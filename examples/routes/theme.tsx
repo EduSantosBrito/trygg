@@ -7,10 +7,9 @@
  * - Layer for service implementation
  * - Swapping layers at runtime
  * - Component.gen API for typed props with auto layer inference
- * - DevMode for debug observability
  */
 import { Context, Effect, Layer } from "effect"
-import { mount, Signal, DevMode, Component } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
 // Define a Theme service using Context.Tag
 interface ThemeConfig {
@@ -61,9 +60,9 @@ const ThemedCard = Component.gen(function* () {
         borderRadius: "8px"
       }}
     >
-      <h2 style={{ color: theme.primary, marginTop: 0 }}>
+      <h3 style={{ color: theme.primary, marginTop: 0 }}>
         {theme.name} Theme
-      </h2>
+      </h3>
       <p>This card uses the injected theme service.</p>
       <p>
         Click "Switch to Dark/Light Theme" above to see the theme change.
@@ -109,6 +108,9 @@ const ThemeApp = Effect.gen(function* () {
 
   return (
     <div className="example">
+      <h2>Theme (Dependency Injection)</h2>
+      <p className="description">Dependency injection with Effect.provide, swappable layers</p>
+      
       <div className="theme-switcher">
         <button onClick={toggleTheme}>
           Switch to {isDarkValue ? "Light" : "Dark"} Theme
@@ -121,11 +123,11 @@ const ThemeApp = Effect.gen(function* () {
         <ThemedTitle title="Using Component API" theme={currentTheme} />
       </div>
 
-      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>Two Approaches</h3>
+      <div className="code-example">
+        <h3>Two Approaches</h3>
 
         <h4>1. Component.gen (no props)</h4>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Component requires Theme - layer passed as prop
+        <pre>{`// Component requires Theme - layer passed as prop
 const ThemedCard = Component.gen(function* () {
   const theme = yield* Theme
   return <div style={{ color: theme.text }}>...</div>
@@ -135,7 +137,7 @@ const ThemedCard = Component.gen(function* () {
 <ThemedCard theme={themeLayer} />`}</pre>
 
         <h4 style={{ marginTop: "1rem" }}>2. Component.gen with props</h4>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Component with typed props - Theme becomes a prop
+        <pre>{`// Component with typed props - Theme becomes a prop
 // Note: Use curried syntax for full type inference
 const ThemedTitle = Component.gen<{ title: string }>()(Props => function* () {
   const { title } = yield* Props
@@ -150,11 +152,4 @@ const ThemedTitle = Component.gen<{ title: string }>()(Props => function* () {
   )
 })
 
-// Mount the app with DevMode for debug observability
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    {ThemeApp}
-    <DevMode />
-  </>)
-}
+export default ThemeApp

@@ -176,6 +176,37 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn(
 })
 
 /**
+ * Create a Signal synchronously (unsafe).
+ * 
+ * Use this only for global/module-level signals that need to be
+ * created outside of Effect context. For component state, always
+ * use `Signal.make` inside `Effect.gen`.
+ * 
+ * @example
+ * ```tsx
+ * // Global auth state
+ * export const authSignal = Signal.unsafeMake<Option<User>>(Option.none())
+ * 
+ * // In components, use normally
+ * const user = yield* Signal.get(authSignal)
+ * yield* Signal.set(authSignal, Option.some(newUser))
+ * ```
+ * 
+ * @since 1.0.0
+ */
+export const unsafeMake = <A>(initial: A): Signal<A> => {
+  const ref = Effect.runSync(SubscriptionRef.make(initial))
+  const debugId = Debug.nextSignalId()
+  Debug.log({
+    event: "signal.create",
+    signal_id: debugId,
+    value: initial,
+    component: "unsafe-global"
+  })
+  return { _tag: "Signal", _ref: ref, _listeners: new Set(), _debugId: debugId }
+}
+
+/**
  * Get the current value of a signal.
  * 
  * IMPORTANT: Reading a signal with Signal.get() subscribes the current

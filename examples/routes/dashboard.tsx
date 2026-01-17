@@ -6,10 +6,9 @@
  * - Composing components with different layer requirements
  * - Multiple services (Theme, Analytics, Logger)
  * - Real-world component patterns
- * - DevMode for debug observability
  */
 import { Context, Effect, Layer } from "effect"
-import { mount, Signal, DevMode, Component } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
 // =============================================================================
 // Services
@@ -77,7 +76,6 @@ const loggerLayer = Layer.succeed(Logger, {
 // =============================================================================
 
 // StatCard - displays a statistic with theme
-// TypeScript infers: { title: string, value: number | string, change?: string, theme: Layer<Theme> }
 const StatCard = Component.gen<{
   title: string
   value: number | string
@@ -113,7 +111,6 @@ const StatCard = Component.gen<{
 })
 
 // ActivityItem - displays an activity with theme and analytics
-// TypeScript infers: { text: string, time: string, theme: Layer<Theme>, analytics: Layer<Analytics> }
 const ActivityItem = Component.gen<{
   text: string
   time: string
@@ -140,7 +137,6 @@ const ActivityItem = Component.gen<{
 })
 
 // ActionButton - button with analytics tracking
-// TypeScript infers: { label: string, variant: "primary" | "secondary", onClick: () => Effect<void>, theme: Layer<Theme>, analytics: Layer<Analytics> }
 const ActionButton = Component.gen<{
   label: string
   variant: "primary" | "secondary"
@@ -174,7 +170,6 @@ const ActionButton = Component.gen<{
 })
 
 // Header - uses theme and logger
-// TypeScript infers: { userName: string, theme: Layer<Theme>, logger: Layer<Logger> }
 const Header = Component.gen<{
   userName: string
 }>()(Props => function* () {
@@ -230,8 +225,8 @@ const DashboardApp = Component.gen(function* () {
   
   const currentTheme = isDarkValue ? darkTheme : lightTheme
   const theme = isDarkValue 
-    ? { name: "Dark", primary: "#4da6ff", background: "#1a1a2e", text: "#e9ecef" }
-    : { name: "Light", primary: "#0066cc", background: "#f8f9fa", text: "#212529" }
+    ? { name: "Dark", primary: "#4da6ff", background: "#1a1a2e", text: "#e9ecef", cardBackground: "#16213e" }
+    : { name: "Light", primary: "#0066cc", background: "#f8f9fa", text: "#212529", cardBackground: "#ffffff" }
   
   const toggleTheme = () => Signal.update(isDark, (v) => !v)
   
@@ -247,7 +242,9 @@ const DashboardApp = Component.gen(function* () {
     <div style={{ 
       minHeight: "100vh", 
       background: theme.background,
-      fontFamily: "system-ui, -apple-system, sans-serif"
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      margin: "-1.5rem",
+      padding: "0"
     }}>
       <Header userName="Developer" theme={currentTheme} logger={loggerLayer} />
       
@@ -279,7 +276,7 @@ const DashboardApp = Component.gen(function* () {
         {/* Recent Activity */}
         <SectionTitle title="Recent Activity" theme={currentTheme} />
         <div style={{
-          background: isDarkValue ? "#16213e" : "#ffffff",
+          background: theme.cardBackground,
           borderRadius: "8px",
           overflow: "hidden",
           boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
@@ -319,19 +316,13 @@ const DashboardApp = Component.gen(function* () {
         margin: "0 auto",
         padding: "0 1.5rem 2rem"
       }}>
-        <div style={{
-          padding: "1rem", 
-          background: isDarkValue ? "#16213e" : "#f5f5f5",
-          borderRadius: "8px"
+        <div className="code-example" style={{
+          background: theme.cardBackground,
         }}>
-          <h3 style={{ marginTop: 0, color: theme.text }}>Component.gen with Multiple Services</h3>
+          <h3 style={{ color: theme.text }}>Component.gen with Multiple Services</h3>
         <pre style={{ 
-          background: isDarkValue ? "#1a1a2e" : "#fff",
+          background: theme.background,
           color: theme.text,
-          padding: "1rem", 
-          borderRadius: "4px", 
-          overflow: "auto", 
-          fontSize: "0.85rem" 
         }}>{`// Component requiring Theme + Analytics
 const ActionButton = Component.gen<{
   label: string
@@ -371,11 +362,4 @@ const ActionButton = Component.gen<{
   )
 })
 
-// Mount
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    <DashboardApp />
-    <DevMode />
-  </>)
-}
+export default DashboardApp

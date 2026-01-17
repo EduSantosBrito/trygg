@@ -220,6 +220,34 @@ Examples include:
 - **Error Boundary** - Error handling patterns
 - **Dashboard** - Multiple services, real-world patterns
 
+## Routing
+
+effect-ui includes file-based routing out of the box:
+
+```tsx
+import { Effect } from "effect"
+import { mount } from "effect-ui"
+import * as Router from "effect-ui/router"
+import { routes } from "virtual:effect-ui-routes"
+
+const App = Effect.gen(function* () {
+  return (
+    <div>
+      <nav>
+        <Router.Link to="/">Home</Router.Link>
+        <Router.Link to="/users">Users</Router.Link>
+      </nav>
+      <Router.Outlet routes={routes} />
+    </div>
+  )
+})
+
+// Router is included by default!
+mount(document.getElementById("root")!, App)
+```
+
+See the examples for routing patterns including layouts, params, and guards.
+
 ## API Reference
 
 See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
@@ -228,7 +256,8 @@ See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
 
 | Export | Description |
 |--------|-------------|
-| `mount(container, app)` | Mount an app to the DOM |
+| `mount(container, app)` | Mount an app to the DOM, returns `MountHandle` |
+| `mount(container, app, layer)` | Mount with custom layers merged with defaults |
 | `Signal.make(initial)` | Create reactive state |
 | `Signal.get(signal)` | Read value and subscribe to changes |
 | `Signal.set(signal, value)` | Set signal value |
@@ -239,6 +268,27 @@ See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
 | `Suspense` | Async boundary component |
 | `ErrorBoundary` | Error handling component |
 | `Portal` | Render to different container |
+
+### MountHandle
+
+`mount()` returns a handle for cleanup:
+
+```tsx
+const handle = mount(container, App)
+
+// Later, to unmount and clean up:
+await handle.dispose()
+```
+
+### Router Exports
+
+| Export | Description |
+|--------|-------------|
+| `Router.Link` | Navigation link component |
+| `Router.NavLink` | Link with active state styling |
+| `Router.Outlet` | Renders matched route |
+| `Router.browserLayer` | Browser router layer (included by default) |
+| `Router.testLayer(path)` | In-memory router for testing |
 
 ## License
 

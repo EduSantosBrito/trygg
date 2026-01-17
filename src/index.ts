@@ -81,7 +81,6 @@ export {
 export {
   Renderer,
   browserLayer,
-  render,
   mount,
   type RendererService,
   type RenderContext,

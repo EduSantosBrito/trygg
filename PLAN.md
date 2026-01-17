@@ -2,11 +2,139 @@
 
 ## Current Status
 
-- **38/38 tests passing**
-- **6 working examples**: Counter, Todo (with Signal.each), Theme, Form, Error Boundary, Dashboard
+- **65/65 tests passing** (including 22 router tests + 5 loading/error tests)
+- **11 working examples as single routed app**: Counter, Todo, Theme, Form, Error Boundary, Dashboard, Users, Settings (layout demo), Login, Protected (guard demo), Error Demo
+- **ManagedRuntime architecture** - Proper Effect-native FiberRef propagation
+- **Simplified mount() API** - Router included by default, returns MountHandle for cleanup
+- **File-based routing** with type-safe navigation and auto-generated route types
+- **Layout support** - `_layout.tsx` wraps child routes with shared UI (sidebar, nav)
+- **Loading states** - `_loading.tsx` shows fallback during route loading (code splitting)
+- **Error boundaries** - `_error.tsx` catches route errors with `Router.useRouteError()` for recovery
+- **Route guards** - `export const guard` effect for auth checks with `Router.redirect()`
+- **Type-safe Link component** - params required when path has `:param` segments
+- **Router.testLayer** - In-memory router for unit testing without DOM
+- **Router observability events** - Full debug logging for navigation debugging
 - **All examples use Component.gen** API with automatic layer prop inference
 - **create-effect-ui CLI** for scaffolding new projects
 - Run examples: `bun run examples`
+
+## Recent Changes (January 2026)
+
+### ManagedRuntime Architecture
+Implemented proper ManagedRuntime pattern for FiberRef propagation:
+
+**Problem**: FiberRefs are fiber-local and don't persist across:
+- `Runtime.runFork` (event handlers run in new fibers)
+- `queueMicrotask` (component re-renders)
+
+**Solution**: `ManagedRuntime` from Effect properly propagates FiberRefs:
+1. `mount()` creates a `ManagedRuntime` from merged layers (browserRendererLayer + Router.browserLayer + user layers)
+2. ManagedRuntime captures FiberRefs set during layer building
+3. When running effects via `managedRuntime.runFork()`, FiberRefs are copied to the new fiber
+4. Event handlers and re-renders use ManagedRuntime, getting proper FiberRef access
+
+**New mount() API**:
+```tsx
+// Simple - Router included by default
+mount(container, App)
+
+// With custom layers - merged with defaults
+mount(container, App, ThemeLayer)
+
+// Returns MountHandle for cleanup
+const handle = mount(container, App)
+await handle.dispose()
+```
+
+### Router FiberRef
+- `CurrentRouter` is a proper FiberRef set during `Router.browserLayer` building
+- `getRouter` reads from FiberRef: `FiberRef.get(CurrentRouter)`
+- Works because ManagedRuntime copies FiberRefs from layer building to forked fibers
+
+### Router.testLayer
+- In-memory router implementation for unit tests
+- Doesn't use window/history - works without a DOM
+- Usage: `mount(container, App, Router.testLayer("/initial/path"))`
+
+### Route Guards Implementation
+- Added `guard` export support in route files
+- Vite plugin includes guard imports in generated routes
+- Guards return `Router.redirect("/path")` to block and redirect
+- Example: `/protected` route with auth guard, `/login` route
+
+### Router Observability Events
+Added debug events following OBSERVABILITY.md pattern:
+- `router.link.click` - Link clicked
+- `router.navigate` / `router.navigate.complete` - Navigation flow
+- `router.match` / `router.match.notfound` - Route matching
+- `router.guard.start/allow/redirect/skip` - Guard evaluation
+- `router.render.start/complete` - Route component rendering
+
+### Bug Fixes
+- **Link params enforcement**: `LinkProps` now requires `params` when path has `:param` segments
+- **Layout outlet fix**: Nested `<Router.Outlet />` inside layouts now works - child content cleared by consumer not producer
+- **Component.gen route support**: Outlet handles both `Effect.gen` and `Component.gen` exports
+- **Suspense scope bug fixed**: Changed `Effect.forkScoped` to `Effect.forkDaemon` in Renderer.ts Suspense handler. The forked fiber waiting for Deferred resolution was being interrupted when the parent re-render scope closed. Using `forkDaemon` lets the fiber live independently, with proper cleanup via `Fiber.interrupt` on Suspense unmount.
+- **NavLink exact prop**: Fixed NavLink `exact` prop not being passed to inner Link component
+- **Router included by default**: `mount()` now merges `Router.browserLayer` with `Renderer.browserLayer` automatically, so routes work without explicit layer configuration
+
+### Debug Event Types Refactored
+`DebugEvent` is now a discriminated union with specific fields per event type for better type safety and documentation.
+
+### Loading/Error States (Completed)
+Implemented `_loading.tsx` and `_error.tsx` special files for route transitions:
+
+**Loading States** (`_loading.tsx`):
+- Displayed while route component is loading (during lazy import/code splitting)
+- Uses Suspense pattern internally with Deferred
+- Inherited by child routes - place in parent directory to cover all children
+
+```tsx
+// routes/_loading.tsx
+import { Effect } from "effect"
+
+export default Effect.succeed(
+  <div className="loading">Loading...</div>
+)
+```
+
+**Error Boundaries** (`_error.tsx`):
+- Catches errors thrown by route components
+- Use `Router.useRouteError()` to access error details and reset function
+- Inherited by child routes
+
+```tsx
+// routes/_error.tsx
+import { Effect } from "effect"
+import * as Router from "effect-ui/router"
+
+export default Effect.gen(function* () {
+  const { error, path, reset } = yield* Router.useRouteError()
+  return (
+    <div className="error">
+      <h1>Error on {path}</h1>
+      <p>{String(error)}</p>
+      <button onClick={() => reset}>Retry</button>
+    </div>
+  )
+})
+```
+
+**Route Hierarchy**:
+- Loading/error files are inherited by child routes
+- Place `_loading.tsx` in `/routes/` for global loading
+- Place `_loading.tsx` in `/routes/settings/` for loading specific to `/settings/*` routes
+
+**Implementation Details**:
+- `RouteDefinition` extended with `loadingComponent` and `errorComponent` properties
+- `RouteErrorInfo` type provides `error`, `path`, and `reset` (Effect to retry)
+- Vite plugin scans for `_loading.tsx` and `_error.tsx` and includes them in route definitions
+- Error recovery uses Signal-based reset trigger to re-render route
+
+## Next Steps (Priority Order)
+
+### 1. Type Safety Fixes
+Eliminate unsafe type casts in Component.ts (see Known Issues section).
 
 ---
 
@@ -447,6 +575,27 @@ Skip setting `value` on focused inputs - DOM is source of truth while typing. Si
 
 Keeps scope open. Without this, `Effect.scoped` closes immediately after mounting, running cleanup finalizers.
 
+### ManagedRuntime for FiberRef Propagation
+
+FiberRefs are fiber-local - they don't propagate to forked fibers. We use ManagedRuntime to solve this:
+
+```ts
+// ManagedRuntime created from layers in mount()
+const managedRuntime = ManagedRuntime.make(
+  Layer.mergeAll(browserRendererLayer, Router.browserLayer, userLayer)
+)
+
+// FiberRefs set during layer building are captured
+// When running effects, they're copied to the new fiber:
+managedRuntime.runFork(effect)  // FiberRefs from layers are available!
+```
+
+This is the proper Effect pattern. ManagedRuntime:
+- Captures FiberRefs at layer build time
+- Copies them to forked fibers via `fiber.setFiberRefs(rt.fiberRefs)`
+- Provides context automatically
+- Handles cleanup via `dispose()`
+
 ## Completed Features
 
 ### Signal.each for Lists (Implemented)
@@ -715,9 +864,133 @@ Eliminate unsafe type casts in Component.ts. See "Known Issues & Technical Debt"
 
 Fix memory leaks and add cleanup observability. See "Known Issues & Technical Debt" section above.
 
-### Phases 16-18: Routing, API Routes, Data Layer
+### Phase 16: Client-Side Router (In Progress)
 
-Being implemented by other agents. See "Development Roadmap" section above for planned APIs.
+File-based routing with automatic code splitting. See **ROUTER.md** for full design.
+
+**Completed:**
+- [x] Core RouterService (navigate, current, params, back, forward)
+- [x] Route matching logic (static, dynamic `:id`/`[id]`, wildcard `*`/`[...path]`)
+- [x] Router.Outlet component (renders matched route)
+- [x] Router.Link and NavLink components with active state styling
+- [x] Browser layer with history.pushState/popstate integration
+- [x] FiberRef-based router context (solves R = never constraint)
+- [x] Effectful `cx()` utility for reactive class names with Signal support
+- [x] Type declarations for `virtual:effect-ui-routes`
+- [x] Vite plugin with route scanning and virtual module generation
+- [x] **Examples restructured as single routed app** with shared navigation
+- [x] **Type-safe routing with path inference** (January 2026)
+  - `ExtractRouteParams<Path>` type extracts params from path patterns
+  - `TypeSafeLinkProps<Path>` requires `params` prop when path has `:param` segments
+  - `buildPathWithParams()` substitutes params into path patterns
+  - Generated `routes.d.ts` augments `RouteMap` with actual route types
+  - Link component updated to support type-safe params
+- [x] **Layout support** (`_layout.tsx`) - January 2026
+  - Layouts wrap child routes with shared UI
+  - Child content passed via FiberRef for nested outlets
+  - NavLink `exact` prop for exact path matching
+  - Settings example demonstrates layout pattern
+- [x] **Router tests** - 22 tests for matching, params, path building
+
+**Type-Safe Link Example:**
+```tsx
+// Static path - no params needed
+<Link to="/">Home</Link>
+
+// Dynamic path - params required and type-checked
+<Link to="/users/:id" params={{ id: "123" }}>User</Link>
+
+// TypeScript catches errors:
+<Link to="/users/:id">Missing params!</Link>  // Error
+<Link to="/users/:id" params={{ wrong: "x" }}>Wrong param!</Link>  // Error
+```
+
+**Remaining:**
+- [x] Route guards (auth checks as Effects) - COMPLETED
+- [x] Router observability events - COMPLETED
+- [x] Loading/error states (`_loading.tsx`, `_error.tsx`) - COMPLETED
+- [ ] Full-stack example with @effect/rpc
+
+---
+
+### Design Decisions Made (Phase 16)
+
+#### 1. Generated Type Declarations (DECIDED: Hybrid Approach)
+
+We use **both virtual module and generated types**:
+- `virtual:effect-ui-routes` - Virtual module for runtime routes (no file to manage)
+- `routes.d.ts` - Generated TypeScript declarations for type safety (visible, inspectable)
+
+This gives us the best of both worlds: clean runtime code + full type safety.
+
+#### 2. Examples Restructure (COMPLETED)
+
+Examples have been restructured as a single routed app with shared navigation:
+
+```
+examples/
+├── index.html              # Single entry point
+├── main.tsx                # Router setup with shared nav header
+├── styles.css              # Shared styles including app shell
+├── routes.d.ts             # Generated route types (auto-generated)
+├── routes/
+│   ├── index.tsx           # Landing page with example grid
+│   ├── counter.tsx         # Counter example
+│   ├── todo.tsx            # Todo example
+│   ├── theme.tsx           # Theme example
+│   ├── form.tsx            # Form example
+│   ├── error-boundary.tsx  # Error boundary example
+│   ├── dashboard.tsx       # Dashboard example
+│   └── users/              # Type-safe routing demo
+│       ├── index.tsx       # Users list with type-safe Link params
+│       └── [id].tsx        # User detail with Router.params()
+```
+
+**Decisions made**:
+- Self-contained examples (one file each) - easier to understand, copy-paste friendly
+- Shared nav header in main.tsx instead of `_layout.tsx` - simpler for now
+- Type-safe routing demonstrated in /users routes
+
+#### 3. Route Metadata
+
+Should routes support additional metadata?
+- Titles (for nav/breadcrumbs)
+- Loading components per route
+- Error boundaries per route
+- Pre-fetch hints
+
+#### 4. Vite Plugin Architecture
+
+TanStack uses multiple composed plugins for different concerns.
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Single plugin** (current) | Simpler, less config | All concerns mixed together |
+| **Composed plugins** | Modular, can use parts independently | More complex setup |
+
+Example of composed approach:
+```ts
+plugins: [
+  effectUICore(),      // JSX, esbuild config
+  effectUIRouter(),    // File-based routing
+]
+```
+
+---
+
+### TanStack Start Research Summary
+
+Key patterns from TanStack Router/Start (January 2026):
+
+1. **Multiple composed plugins** - Separate plugins for routing, dev server, manifest, compiler
+2. **Generator class** - Sophisticated file caching with mtime tracking
+3. **Real file output** - Writes `routeTree.gen.ts` to disk, not virtual module
+4. **Templates** - Can scaffold new route files automatically
+5. **File watching** - Watches routes directory, invalidates on changes, triggers HMR
+
+### Phases 17-18: API Routes, Data Layer
+
+Deferred until routing is complete. Will integrate with @effect/rpc.
 
 ### Phase 12: Package Rename to `effect-dom` (Deferred)
 
@@ -803,11 +1076,20 @@ src/
 ├── jsx-runtime.ts       Production JSX transformation
 ├── jsx-dev-runtime.ts   Development JSX with source maps
 ├── jsx.d.ts             JSX TypeScript definitions
-├── vite-plugin.ts       Vite configuration plugin
+├── vite-plugin.ts       Vite config + file-based routing
+├── virtual-routes.d.ts  Type declarations for virtual:effect-ui-routes
 ├── testing.ts           Test utilities (render, click, waitFor)
 ├── debug.ts             Wide event logging infrastructure
 ├── DevMode.ts           Debug mode component
 ├── AtomTracker.ts       Atom tracking (effect-atom integration)
+├── router/              Client-side routing (Phase 16)
+│   ├── index.ts         Router exports
+│   ├── RouterService.ts Router service + browserLayer
+│   ├── Outlet.ts        Route outlet component
+│   ├── Link.ts          Link and NavLink components
+│   ├── matching.ts      Path matching logic
+│   ├── types.ts         Router types
+│   └── utils.ts         Effectful cx() utility
 ├── components/
 │   ├── Suspense.ts      Async boundary component
 │   ├── ErrorBoundary.ts Error handling component
@@ -820,13 +1102,17 @@ create-effect-ui/        CLI for scaffolding new projects
 ├── package.json         CLI package metadata
 ├── template/            Starter template files
 
-examples/                6 working examples
-├── counter/             Basic Signal state
-├── todo/                Signal.each for lists
-├── theme/               Context.Tag services
-├── form/                Form validation
-├── error-boundary/      Error handling
-├── dashboard/           Multiple services
+examples/                Single routed app with all examples
+├── index.html           Entry point
+├── main.tsx             Router setup with shared navigation
+├── routes/              File-based routes
+│   ├── index.tsx        Landing page (example list)
+│   ├── counter.tsx      Basic Signal state
+│   ├── todo.tsx         Signal.each for lists
+│   ├── theme.tsx        Context.Tag services
+│   ├── form.tsx         Form validation
+│   ├── error-boundary.tsx Error handling
+│   └── dashboard.tsx    Multiple services
 
 tests/                   38 tests
 ├── counter.test.tsx     Core functionality
@@ -842,7 +1128,6 @@ effect/                  Local Effect repo (reference only, DO NOT MODIFY)
 
 ```
 src/
-├── router/              Phase 16 - Client-side routing
 ├── data/                Phase 18 - Data fetching layer
 ├── api/                 Phase 17 - API routes
 ├── form/                Phase 20 - Form management

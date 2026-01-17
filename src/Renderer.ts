@@ -9,6 +9,7 @@ import {
   Data,
   Deferred,
   Effect,
+  Fiber,
   FiberRef,
   Layer,
   Match,
@@ -18,6 +19,7 @@ import {
 import { Element, type ElementProps, type EventHandler } from "./Element.js"
 import * as Signal from "./Signal.js"
 import * as Debug from "./debug.js"
+import * as Router from "./router/index.js"
 
 /**
  * Type guard to check if a value is an EventHandler
@@ -556,27 +558,34 @@ const renderElement = (
         // Render fallback initially
         let currentResult = yield* renderElement(fallback, suspenseParent, runtime)
 
-        // Fork a fiber to wait for the deferred and swap content
-        yield* Effect.forkScoped(
-          Effect.gen(function* () {
-            // Wait for the async content
-            const resolvedElement = yield* Deferred.await(deferred)
+        // Fork a daemon fiber to wait for the deferred and swap content.
+        // Using forkDaemon instead of forkScoped because the parent re-render
+        // scope closes when re-render completes, which would interrupt the fiber
+        // before the Deferred resolves. forkDaemon lets the fiber run independently.
+        const waitFiber = yield* Effect.forkDaemon(
+          Effect.scoped(
+            Effect.gen(function* () {
+              // Wait for the async content
+              const resolvedElement = yield* Deferred.await(deferred)
 
-            // Clean up fallback
-            yield* currentResult.cleanup
+              // Clean up fallback
+              yield* currentResult.cleanup
 
-            // Render resolved content (deferred resolves to Element)
-            currentResult = yield* renderElement(
-              resolvedElement,
-              suspenseParent,
-              runtime
-            )
-          })
+              // Render resolved content (deferred resolves to Element)
+              currentResult = yield* renderElement(
+                resolvedElement,
+                suspenseParent,
+                runtime
+              )
+            })
+          )
         )
 
         return {
           node: placeholder,
           cleanup: Effect.gen(function* () {
+            // Interrupt the wait fiber if still running (cleanup before resolve)
+            yield* Fiber.interrupt(waitFiber)
             yield* currentResult.cleanup
             placeholder.remove()
           })
@@ -974,12 +983,15 @@ export const mount = <E>(
   // Normalize to Effect
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app)
   
+  // Merge Renderer and Router layers - Router is included by default
+  const appLayer = Layer.merge(browserLayer, Router.browserLayer)
+  
   // Dynamic import to avoid bundling platform-browser for non-browser usage
   import("@effect/platform-browser/BrowserRuntime").then(({ runMain }) => {
     runMain(
       render(container, appEffect).pipe(
         Effect.scoped,
-        Effect.provide(browserLayer)
+        Effect.provide(appLayer)
       )
     )
   })

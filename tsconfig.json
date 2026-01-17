@@ -20,7 +20,12 @@
     "baseUrl": ".",
     "paths": {
       "#jsx/jsx-runtime": ["./src/jsx-runtime.ts"],
-      "#jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
+      "#jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
+      "effect-ui": ["./src/index.ts"],
+      "effect-ui/router": ["./src/router/index.ts"],
+      "effect-ui/vite-plugin": ["./src/vite-plugin.ts"],
+      "effect-ui/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "effect-ui/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     },
 
     // Best practices

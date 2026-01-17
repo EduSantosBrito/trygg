@@ -138,3 +138,20 @@ export const Fragment = (props: { children?: unknown }): Element => {
 // Re-export Element type for use in JSX
 export { Element }
 export type { ElementProps, ElementKey }
+
+// JSX namespace for TypeScript - required for jsxImportSource
+export namespace JSX {
+  export type Element = import("./Element.js").Element
+  
+  export interface IntrinsicAttributes {
+    readonly key?: ElementKey
+  }
+  
+  export interface IntrinsicElements {
+    [elemName: string]: ElementProps
+  }
+  
+  export interface ElementChildrenAttribute {
+    children: {}
+  }
+}

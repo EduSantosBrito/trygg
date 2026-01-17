@@ -7,10 +7,9 @@
  * - Effect-based validation logic with services
  * - Form state with multiple signals
  * - Conditional error display
- * - DevMode for debug observability
  */
 import { Context, Data, Effect, Either, Layer, Option } from "effect"
-import { mount, Signal, DevMode, Component } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
 // =============================================================================
 // Typed Validation Errors
@@ -57,7 +56,6 @@ const defaultFormTheme = Layer.succeed(FormTheme, {
 // =============================================================================
 
 // FormField component with typed props and theme requirement
-// TypeScript infers: { label: string, type: string, value: Signal<string>, error: Option<string>, ... , formTheme: Layer<FormTheme> }
 const FormField = Component.gen<{
   label: string
   type: "text" | "email" | "password"
@@ -104,7 +102,7 @@ const SuccessMessage = Component.gen<{
   
   return (
     <div className="success" style={{ color: theme.successColor }}>
-      <h2>Success!</h2>
+      <h3>Success!</h3>
       <p>Form submitted successfully with email: {email}</p>
       <button onClick={onReset}>Reset Form</button>
     </div>
@@ -226,6 +224,9 @@ const FormApp = Component.gen(function* () {
 
   return (
     <div className="example">
+      <h2>Form Validation</h2>
+      <p className="description">Typed errors, validation Effects, form state</p>
+      
       {submittedValue ? (
         <SuccessMessage 
           email={emailValueForDisplay} 
@@ -261,46 +262,32 @@ const FormApp = Component.gen(function* () {
         </form>
       )}
 
-      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>Component.gen for Forms</h3>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Reusable form field with theme service
-const FormField = Component.gen<{
-  label: string
-  value: Signal<string>
-  error: Option<string>
-}>()(Props => function* () {
-  const { label, value, error } = yield* Props
-  const theme = yield* FormTheme  // Service requirement
-  
-  return (
-    <div className="form-group">
-      <label style={{ color: theme.labelColor }}>{label}</label>
-      <input value={value} style={{
-        borderColor: Option.isSome(error) 
-          ? theme.errorColor 
-          : theme.inputBorder
-      }} />
-    </div>
-  )
-})
+      <div className="code-example">
+        <h3>Typed Validation Errors</h3>
+        <pre>{`// Define typed errors
+class EmailInvalid extends Data.TaggedError("EmailInvalid")<{
+  readonly email: string
+}> {}
 
-// TypeScript infers: { label, value, error, formTheme: Layer<FormTheme> }
-<FormField 
-  label="Email" 
-  value={email} 
-  error={emailError}
-  formTheme={formThemeLayer}
-/>`}</pre>
+// Validation function returns typed Effect
+const validateEmail = (email: string): Effect<string, EmailRequired | EmailInvalid> => {
+  if (!email.includes("@")) {
+    return Effect.fail(new EmailInvalid({ email }))
+  }
+  return Effect.succeed(email)
+}
+
+// Pattern match on error type
+const getErrorMessage = (error: ValidationError): string => {
+  switch (error._tag) {
+    case "EmailInvalid":
+      return \`"\${error.email}" is not valid\`
+    // ...
+  }
+}`}</pre>
       </div>
     </div>
   )
 })
 
-// Mount the app with DevMode
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    <FormApp />
-    <DevMode />
-  </>)
-}
+export default FormApp

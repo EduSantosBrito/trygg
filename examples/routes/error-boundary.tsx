@@ -7,10 +7,9 @@
  * - Typed errors with Data.TaggedError
  * - Error inspection in fallback UI
  * - Recovery patterns
- * - DevMode for debug observability
  */
 import { Context, Data, Effect, Layer } from "effect"
-import { mount, Signal, ErrorBoundary, DevMode, Component } from "effect-ui"
+import { Signal, ErrorBoundary, Component } from "effect-ui"
 
 // =============================================================================
 // Typed Errors
@@ -190,18 +189,17 @@ const TriggerButton = Component.gen<{
 
 const ErrorBoundaryApp = Component.gen(function* () {
   const errorType = yield* Signal.make<"network" | "validation" | "unknown" | "none">("none")
-  const key = yield* Signal.make(0)
 
   const errorTypeValue = yield* Signal.get(errorType)
 
   const triggerError = (type: "network" | "validation" | "unknown" | "none") =>
-    Effect.gen(function* () {
-      yield* Signal.set(errorType, type)
-      yield* Signal.update(key, (k) => k + 1)
-    })
+    Signal.set(errorType, type)
 
   return (
     <div className="example">
+      <h2>Error Boundary</h2>
+      <p className="description">Typed error handling, Cause inspection, recovery UI</p>
+      
       <div style={{ marginBottom: "1rem" }}>
         <p>Click a button to trigger different error types:</p>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -242,50 +240,38 @@ const ErrorBoundaryApp = Component.gen(function* () {
         })}
       </div>
 
-      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>Component.gen for Error Display</h3>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Error display component with theme
-const NetworkErrorDisplay = Component.gen<{
-  error: NetworkError
-}>()(Props => function* () {
-  const { error } = yield* Props
-  const theme = yield* ErrorTheme
+      <div className="code-example">
+        <h3>ErrorBoundary with Typed Errors</h3>
+        <pre>{`// Define typed errors
+class NetworkError extends Data.TaggedError("NetworkError")<{
+  url: string
+  status: number
+}> {}
 
-  return (
-    <div style={{
-      background: theme.errorBackground,
-      color: theme.errorText
-    }}>
-      <h3>Network Error</h3>
-      <p>URL: {error.url}</p>
-      <p>Status: {error.status}</p>
-    </div>
-  )
+// Component that might fail
+const RiskyComponent = Effect.fn("RiskyComponent")(function* (shouldFail) {
+  if (shouldFail) {
+    return yield* Effect.fail(new NetworkError({ url: "/api", status: 500 }))
+  }
+  return <SuccessDisplay />
 })
 
-// Use in error boundary fallback
+// ErrorBoundary with typed fallback
 ErrorBoundary({
-  children: RiskyComponent(),
+  children: RiskyComponent(shouldFail),
   fallback: (error) => {
     switch (error._tag) {
       case "NetworkError":
-        return <NetworkErrorDisplay
-          error={error}
-          errorTheme={themeLayer}
-        />
+        return <NetworkErrorDisplay error={error} />
+      case "ValidationError":
+        return <ValidationErrorDisplay error={error} />
     }
-  }
+  },
+  onError: (error) => Effect.log(\`Caught: \${error._tag}\`)
 })`}</pre>
       </div>
     </div>
   )
 })
 
-// Mount
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    <ErrorBoundaryApp />
-    <DevMode />
-  </>)
-}
+export default ErrorBoundaryApp

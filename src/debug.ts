@@ -16,49 +16,266 @@
  * ```
  */
 
-/** Event types for categorization */
-export type EventType =
-  | "signal.create"
-  | "signal.get"
-  | "signal.set"
-  | "signal.set.skipped"
-  | "signal.update"
-  | "signal.update.skipped"
-  | "signal.notify"
-  | "signal.subscribe"
-  | "signal.unsubscribe"
-  | "render.component.initial"
-  | "render.component.rerender"
-  | "render.component.cleanup"
-  | "render.signaltext.initial"
-  | "render.signaltext.update"
-  | "render.intrinsic"
-  | "render.schedule"
-  | "render.keyedlist.update"
-  | "render.keyedlist.item.add"
-  | "render.keyedlist.item.remove"
-  | "render.keyedlist.item.rerender"
-  | "signal.get.phase"
-
-/** Wide event structure */
-export interface DebugEvent {
+/** Base fields for all events */
+interface BaseEvent {
   readonly timestamp: string
-  readonly event: EventType
-  readonly component?: string
-  readonly signal_id?: string
-  readonly value?: unknown
-  readonly prev_value?: unknown
-  readonly listener_count?: number
-  readonly accessed_signals?: number
-  readonly is_rerendering?: boolean
-  readonly pending_rerender?: boolean
-  readonly trigger?: string
   readonly duration_ms?: number
-  readonly element_tag?: string
+}
+
+/** Signal events */
+type SignalCreateEvent = BaseEvent & {
+  readonly event: "signal.create"
+  readonly signal_id: string
+  readonly value: unknown
+  readonly component: string
+}
+
+type SignalGetEvent = BaseEvent & {
+  readonly event: "signal.get"
+  readonly signal_id: string
+  readonly trigger: string
+}
+
+type SignalGetPhaseEvent = BaseEvent & {
+  readonly event: "signal.get.phase"
+  readonly signal_id: string
+  readonly has_phase: boolean
+}
+
+type SignalSetEvent = BaseEvent & {
+  readonly event: "signal.set"
+  readonly signal_id: string
+  readonly prev_value: unknown
+  readonly value: unknown
+  readonly listener_count: number
+}
+
+type SignalSetSkippedEvent = BaseEvent & {
+  readonly event: "signal.set.skipped"
+  readonly signal_id: string
+  readonly value: unknown
+  readonly reason: string
+}
+
+type SignalUpdateEvent = BaseEvent & {
+  readonly event: "signal.update"
+  readonly signal_id: string
+  readonly prev_value: unknown
+  readonly value: unknown
+  readonly listener_count: number
+}
+
+type SignalUpdateSkippedEvent = BaseEvent & {
+  readonly event: "signal.update.skipped"
+  readonly signal_id: string
+  readonly value: unknown
+  readonly reason: string
+}
+
+type SignalNotifyEvent = BaseEvent & {
+  readonly event: "signal.notify"
+  readonly signal_id: string
+  readonly listener_count: number
+}
+
+type SignalSubscribeEvent = BaseEvent & {
+  readonly event: "signal.subscribe"
+  readonly signal_id: string
+  readonly listener_count: number
+}
+
+type SignalUnsubscribeEvent = BaseEvent & {
+  readonly event: "signal.unsubscribe"
+  readonly signal_id: string
+  readonly listener_count: number
+}
+
+/** Render events */
+type RenderComponentInitialEvent = BaseEvent & {
+  readonly event: "render.component.initial"
+  readonly accessed_signals: number
+}
+
+type RenderComponentRerenderEvent = BaseEvent & {
+  readonly event: "render.component.rerender"
+  readonly trigger: string
+  readonly accessed_signals: number
+}
+
+type RenderComponentCleanupEvent = BaseEvent & {
+  readonly event: "render.component.cleanup"
+}
+
+type RenderSignalTextInitialEvent = BaseEvent & {
+  readonly event: "render.signaltext.initial"
+  readonly signal_id: string
+  readonly value: unknown
+}
+
+type RenderSignalTextUpdateEvent = BaseEvent & {
+  readonly event: "render.signaltext.update"
+  readonly signal_id: string
+  readonly value: unknown
+}
+
+type RenderIntrinsicEvent = BaseEvent & {
+  readonly event: "render.intrinsic"
+  readonly element_tag: string
+}
+
+type RenderScheduleEvent = BaseEvent & {
+  readonly event: "render.schedule"
+  readonly is_rerendering: boolean
+  readonly pending_rerender: boolean
+}
+
+type RenderKeyedListUpdateEvent = BaseEvent & {
+  readonly event: "render.keyedlist.update"
+  readonly current_keys: number
+}
+
+type RenderKeyedListItemAddEvent = BaseEvent & {
+  readonly event: "render.keyedlist.item.add"
+  readonly key: string | number
+}
+
+type RenderKeyedListItemRemoveEvent = BaseEvent & {
+  readonly event: "render.keyedlist.item.remove"
+  readonly key: string | number
+}
+
+type RenderKeyedListItemRerenderEvent = BaseEvent & {
+  readonly event: "render.keyedlist.item.rerender"
+  readonly key: string | number
+}
+
+/** Router events */
+type RouterNavigateEvent = BaseEvent & {
+  readonly event: "router.navigate"
+  readonly from_path: string
+  readonly to_path: string
+  readonly replace?: boolean
+}
+
+type RouterNavigateCompleteEvent = BaseEvent & {
+  readonly event: "router.navigate.complete"
+  readonly path: string
+}
+
+type RouterMatchEvent = BaseEvent & {
+  readonly event: "router.match"
+  readonly path: string
+  readonly route_pattern: string
+  readonly params: Record<string, string>
+}
+
+type RouterMatchNotFoundEvent = BaseEvent & {
+  readonly event: "router.match.notfound"
+  readonly path: string
+}
+
+type RouterGuardStartEvent = BaseEvent & {
+  readonly event: "router.guard.start"
+  readonly route_pattern: string
+  readonly has_guard: boolean
+}
+
+type RouterGuardAllowEvent = BaseEvent & {
+  readonly event: "router.guard.allow"
+  readonly route_pattern: string
+}
+
+type RouterGuardRedirectEvent = BaseEvent & {
+  readonly event: "router.guard.redirect"
+  readonly route_pattern: string
+  readonly redirect_to: string
+}
+
+type RouterGuardSkipEvent = BaseEvent & {
+  readonly event: "router.guard.skip"
+  readonly route_pattern: string
+  readonly reason: string
+}
+
+type RouterRenderStartEvent = BaseEvent & {
+  readonly event: "router.render.start"
+  readonly route_pattern: string
+  readonly params: Record<string, string>
+  readonly has_guard: boolean
+  readonly has_layout: boolean
+}
+
+type RouterRenderCompleteEvent = BaseEvent & {
+  readonly event: "router.render.complete"
+  readonly route_pattern: string
+  readonly has_layout: boolean
+}
+
+type RouterLinkClickEvent = BaseEvent & {
+  readonly event: "router.link.click"
+  readonly to_path: string
+  readonly replace?: boolean
   readonly reason?: string
-  readonly current_keys?: number
-  readonly key?: string | number
-  readonly has_phase?: boolean
+}
+
+type RouterErrorEvent = BaseEvent & {
+  readonly event: "router.error"
+  readonly route_pattern: string
+  readonly error: string
+}
+
+/** All debug events as discriminated union */
+export type DebugEvent =
+  // Signal events
+  | SignalCreateEvent
+  | SignalGetEvent
+  | SignalGetPhaseEvent
+  | SignalSetEvent
+  | SignalSetSkippedEvent
+  | SignalUpdateEvent
+  | SignalUpdateSkippedEvent
+  | SignalNotifyEvent
+  | SignalSubscribeEvent
+  | SignalUnsubscribeEvent
+  // Render events
+  | RenderComponentInitialEvent
+  | RenderComponentRerenderEvent
+  | RenderComponentCleanupEvent
+  | RenderSignalTextInitialEvent
+  | RenderSignalTextUpdateEvent
+  | RenderIntrinsicEvent
+  | RenderScheduleEvent
+  | RenderKeyedListUpdateEvent
+  | RenderKeyedListItemAddEvent
+  | RenderKeyedListItemRemoveEvent
+  | RenderKeyedListItemRerenderEvent
+  // Router events
+  | RouterNavigateEvent
+  | RouterNavigateCompleteEvent
+  | RouterMatchEvent
+  | RouterMatchNotFoundEvent
+  | RouterGuardStartEvent
+  | RouterGuardAllowEvent
+  | RouterGuardRedirectEvent
+  | RouterGuardSkipEvent
+  | RouterRenderStartEvent
+  | RouterRenderCompleteEvent
+  | RouterLinkClickEvent
+  | RouterErrorEvent
+
+/** Extract event type from DebugEvent */
+export type EventType = DebugEvent["event"]
+
+/** 
+ * Loose input type for log function.
+ * Accepts any event with optional fields - the discriminated union above
+ * documents the expected shape for each event type.
+ */
+export type LogInput = {
+  readonly event: EventType
+  readonly duration_ms?: number
+  // Allow any additional fields
+  readonly [key: string]: unknown
 }
 
 // --- Internal State ---
@@ -228,6 +445,7 @@ const getColor = (event: EventType): string => {
   if (event.startsWith("render.intrinsic")) return "#3498db" // blue
   if (event.startsWith("render.schedule")) return "#f39c12" // orange
   if (event.startsWith("render.keyedlist")) return "#16a085" // teal
+  if (event.startsWith("router")) return "#e91e63" // pink
   return "#95a5a6" // gray
 }
 
@@ -235,10 +453,10 @@ const getColor = (event: EventType): string => {
  * Log a wide event.
  * No-op if debug is disabled or event is filtered out.
  */
-export const log = (event: Omit<DebugEvent, "timestamp">): void => {
+export const log = (event: LogInput): void => {
   if (!shouldLog(event.event)) return
 
-  const fullEvent: DebugEvent = {
+  const fullEvent = {
     timestamp: new Date().toISOString(),
     ...event
   }
@@ -259,17 +477,16 @@ export const log = (event: Omit<DebugEvent, "timestamp">): void => {
  * No-op if debug is disabled or event is filtered out.
  */
 export const measure = <T>(
-  eventType: EventType,
-  context: Omit<DebugEvent, "timestamp" | "event" | "duration_ms">,
+  event: LogInput,
   fn: () => T
 ): T => {
-  if (!shouldLog(eventType)) return fn()
+  if (!shouldLog(event.event)) return fn()
 
   const start = performance.now()
   const result = fn()
   const duration_ms = performance.now() - start
 
-  log({ event: eventType, ...context, duration_ms })
+  log({ ...event, duration_ms })
   return result
 }
 

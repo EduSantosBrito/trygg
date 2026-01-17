@@ -7,10 +7,9 @@
  * - Nested state per item (editing mode) that persists across list changes
  * - Fine-grained reactivity with Signal objects
  * - List operations (add, remove, toggle)
- * - DevMode for debug observability
  */
 import { Context, Effect, Layer, Option } from "effect"
-import { mount, Signal, DevMode, Component } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
 // =============================================================================
 // Types
@@ -243,8 +242,8 @@ const TodoApp = Component.gen(function* () {
 
   return (
     <div className="example">
-      <h2>Todo List with Component.gen</h2>
-      <p style={{ fontSize: "0.9em", color: "#666", marginBottom: "1em" }}>
+      <h2>Todo List</h2>
+      <p className="description">
         Double-click a todo to edit. Try adding/removing todos while editing - the edit state persists!
       </p>
       
@@ -290,15 +289,28 @@ const TodoApp = Component.gen(function* () {
           No todos yet. Add one above!
         </p>
       )}
+      
+      <div className="code-example">
+        <h3>Signal.each for Lists</h3>
+        <pre>{`// Efficient list rendering with stable nested state
+const todoList = Signal.each(
+  todos,
+  (todo) => Effect.gen(function* () {
+    // Nested signal - stable per todo.id!
+    const editText = yield* Signal.make(Option.none())
+    const isEditing = Option.isSome(yield* Signal.get(editText))
+    
+    return (
+      <li key={todo.id}>
+        {isEditing ? <input ... /> : <span>{todo.text}</span>}
+      </li>
+    )
+  }),
+  { key: (todo) => todo.id }
+)`}</pre>
+      </div>
     </div>
   )
 })
 
-// Mount the app
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    <TodoApp />
-    <DevMode />
-  </>)
-}
+export default TodoApp

@@ -6,10 +6,9 @@
  * - Signal.make for reactive state
  * - Signal passed directly to JSX for fine-grained updates
  * - Event handlers that return Effects
- * - DevMode for debug observability
  */
 import { Context, Effect, Layer } from "effect"
-import { mount, Signal, DevMode, Component } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
 // =============================================================================
 // Theme Service
@@ -81,6 +80,9 @@ const Counter = Component.gen(function* () {
 
   return (
     <div className="example">
+      <h2>Counter</h2>
+      <p className="description">Basic state with Signal, event handlers as Effects</p>
+      
       <div className="counter">
         <CounterButton label="-" onClick={decrement} theme={defaultTheme} />
         <CountDisplay value={count} theme={defaultTheme} />
@@ -90,9 +92,9 @@ const Counter = Component.gen(function* () {
         <CounterButton label="Reset" onClick={reset} theme={defaultTheme} />
       </div>
       
-      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f9f9f9", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>Component.gen Pattern</h3>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Component with props and theme requirement
+      <div className="code-example">
+        <h3>Component.gen Pattern</h3>
+        <pre>{`// Component with props and theme requirement
 const CountDisplay = Component.gen<{ 
   value: Signal<number> 
 }>()(Props => function* () {
@@ -108,11 +110,4 @@ const CountDisplay = Component.gen<{
   )
 })
 
-// Mount the app with DevMode for debug observability
-const container = document.getElementById("root")
-if (container) {
-  mount(container, <>
-    <Counter />
-    <DevMode />
-  </>)
-}
+export default Counter

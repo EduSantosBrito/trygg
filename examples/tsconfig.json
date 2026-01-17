@@ -13,8 +13,19 @@
     "baseUrl": ".",
     "paths": {
       "effect-ui": ["../src/index.ts"],
-      "effect-ui/*": ["../src/*"]
+      "effect-ui/router": ["../src/router/index.ts"],
+      "effect-ui/vite-plugin": ["../src/vite-plugin.ts"],
+      "effect-ui/jsx-runtime": ["../src/jsx-runtime.ts"],
+      "effect-ui/jsx-dev-runtime": ["../src/jsx-dev-runtime.ts"]
     }
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "../src/**/*.ts"]
+  "include": [
+    "./**/*.ts", 
+    "./**/*.tsx", 
+    "../src/**/*.ts",
+    "../src/**/*.d.ts"
+  ],
+  "exclude": [
+    "vite.config.ts"
+  ]
 }
