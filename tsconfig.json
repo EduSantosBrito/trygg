@@ -1,11 +1,13 @@
 {
+  "include": ["src/**/*", "tests/**/*"],
   "compilerOptions": {
     // Environment setup & latest features
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ES2022",
     "module": "Preserve",
     "moduleDetection": "force",
     "jsx": "react-jsx",
+    "jsxImportSource": "#jsx",
     "allowJs": true,
 
     // Bundler mode
@@ -13,6 +15,13 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+
+    // Path mapping for JSX runtime
+    "baseUrl": ".",
+    "paths": {
+      "#jsx/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "#jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
+    },
 
     // Best practices
     "strict": true,

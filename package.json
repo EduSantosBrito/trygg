@@ -1,20 +1,44 @@
 {
   "name": "effect-ui",
+  "version": "0.1.0",
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./vite-plugin": "./src/vite-plugin.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts"
+  },
   "scripts": {
     "prepare": "effect-language-service patch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npx vitest run",
+    "test:watch": "npx vitest",
+    "examples": "bun run --cwd examples dev",
+    "examples:install": "bun install --cwd examples"
   },
   "devDependencies": {
     "@effect/language-service": "^0.67.0",
-    "@types/bun": "latest"
+    "@effect/vitest": "^0.27.0",
+    "@types/bun": "latest",
+    "happy-dom": "^20.3.1",
+    "vite": "^6.0.0",
+    "vitest": "^3.2.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   },
   "dependencies": {
+    "@effect-atom/atom": "^0.4.13",
+    "@effect/platform": "^0.94.1",
+    "@effect/platform-browser": "^0.74.0",
     "effect": "^3.19.14"
   }
 }

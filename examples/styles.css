@@ -1,0 +1,239 @@
+/* Minimal styles for effect-ui examples */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+  background: #fafafa;
+  color: #333;
+}
+
+h1 {
+  color: #111;
+  margin-bottom: 0.5rem;
+}
+
+/* Landing page */
+.landing p {
+  color: #666;
+  margin-bottom: 2rem;
+}
+
+.landing nav ul {
+  list-style: none;
+  padding: 0;
+}
+
+.landing nav li {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.landing nav a {
+  font-weight: 600;
+  color: #0066cc;
+  text-decoration: none;
+  font-size: 1.1rem;
+}
+
+.landing nav a:hover {
+  text-decoration: underline;
+}
+
+.landing nav span {
+  display: block;
+  color: #666;
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+/* Example pages */
+.example {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: #666;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: #0066cc;
+}
+
+/* Buttons */
+button {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: #f0f0f0;
+}
+
+button:active {
+  background: #e0e0e0;
+}
+
+button.primary {
+  background: #0066cc;
+  border-color: #0066cc;
+  color: white;
+}
+
+button.primary:hover {
+  background: #0055aa;
+}
+
+button.danger {
+  background: #cc3333;
+  border-color: #cc3333;
+  color: white;
+}
+
+button.danger:hover {
+  background: #aa2222;
+}
+
+/* Inputs */
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  padding: 0.5rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 100%;
+}
+
+input:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+/* Counter example */
+.counter {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 1.5rem;
+}
+
+.counter .count {
+  min-width: 3rem;
+  text-align: center;
+  font-weight: bold;
+}
+
+/* Todo example */
+.todo-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.todo-input input {
+  flex: 1;
+}
+
+.todo-list {
+  list-style: none;
+  padding: 0;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.todo-item.completed span {
+  text-decoration: line-through;
+  color: #999;
+}
+
+.todo-item span {
+  flex: 1;
+}
+
+.todo-filters {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eee;
+}
+
+/* Theme example */
+.themed {
+  padding: 1.5rem;
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
+.theme-switcher {
+  margin-bottom: 1rem;
+}
+
+/* Form example */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
+.error {
+  color: #cc3333;
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.success {
+  color: #22aa22;
+  padding: 1rem;
+  background: #f0fff0;
+  border-radius: 4px;
+}
+
+/* Error boundary example */
+.error-display {
+  padding: 1rem;
+  background: #fff0f0;
+  border: 1px solid #ffcccc;
+  border-radius: 4px;
+  color: #cc3333;
+}
+
+.error-display pre {
+  background: #ffe0e0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
