@@ -75,5 +75,5 @@ export const Suspense = <E>(props: SuspenseProps<E>): Element => {
     return suspenseElement(deferred, fallback)
   })
 
-  return componentElement(effect)
+  return componentElement(() => effect)
 }

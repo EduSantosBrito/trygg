@@ -406,7 +406,7 @@ export const render = <E>(
 
     // Wrap in Component for reactive re-rendering
     const componentElement = Element.Component({
-      effect: input,
+      run: () => input,
       key: null
     })
 

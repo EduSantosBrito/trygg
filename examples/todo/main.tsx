@@ -2,37 +2,115 @@
  * Todo List Example
  *
  * Demonstrates:
+ * - Component.gen for reusable components with services
  * - Signal.each for efficient list rendering with stable scopes
  * - Nested state per item (editing mode) that persists across list changes
  * - Fine-grained reactivity with Signal objects
  * - List operations (add, remove, toggle)
  * - DevMode for debug observability
  */
-import { Effect, Option } from "effect"
-import { mount, Signal, DevMode } from "effect-ui"
+import { Context, Effect, Layer, Option } from "effect"
+import { mount, Signal, DevMode, Component } from "effect-ui"
 
-// Todo item type
+// =============================================================================
+// Types
+// =============================================================================
+
 interface Todo {
   readonly id: number
   readonly text: string
   readonly completed: boolean
 }
 
-// Filter type
 type Filter = "all" | "active" | "completed"
 
-// Main Todo app component
-const TodoApp = Effect.gen(function* () {
+// =============================================================================
+// Todo Theme Service
+// =============================================================================
+
+interface TodoThemeConfig {
+  readonly completedColor: string
+  readonly activeColor: string
+  readonly dangerColor: string
+  readonly primaryColor: string
+}
+
+class TodoTheme extends Context.Tag("TodoTheme")<TodoTheme, TodoThemeConfig>() {}
+
+const defaultTodoTheme = Layer.succeed(TodoTheme, {
+  completedColor: "#888",
+  activeColor: "#333",
+  dangerColor: "#dc3545",
+  primaryColor: "#0066cc"
+})
+
+// =============================================================================
+// Components using Component.gen
+// =============================================================================
+
+// TodoInput component
+const TodoInput = Component.gen<{
+  value: Signal.Signal<string>
+  onSubmit: () => Effect.Effect<void>
+  onInput: (e: Event) => Effect.Effect<void>
+}>()(Props => function* () {
+  const { value, onSubmit, onInput } = yield* Props
+  const theme = yield* TodoTheme
+  
+  const handleSubmit = (e: Event) =>
+    Effect.sync(() => e.preventDefault()).pipe(Effect.flatMap(() => onSubmit()))
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="todo-input">
+        <input
+          type="text"
+          value={value}
+          onInput={onInput}
+          placeholder="What needs to be done?"
+        />
+        <button type="submit" style={{ background: theme.primaryColor, color: "white" }}>
+          Add
+        </button>
+      </div>
+    </form>
+  )
+})
+
+// FilterButton component
+const FilterButton = Component.gen<{
+  label: string
+  count: number
+  isActive: boolean
+  onClick: () => Effect.Effect<void>
+}>()(Props => function* () {
+  const { label, count, isActive, onClick } = yield* Props
+  const theme = yield* TodoTheme
+  
+  return (
+    <button
+      className={isActive ? "primary" : ""}
+      style={isActive ? { background: theme.primaryColor, color: "white" } : {}}
+      onClick={onClick}
+    >
+      {label} ({count})
+    </button>
+  )
+})
+
+// =============================================================================
+// Main Todo App
+// =============================================================================
+
+const TodoApp = Component.gen(function* () {
   // Create signals for state
   const todos = yield* Signal.make<ReadonlyArray<Todo>>([])
-  const inputValue = yield* Signal.make("")  // Don't read this - pass directly to input
+  const inputValue = yield* Signal.make("")
   const filter = yield* Signal.make<Filter>("all")
   const nextId = yield* Signal.make(1)
 
-  // Read filter for re-rendering on filter change
+  // Read filter and todos for re-rendering
   const filterValue = yield* Signal.get(filter)
-  
-  // Read todos for stats (could be derived)
   const todosValue = yield* Signal.get(todos)
 
   // Derive a filtered signal
@@ -44,7 +122,7 @@ const TodoApp = Effect.gen(function* () {
     })
   )
 
-  // Add a new todo
+  // Actions
   const addTodo = () =>
     Effect.gen(function* () {
       const text = (yield* Signal.get(inputValue)).trim()
@@ -56,7 +134,6 @@ const TodoApp = Effect.gen(function* () {
       yield* Signal.set(inputValue, "")
     })
 
-  // Toggle todo completion
   const toggleTodo = (id: number) =>
     Signal.update(todos, (list) =>
       list.map((todo) =>
@@ -64,7 +141,6 @@ const TodoApp = Effect.gen(function* () {
       )
     )
 
-  // Update todo text
   const updateTodoText = (id: number, text: string) =>
     Signal.update(todos, (list) =>
       list.map((todo) =>
@@ -72,11 +148,9 @@ const TodoApp = Effect.gen(function* () {
       )
     )
 
-  // Remove a todo
   const removeTodo = (id: number) =>
     Signal.update(todos, (list) => list.filter((todo) => todo.id !== id))
 
-  // Handle input change
   const onInputChange = (e: Event) =>
     Effect.sync(() => {
       const target = e.target
@@ -86,34 +160,23 @@ const TodoApp = Effect.gen(function* () {
       return ""
     }).pipe(Effect.flatMap((v) => Signal.set(inputValue, v)))
 
-  // Handle form submit
-  const onSubmit = (e: Event) =>
-    Effect.sync(() => e.preventDefault()).pipe(Effect.flatMap(() => addTodo()))
-
-  // Count stats
+  // Stats
   const activeCount = todosValue.filter((t) => !t.completed).length
   const completedCount = todosValue.filter((t) => t.completed).length
 
   // Use Signal.each for efficient list rendering
-  // Each item gets a stable scope - nested signals persist across list changes!
   const todoListElement = Signal.each(
     filteredTodos,
     (todo) =>
       Effect.gen(function* () {
-        // Nested signal - stable per todo.id! Persists when other todos change.
+        // Nested signal - stable per todo.id!
         const editText = yield* Signal.make<Option.Option<string>>(Option.none())
-        
-        // Read to trigger re-render when editing state changes
         const editTextValue = yield* Signal.get(editText)
         const isEditing = Option.isSome(editTextValue)
 
-        // Start editing
         const startEditing = () => Signal.set(editText, Option.some(todo.text))
-        
-        // Cancel editing
         const cancelEditing = () => Signal.set(editText, Option.none())
         
-        // Save editing
         const saveEditing = () =>
           Effect.gen(function* () {
             const text = yield* Signal.get(editText)
@@ -123,7 +186,6 @@ const TodoApp = Effect.gen(function* () {
             yield* Signal.set(editText, Option.none())
           })
 
-        // Handle edit input change
         const onEditInputChange = (e: Event) =>
           Effect.sync(() => {
             const target = e.target
@@ -133,7 +195,6 @@ const TodoApp = Effect.gen(function* () {
             return ""
           }).pipe(Effect.flatMap((v) => Signal.set(editText, Option.some(v))))
 
-        // Handle key press in edit input
         const onEditKeyDown = (e: Event) =>
           Effect.gen(function* () {
             if (e instanceof KeyboardEvent) {
@@ -157,17 +218,15 @@ const TodoApp = Effect.gen(function* () {
               disabled={isEditing}
             />
             {isEditing ? (
-              <>
-                <input
-                  type="text"
-                  className="edit-input"
-                  value={Option.isSome(editTextValue) ? editTextValue.value : ""}
-                  onInput={onEditInputChange}
-                  onKeyDown={onEditKeyDown}
-                  onBlur={() => saveEditing()}
-                  autoFocus={true}
-                />
-              </>
+              <input
+                type="text"
+                className="edit-input"
+                value={Option.isSome(editTextValue) ? editTextValue.value : ""}
+                onInput={onEditInputChange}
+                onKeyDown={onEditKeyDown}
+                onBlur={() => saveEditing()}
+                autoFocus={true}
+              />
             ) : (
               <>
                 <span onDblclick={() => startEditing()}>{todo.text}</span>
@@ -184,24 +243,17 @@ const TodoApp = Effect.gen(function* () {
 
   return (
     <div className="example">
-      <h2>Todo List with Signal.each</h2>
+      <h2>Todo List with Component.gen</h2>
       <p style={{ fontSize: "0.9em", color: "#666", marginBottom: "1em" }}>
         Double-click a todo to edit. Try adding/removing todos while editing - the edit state persists!
       </p>
       
-      <form onSubmit={onSubmit}>
-        <div className="todo-input">
-          <input
-            type="text"
-            value={inputValue}
-            onInput={onInputChange}
-            placeholder="What needs to be done?"
-          />
-          <button type="submit" className="primary">
-            Add
-          </button>
-        </div>
-      </form>
+      <TodoInput
+        value={inputValue}
+        onSubmit={addTodo}
+        onInput={onInputChange}
+        todoTheme={defaultTodoTheme}
+      />
 
       <ul className="todo-list">
         {todoListElement}
@@ -209,24 +261,27 @@ const TodoApp = Effect.gen(function* () {
 
       {todosValue.length > 0 && (
         <div className="todo-filters">
-          <button
-            className={filterValue === "all" ? "primary" : ""}
+          <FilterButton
+            label="All"
+            count={todosValue.length}
+            isActive={filterValue === "all"}
             onClick={() => Signal.set(filter, "all")}
-          >
-            All ({todosValue.length})
-          </button>
-          <button
-            className={filterValue === "active" ? "primary" : ""}
+            todoTheme={defaultTodoTheme}
+          />
+          <FilterButton
+            label="Active"
+            count={activeCount}
+            isActive={filterValue === "active"}
             onClick={() => Signal.set(filter, "active")}
-          >
-            Active ({activeCount})
-          </button>
-          <button
-            className={filterValue === "completed" ? "primary" : ""}
+            todoTheme={defaultTodoTheme}
+          />
+          <FilterButton
+            label="Completed"
+            count={completedCount}
+            isActive={filterValue === "completed"}
             onClick={() => Signal.set(filter, "completed")}
-          >
-            Completed ({completedCount})
-          </button>
+            todoTheme={defaultTodoTheme}
+          />
         </div>
       )}
 
@@ -239,11 +294,11 @@ const TodoApp = Effect.gen(function* () {
   )
 })
 
-// Mount the app with DevMode for debug observability
+// Mount the app
 const container = document.getElementById("root")
 if (container) {
   mount(container, <>
-    {TodoApp}
+    <TodoApp />
     <DevMode />
   </>)
 }

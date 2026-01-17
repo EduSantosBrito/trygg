@@ -18,6 +18,7 @@ An Effect-native UI framework with JSX support.
 - `src/jsx-runtime.ts` - JSX transformation
 - `src/Renderer.ts` - DOM rendering service + mount()
 - `src/Signal.ts` - Reactive state primitive
+- `src/Component.ts` - Component.gen API with auto layer inference
 - `src/vite-plugin.ts` - Vite plugin for JSX config
 
 <!-- effect-solutions:start -->
@@ -128,6 +129,34 @@ return items.map(item => <li>{item}</li>)  // Re-renders when items change
 ```
 
 Event handlers are typed `(event: Event) => Effect<void, E, never>` and run via `Runtime.runFork`.
+
+### Component.gen API for Typed Props
+
+```tsx
+import { Context, Effect, Layer } from "effect"
+import { Component, mount } from "effect-ui"
+
+class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
+
+// With typed props - use curried syntax for full type inference
+const Card = Component.gen<{ title: string }>()(Props => function* () {
+  const { title } = yield* Props
+  const theme = yield* Theme
+  return <div style={{ color: theme.primary }}>{title}</div>
+})
+
+// Without props - just pass the generator directly
+const ThemedCard = Component.gen(function* () {
+  const theme = yield* Theme
+  return <div>{theme.name}</div>
+})
+
+// TypeScript infers: { title: string, theme: Layer<Theme> }
+const themeLayer = Layer.succeed(Theme, { primary: "blue" })
+mount(container, <Card title="Hello" theme={themeLayer} />)
+```
+
+Service requirements automatically become layer props (e.g., `theme: Layer<Theme>`).
 
 ## Running Examples
 

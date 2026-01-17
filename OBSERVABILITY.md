@@ -55,22 +55,24 @@ That's it. Debug events will appear in your browser console.
 <DevMode enabled={import.meta.env.DEV} />
 ```
 
-### Escape Hatches (No Code Changes)
+### Escape Hatches (Development Only)
 
-For debugging deployed apps without modifying code:
+For quick debugging during development without modifying code:
 
 ```js
-// URL parameter
-https://myapp.com/?effectui_debug
-https://myapp.com/?effectui_debug=signal
+// URL parameter (development only)
+http://localhost:5173/?effectui_debug
+http://localhost:5173/?effectui_debug=signal
 
-// localStorage (persists across reloads)
+// localStorage (development only, persists across reloads)
 localStorage.setItem("effectui_debug", "true")
 localStorage.setItem("effectui_debug", "signal,render")
 
 // To disable
 localStorage.removeItem("effectui_debug")
 ```
+
+**Security Note**: These escape hatches only work in development mode (`import.meta.env.DEV === true` or `NODE_ENV === "development"`). In production builds, they are disabled for security. Debug output could expose internal state and component hierarchy.
 
 ## Event Reference
 
@@ -169,9 +171,10 @@ Look for `render.signaltext.update` events without corresponding `render.compone
 
 ## Production Safety
 
-- `<DevMode />` is tree-shaken in production builds
-- If accidentally included, it checks `import.meta.env.DEV` and does nothing in production
-- URL/localStorage escape hatches also check for development mode by default
+- `<DevMode />` checks `import.meta.env.DEV` and does nothing in production
+- URL params and localStorage escape hatches are disabled in production
+- Debug output is never emitted in production builds
+- To debug a production issue, use `<DevMode enabled={true} />` explicitly (not recommended)
 
 ## Best Practices
 

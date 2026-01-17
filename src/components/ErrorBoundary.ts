@@ -93,5 +93,5 @@ export const ErrorBoundary = <E>(props: ErrorBoundaryProps<E>): Element => {
     return result
   })
 
-  return componentElement(effect)
+  return componentElement(() => effect)
 }

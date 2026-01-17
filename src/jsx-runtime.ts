@@ -95,7 +95,7 @@ export const jsx = <Props extends JSXProps>(
 
   if (isEffect(type)) {
     // Effect passed directly: <Counter /> where Counter is Effect<Element>
-    return componentElement(type, resolvedKey)
+    return componentElement(() => type, resolvedKey)
   }
 
   // Component function: call it to get the result
@@ -107,7 +107,7 @@ export const jsx = <Props extends JSXProps>(
   }
   
   // Traditional component function returns Effect<Element>
-  return componentElement(result, resolvedKey)
+  return componentElement(() => result, resolvedKey)
 }
 
 /**

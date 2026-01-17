@@ -319,8 +319,11 @@ const renderElement = (
       })
     ),
 
-    Match.tag("Component", ({ effect }) =>
+    Match.tag("Component", ({ run }) =>
       Effect.gen(function* () {
+        // Create the effect from the thunk
+        const effect = run()
+        
         // Create a placeholder comment as anchor for this component
         const anchor = document.createComment("component")
         parent.appendChild(anchor)
@@ -912,7 +915,7 @@ export const render = Effect.fn("render")(function* <E>(
   // Wrap the app Effect in a Component element to enable reactive re-rendering
   // This is crucial for Signal-based reactivity to work
   const componentElement = Element.Component({
-    effect: app,
+    run: () => app,
     key: null
   })
   

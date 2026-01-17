@@ -43,7 +43,7 @@ export type Element = Data.TaggedEnum<{
   }
   /** Effect that produces an Element - R must be never */
   Component: {
-    readonly effect: Effect.Effect<Element, unknown, never>
+    readonly run: () => Effect.Effect<Element, unknown, never>
     readonly key: ElementKey | null
   }
   /** Fragment containing multiple children */
@@ -336,9 +336,76 @@ const TodoList = Effect.gen(function* () {
 
 ---
 
-## 5. Dependency Injection
+## 5. Component.gen API
 
-### 5.1 Core Principles
+### 5.1 Typed Components with Automatic Layer Inference
+
+The `Component.gen` API enables JSX components with typed props and automatic layer prop inference:
+
+```tsx
+import { Context, Effect, Layer } from "effect"
+import { Component, mount } from "effect-ui"
+
+// Define a service
+class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
+
+// With typed props - use curried syntax for full type inference
+const Card = Component.gen<{ title: string }>()(Props => function* () {
+  const { title } = yield* Props
+  const theme = yield* Theme
+  return <div style={{ color: theme.primary }}>{title}</div>
+})
+
+// Without props - just pass the generator directly
+const ThemedCard = Component.gen(function* () {
+  const theme = yield* Theme
+  return <div>{theme.name}</div>
+})
+
+// TypeScript infers: { title: string, theme: Layer<Theme> }
+const themeLayer = Layer.succeed(Theme, { primary: "blue" })
+mount(container, <Card title="Hello" theme={themeLayer} />)
+```
+
+### 5.2 How It Works
+
+1. **Props as Context.Tag**: Regular props are wrapped in a `PropsMarker` Context.Tag
+2. **yield* Props**: Access props consistently with services using generator syntax
+3. **Service detection**: Effect's R type is analyzed using `Context.TagClassShape`
+4. **Auto layer props**: Each service requirement becomes a `layer: Layer<Service>` prop
+5. **Auto-provide**: At render time, props are wrapped in Layer and provided automatically
+
+### 5.3 Multiple Services
+
+```tsx
+const Dashboard = Component.gen<{ userId: string }>()(Props => function* () {
+  const { userId } = yield* Props
+  const theme = yield* Theme
+  const logger = yield* Logger
+  return <div>...</div>
+})
+
+// Inferred props: { userId: string, theme: Layer<Theme>, logger: Layer<Logger> }
+<Dashboard userId="123" theme={themeLayer} logger={loggerLayer} />
+```
+
+### 5.4 No Service Requirements
+
+```tsx
+const SimpleCard = Component.gen<{ message: string }>()(Props => function* () {
+  const { message } = yield* Props
+  return <div>{message}</div>
+})
+
+// Inferred props: { message: string } - no layer props
+<SimpleCard message="Hello" />
+```
+
+---
+
+## 6. Dependency Injection
+
+### 6.1 Core Principles
 
 **Effect-native DI**: Use Effect's built-in context system. No special Provider components.
 
@@ -355,7 +422,7 @@ mount(
 )
 ```
 
-### 5.2 Nested Layers
+### 6.2 Nested Layers
 
 ```tsx
 const ThemedSection = Effect.provide(
@@ -369,9 +436,9 @@ const ThemedSection = Effect.provide(
 
 ---
 
-## 6. Error Handling
+## 7. Error Handling
 
-### 6.1 Error Boundary
+### 7.1 Error Boundary
 
 ```typescript
 export const ErrorBoundary = <E>(props: ErrorBoundaryProps<E>): Element => {
@@ -393,9 +460,9 @@ export const ErrorBoundary = <E>(props: ErrorBoundaryProps<E>): Element => {
 
 ---
 
-## 7. Testing
+## 8. Testing
 
-### 7.1 Test Utilities
+### 8.1 Test Utilities
 
 ```typescript
 export const render = <E>(
@@ -406,7 +473,7 @@ export const click = (element: HTMLElement): Effect.Effect<void>
 export const waitFor = <T>(fn: () => T): Effect.Effect<T, WaitForTimeoutError>
 ```
 
-### 7.2 Test Example
+### 8.2 Test Example
 
 ```typescript
 describe("Counter", () => {
@@ -424,9 +491,9 @@ describe("Counter", () => {
 
 ---
 
-## 8. Vite Integration
+## 9. Vite Integration
 
-### 8.1 Vite Plugin
+### 9.1 Vite Plugin
 
 ```typescript
 // vite.config.ts
@@ -444,7 +511,7 @@ The plugin configures:
 
 ---
 
-## 9. Example Application
+## 10. Example Application
 
 ```tsx
 import { Effect } from "effect"
@@ -467,7 +534,7 @@ mount(document.getElementById("root")!, Counter)
 
 ---
 
-## 10. Design Decisions Summary
+## 11. Design Decisions Summary
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -480,5 +547,6 @@ mount(document.getElementById("root")!, Counter)
 | Rendering target | Browser DOM first | Start simple, add SSR later |
 | Event handlers | Return `Effect` | Renderer handles execution via `Runtime.runFork` |
 | DI pattern | `Effect.provide` directly | No Provider component, just use Effect |
+| Component API | `Component.gen<P>()` with auto-inference | Clean syntax, typed props + auto layer props |
 | Entrypoint | `mount()` simple, `render()` composable | Easy start, flexible when needed |
 | Scope lifecycle | `Effect.never` keeps scope open | Prevents cleanup from removing DOM |

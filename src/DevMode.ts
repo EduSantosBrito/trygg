@@ -103,5 +103,5 @@ export const DevMode = (props: DevModeProps = {}): Element => {
     return empty
   })
 
-  return componentElement(effect)
+  return componentElement(() => effect)
 }

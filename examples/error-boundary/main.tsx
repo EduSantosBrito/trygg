@@ -2,16 +2,20 @@
  * Error Boundary Example
  *
  * Demonstrates:
+ * - Component.gen for error display components
  * - ErrorBoundary component for catching errors
  * - Typed errors with Data.TaggedError
  * - Error inspection in fallback UI
  * - Recovery patterns
  * - DevMode for debug observability
  */
-import { Data, Effect } from "effect"
-import { mount, Signal, ErrorBoundary, DevMode } from "effect-ui"
+import { Context, Data, Effect, Layer } from "effect"
+import { mount, Signal, ErrorBoundary, DevMode, Component } from "effect-ui"
 
-// Define typed errors
+// =============================================================================
+// Typed Errors
+// =============================================================================
+
 class NetworkError extends Data.TaggedError("NetworkError")<{
   readonly url: string
   readonly status: number
@@ -28,11 +32,96 @@ class UnknownError extends Data.TaggedError("UnknownError")<{
 
 type AppError = NetworkError | ValidationError | UnknownError
 
-// Simulate a component that might fail
+// =============================================================================
+// Error Display Theme Service
+// =============================================================================
+
+interface ErrorThemeConfig {
+  readonly errorBackground: string
+  readonly errorText: string
+  readonly successBackground: string
+  readonly successText: string
+}
+
+class ErrorTheme extends Context.Tag("ErrorTheme")<ErrorTheme, ErrorThemeConfig>() {}
+
+const defaultErrorTheme = Layer.succeed(ErrorTheme, {
+  errorBackground: "#ffebee",
+  errorText: "#c62828",
+  successBackground: "#e8f5e9",
+  successText: "#2e7d32"
+})
+
+// =============================================================================
+// Error Display Components using Component.gen
+// =============================================================================
+
+// NetworkErrorDisplay component
+const NetworkErrorDisplay = Component.gen<{
+  error: NetworkError
+}>()(Props => function* () {
+  const { error } = yield* Props
+  const theme = yield* ErrorTheme
+
+  return (
+    <div className="error-display" style={{ background: theme.errorBackground, color: theme.errorText }}>
+      <h3 style={{ marginTop: 0 }}>Network Error</h3>
+      <p>Failed to fetch from <code>{error.url}</code></p>
+      <p>Status: <strong>{error.status}</strong></p>
+    </div>
+  )
+})
+
+// ValidationErrorDisplay component
+const ValidationErrorDisplay = Component.gen<{
+  error: ValidationError
+}>()(Props => function* () {
+  const { error } = yield* Props
+  const theme = yield* ErrorTheme
+
+  return (
+    <div className="error-display" style={{ background: theme.errorBackground, color: theme.errorText }}>
+      <h3 style={{ marginTop: 0 }}>Validation Error</h3>
+      <p>Field: <code>{error.field}</code></p>
+      <p>Message: {error.message}</p>
+    </div>
+  )
+})
+
+// UnknownErrorDisplay component
+const UnknownErrorDisplay = Component.gen<{
+  error: UnknownError
+}>()(Props => function* () {
+  const { error } = yield* Props
+  const theme = yield* ErrorTheme
+
+  return (
+    <div className="error-display" style={{ background: theme.errorBackground, color: theme.errorText }}>
+      <h3 style={{ marginTop: 0 }}>Unknown Error</h3>
+      <pre>{String(error.cause)}</pre>
+    </div>
+  )
+})
+
+// Success display component
+const SuccessDisplay = Component.gen(function* () {
+  const theme = yield* ErrorTheme
+
+  return (
+    <div style={{ padding: "1rem", background: theme.successBackground, borderRadius: "8px" }}>
+      <h3 style={{ marginTop: 0, color: theme.successText }}>Success!</h3>
+      <p style={{ color: theme.successText }}>The component rendered without errors.</p>
+    </div>
+  )
+})
+
+// =============================================================================
+// Risky Component
+// =============================================================================
+
 const RiskyComponent = Effect.fn("RiskyComponent")(function* (
   shouldFail: "network" | "validation" | "unknown" | "none"
 ) {
-  // Simulate different error conditions
   if (shouldFail === "network") {
     return yield* Effect.fail(
       new NetworkError({ url: "/api/data", status: 500 })
@@ -51,52 +140,58 @@ const RiskyComponent = Effect.fn("RiskyComponent")(function* (
     )
   }
 
-  // Success case
-  return (
-    <div style={{ padding: "1rem", background: "#e8f5e9", borderRadius: "8px" }}>
-      <h3 style={{ marginTop: 0, color: "#2e7d32" }}>Success!</h3>
-      <p>The component rendered without errors.</p>
-    </div>
-  )
+  // Success - use the SuccessDisplay component
+  return <SuccessDisplay errorTheme={defaultErrorTheme} />
 })
 
-// Render error details based on error type
+// =============================================================================
+// Error Renderer using Component.gen components
+// =============================================================================
+
 const renderError = (error: AppError) => {
   switch (error._tag) {
     case "NetworkError":
-      return (
-        <div className="error-display">
-          <h3 style={{ marginTop: 0 }}>Network Error</h3>
-          <p>Failed to fetch from <code>{error.url}</code></p>
-          <p>Status: <strong>{error.status}</strong></p>
-        </div>
-      )
-
+      return <NetworkErrorDisplay error={error} errorTheme={defaultErrorTheme} />
     case "ValidationError":
-      return (
-        <div className="error-display">
-          <h3 style={{ marginTop: 0 }}>Validation Error</h3>
-          <p>Field: <code>{error.field}</code></p>
-          <p>Message: {error.message}</p>
-        </div>
-      )
-
+      return <ValidationErrorDisplay error={error} errorTheme={defaultErrorTheme} />
     case "UnknownError":
-      return (
-        <div className="error-display">
-          <h3 style={{ marginTop: 0 }}>Unknown Error</h3>
-          <pre>{String(error.cause)}</pre>
-        </div>
-      )
+      return <UnknownErrorDisplay error={error} errorTheme={defaultErrorTheme} />
   }
 }
 
-// Main app component
-const ErrorBoundaryApp = Effect.gen(function* () {
+// =============================================================================
+// Trigger Button Component
+// =============================================================================
+
+const TriggerButton = Component.gen<{
+  label: string
+  variant: "default" | "danger"
+  onClick: () => Effect.Effect<void>
+}>()(Props => function* () {
+  const { label, variant, onClick } = yield* Props
+  const theme = yield* ErrorTheme
+
+  return (
+    <button
+      className={variant === "danger" ? "danger" : ""}
+      style={variant === "danger"
+        ? { background: theme.errorText, color: "white" }
+        : {}}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  )
+})
+
+// =============================================================================
+// Main App
+// =============================================================================
+
+const ErrorBoundaryApp = Component.gen(function* () {
   const errorType = yield* Signal.make<"network" | "validation" | "unknown" | "none">("none")
   const key = yield* Signal.make(0)
 
-  // Get current values for rendering
   const errorTypeValue = yield* Signal.get(errorType)
 
   const triggerError = (type: "network" | "validation" | "unknown" | "none") =>
@@ -110,18 +205,30 @@ const ErrorBoundaryApp = Effect.gen(function* () {
       <div style={{ marginBottom: "1rem" }}>
         <p>Click a button to trigger different error types:</p>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button onClick={() => triggerError("none")}>
-            No Error
-          </button>
-          <button className="danger" onClick={() => triggerError("network")}>
-            Network Error
-          </button>
-          <button className="danger" onClick={() => triggerError("validation")}>
-            Validation Error
-          </button>
-          <button className="danger" onClick={() => triggerError("unknown")}>
-            Unknown Error
-          </button>
+          <TriggerButton
+            label="No Error"
+            variant="default"
+            onClick={() => triggerError("none")}
+            errorTheme={defaultErrorTheme}
+          />
+          <TriggerButton
+            label="Network Error"
+            variant="danger"
+            onClick={() => triggerError("network")}
+            errorTheme={defaultErrorTheme}
+          />
+          <TriggerButton
+            label="Validation Error"
+            variant="danger"
+            onClick={() => triggerError("validation")}
+            errorTheme={defaultErrorTheme}
+          />
+          <TriggerButton
+            label="Unknown Error"
+            variant="danger"
+            onClick={() => triggerError("unknown")}
+            errorTheme={defaultErrorTheme}
+          />
         </div>
       </div>
 
@@ -136,47 +243,49 @@ const ErrorBoundaryApp = Effect.gen(function* () {
       </div>
 
       <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>How it works</h3>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Define typed errors
-class NetworkError extends Data.TaggedError("NetworkError")<{
-  readonly url: string
-  readonly status: number
-}> {}
+        <h3 style={{ marginTop: 0 }}>Component.gen for Error Display</h3>
+        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Error display component with theme
+const NetworkErrorDisplay = Component.gen<{
+  error: NetworkError
+}>()(Props => function* () {
+  const { error } = yield* Props
+  const theme = yield* ErrorTheme
 
-// Component that may fail
-const RiskyComponent = Effect.gen(function* () {
-  if (shouldFail) {
-    return yield* Effect.fail(
-      new NetworkError({ url: "/api", status: 500 })
-    )
-  }
-  return <div>Success!</div>
+  return (
+    <div style={{
+      background: theme.errorBackground,
+      color: theme.errorText
+    }}>
+      <h3>Network Error</h3>
+      <p>URL: {error.url}</p>
+      <p>Status: {error.status}</p>
+    </div>
+  )
 })
 
-// Wrap with ErrorBoundary
+// Use in error boundary fallback
 ErrorBoundary({
-  children: RiskyComponent,
+  children: RiskyComponent(),
   fallback: (error) => {
-    // Pattern match on error type!
     switch (error._tag) {
       case "NetworkError":
-        return <div>Network failed: {error.status}</div>
-      case "ValidationError":
-        return <div>Invalid: {error.message}</div>
+        return <NetworkErrorDisplay
+          error={error}
+          errorTheme={themeLayer}
+        />
     }
-  },
-  onError: (e) => Effect.log(\`Error: \${e._tag}\`)
+  }
 })`}</pre>
       </div>
     </div>
   )
 })
 
-// Mount the app with DevMode for debug observability
+// Mount
 const container = document.getElementById("root")
 if (container) {
   mount(container, <>
-    {ErrorBoundaryApp}
+    <ErrorBoundaryApp />
     <DevMode />
   </>)
 }

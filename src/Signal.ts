@@ -532,7 +532,14 @@ export const _setEachImpl = (impl: EachFn): void => {
  */
 export const each: EachFn = (source, renderFn, options) => {
   if (_eachImpl === null) {
-    throw new Error("Signal.each is not initialized. Import 'effect-ui' or 'effect-ui/Element' first.")
+    throw new Error(
+      "Signal.each is not initialized.\n\n" +
+      "This usually means you imported Signal directly from 'effect-ui/Signal' " +
+      "before the main 'effect-ui' module was loaded.\n\n" +
+      "Fix: Import from 'effect-ui' instead:\n" +
+      "  import { Signal } from 'effect-ui'\n\n" +
+      "Or ensure 'effect-ui' is imported before using Signal.each."
+    )
   }
   return _eachImpl(source, renderFn, options)
 }

@@ -174,11 +174,12 @@ export type Element = Data.TaggedEnum<{
   }
   /**
    * Effect-based component that produces an Element.
-   * The effect must have R=never, meaning all requirements are satisfied.
-   * Use Effect.provide to satisfy services before creating the component element.
+   * Stores a thunk that creates the effect at render time.
+   * R must be never - all requirements must be satisfied via Effect.provide
+   * before creating a Component element.
    */
   readonly Component: {
-    readonly effect: Effect.Effect<Element, unknown, never>
+    readonly run: () => Effect.Effect<Element, unknown, never>
     readonly key: ElementKey | null
   }
   /**
@@ -238,22 +239,22 @@ export const text = (content: string): Element =>
   Element.Text({ content })
 
 /**
- * Create a component element from an Effect.
+ * Create a component element from a thunk that produces an Effect.
  * 
  * This is the low-level function for creating Component elements.
- * For defining JSX-compatible components, use `component()` from effect-ui instead.
+ * For defining JSX-compatible components, use `Component()` from effect-ui instead.
  * 
- * The effect must have R=never - all service requirements must be satisfied
- * via Effect.provide before passing to this function.
+ * If the effect has unsatisfied requirements (R != never), it will fail
+ * at runtime with "service not found".
  * 
  * @since 1.0.0
  * @internal
  */
 export const componentElement = <E>(
-  effect: Effect.Effect<Element, E, never>,
+  run: () => Effect.Effect<Element, E, never>,
   key: ElementKey | null = null
 ): Element =>
-  Element.Component({ effect, key })
+  Element.Component({ run, key })
 
 /**
  * Create a fragment element
@@ -367,8 +368,13 @@ export const normalizeChild = (child: unknown): Element => {
   }
   if (isEffect(child)) {
     // Effect child - wrap as Component element
-    return componentElement(child)
+    // Wrap in thunk to defer execution
+    return componentElement(() => child)
   }
+  
+  // Unknown child type - silently ignore
+  // TypeScript types should catch most invalid children at compile time.
+  // At runtime, we gracefully degrade to an empty element.
   return empty
 }
 

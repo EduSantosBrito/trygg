@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - effect-ui</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      max-width: none;
+      background: transparent;
+    }
+    .back-link {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      z-index: 100;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    .back-link:hover {
+      background: rgba(0,0,0,0.9);
+    }
+  </style>
+</head>
+<body>
+  <a href="/" class="back-link">Back to examples</a>
+  
+  <div id="root"></div>
+  
+  <script type="module" src="./main.tsx"></script>
+</body>
+</html>

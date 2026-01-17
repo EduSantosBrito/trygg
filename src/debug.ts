@@ -130,12 +130,46 @@ export const getFilter = (): ReadonlyArray<string> | null => {
 // --- Environment Detection ---
 
 /**
+ * Check if we're in development mode.
+ * Uses import.meta.env.DEV (Vite) or process.env.NODE_ENV.
+ * Returns false if we can't determine - fail secure.
+ */
+const isDevelopment = (): boolean => {
+  // Check Vite's import.meta.env.DEV
+  try {
+    // @ts-expect-error - import.meta.env may not be typed
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV === true) {
+      return true
+    }
+  } catch {
+    // import.meta not available
+  }
+  
+  // Check Node.js process.env.NODE_ENV
+  try {
+    if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
+      return true
+    }
+  } catch {
+    // process not available
+  }
+  
+  // Default to false (secure by default)
+  return false
+}
+
+/**
  * Initialize debug state from environment (URL params, localStorage).
  * Called automatically on module load in browser.
- * This is the "escape hatch" for debugging without code changes.
+ * 
+ * SECURITY: Only works in development mode. In production, debug must be
+ * enabled explicitly via the <DevMode /> component with `enabled` prop.
  */
 export const initFromEnvironment = (): void => {
   if (typeof window === "undefined") return
+  
+  // SECURITY: Only allow environment-based debug in development
+  if (!isDevelopment()) return
 
   // Check URL params first
   const url = new URL(window.location.href)

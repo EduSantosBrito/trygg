@@ -6,10 +6,11 @@
  * - Effect.provide for dependency injection
  * - Layer for service implementation
  * - Swapping layers at runtime
+ * - Component.gen API for typed props with auto layer inference
  * - DevMode for debug observability
  */
 import { Context, Effect, Layer } from "effect"
-import { mount, Signal, DevMode } from "effect-ui"
+import { mount, Signal, DevMode, Component } from "effect-ui"
 
 // Define a Theme service using Context.Tag
 interface ThemeConfig {
@@ -40,10 +41,13 @@ const DarkTheme = Layer.succeed(Theme, {
   border: "#333355"
 })
 
+// =============================================================================
+// Approach 1: Component.gen (no props)
+// =============================================================================
+
 // A component that uses the Theme service
-// Note: R = Theme (has a requirement)
-const ThemedCard = Effect.gen(function* () {
-  // Access the theme via yield*
+// Note: R = Theme (has a requirement), becomes `theme` prop
+const ThemedCard = Component.gen(function* () {
   const theme = yield* Theme
 
   return (
@@ -68,6 +72,29 @@ const ThemedCard = Effect.gen(function* () {
   )
 })
 
+// =============================================================================
+// Approach 2: Component.gen with props (auto layer inference)
+// =============================================================================
+
+// Component with typed props - Theme requirement becomes a `theme` prop
+// TypeScript infers: { title: string, theme: Layer<Theme> }
+// Note: Use curried syntax Component.gen<P>()(fn) to get full type inference
+const ThemedTitle = Component.gen<{ title: string }>()(Props => function* () {
+  const { title } = yield* Props
+  const theme = yield* Theme
+  return (
+    <h3 style={{
+      color: theme.primary,
+      background: theme.background,
+      padding: "0.5rem 1rem",
+      borderRadius: "4px",
+      display: "inline-block"
+    }}>
+      {title}
+    </h3>
+  )
+})
+
 // Main app that switches between themes
 const ThemeApp = Effect.gen(function* () {
   const isDark = yield* Signal.make(false)
@@ -80,9 +107,6 @@ const ThemeApp = Effect.gen(function* () {
 
   const toggleTheme = () => Signal.update(isDark, (v) => !v)
 
-  // Render the themed card with the current theme layer
-  const card = yield* Effect.provide(ThemedCard, currentTheme)
-
   return (
     <div className="example">
       <div className="theme-switcher">
@@ -90,27 +114,37 @@ const ThemeApp = Effect.gen(function* () {
           Switch to {isDarkValue ? "Light" : "Dark"} Theme
         </button>
       </div>
-      {card}
-      
-      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
-        <h3 style={{ marginTop: 0 }}>How it works</h3>
-        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Define a service
-class Theme extends Context.Tag("Theme")<
-  Theme,
-  ThemeConfig
->() {}
 
-// Component that requires Theme
-const ThemedCard = Effect.gen(function* () {
-  const theme = yield* Theme  // R = Theme
+
+      <ThemedCard theme={currentTheme} />
+      <div style={{ marginTop: "1rem" }}>
+        <ThemedTitle title="Using Component API" theme={currentTheme} />
+      </div>
+
+      <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px" }}>
+        <h3 style={{ marginTop: 0 }}>Two Approaches</h3>
+
+        <h4>1. Component.gen (no props)</h4>
+        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Component requires Theme - layer passed as prop
+const ThemedCard = Component.gen(function* () {
+  const theme = yield* Theme
   return <div style={{ color: theme.text }}>...</div>
 })
 
-// Provide the service
-const card = yield* Effect.provide(
-  ThemedCard,
-  isDark ? DarkTheme : LightTheme
-)`}</pre>
+// TypeScript infers: { theme: Layer<Theme> }
+<ThemedCard theme={themeLayer} />`}</pre>
+
+        <h4 style={{ marginTop: "1rem" }}>2. Component.gen with props</h4>
+        <pre style={{ background: "#fff", padding: "0.5rem", borderRadius: "4px", overflow: "auto", fontSize: "0.85rem" }}>{`// Component with typed props - Theme becomes a prop
+// Note: Use curried syntax for full type inference
+const ThemedTitle = Component.gen<{ title: string }>()(Props => function* () {
+  const { title } = yield* Props
+  const theme = yield* Theme
+  return <h3 style={{ color: theme.primary }}>{title}</h3>
+})
+
+// TypeScript infers: { title: string, theme: Layer<Theme> }
+<ThemedTitle title="Hello" theme={themeLayer} />`}</pre>
       </div>
     </div>
   )
