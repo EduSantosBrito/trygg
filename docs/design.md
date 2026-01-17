@@ -280,21 +280,7 @@ return (
 
 ### 4.5 Debug Logging
 
-Enable debug logging by adding the `<DevMode />` component:
-
-```tsx
-import { mount, DevMode } from "effect-ui"
-
-mount(container, <>
-  <App />
-  <DevMode />                     {/* Enable all logging */}
-  <DevMode filter="signal" />     {/* Only signal events */}
-</>)
-```
-
-Escape hatches (no code changes): `?effectui_debug` URL param or `localStorage.effectui_debug = "true"`.
-
-See `OBSERVABILITY.md` for full event reference and debugging scenarios.
+See [observability.md](observability.md) for debug events and `<DevMode />` usage.
 
 ### 4.6 Signal.each for Lists (Implemented)
 
@@ -518,13 +504,13 @@ import { Effect } from "effect"
 import { mount, Signal } from "effect-ui"
 
 const Counter = Effect.gen(function* () {
-  const [count, updateCount] = yield* Signal.makeUpdater(0)
+  const count = yield* Signal.make(0)
   
   return (
     <div>
       <h1>Count: {count}</h1>
-      <button onClick={() => updateCount(n => n - 1)}>-</button>
-      <button onClick={() => updateCount(n => n + 1)}>+</button>
+      <button onClick={() => Signal.update(count, n => n - 1)}>-</button>
+      <button onClick={() => Signal.update(count, n => n + 1)}>+</button>
     </div>
   )
 })
