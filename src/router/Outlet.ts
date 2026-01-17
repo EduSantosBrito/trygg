@@ -83,16 +83,27 @@ type LoadAndRenderResult =
   | { readonly _tag: "redirect"; readonly redirect: RouterRedirect }
 
 /**
- * Render a component - handles both Effect and Component.gen exports
+ * Render a component - handles both Effect and Component.gen exports.
+ * IMPORTANT: Returns a Component element so the route gets its own render phase.
+ * Without this, route signals would be created in Outlet's render phase and
+ * get reused incorrectly across different routes.
  * @internal
  */
 const renderComponent = (component: unknown): Effect.Effect<Element, unknown, never> => {
   if (typeof component === "function" && (component as { _tag?: string })._tag === "EffectComponent") {
     // It's a Component.gen result - call it with empty props to get Element
-    return Effect.succeed((component as (props: Record<string, unknown>) => Element)({}))
+    // Wrap in componentElement so it gets its own render phase
+    return Effect.succeed(
+      componentElement(() => 
+        Effect.succeed((component as (props: Record<string, unknown>) => Element)({}))
+      )
+    )
   }
-  // It's an Effect - yield it to get Element
-  return component as Effect.Effect<Element, unknown, never>
+  // It's an Effect - wrap in componentElement so it gets its own render phase
+  // This ensures each route has isolated signals that don't collide across navigation
+  return Effect.succeed(
+    componentElement(() => component as Effect.Effect<Element, unknown, never>)
+  )
 }
 
 /**
