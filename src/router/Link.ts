@@ -10,10 +10,28 @@
  * 
  * // Dynamic path - params required and type-checked
  * <Link to="/users/:id" params={{ id: "123" }}>User</Link>
- * 
- * // Active link styling - use NavLink with activeClassName
- * <NavLink to="/users" activeClassName="active">Users</NavLink>
  * ```
+ * 
+ * ## Active Link Styling
+ * 
+ * Use `Link` with `Router.isActive()` for active state:
+ * 
+ * ```tsx
+ * const NavItem = Effect.gen(function* () {
+ *   const isActive = yield* Router.isActive("/users")
+ *   return (
+ *     <Link 
+ *       to="/users" 
+ *       className={isActive ? "nav-link active" : "nav-link"}
+ *       aria-current={isActive ? "page" : undefined}
+ *     >
+ *       Users
+ *     </Link>
+ *   )
+ * })
+ * ```
+ * 
+ * **Note:** `NavLink` is deprecated. Use `Link` + `Router.isActive()` instead.
  */
 import { Effect } from "effect"
 import { Element, intrinsic, componentElement, normalizeChildren, type ElementProps } from "../Element.js"
@@ -22,29 +40,30 @@ import * as Debug from "../debug.js"
 import { getRouter } from "./RouterService.js"
 import { buildPath } from "./matching.js"
 import { cx } from "./utils.js"
-import type { ExtractRouteParams, RoutePath, RouteMap } from "./types.js"
+import type { RouteParamsFor, RoutePath } from "./types.js"
 import { buildPathWithParams } from "./types.js"
+
+// F-001: Prefetch constants from framework research
+/** Hover delay before prefetch triggers (TanStack Router default) */
+const PREFETCH_HOVER_DELAY_MS = 50
+
+/**
+ * Prefetch strategy for Link component.
+ * 
+ * - `"intent"` (default): prefetch on hover (50ms debounce) or focus
+ * - `"viewport"`: prefetch when link enters viewport (IntersectionObserver + requestIdleCallback)
+ * - `"render"`: prefetch immediately when Link renders
+ * - `false`: no prefetch
+ * 
+ * @since 1.0.0
+ */
+export type PrefetchStrategy = "intent" | "viewport" | "render" | false
 
 /**
  * Check if a type has any keys
  * @internal
  */
 type HasKeys<T> = keyof T extends never ? false : true
-
-/**
- * Simplify intersection types for better display
- * @internal
- */
-type Simplify<T> = { [K in keyof T]: T[K] } & {}
-
-/**
- * Get params type for a path - from RouteMap if available, otherwise extract from path
- * @internal
- */
-type GetParams<Path extends string> = 
-  Path extends keyof RouteMap 
-    ? RouteMap[Path] 
-    : Simplify<ExtractRouteParams<Path>>
 
 /**
  * Base link props without params
@@ -61,6 +80,14 @@ interface BaseLinkProps<Path extends RoutePath> {
   readonly children?: unknown
   /** CSS class name */
   readonly className?: string
+  /** 
+   * Prefetch strategy (default: "intent")
+   * - "intent": prefetch on hover (50ms debounce) or focus
+   * - "viewport": prefetch when link enters viewport (IntersectionObserver + idle callback)
+   * - "render": prefetch immediately when Link renders
+   * - false: no prefetch
+   */
+  readonly prefetch?: PrefetchStrategy
 }
 
 /**
@@ -72,10 +99,10 @@ interface BaseLinkProps<Path extends RoutePath> {
  * @since 1.0.0
  */
 export type LinkProps<Path extends RoutePath = RoutePath> = 
-  HasKeys<GetParams<Path>> extends true
+  HasKeys<RouteParamsFor<Path>> extends true
     ? BaseLinkProps<Path> & {
         /** Route params to substitute into path (required for this route) */
-        readonly params: GetParams<Path>
+        readonly params: RouteParamsFor<Path>
       }
     : BaseLinkProps<Path> & {
         /** Route params - not needed for static paths */
@@ -88,8 +115,26 @@ export type LinkProps<Path extends RoutePath = RoutePath> =
  * Renders an `<a>` element with proper href for accessibility and SEO,
  * but intercepts clicks to use client-side navigation.
  * 
- * **Note:** Link does NOT track active state. Use `NavLink` with `activeClassName`
- * for active link styling.
+ * ## Active Link Styling
+ * 
+ * Link does NOT track active state. Use `Router.isActive()` to compute active
+ * state and set attributes like `aria-current` and `data-active`:
+ * 
+ * ```tsx
+ * const NavItem = Effect.gen(function* () {
+ *   const isActive = yield* Router.isActive("/users")
+ *   return (
+ *     <Link 
+ *       to="/users" 
+ *       className={isActive ? "nav-link active" : "nav-link"}
+ *       aria-current={isActive ? "page" : undefined}
+ *       data-active={isActive ? "true" : undefined}
+ *     >
+ *       Users
+ *     </Link>
+ *   )
+ * })
+ * ```
  * 
  * ## Usage
  * 
@@ -110,10 +155,10 @@ export type LinkProps<Path extends RoutePath = RoutePath> =
  * @since 1.0.0
  */
 export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element => {
-  const { to, params, query: queryParams, replace, children, className } = props
+  const { to, params, query: queryParams, replace, children, className, prefetch = "intent" } = props
   
   // Build resolved path (substitute params if provided)
-  const resolvedPath = params ? buildPathWithParams(to, params as Record<string, string> as ExtractRouteParams<Path>) : to
+  const resolvedPath = params ? buildPathWithParams(to, params) : to
   
   // Build full href with query string
   const href = buildPath(resolvedPath, queryParams)
@@ -122,6 +167,45 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
   const linkEffect = Effect.gen(function* () {
     const router = yield* getRouter
     
+    // F-001: Prefetch state and handlers
+    let prefetchTriggered = false
+    let hoverTimeout: ReturnType<typeof setTimeout> | null = null
+    
+    // Trigger prefetch once (guarded by flag)
+    const triggerPrefetch = Effect.gen(function* () {
+      if (prefetchTriggered) return
+      prefetchTriggered = true
+      yield* router.prefetch(resolvedPath)
+    })
+    
+    // Mouse enter handler - 50ms debounce before prefetch
+    const handleMouseEnter = prefetch === "intent"
+      ? Effect.fnUntraced(function* () {
+          if (prefetchTriggered) return
+          hoverTimeout = setTimeout(() => {
+            Effect.runFork(triggerPrefetch)
+          }, PREFETCH_HOVER_DELAY_MS)
+        })
+      : undefined
+    
+    // Mouse leave handler - cancel pending prefetch
+    const handleMouseLeave = prefetch === "intent"
+      ? Effect.fnUntraced(function* () {
+          if (hoverTimeout !== null) {
+            clearTimeout(hoverTimeout)
+            hoverTimeout = null
+          }
+        })
+      : undefined
+    
+    // Focus handler - immediate prefetch (accessibility)
+    const handleFocus = prefetch === "intent"
+      ? Effect.fnUntraced(function* () {
+          if (prefetchTriggered) return
+          yield* triggerPrefetch
+        })
+      : undefined
+    
     // Click handler - prevents default and uses router
     // NOTE: We capture `router` from the closure instead of calling getRouter again,
     // because event handlers run in forked fibers that don't inherit FiberRef values.
@@ -129,7 +213,7 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
       // Don't intercept if modifier keys are pressed (open in new tab, etc.)
       if (event instanceof MouseEvent) {
         if (event.metaKey || event.ctrlKey || event.shiftKey) {
-          Debug.log({
+          yield* Debug.log({
             event: "router.link.click",
             to_path: resolvedPath,
             reason: "modifier key pressed, allowing default"
@@ -138,7 +222,7 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
         }
       }
       
-      Debug.log({
+      yield* Debug.log({
         event: "router.link.click",
         to_path: resolvedPath,
         ...(replace !== undefined ? { replace } : {})
@@ -152,11 +236,24 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
       yield* router.navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
     })
     
+    // F-001: Trigger prefetch immediately for "render" strategy
+    if (prefetch === "render") {
+      yield* triggerPrefetch
+    }
+    
     // Build props for the anchor element
     const anchorProps: ElementProps = {
       href,
       onClick: handleClick,
-      ...(className ? { className } : {})
+      ...(className ? { className } : {}),
+      ...(handleMouseEnter ? { onMouseEnter: handleMouseEnter } : {}),
+      ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
+      ...(handleFocus ? { onFocus: handleFocus } : {}),
+      // F-001: Viewport prefetch uses data attributes + global observer
+      ...(prefetch === "viewport" ? { 
+        "data-effectui-prefetch": "viewport",
+        "data-effectui-prefetch-path": resolvedPath
+      } : {})
     }
     
     const childElements = normalizeChildren(children)
@@ -183,10 +280,10 @@ interface BaseNavLinkProps<Path extends RoutePath> extends BaseLinkProps<Path> {
  * @since 1.0.0
  */
 export type NavLinkProps<Path extends RoutePath = RoutePath> = 
-  HasKeys<GetParams<Path>> extends true
+  HasKeys<RouteParamsFor<Path>> extends true
     ? BaseNavLinkProps<Path> & {
         /** Route params to substitute into path (required for this route) */
-        readonly params: GetParams<Path>
+        readonly params: RouteParamsFor<Path>
       }
     : BaseNavLinkProps<Path> & {
         /** Route params - not needed for static paths */
@@ -196,38 +293,59 @@ export type NavLinkProps<Path extends RoutePath = RoutePath> =
 /**
  * NavLink - Link with active state styling
  * 
- * Subscribes to route changes and applies `activeClassName` when the route matches.
- * Use this when you need visual feedback for the current route.
+ * **@deprecated** Use `Link` with `Router.isActive()` instead.
+ * This component will be removed in a future version.
  * 
- * @example
+ * NavLink overlaps responsibility - users can derive active state from
+ * `Router.current` or `Router.isActive()` and set `aria-current`/`data-active`
+ * themselves. This gives full control over the semantics and attributes.
+ * 
+ * ## Migration
+ * 
+ * Before (NavLink):
  * ```tsx
- * // Basic usage - adds "active" class when on /users
  * <NavLink to="/users" className="nav-link" activeClassName="active">
  *   Users
  * </NavLink>
+ * ```
  * 
- * // Exact matching - only active on exact /settings, not /settings/profile
- * <NavLink to="/settings" activeClassName="active" exact>
- *   Settings
- * </NavLink>
+ * After (Link + Router.isActive):
+ * ```tsx
+ * const NavLink = Effect.gen(function* () {
+ *   const isActive = yield* Router.isActive("/users")
+ *   return (
+ *     <Link 
+ *       to="/users" 
+ *       className={`nav-link ${isActive ? "active" : ""}`}
+ *       aria-current={isActive ? "page" : undefined}
+ *     >
+ *       Users
+ *     </Link>
+ *   )
+ * })
+ * ```
  * 
- * // With params
- * <NavLink 
- *   to="/users/:id" 
- *   params={{ id: "123" }}
- *   activeClassName="active"
- * >
- *   User Profile
- * </NavLink>
+ * Or use the `cx` utility:
+ * ```tsx
+ * const NavLink = Effect.gen(function* () {
+ *   const isActive = yield* Router.isActive("/users")
+ *   const className = yield* cx("nav-link", isActive && "active")
+ *   return (
+ *     <Link to="/users" className={className} aria-current={isActive ? "page" : undefined}>
+ *       Users
+ *     </Link>
+ *   )
+ * })
  * ```
  * 
  * @since 1.0.0
+ * @deprecated Use `Link` with `Router.isActive()` instead
  */
 export const NavLink = <Path extends RoutePath>(props: NavLinkProps<Path>): Element => {
   const { activeClassName, className, params, exact, to, query: queryParams, replace, children } = props
   
   // Build resolved path (substitute params if provided)
-  const resolvedPath = params ? buildPathWithParams(to, params as Record<string, string> as ExtractRouteParams<Path>) : to
+  const resolvedPath = params ? buildPathWithParams(to, params) : to
   
   // Build full href with query string
   const href = buildPath(resolvedPath, queryParams)
@@ -248,7 +366,7 @@ export const NavLink = <Path extends RoutePath>(props: NavLinkProps<Path>): Elem
     const handleClick = Effect.fnUntraced(function* (event: Event) {
       if (event instanceof MouseEvent) {
         if (event.metaKey || event.ctrlKey || event.shiftKey) {
-          Debug.log({
+          yield* Debug.log({
             event: "router.link.click",
             to_path: resolvedPath,
             reason: "modifier key pressed, allowing default"
@@ -257,7 +375,7 @@ export const NavLink = <Path extends RoutePath>(props: NavLinkProps<Path>): Elem
         }
       }
       
-      Debug.log({
+      yield* Debug.log({
         event: "router.link.click",
         to_path: resolvedPath,
         ...(replace !== undefined ? { replace } : {})

@@ -36,16 +36,18 @@ describe("Signal", () => {
 
       // Track listener calls
       let callCount = 0
-      const unsubscribe = Signal.subscribe(signal, () => {
-        callCount++
-      })
+      const unsubscribe = yield* Signal.subscribe(signal, () =>
+        Effect.sync(() => {
+          callCount++
+        })
+      )
 
       expect(callCount).toBe(0)
 
       // Update and notify (simulating what the setter does)
       yield* SubscriptionRef.set(signal._ref, 1)
       for (const listener of signal._listeners) {
-        listener()
+        yield* listener()
       }
 
       expect(callCount).toBe(1)
@@ -53,16 +55,16 @@ describe("Signal", () => {
       // Another update
       yield* SubscriptionRef.set(signal._ref, 2)
       for (const listener of signal._listeners) {
-        listener()
+        yield* listener()
       }
 
       expect(callCount).toBe(2)
 
       // Unsubscribe and update - should not trigger
-      unsubscribe()
+      yield* unsubscribe
       yield* SubscriptionRef.set(signal._ref, 3)
       for (const listener of signal._listeners) {
-        listener()
+        yield* listener()
       }
 
       expect(callCount).toBe(2) // Still 2, unsubscribed
@@ -75,9 +77,12 @@ describe("Signal", () => {
 
       // Track listener calls
       let callCount = 0
-      Signal.subscribe(signal, () => {
-        callCount++
-      })
+      const _unsub = yield* Signal.subscribe(signal, () =>
+        Effect.sync(() => {
+          callCount++
+        })
+      )
+      void _unsub // silence unused variable warning
 
       expect(callCount).toBe(0)
 
@@ -100,9 +105,12 @@ describe("Signal", () => {
       const signal = yield* Signal.make(Option.none<string>())
 
       let callCount = 0
-      Signal.subscribe(signal, () => {
-        callCount++
-      })
+      const _unsub2 = yield* Signal.subscribe(signal, () =>
+        Effect.sync(() => {
+          callCount++
+        })
+      )
+      void _unsub2 // silence unused variable warning
 
       // Set to Option.none() again - should NOT trigger (structural equality)
       yield* Signal.set(signal, Option.none())
@@ -127,9 +135,12 @@ describe("Signal", () => {
       const signal = yield* Signal.make(5)
 
       let callCount = 0
-      Signal.subscribe(signal, () => {
-        callCount++
-      })
+      const _unsub3 = yield* Signal.subscribe(signal, () =>
+        Effect.sync(() => {
+          callCount++
+        })
+      )
+      void _unsub3 // silence unused variable warning
 
       // Identity function - should NOT trigger
       yield* Signal.update(signal, (n) => n)

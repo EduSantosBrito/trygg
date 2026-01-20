@@ -9,22 +9,24 @@
  * - Composed with derive for computed values
  */
 import {
+  Cause,
   Effect,
   Equal,
   FiberRef,
   Ref,
-  Runtime,
   Scope,
   Stream,
   SubscriptionRef
 } from "effect"
 import * as Debug from "./debug.js"
+import * as Metrics from "./metrics.js"
 
 /**
  * Callback type for signal change notifications.
+ * Effect-based for trace context propagation.
  * @internal
  */
-export type SignalListener = () => void
+export type SignalListener = () => Effect.Effect<void>
 
 /**
  * A Signal holds reactive state.
@@ -128,7 +130,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn(
     // Not in component render - create standalone signal
     const ref = yield* SubscriptionRef.make(initial)
     const debugId = Debug.nextSignalId()
-    Debug.log({
+    yield* Debug.log({
       event: "signal.create",
       signal_id: debugId,
       value: initial,
@@ -147,7 +149,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn(
   if (index < signals.length) {
     // Reuse existing signal from previous render
     signal = signals[index] as Signal<A>
-    Debug.log({
+    yield* Debug.log({
       event: "signal.create",
       signal_id: signal._debugId,
       value: initial,
@@ -159,7 +161,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn(
     const debugId = Debug.nextSignalId()
     signal = { _tag: "Signal", _ref: ref, _listeners: new Set(), _debugId: debugId }
     yield* Ref.update(phase.signals, (arr) => [...arr, signal])
-    Debug.log({
+    yield* Debug.log({
       event: "signal.create",
       signal_id: debugId,
       value: initial,
@@ -197,12 +199,8 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn(
 export const unsafeMake = <A>(initial: A): Signal<A> => {
   const ref = Effect.runSync(SubscriptionRef.make(initial))
   const debugId = Debug.nextSignalId()
-  Debug.log({
-    event: "signal.create",
-    signal_id: debugId,
-    value: initial,
-    component: "unsafe-global"
-  })
+  // Note: No logging here since we're outside Effect context.
+  // unsafeMake is for global signals created at module load time.
   return { _tag: "Signal", _ref: ref, _listeners: new Set(), _debugId: debugId }
 }
 
@@ -230,14 +228,14 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
   function* <A>(signal: Signal<A>) {
     // Track this signal as accessed - subscribes component to changes
     const phase = yield* FiberRef.get(CurrentRenderPhase)
-    Debug.log({
+    yield* Debug.log({
       event: "signal.get.phase",
       signal_id: signal._debugId,
       has_phase: phase !== null
     })
     if (phase !== null) {
       phase.accessed.add(signal)
-      Debug.log({
+      yield* Debug.log({
         event: "signal.get",
         signal_id: signal._debugId,
         trigger: "component subscription"
@@ -246,6 +244,19 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
     return yield* SubscriptionRef.get(signal._ref)
   }
 )
+
+/**
+ * Peek at the current value of a signal synchronously without subscribing.
+ * 
+ * WARNING: This is for internal use only (e.g., normalizeChild detecting
+ * Signal<Element> vs Signal<primitive>). Do not use in components - use
+ * Signal.get instead which properly tracks dependencies.
+ * 
+ * @internal
+ * @since 1.0.0
+ */
+export const peekSync = <A>(signal: Signal<A>): A =>
+  Effect.runSync(SubscriptionRef.get(signal._ref))
 
 /**
  * Set the value of a signal and notify listeners.
@@ -263,7 +274,7 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
     
     // Skip update if value is unchanged (prevents unnecessary re-renders)
     if (Equal.equals(prevValue, value)) {
-      Debug.log({
+      yield* Debug.log({
         event: "signal.set.skipped",
         signal_id: signal._debugId,
         value: value,
@@ -273,14 +284,16 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
     }
     
     yield* SubscriptionRef.set(signal._ref, value)
-    Debug.log({
+    yield* Debug.log({
       event: "signal.set",
       signal_id: signal._debugId,
       prev_value: prevValue,
       value: value,
       listener_count: signal._listeners.size
     })
-    notifyListeners(signal)
+    // Record signal update metric
+    yield* Metrics.recordSignalUpdate
+    yield* notifyListeners(signal)
   }
 )
 
@@ -301,7 +314,7 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
     
     // Skip update if value is unchanged (prevents unnecessary re-renders)
     if (Equal.equals(prevValue, newValue)) {
-      Debug.log({
+      yield* Debug.log({
         event: "signal.update.skipped",
         signal_id: signal._debugId,
         value: newValue,
@@ -311,14 +324,16 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
     }
     
     yield* SubscriptionRef.set(signal._ref, newValue)
-    Debug.log({
+    yield* Debug.log({
       event: "signal.update",
       signal_id: signal._debugId,
       prev_value: prevValue,
       value: newValue,
       listener_count: signal._listeners.size
     })
-    notifyListeners(signal)
+    // Record signal update metric
+    yield* Metrics.recordSignalUpdate
+    yield* notifyListeners(signal)
   }
 )
 
@@ -337,7 +352,7 @@ export const modify = <A, B>(
   f: (a: A) => readonly [B, A]
 ): Effect.Effect<B> =>
   SubscriptionRef.modify(signal._ref, f).pipe(
-    Effect.tap(() => Effect.sync(() => notifyListeners(signal)))
+    Effect.tap(() => notifyListeners(signal))
   )
 
 /**
@@ -375,23 +390,50 @@ export const watch: <A>(signal: Signal<A>) => Effect.Effect<A, never, Scope.Scop
 )
 
 /**
+ * Options for Signal.derive
+ * @since 1.0.0
+ */
+export interface DeriveOptions {
+  /** Explicit scope for subscription cleanup. If not provided, uses current Effect scope. */
+  readonly scope: Scope.Scope
+}
+
+/**
  * Create a derived signal that computes its value from other signals.
  *
  * The derived signal updates eagerly when any source signal changes.
+ * Subscriptions are automatically cleaned up when the scope closes.
  *
  * @example
  * ```tsx
- * const count = yield* Signal.make(5)
+ * // Uses current Effect scope (component lifetime)
  * const doubled = yield* Signal.derive(count, n => n * 2)
- * // doubled is always count * 2
+ *
+ * // Explicit scope for long-lived signals
+ * const scope = yield* Scope.make()
+ * const doubled = yield* Signal.derive(count, n => n * 2, { scope })
+ * // Later: yield* Scope.close(scope, Exit.void)
  * ```
  *
  * @since 1.0.0
  */
-export const derive: <A, B>(source: Signal<A>, f: (a: A) => B) => Effect.Effect<Signal<B>> = Effect.fn("Signal.derive")(
-  function* <A, B>(source: Signal<A>, f: (a: A) => B) {
-    // Capture runtime for use in sync callbacks
-    const runtime = yield* Effect.runtime<never>()
+export function derive<A, B>(
+  source: Signal<A>,
+  f: (a: A) => B,
+  options: DeriveOptions
+): Effect.Effect<Signal<B>>
+export function derive<A, B>(
+  source: Signal<A>,
+  f: (a: A) => B
+): Effect.Effect<Signal<B>, never, Scope.Scope>
+export function derive<A, B>(
+  source: Signal<A>,
+  f: (a: A) => B,
+  options?: DeriveOptions
+): Effect.Effect<Signal<B>, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    // Get scope from options or from context
+    const scope = options?.scope ?? (yield* Effect.scope)
     
     const initial = yield* SubscriptionRef.get(source._ref)
     const derivedRef = yield* SubscriptionRef.make(f(initial))
@@ -403,32 +445,35 @@ export const derive: <A, B>(source: Signal<A>, f: (a: A) => B) => Effect.Effect<
       _debugId: debugId
     }
     
-    Debug.log({
-      event: "signal.create",
+    yield* Debug.log({
+      event: "signal.derive.create",
       signal_id: debugId,
-      value: f(initial),
-      component: `derived from ${source._debugId}`
+      source_id: source._debugId,
+      value: f(initial)
     })
 
-    // Subscribe to source changes
-    // Using Runtime.runSync with captured runtime for sync callbacks
-    const unsubscribe = subscribe(source, () => {
-      Runtime.runSync(runtime)(
-        Effect.gen(function* () {
-          const current = yield* SubscriptionRef.get(source._ref)
-          yield* SubscriptionRef.set(derivedRef, f(current))
-          notifyListeners(derivedSignal)
-        })
-      )
-    })
+    // Subscribe to source changes with Effect-based listener
+    const unsubscribe = yield* subscribe(source, () =>
+      Effect.gen(function* () {
+        const current = yield* SubscriptionRef.get(source._ref)
+        yield* SubscriptionRef.set(derivedRef, f(current))
+        yield* notifyListeners(derivedSignal)
+      })
+    )
 
-    // Track unsubscribe for cleanup (would need scope integration)
-    // For now, derived signals live as long as the source
-    void unsubscribe
+    // Register cleanup on scope finalization
+    yield* Scope.addFinalizer(scope, Effect.gen(function* () {
+      yield* unsubscribe
+      yield* Debug.log({
+        event: "signal.derive.cleanup",
+        signal_id: debugId,
+        source_id: source._debugId
+      })
+    }))
 
     return derivedSignal
-  }
-)
+  }).pipe(Effect.withSpan("Signal.derive"))
+}
 
 /**
  * Get the changes stream from a signal.
@@ -450,43 +495,78 @@ export const isSignal = (value: unknown): value is Signal<unknown> =>
 
 /**
  * Notify all listeners that a signal has changed.
+ * 
+ * F-003: Listeners run in parallel with error isolation.
+ * - Uses Effect.forEach with unbounded concurrency
+ * - Errors in one listener don't affect others
+ * - Errors are logged via signal.listener.error event
+ * - Listeners are snapshotted to handle mid-notification unsubscribes
+ * 
  * @internal
  */
-const notifyListeners = <A>(signal: Signal<A>): void => {
-  Debug.log({
-    event: "signal.notify",
-    signal_id: signal._debugId,
-    listener_count: signal._listeners.size
-  })
-  for (const listener of signal._listeners) {
-    listener()
+const notifyListeners: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fnUntraced(
+  function* <A>(signal: Signal<A>) {
+    const listenerCount = signal._listeners.size
+    
+    yield* Debug.log({
+      event: "signal.notify",
+      signal_id: signal._debugId,
+      listener_count: listenerCount
+    })
+    
+    // Skip if no listeners
+    if (listenerCount === 0) return
+    
+    // Snapshot listeners to handle mid-notification unsubscribes safely
+    const listeners = Array.from(signal._listeners)
+    
+    // Notify all listeners in parallel with error isolation
+    yield* Effect.forEach(
+      listeners,
+      (listener, index) =>
+        listener().pipe(
+          Effect.catchAllCause((cause) =>
+            Debug.log({
+              event: "signal.listener.error",
+              signal_id: signal._debugId,
+              cause: Cause.pretty(cause),
+              listener_index: index
+            })
+          )
+        ),
+      { concurrency: "unbounded", discard: true }
+    )
   }
-}
+)
 
 /**
- * Subscribe to a signal's changes with a sync callback.
- * Returns an unsubscribe function.
+ * Subscribe to a signal's changes with an Effect-based callback.
+ * Returns an Effect that yields an unsubscribe Effect.
  * @since 1.0.0
  */
-export const subscribe = <A>(
+export const subscribe: <A>(
   signal: Signal<A>,
   listener: SignalListener
-): (() => void) => {
-  signal._listeners.add(listener)
-  Debug.log({
-    event: "signal.subscribe",
-    signal_id: signal._debugId,
-    listener_count: signal._listeners.size
-  })
-  return () => {
-    signal._listeners.delete(listener)
-    Debug.log({
-      event: "signal.unsubscribe",
+) => Effect.Effect<Effect.Effect<void>> = Effect.fn("Signal.subscribe")(
+  function* <A>(signal: Signal<A>, listener: SignalListener) {
+    signal._listeners.add(listener)
+    yield* Debug.log({
+      event: "signal.subscribe",
       signal_id: signal._debugId,
       listener_count: signal._listeners.size
     })
+    // Return unsubscribe effect (intentionally returns Effect for later execution)
+    return Effect.sync(() => signal._listeners.delete(listener)).pipe(
+      Effect.andThen(
+        Debug.log({
+          event: "signal.unsubscribe",
+          signal_id: signal._debugId,
+          listener_count: signal._listeners.size
+        })
+      )
+    )
   }
-}
+)
 
 /**
  * Key type for list items

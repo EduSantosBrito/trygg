@@ -21,6 +21,9 @@
   },
   "devDependencies": {
     "@effect/language-service": "^0.67.0",
+    "@effect/platform-bun": "^0.87.0",
+    "@effect/sql": "^0.49.0",
+    "@effect/sql-sqlite-bun": "^0.50.0",
     "@effect/vitest": "^0.27.0",
     "@types/bun": "latest",
     "happy-dom": "^20.3.1",

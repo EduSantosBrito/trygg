@@ -282,7 +282,16 @@ return (
 
 See [observability.md](observability.md) for debug events and `<DevMode />` usage.
 
-### 4.6 Signal.each for Lists (Implemented)
+### 4.6 data-* and aria-* attributes
+
+Intrinsic elements accept `data-*` and `aria-*` attributes. Values can be static primitives or Signals for fine-grained updates.
+
+```tsx
+const status = yield* Signal.make("ready")
+return <button data-status={status} aria-live="polite">Run</button>
+```
+
+### 4.7 Signal.each for Lists (Implemented)
 
 Efficient list rendering with stable scopes per key:
 
@@ -330,13 +339,13 @@ The `Component.gen` API enables JSX components with typed props and automatic la
 
 ```tsx
 import { Context, Effect, Layer } from "effect"
-import { Component, mount } from "effect-ui"
+import { Component, mount, type ComponentProps } from "effect-ui"
 
 // Define a service
 class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
 
-// With typed props - use curried syntax for full type inference
-const Card = Component.gen<{ title: string }>()(Props => function* () {
+// With typed props - pass the generator directly
+const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>{title}</div>
@@ -364,7 +373,7 @@ mount(container, <Card title="Hello" theme={themeLayer} />)
 ### 5.3 Multiple Services
 
 ```tsx
-const Dashboard = Component.gen<{ userId: string }>()(Props => function* () {
+const Dashboard = Component.gen(function* (Props: ComponentProps<{ userId: string }>) {
   const { userId } = yield* Props
   const theme = yield* Theme
   const logger = yield* Logger
@@ -378,7 +387,7 @@ const Dashboard = Component.gen<{ userId: string }>()(Props => function* () {
 ### 5.4 No Service Requirements
 
 ```tsx
-const SimpleCard = Component.gen<{ message: string }>()(Props => function* () {
+const SimpleCard = Component.gen(function* (Props: ComponentProps<{ message: string }>) {
   const { message } = yield* Props
   return <div>{message}</div>
 })
@@ -533,6 +542,85 @@ mount(document.getElementById("root")!, Counter)
 | Rendering target | Browser DOM first | Start simple, add SSR later |
 | Event handlers | Return `Effect` | Renderer handles execution via `Runtime.runFork` |
 | DI pattern | `Effect.provide` directly | No Provider component, just use Effect |
-| Component API | `Component.gen<P>()` with auto-inference | Clean syntax, typed props + auto layer props |
+| Component API | `Component.gen` with props inference | Clean syntax, typed props + auto layer props |
 | Entrypoint | `mount()` simple, `render()` composable | Easy start, flexible when needed |
 | Scope lifecycle | `Effect.never` keeps scope open | Prevents cleanup from removing DOM |
+
+---
+
+## 12. Security
+
+### 12.1 URL Validation for href/src
+
+effect-ui validates `href` and `src` attributes at render time to prevent XSS attacks via dangerous URL schemes like `javascript:`.
+
+**Default allowed schemes** (based on WHATWG URL Standard and IANA registry):
+- `http`, `https` - Standard web protocols
+- `mailto` - Email links
+- `tel`, `sms` - Phone/SMS links
+- `blob` - Blob URLs for local file references
+- `data` - Data URLs for embedded content
+
+**Unsafe URLs are blocked:**
+```tsx
+// This href will NOT be rendered - a console warning is emitted
+<a href="javascript:alert(1)">Click me</a>
+
+// This src will NOT be rendered
+<img src="javascript:doSomething()" />
+```
+
+**Adding custom schemes:**
+```tsx
+import { SafeUrl } from "effect-ui"
+
+// Add app-specific deep links
+SafeUrl.allowSchemes(["myapp", "web+myapp"])
+
+// Now these are valid:
+<a href="myapp://settings">Settings</a>
+<a href="web+myapp://page">Open in App</a>
+```
+
+**Validation API:**
+```tsx
+import { SafeUrl, UnsafeUrlError } from "effect-ui"
+import { Effect, Exit } from "effect"
+
+// Effect-based validation
+const result = await Effect.runPromiseExit(
+  SafeUrl.validate("javascript:alert(1)")
+)
+// Exit.isFailure(result) === true
+// Error: UnsafeUrlError with scheme="javascript"
+
+// Sync validation
+if (SafeUrl.isSafe(userUrl)) {
+  // URL is safe
+}
+
+// Option-based
+const validated = SafeUrl.validateSync(userUrl)
+// Option.none() if unsafe
+```
+
+**Standards references:**
+- [WHATWG URL Standard](https://url.spec.whatwg.org/)
+- [IANA URI Schemes Registry](https://www.iana.org/assignments/uri-schemes/)
+
+### 12.2 Content Security
+
+**Untrusted HTML**: effect-ui does not have a `dangerouslySetInnerHTML` equivalent. Text content is always escaped when rendered.
+
+**User input**: Always validate user-provided URLs before using them in `href` or `src`:
+```tsx
+const UserLink = Effect.gen(function* (props: { url: string }) {
+  // Validate before rendering
+  const safeUrl = yield* SafeUrl.validate(props.url)
+  return <a href={safeUrl}>Link</a>
+}).pipe(
+  Effect.catchTag("UnsafeUrlError", (error) =>
+    Effect.succeed(<span>Invalid URL: {error.scheme}</span>)
+  )
+)
+```

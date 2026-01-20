@@ -5,8 +5,142 @@
 import { Context, Effect, FiberRef, Layer, Option, Runtime } from "effect"
 import * as Signal from "../Signal.js"
 import * as Debug from "../debug.js"
-import type { Route, RouteParams, RouterService, NavigateOptions, RouteErrorInfo } from "./types.js"
-import { parsePath, buildPath } from "./matching.js"
+import * as Metrics from "../metrics.js"
+import type { Route, RouteParams, RouterService, NavigateOptions, RouteErrorInfo, RoutePath, RouteParamsFor, RoutesManifest } from "./types.js"
+import type { Element } from "../Element.js"
+import { parsePath, buildPath, createMatcher } from "./matching.js"
+import { moduleLoader } from "./moduleLoader.js"
+
+// F-001: Viewport prefetch constants from framework research
+/** IntersectionObserver threshold - 10% visible triggers prefetch */
+const INTERSECTION_THRESHOLD = 0.1
+/** IntersectionObserver rootMargin for slight lookahead */
+const INTERSECTION_ROOT_MARGIN = "100px"
+/** requestIdleCallback timeout - max wait for idle state */
+const IDLE_TIMEOUT_MS = 5000
+/** Data attribute for viewport prefetch links */
+const PREFETCH_ATTR = "data-effectui-prefetch"
+/** Data attribute for prefetch path */
+const PREFETCH_PATH_ATTR = "data-effectui-prefetch-path"
+
+/**
+ * Setup global viewport prefetch observer.
+ * Uses IntersectionObserver + MutationObserver + requestIdleCallback pattern.
+ * SvelteKit-style: single global observer for all viewport prefetch links.
+ * 
+ * @internal
+ */
+const setupViewportPrefetch = (
+  router: RouterService,
+  runtime: Runtime.Runtime<never>
+): Effect.Effect<() => void> =>
+  Effect.sync(() => {
+    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") {
+      // SSR or no IntersectionObserver support - return no-op cleanup
+      return () => {}
+    }
+
+    // Track observed elements to avoid double-observing
+    const observed = new WeakSet<globalThis.Element>()
+    
+    // Track pending idle callbacks for cleanup
+    const pendingCallbacks = new Set<number>()
+
+    // Handle intersection - one-shot prefetch trigger
+    const handleIntersection: IntersectionObserverCallback = (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        
+        const anchor = entry.target as HTMLAnchorElement
+        const path = anchor.getAttribute(PREFETCH_PATH_ATTR)
+        
+        if (path === null) continue
+        
+        // Unobserve immediately (one-shot)
+        intersectionObserver.unobserve(anchor)
+        
+        // Schedule prefetch via requestIdleCallback for non-blocking execution
+        const callbackId = requestIdleCallback(
+          () => {
+            pendingCallbacks.delete(callbackId)
+            
+            // Log viewport trigger event and run prefetch
+            Runtime.runFork(runtime)(
+              Effect.gen(function* () {
+                yield* Debug.log({
+                  event: "router.prefetch.viewport",
+                  path
+                })
+                yield* router.prefetch(path)
+              })
+            )
+          },
+          { timeout: IDLE_TIMEOUT_MS }
+        )
+        pendingCallbacks.add(callbackId)
+      }
+    }
+
+    // Create singleton IntersectionObserver
+    const intersectionObserver = new IntersectionObserver(handleIntersection, {
+      threshold: INTERSECTION_THRESHOLD,
+      rootMargin: INTERSECTION_ROOT_MARGIN
+    })
+
+    // Observe a viewport prefetch link
+    const observeLink = (anchor: globalThis.Element): void => {
+      if (observed.has(anchor)) return
+      observed.add(anchor)
+      intersectionObserver.observe(anchor)
+    }
+
+    // Scan and observe all viewport prefetch links in a subtree
+    const scanLinks = (root: globalThis.Element | Document): void => {
+      const links = root.querySelectorAll(`[${PREFETCH_ATTR}="viewport"]`)
+      links.forEach(observeLink)
+    }
+
+    // Initial scan of existing links
+    scanLinks(document)
+
+    // Create MutationObserver to detect new links
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        // Check added nodes for viewport prefetch links
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue
+          const element = node as globalThis.Element
+          
+          // Check if the node itself is a viewport prefetch link
+          if (element.matches?.(`[${PREFETCH_ATTR}="viewport"]`)) {
+            observeLink(element)
+          }
+          
+          // Check children for viewport prefetch links
+          scanLinks(element)
+        }
+      }
+    })
+
+    // Start observing document for DOM changes
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    })
+
+    // Return cleanup function
+    return () => {
+      // Disconnect observers
+      intersectionObserver.disconnect()
+      mutationObserver.disconnect()
+      
+      // Cancel pending idle callbacks
+      for (const callbackId of pendingCallbacks) {
+        cancelIdleCallback(callbackId)
+      }
+      pendingCallbacks.clear()
+    }
+  })
 
 /**
  * Router service tag
@@ -37,11 +171,30 @@ export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
 
 /**
  * FiberRef to store route error info for _error.tsx components.
- * Set by Outlet when a route errors, read by error components via useRouteError().
+ * Set by Outlet when a route errors, read by error components via currentError.
  * @internal
  */
 export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>> = 
   FiberRef.unsafeMake<Option.Option<RouteErrorInfo>>(Option.none())
+
+/**
+ * FiberRef to store child content passed from parent outlet to nested outlet.
+ * Used by layouts - the parent outlet sets this before rendering the layout,
+ * and the nested outlet inside the layout reads it.
+ * Using FiberRef instead of module-level variable ensures isolation between
+ * multiple router instances and proper cleanup on unmount.
+ * @internal
+ */
+export const CurrentOutletChild: FiberRef.FiberRef<Option.Option<Element>> = 
+  FiberRef.unsafeMake<Option.Option<Element>>(Option.none())
+
+/**
+ * FiberRef to store the routes manifest for prefetching.
+ * Set by Outlet when routes are provided, read by prefetch.
+ * @internal
+ */
+export const CurrentRoutes: FiberRef.FiberRef<RoutesManifest> = 
+  FiberRef.unsafeMake<RoutesManifest>([])
 
 /**
  * Get the current router service from FiberRef.
@@ -101,11 +254,20 @@ export const forward: Effect.Effect<void, never, Router> =
   Effect.flatMap(Router, (router) => router.forward())
 
 /**
- * Get route params with type safety
+ * Get route params with type safety based on path pattern.
+ * Pass the path for autocomplete and type inference (not used at runtime).
+ * 
+ * @example
+ * ```ts
+ * const { id } = yield* Router.params("/users/:id")
+ * ```
+ * 
  * @since 1.0.0
  */
-export const params = <P extends RouteParams>(): Effect.Effect<P> =>
-  Effect.map(FiberRef.get(CurrentRouteParams), (p) => p as P)
+export const params = <Path extends RoutePath>(
+  _path: Path
+): Effect.Effect<RouteParamsFor<Path>> =>
+  FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>
 
 /**
  * Check if a path is currently active
@@ -118,6 +280,17 @@ export const isActive = (
   Effect.flatMap(Router, (router) => router.isActive(path, exact))
 
 /**
+ * Prefetch route modules for a path.
+ * Loads all modules (component, layouts) for the matched route into cache.
+ * Best-effort: failures are silently ignored.
+ * @since 1.0.0
+ */
+export const prefetch = (
+  path: string
+): Effect.Effect<void, never, Router> =>
+  Effect.flatMap(Router, (router) => router.prefetch(path))
+
+/**
  * Get route error info in an _error.tsx component.
  * Returns the error, path, and a reset effect to retry rendering.
  * 
@@ -128,12 +301,12 @@ export const isActive = (
  * import * as Router from "effect-ui/router"
  * 
  * export default Effect.gen(function* () {
- *   const { error, path, reset } = yield* Router.useRouteError()
+ *   const { cause, path, reset } = yield* Router.currentError
  *   return (
  *     <div>
  *       <h1>Error on {path}</h1>
- *       <p>{String(error)}</p>
- *       <button onClick={() => reset}>Retry</button>
+ *       <p>{String(Cause.squash(cause))}</p>
+ *       <button onClick={reset}>Retry</button>
  *     </div>
  *   )
  * })
@@ -141,13 +314,13 @@ export const isActive = (
  * 
  * @since 1.0.0
  */
-export const useRouteError: Effect.Effect<RouteErrorInfo> = 
+export const currentError: Effect.Effect<RouteErrorInfo> = 
   Effect.flatMap(FiberRef.get(CurrentRouteError), (maybeError) => {
     if (Option.isNone(maybeError)) {
       return Effect.die(
         new Error(
-          "useRouteError called outside of an error boundary.\n" +
-          "This function should only be used in _error.tsx components."
+          "Router.currentError called outside of an error boundary.\n" +
+          "This should only be used in _error.tsx components."
         )
       )
     }
@@ -173,7 +346,7 @@ export const link = (
  * Uses History API for navigation
  * @since 1.0.0
  */
-export const browserLayer: Layer.Layer<Router> = Layer.effect(
+export const browserLayer: Layer.Layer<Router> = Layer.scoped(
   Router,
   Effect.gen(function* () {
     // Get initial location
@@ -208,11 +381,24 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
       Runtime.runSync(runtime)(Signal.set(querySignal, newQuery))
     }
     
-    // Listen to browser popstate (back/forward)
+    // Listen to browser popstate (back/forward) with proper lifecycle management
+    // The listener is added when the layer is built and removed when the scope closes
     if (typeof window !== "undefined") {
-      window.addEventListener("popstate", () => {
+      const popstateHandler = () => {
         updateFromPath(window.location.pathname + window.location.search)
-      })
+      }
+      
+      yield* Effect.acquireRelease(
+        Effect.gen(function* () {
+          window.addEventListener("popstate", popstateHandler)
+          yield* Debug.log({ event: "router.popstate.added" })
+          return popstateHandler
+        }),
+        (handler) => Effect.gen(function* () {
+          window.removeEventListener("popstate", handler)
+          yield* Debug.log({ event: "router.popstate.removed" })
+        })
+      )
     }
     
     const routerService: RouterService = {
@@ -220,13 +406,20 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
       query: querySignal,
       
       navigate: Effect.fn("RouterService.navigate")(function* (targetPath: string, options?: NavigateOptions) {
+          // Start a new trace for this navigation
+          const traceId = Debug.nextTraceId()
+          yield* Debug.setTraceId(traceId)
+          
           const current = yield* Signal.get(currentSignal)
-          Debug.log({
+          yield* Debug.log({
             event: "router.navigate",
             from_path: current.path,
             to_path: targetPath,
             ...(options?.replace !== undefined ? { replace: options.replace } : {})
           })
+          
+          // Record navigation metric
+          yield* Metrics.recordNavigation
           
           const fullPath = buildPath(targetPath, options?.query)
           
@@ -246,10 +439,14 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
           })
           yield* Signal.set(querySignal, newQuery)
           
-          Debug.log({
+          yield* Debug.log({
             event: "router.navigate.complete",
             path: fullPath
           })
+          
+          // Note: We don't clear trace context here because render events
+          // should continue to use the same traceId. The trace context is
+          // cleared when the next navigation starts (by setTraceId above).
         }),
       
       back: () => Effect.sync(() => {
@@ -264,8 +461,8 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
         }
       }),
       
-      params: <P extends RouteParams>() => 
-        Effect.map(FiberRef.get(CurrentRouteParams), (p) => p as P),
+      params: <Path extends RoutePath>(_path: Path) => 
+        FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>,
       
       isActive: Effect.fn("RouterService.isActive")(function* (targetPath: string, exact: boolean = false) {
           const route = yield* Signal.get(currentSignal)
@@ -273,6 +470,77 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
             return route.path === targetPath
           }
           return route.path.startsWith(targetPath)
+        }),
+      
+      prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
+          // Get routes from FiberRef (set by Outlet)
+          const routes = yield* FiberRef.get(CurrentRoutes)
+          
+          if (routes.length === 0) {
+            yield* Debug.log({
+              event: "router.prefetch.no_match",
+              path: targetPath
+            })
+            return
+          }
+          
+          const matcher = createMatcher(routes)
+          const matchOption = matcher.match(targetPath)
+          
+          if (Option.isNone(matchOption)) {
+            yield* Debug.log({
+              event: "router.prefetch.no_match",
+              path: targetPath
+            })
+            return
+          }
+          
+          const match = matchOption.value
+          
+          // Count modules to prefetch
+          const moduleCount = 1 + (match.route.layout ? 1 : 0) + 
+            match.parents.filter(p => p.route.layout).length
+          
+          yield* Debug.log({
+            event: "router.prefetch.start",
+            path: targetPath,
+            route_pattern: match.route.path,
+            module_count: moduleCount
+          })
+          
+          // Collect all modules to prefetch
+          const loaders: Array<Effect.Effect<unknown, unknown>> = []
+          
+          // Component
+          loaders.push(
+            moduleLoader.load(match.route.path, "component", true, match.route.component)
+          )
+          
+          // Leaf layout
+          if (match.route.layout) {
+            loaders.push(
+              moduleLoader.load(match.route.path, "layout", true, match.route.layout)
+            )
+          }
+          
+          // Parent layouts
+          for (const parent of match.parents) {
+            if (parent.route.layout) {
+              loaders.push(
+                moduleLoader.load(parent.route.path, "layout", true, parent.route.layout)
+              )
+            }
+          }
+          
+          // Load all in parallel, ignore errors (prefetch is best-effort)
+          yield* Effect.all(loaders, { concurrency: "unbounded" }).pipe(
+            Effect.catchAll(() => Effect.void)
+          )
+          
+          yield* Debug.log({
+            event: "router.prefetch.complete",
+            path: targetPath
+          })
         })
     }
     
@@ -280,6 +548,19 @@ export const browserLayer: Layer.Layer<Router> = Layer.effect(
     // ManagedRuntime captures FiberRefs at layer build time and propagates
     // them to all forked fibers, solving the fiber-local variable problem.
     yield* FiberRef.set(CurrentRouter, Option.some(routerService))
+    
+    // F-001: Setup viewport prefetch observer (global IntersectionObserver + MutationObserver)
+    yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        const cleanup = yield* setupViewportPrefetch(routerService, runtime)
+        yield* Debug.log({ event: "router.viewport.observer.added" })
+        return cleanup
+      }),
+      (cleanup) => Effect.gen(function* () {
+        cleanup()
+        yield* Debug.log({ event: "router.viewport.observer.removed" })
+      })
+    )
     
     return routerService
   })
@@ -342,6 +623,21 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> => Lay
       query: querySignal,
       
       navigate: Effect.fn("RouterService.navigate")(function* (targetPath: string, options?: NavigateOptions) {
+          // Start a new trace for this navigation
+          const traceId = Debug.nextTraceId()
+          yield* Debug.setTraceId(traceId)
+          
+          const current = yield* Signal.get(currentSignal)
+          yield* Debug.log({
+            event: "router.navigate",
+            from_path: current.path,
+            to_path: targetPath,
+            ...(options?.replace !== undefined ? { replace: options.replace } : {})
+          })
+          
+          // Record navigation metric
+          yield* Metrics.recordNavigation
+          
           const fullPath = buildPath(targetPath, options?.query)
           const { path: newPath, query: newQuery } = parsePath(fullPath)
           
@@ -361,6 +657,11 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> => Lay
             query: newQuery
           })
           yield* Signal.set(querySignal, newQuery)
+          
+          yield* Debug.log({
+            event: "router.navigate.complete",
+            path: fullPath
+          })
         }),
       
       back: () => Effect.sync(() => {
@@ -383,8 +684,8 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> => Lay
         }
       }),
       
-      params: <P extends RouteParams>() => 
-        Effect.map(FiberRef.get(CurrentRouteParams), (p) => p as P),
+      params: <Path extends RoutePath>(_path: Path) => 
+        FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>,
       
       isActive: Effect.fn("RouterService.isActive")(function* (targetPath: string, exact: boolean = false) {
           const route = yield* Signal.get(currentSignal)
@@ -392,6 +693,77 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> => Lay
             return route.path === targetPath
           }
           return route.path.startsWith(targetPath)
+        }),
+      
+      prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
+          // Get routes from FiberRef (set by Outlet)
+          const routes = yield* FiberRef.get(CurrentRoutes)
+          
+          if (routes.length === 0) {
+            yield* Debug.log({
+              event: "router.prefetch.no_match",
+              path: targetPath
+            })
+            return
+          }
+          
+          const matcher = createMatcher(routes)
+          const matchOption = matcher.match(targetPath)
+          
+          if (Option.isNone(matchOption)) {
+            yield* Debug.log({
+              event: "router.prefetch.no_match",
+              path: targetPath
+            })
+            return
+          }
+          
+          const match = matchOption.value
+          
+          // Count modules to prefetch
+          const moduleCount = 1 + (match.route.layout ? 1 : 0) + 
+            match.parents.filter(p => p.route.layout).length
+          
+          yield* Debug.log({
+            event: "router.prefetch.start",
+            path: targetPath,
+            route_pattern: match.route.path,
+            module_count: moduleCount
+          })
+          
+          // Collect all modules to prefetch
+          const loaders: Array<Effect.Effect<unknown, unknown>> = []
+          
+          // Component
+          loaders.push(
+            moduleLoader.load(match.route.path, "component", true, match.route.component)
+          )
+          
+          // Leaf layout
+          if (match.route.layout) {
+            loaders.push(
+              moduleLoader.load(match.route.path, "layout", true, match.route.layout)
+            )
+          }
+          
+          // Parent layouts
+          for (const parent of match.parents) {
+            if (parent.route.layout) {
+              loaders.push(
+                moduleLoader.load(parent.route.path, "layout", true, parent.route.layout)
+              )
+            }
+          }
+          
+          // Load all in parallel, ignore errors (prefetch is best-effort)
+          yield* Effect.all(loaders, { concurrency: "unbounded" }).pipe(
+            Effect.catchAll(() => Effect.void)
+          )
+          
+          yield* Debug.log({
+            event: "router.prefetch.complete",
+            path: targetPath
+          })
         })
     }
     

@@ -91,9 +91,9 @@ const info = (message: string): void => {
 
 /**
  * Route file info extracted from the file system
- * @internal
+ * @internal - exported for testing
  */
-interface RouteFile {
+export interface RouteFile {
   /** Absolute file path */
   readonly filePath: string
   /** Route path pattern (e.g., "/users/:id") */
@@ -110,9 +110,9 @@ interface RouteFile {
 
 /**
  * Scan routes directory and extract route files
- * @internal
+ * @internal - exported for testing
  */
-const scanRoutes = (routesDir: string): RouteFile[] => {
+export const scanRoutes = (routesDir: string): RouteFile[] => {
   const routes: RouteFile[] = []
   
   const scanDir = (dir: string, parentPath: string = ""): void => {
@@ -127,7 +127,11 @@ const scanRoutes = (routesDir: string): RouteFile[] => {
       
       if (entry.isDirectory()) {
         // Recurse into subdirectory
-        const dirPath = parentPath + "/" + entry.name
+        // Convert [param] syntax in directory names to :param
+        const dirName = entry.name
+          .replace(/^\[\.\.\.(.+)\]$/, "*") // [...rest] -> *
+          .replace(/^\[(.+)\]$/, ":$1")      // [param] -> :param
+        const dirPath = parentPath + "/" + dirName
         scanDir(fullPath, dirPath)
       } else if (entry.isFile() && /\.(tsx|ts|jsx|js)$/.test(entry.name)) {
         // Process route file
@@ -176,9 +180,9 @@ const scanRoutes = (routesDir: string): RouteFile[] => {
 
 /**
  * Generate the virtual module code for routes
- * @internal
+ * @internal - exported for testing
  */
-const generateRoutesModule = (routes: RouteFile[], routesDir: string): string => {
+export const generateRoutesModule = (routes: RouteFile[], routesDir: string): string => {
   // Separate route types
   const pageRoutes = routes.filter(r => !r.isLayout && !r.isLoading && !r.isError)
   const layoutRoutes = routes.filter(r => r.isLayout)
@@ -268,9 +272,9 @@ export default routes;
 
 /**
  * Extract param names from a route path
- * @internal
+ * @internal - exported for testing
  */
-const extractParamNames = (routePath: string): string[] => {
+export const extractParamNames = (routePath: string): string[] => {
   const params: string[] = []
   const segments = routePath.split("/").filter(Boolean)
   
@@ -285,9 +289,9 @@ const extractParamNames = (routePath: string): string[] => {
 
 /**
  * Generate TypeScript type declaration for route params
- * @internal
+ * @internal - exported for testing
  */
-const generateParamType = (routePath: string): string => {
+export const generateParamType = (routePath: string): string => {
   const params = extractParamNames(routePath)
   if (params.length === 0) {
     return "{}"
@@ -298,9 +302,9 @@ const generateParamType = (routePath: string): string => {
 /**
  * Generate type declarations file for routes
  * This creates a .d.ts file that augments RouteMap with actual routes
- * @internal
+ * @internal - exported for testing
  */
-const generateRouteTypes = (routes: RouteFile[]): string => {
+export const generateRouteTypes = (routes: RouteFile[]): string => {
   const pageRoutes = routes.filter(r => !r.isLayout && !r.isLoading && !r.isError)
   
   // Generate RouteMap entries
@@ -325,9 +329,9 @@ export {}
 
 /**
  * Score a route path for sorting (higher = more specific)
- * @internal
+ * @internal - exported for testing
  */
-const scoreRoutePath = (routePath: string): number => {
+export const scoreRoutePath = (routePath: string): number => {
   const segments = routePath.split("/").filter(Boolean)
   let score = 0
   

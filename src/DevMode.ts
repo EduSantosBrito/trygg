@@ -47,6 +47,27 @@ export interface DevModeProps {
    * ```
    */
   readonly enabled?: boolean
+
+  /**
+   * Custom plugins to use for debug output.
+   * - undefined: uses the default console plugin
+   * - DebugPlugin[]: uses only the specified plugins
+   *
+   * When plugins are provided, they replace the default console plugin.
+   * To include console output alongside custom plugins, include
+   * `Debug.consolePlugin` in the array.
+   *
+   * @example
+   * ```tsx
+   * // Custom plugin only
+   * const events: Debug.DebugEvent[] = []
+   * <DevMode plugins={[Debug.createCollectorPlugin("collector", events)]} />
+   *
+   * // Custom plugin + console
+   * <DevMode plugins={[Debug.consolePlugin, myPlugin]} />
+   * ```
+   */
+  readonly plugins?: ReadonlyArray<Debug.DebugPlugin>
 }
 
 /**
@@ -83,12 +104,19 @@ export interface DevModeProps {
  *   <App />
  *   <DevMode enabled={import.meta.env.DEV} />
  * </>)
+ *
+ * // With custom plugins
+ * const events: Debug.DebugEvent[] = []
+ * mount(container, <>
+ *   <App />
+ *   <DevMode plugins={[Debug.consolePlugin, Debug.createCollectorPlugin("test", events)]} />
+ * </>)
  * ```
  *
  * @since 1.0.0
  */
 export const DevMode = (props: DevModeProps = {}): Element => {
-  const { filter, enabled = true } = props
+  const { filter, enabled = true, plugins } = props
 
   // If disabled, return empty immediately (no effect)
   if (!enabled) {
@@ -99,6 +127,14 @@ export const DevMode = (props: DevModeProps = {}): Element => {
   const effect = Effect.sync(() => {
     // Enable debug logging
     Debug.enable(filter)
+    
+    // Register custom plugins if provided
+    if (plugins !== undefined && plugins.length > 0) {
+      for (const plugin of plugins) {
+        Debug.registerPlugin(plugin)
+      }
+    }
+    
     // Return empty element (DevMode renders nothing)
     return empty
   })

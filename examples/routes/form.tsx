@@ -9,7 +9,7 @@
  * - Conditional error display
  */
 import { Context, Data, Effect, Either, Layer, Option } from "effect"
-import { Signal, Component } from "effect-ui"
+import { Signal, Component, type ComponentProps } from "effect-ui"
 
 // =============================================================================
 // Typed Validation Errors
@@ -56,7 +56,7 @@ const defaultFormTheme = Layer.succeed(FormTheme, {
 // =============================================================================
 
 // FormField component with typed props and theme requirement
-const FormField = Component.gen<{
+const FormField = Component.gen(function* (Props: ComponentProps<{
   label: string
   type: "text" | "email" | "password"
   value: Signal.Signal<string>
@@ -64,7 +64,7 @@ const FormField = Component.gen<{
   placeholder: string
   hint?: string
   onInput: (e: Event) => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, type, value, error, placeholder, hint, onInput } = yield* Props
   const theme = yield* FormTheme
   
@@ -93,10 +93,10 @@ const FormField = Component.gen<{
 })
 
 // SuccessMessage component
-const SuccessMessage = Component.gen<{
+const SuccessMessage = Component.gen(function* (Props: ComponentProps<{
   email: string
   onReset: () => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { email, onReset } = yield* Props
   const theme = yield* FormTheme
   

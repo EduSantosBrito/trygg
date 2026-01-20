@@ -97,16 +97,26 @@ type UnionToIntersection<U> =
 type RequirementsToLayerProps<R> = UnionToIntersection<TagToLayerProp<R>>
 
 /**
- * Combined props type for a component: regular props P + layer props from R.
- * 
- * For `Component<{ title: string }>()` with an effect requiring Theme:
- * - P = { title: string }
- * - R = PropsMarker<{ title: string }> | Theme
- * - Result = { title: string } & { readonly theme: Layer<ThemeService> }
- * 
+ * Component props helper.
+ *
+ * - `ComponentProps<P, R>`: regular props P + layer props from R
+ * - `ComponentProps<P>`: props tag used in Component.gen for inference
+ *
  * @since 1.0.0
  */
-export type ComponentProps<P, R> = P & RequirementsToLayerProps<R>
+type ComponentPropsSentinel = {
+  readonly _tag: "@effect-ui/ComponentPropsSentinel"
+}
+
+type ComponentPropsWithLayers<P, R> =
+  [R] extends [never]
+    ? P
+    : P & RequirementsToLayerProps<R>
+
+export type ComponentProps<P, R = ComponentPropsSentinel> =
+  [R] extends [ComponentPropsSentinel]
+    ? Context.Tag<PropsMarker<P>, P>
+    : ComponentPropsWithLayers<P, R>
 
 // =============================================================================
 // Runtime Utilities
@@ -251,14 +261,14 @@ export interface ComponentType<Props = Record<string, never>, E = never> {
  */
 export function Component<P extends object = {}>(): <E, R>(
   effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>
-) => ComponentType<ComponentProps<P, R>, E> {
+) => ComponentType<ComponentPropsWithLayers<P, R>, E> {
   return <E, R>(
     effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>
-  ): ComponentType<ComponentProps<P, R>, E> => {
+  ): ComponentType<ComponentPropsWithLayers<P, R>, E> => {
     // Create a unique Props tag for this component instance
     const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props")
     
-    const componentFn = (allProps: ComponentProps<P, R>): Element => {
+    const componentFn = (allProps: ComponentPropsWithLayers<P, R>): Element => {
       const { layers, regularProps } = separateProps<P>(allProps)
       
       // Create the effect by calling effectFn with the Props tag
@@ -287,7 +297,7 @@ export function Component<P extends object = {}>(): <E, R>(
         }
         
         // SAFE CAST: After providing propsLayer and all service layers, R should be never.
-        // TypeScript enforces at ComponentProps<P, R> that all required layers are passed.
+        // TypeScript enforces at ComponentPropsWithLayers<P, R> that all required layers are passed.
         // If a layer is missing, the call site will have a type error.
         return effect as Effect.Effect<Element, E, never>
       }
@@ -302,7 +312,7 @@ export function Component<P extends object = {}>(): <E, R>(
       enumerable: true
     })
     
-    return componentFn as ComponentType<ComponentProps<P, R>, E>
+    return componentFn as ComponentType<ComponentPropsWithLayers<P, R>, E>
   }
 }
 
@@ -412,18 +422,18 @@ function genWithProps<P extends object>(): <
   AEff extends Element
 >(
   f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>
-) => ComponentType<ComponentProps<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> {
+) => ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> {
   
   return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends Element>(
     f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>
-  ): ComponentType<ComponentProps<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> => {
+  ): ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> => {
     type R = Exclude<ExtractContext<Eff>, PropsMarker<P>>
     type E = ExtractError<Eff>
     
     // Create a unique Props tag for this component instance
     const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props")
     
-    const componentFn = (allProps: ComponentProps<P, R>): Element => {
+    const componentFn = (allProps: ComponentPropsWithLayers<P, R>): Element => {
       const { layers, regularProps } = separateProps<P>(allProps)
       
       // Create Props layer from regularProps
@@ -458,8 +468,26 @@ function genWithProps<P extends object>(): <
       enumerable: true
     })
     
-    return componentFn as ComponentType<ComponentProps<P, R>, E>
+    return componentFn as ComponentType<ComponentPropsWithLayers<P, R>, E>
   }
+}
+
+/**
+ * Create a function that creates components with props from a generator directly.
+ * @internal
+ */
+function genWithPropsDirect<P extends object>(): <
+  Eff extends EffectYieldWrap<unknown, unknown, unknown>,
+  AEff extends Element
+>(
+  f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, AEff, never>
+) => ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> {
+  const withProps = genWithProps<P>()
+
+  return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends Element>(
+    f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, AEff, never>
+  ): ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>> =>
+    withProps((Props) => (resume) => f(Props, resume))
 }
 
 /**
@@ -473,9 +501,10 @@ const isGeneratorFunction = (fn: Function): boolean => {
 /**
  * Component.gen - Create components using generator syntax.
  * 
- * Two usage patterns:
+ * Usage patterns:
  * 1. Without props: `Component.gen(function* () { ... })`
- * 2. With props: `Component.gen<{ title: string }>()(Props => function* () { ... })`
+ * 2. With props: `Component.gen(function* (Props: ComponentProps<{ title: string }>) { ... })`
+ * 3. Curried form still supported: `Component.gen<P>()(Props => function* () { ... })`
  * 
  * Service requirements are automatically mapped to layer props.
  * 
@@ -487,8 +516,8 @@ const isGeneratorFunction = (fn: Function): boolean => {
  *   return <div style={{ color: theme.text }}>{theme.name}</div>
  * })
  * 
- * // With typed props - call with type param first, then pass generator factory
- * const Card = Component.gen<{ title: string }>()(Props => function* () {
+ * // With typed props - pass the generator directly
+ * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
  *   const { title } = yield* Props
  *   const theme = yield* Theme
  *   return <div style={{ color: theme.primary }}>{title}</div>
@@ -504,22 +533,34 @@ export function gen<Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff
   f: (resume: Effect.Adapter) => Generator<Eff, AEff, never>
 ): ComponentType<RequirementsToLayerProps<ExtractContext<Eff>>, ExtractError<Eff>>
 
-export function gen<P extends object>(): <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends Element>(
+export function gen<
+  P extends object = {},
+  Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<unknown, unknown, unknown>,
+  AEff extends Element = Element
+>(
+  f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, AEff, never>
+): ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>>
+
+export function gen<P extends object = {}>(): <
+  Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<unknown, unknown, unknown>,
+  AEff extends Element = Element
+>(
   f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>
-) => ComponentType<ComponentProps<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>>
+) => ComponentType<ComponentPropsWithLayers<P, Exclude<ExtractContext<Eff>, PropsMarker<P>>>, ExtractError<Eff>>
 
 export function gen<P extends object>(
   f?: Function
 ): unknown {
-  // If f is provided and is a generator function, it's overload 1 (no props)
   if (f !== undefined && isGeneratorFunction(f)) {
-    return genNoProps(f as (resume: Effect.Adapter) => Generator<EffectYieldWrap<unknown, unknown, unknown>, Element, never>)
+    if (f.length === 0) {
+      return genNoProps(f as (resume: Effect.Adapter) => Generator<EffectYieldWrap<unknown, unknown, unknown>, Element, never>)
+    }
+    return genWithPropsDirect<P>()(
+      f as (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<EffectYieldWrap<unknown, unknown, unknown>, Element, never>
+    )
   }
-  // If f is not provided, return the curried function for overload 2 (with props)
   if (f === undefined) {
     return genWithProps<P>()
   }
-  // Otherwise f is a regular function that should be a generator factory
-  // This handles the case where someone passes a non-generator function to the first overload
   throw new Error("Component.gen: expected a generator function or call with type parameter first")
 }

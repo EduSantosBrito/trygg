@@ -8,7 +8,7 @@
  * - Event handlers that return Effects
  */
 import { Context, Effect, Layer } from "effect"
-import { Signal, Component } from "effect-ui"
+import { Signal, Component, type ComponentProps } from "effect-ui"
 
 // =============================================================================
 // Theme Service
@@ -34,7 +34,7 @@ const defaultTheme = Layer.succeed(Theme, {
 
 // Display component with typed props and theme requirement
 // TypeScript infers: { value: Signal<number>, theme: Layer<Theme> }
-const CountDisplay = Component.gen<{ value: Signal.Signal<number> }>()(Props => function* () {
+const CountDisplay = Component.gen(function* (Props: ComponentProps<{ value: Signal.Signal<number> }>) {
   const { value } = yield* Props
   const theme = yield* Theme
   
@@ -50,10 +50,10 @@ const CountDisplay = Component.gen<{ value: Signal.Signal<number> }>()(Props => 
 
 // Button component with typed props and theme requirement
 // TypeScript infers: { label: string, onClick: () => Effect<void>, theme: Layer<Theme> }
-const CounterButton = Component.gen<{ 
+const CounterButton = Component.gen(function* (Props: ComponentProps<{ 
   label: string
   onClick: () => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, onClick } = yield* Props
   const theme = yield* Theme
   
@@ -95,9 +95,9 @@ const Counter = Component.gen(function* () {
       <div className="code-example">
         <h3>Component.gen Pattern</h3>
         <pre>{`// Component with props and theme requirement
-const CountDisplay = Component.gen<{ 
+const CountDisplay = Component.gen(function* (Props: ComponentProps<{ 
   value: Signal<number> 
-}>()(Props => function* () {
+}>) {
   const { value } = yield* Props
   const theme = yield* Theme  // Service requirement
   return <span style={{ color: theme.primary }}>{value}</span>

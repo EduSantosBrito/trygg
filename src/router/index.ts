@@ -77,6 +77,7 @@ export type {
   RouteErrorInfo,
   // Type-safe routing utilities
   ExtractRouteParams,
+  RouteParamsFor,
   TypeSafeLinkProps,
   RouteMap,
   RoutePath
@@ -98,7 +99,7 @@ export {
   link,
   browserLayer,
   testLayer,
-  useRouteError
+  currentError
 } from "./RouterService.js"
 
 // Components

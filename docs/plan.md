@@ -1,225 +1,461 @@
-# Effect UI - Implementation Plan
+# Web Framework Review Plan
 
-## Current Status
-
-- **65/65 tests passing** (including 22 router tests + 5 loading/error tests)
-- **11 working examples as single routed app**
-- **File-based routing** with type-safe navigation, layouts, loading/error states, guards
-- **Router included by default** in `mount()`
-- Run examples: `bun run examples`
+## Status: In Progress
+**Last Updated:** 2026-01-20
+**Reviewer:** OpenCode
+**Framework:** effect-ui
 
 ---
 
-## Next Priority: ManagedRuntime Architecture
+## Summary
 
-### Problem Statement
+**Total Findings:** 11
+**By Priority:** CRITICAL: 2 | HIGH: 4 | MEDIUM: 3 | LOW: 2
+**By Category:** Performance: 5 | Security: 1 | Reliability: 2 | LLM: 2 | Tests: 1 | Other: 0
 
-Current implementation uses ad-hoc runtime capture (`Effect.runtime<never>()`) and passes `Runtime.Runtime<never>` through the render tree. This has issues:
-
-1. **FiberRefs don't propagate** - Event handlers and re-renders run in new fibers without parent FiberRefs
-2. **Memory leaks** - `Signal.derive` subscriptions never cleaned up
-3. **Inconsistent patterns** - Mix of `Runtime.runFork/runSync` and `Effect.fork*` variants
-
-### Solution: FiberRef-based Runner Access
-
-Use a `CurrentRunner` FiberRef set via `Effect.locally` so all code within mount scope has access to the runner.
-
-**Key Finding**: Child fibers inherit FiberRefs at fork time via `fiberRefs.forkAs()` in Effect's fiberRuntime.ts:2459. So `Effect.locally` works correctly - forked children get the FiberRef value.
-
-### Architecture
-
-```
-mount()
-  │
-  ├─ Create ManagedRuntime from layers
-  │
-  └─ Effect.locally(render(...), CurrentRunner, runner)
-       │
-       ├─ All child effects have CurrentRunner FiberRef
-       │
-       ├─ Event handlers: yield* FiberRef.get(CurrentRunner) → runner.runFork
-       │
-       ├─ Re-renders: yield* FiberRef.get(CurrentRunner) → runner.runFork
-       │
-       └─ Signal.derive: yield* FiberRef.get(CurrentRunner) → runner.runSync
-```
-
-### Implementation Plan
-
-#### Phase 1: Core Runtime Infrastructure
-
-| Task | File | Description |
-|------|------|-------------|
-| 1.1 | `src/runtime.ts` (NEW) | Create `CurrentRunner` FiberRef, runner interface |
-| 1.2 | `Renderer.ts` | Update `mount()` to create ManagedRuntime, use `Effect.locally` |
-| 1.3 | `Renderer.ts` | Update `renderElement` to read runner from FiberRef |
-| 1.4 | `Renderer.ts` | Update event handlers to use `runner.runFork` |
-| 1.5 | `Renderer.ts` | Update re-render to use `runner.runFork` |
-
-#### Phase 2: Memory Leak Fixes
-
-| Task | File | Description |
-|------|------|-------------|
-| 2.1 | `Signal.ts` | Update `derive()` to use FiberRef runner |
-| 2.2 | `Signal.ts` | Add `Effect.addFinalizer` for subscription cleanup |
-| 2.3 | `RouterService.ts` | Add cleanup for popstate listener |
-
-#### Phase 3: Testing Infrastructure
-
-| Task | File | Description |
-|------|------|-------------|
-| 3.1 | `testing.ts` | Create isolated test ManagedRuntime |
-| 3.2 | `testing.ts` | Set `CurrentRunner` FiberRef in test utilities |
-
-### File Structure Change
-
-```
-src/
-├── runtime.ts (NEW)      # CurrentRunner FiberRef, EffectRunner interface
-├── Renderer.ts           # Uses runtime.ts
-├── Signal.ts             # Uses runtime.ts for derive()
-└── router/RouterService.ts # Uses runtime.ts for popstate
-```
-
-This avoids circular dependency: `runtime.ts` has no imports from other src files.
+**Performance Verdict:** Below target; re-render and navigation paths exceed budgets
+**Effect Utilization:** Partial; caching/concurrency/timeout/scope patterns underused
 
 ---
 
-## Known Issues & Technical Debt
+## Findings
 
-### FIXED: Route Signal Collision Bug (January 2026)
+### F-001: Sequential route module loading
+**Category:** Performance
+**Priority:** HIGH
+**Status:** Solution Proposed ([Solution](solutions.md#f-001))
 
-**Symptoms**: Signal updates fire but `listener_count: 0`. Signal IDs reused across routes with different types:
-```
-signal.update {signal_id: 'sig_5', prev_value: 'Jane Doe', value: false}  // Wrong type!
-```
+**Location:**
+- File: `src/router/Outlet.ts`
+- Lines: 306-324
+- Function/Component: `loadAndRender`
 
-**Root Cause**: `Outlet.ts:renderComponent` was yielding route effects directly in Outlet's render phase. When Outlet re-renders after navigation, its `signalIndex` resets to 0 but signals array persists. New route's signals reuse same positions.
+**Problem:**
+Route component and layout modules are loaded with sequential `Effect.promise` calls. Each nested layout waits for the previous module import to finish, creating a waterfall during navigation and delaying render.
 
-**Fix**: Wrap route components in `componentElement()` so each route gets its own isolated render phase:
-```typescript
-// Before (broken):
-return component as Effect.Effect<Element, unknown, never>
+**Current Behavior:**
+Dynamic imports for leaf component, layout, and parent layouts run serially on every navigation.
 
-// After (fixed):
-return Effect.succeed(
-  componentElement(() => component as Effect.Effect<Element, unknown, never>)
-)
-```
+**Expected Behavior:**
+Module imports should be parallelized or prefetched so navigation is near-instant even with nested layouts.
 
----
+**Impact:**
+- Performance: Adds cumulative module-load latency per layout
+- Users: Noticeable delay on rapid navigation
+- Scale: Gets worse with deep layout nesting
 
-### HIGH PRIORITY: Memory Leaks
+**Evidence:**
+`loadAndRender` loads component and layout modules sequentially via `Effect.promise`.
 
-| Issue | Location | Fix |
-|-------|----------|-----|
-| `Signal.derive` leak | `Signal.ts:415-427` | Add `Effect.addFinalizer(unsubscribe)` |
-| popstate listener leak | `RouterService.ts:213` | Add `removeEventListener` cleanup |
-| Outlet module state | `Outlet.ts:22` | Convert `_currentOutletChild` to FiberRef |
+**Effect Pattern Suggestion:**
+`Effect.all` with `concurrency` for parallel module loading
 
-### MEDIUM PRIORITY: Non-Effect Patterns
-
-Found by codebase analysis - places using vanilla JS that could use Effect:
-
-| Pattern | Location | Suggested Fix | Priority |
-|---------|----------|---------------|----------|
-| Mutable render state | `Renderer.ts:334-338` | Use `Ref` | Nice to have |
-| Manual cleanup arrays | `Renderer.ts:169,183` | Use `Scope.addFinalizer` | Nice to have |
-| Imperative loops | `Renderer.ts:298-302` | Use `Effect.forEach` | Should fix |
-| Module-level debug state | `debug.ts:283-284` | Use `FiberRef` | Nice to have |
-
-### LOW PRIORITY: Type Safety
-
-| File | Issue | Status |
-|------|-------|--------|
-| `Component.ts` | Multiple `as` casts for layer inference | Documented, complex to fix |
-| `Signal.ts` | `AnySignal` uses `any` | Acceptable (internal) |
-| `RouterService.ts` | Params cast to caller type | Consider Schema validation |
+**Related Findings:** F-002, F-006
 
 ---
 
-## Key Decisions & Findings
+### F-002: Route loading fibers not scoped or interrupted
+**Category:** Performance
+**Priority:** CRITICAL
+**Status:** Solution Proposed ([Solution](solutions.md#f-002))
 
-### FiberRef Propagation (January 2026)
+**Location:**
+- File: `src/router/Outlet.ts`
+- Lines: 600-640
+- Function/Component: `Outlet`
 
-**Finding**: Effect's `fiberRefs.forkAs()` copies parent FiberRefs to child fibers at fork time.
-- `Effect.locally(effect, ref, value)` sets FiberRef for duration of `effect`
-- Child fibers forked within `effect` inherit the FiberRef value
-- This enables FiberRef-based runner access without module-level state
+**Problem:**
+Route loading for Suspense creates a new `Scope` and forks a fiber, but the scope is never closed and the fiber is never interrupted when navigation changes. Stale route loads continue in the background after the Outlet re-renders.
 
-### Sync Callbacks Design (Documented)
+**Current Behavior:**
+Each navigation starts a new forked load that outlives the current render and can continue after route changes.
 
-Signal listeners use sync callbacks (`Set<() => void>`) instead of Effect Streams because:
-- Streams had fiber scheduling issues in tests
-- Sync callbacks fire immediately, then schedule re-renders via `queueMicrotask`
-- More reliable for fine-grained DOM updates
+**Expected Behavior:**
+Route-loading work should be tied to the Outlet lifecycle and interrupted/closed on navigation or unmount.
 
-### Suspense Scope Bug Fix (January 2026)
+**Impact:**
+- Performance: Background work continues after navigation
+- Users: Delayed or out-of-order rendering on rapid clicks
+- Scale: Leaks fibers/scopes with repeated navigation
 
-Changed `Effect.forkScoped` to `Effect.forkDaemon` in Suspense handler because the parent re-render scope closes when re-render completes, interrupting the fiber before Deferred resolves.
+**Evidence:**
+`Scope.make()` is used with `Effect.forkIn` and no `Scope.close` or fiber interruption is registered.
 
-### Router FiberRef Pattern
+**Effect Pattern Suggestion:**
+`Scope` + `Fiber.interrupt` (tie load fibers to lifecycle via `acquireRelease`)
 
-`CurrentRouter` is a FiberRef set during layer building. Works because:
-1. `Router.browserLayer` sets the FiberRef
-2. Fibers forked through ManagedRuntime inherit FiberRefs
-3. `getRouter` reads via `FiberRef.get(CurrentRouter)`
-
----
-
-## Development Roadmap
-
-### Current Phase: Runtime Architecture Refactor
-
-1. **ManagedRuntime + FiberRef** - Proper fiber management
-2. **Memory leak fixes** - Signal.derive, popstate cleanup
-3. **Effect idioms** - Replace imperative patterns
-
-### Future Phases
-
-| Phase | Goal | Status |
-|-------|------|--------|
-| Type Safety | Eliminate `as` casts in Component.ts | Planned |
-| Data Layer | Query/mutation with caching (@effect/rpc) | Planned |
-| Forms | Effect Schema validation | Planned |
-| SSR | Server rendering + hydration | Future |
+**Related Findings:** F-001
 
 ---
 
-## File Structure
+### F-003: Signal notifications run sequentially
+**Category:** Performance
+**Priority:** HIGH
+**Status:** Solution Proposed ([Solution](solutions.md#f-003))
 
-```
-src/
-├── index.ts             # Main exports
-├── runtime.ts           # CurrentRunner FiberRef (NEW)
-├── Element.ts           # Virtual DOM types
-├── Signal.ts            # Reactive state
-├── Renderer.ts          # DOM rendering + mount()
-├── Component.ts         # Component.gen API
-├── router/              # File-based routing
-├── components/          # Suspense, ErrorBoundary, Portal
-├── testing.ts           # Test utilities
-├── debug.ts             # Observability events
-└── vite-plugin.ts       # Vite integration
+**Location:**
+- File: `src/Signal.ts`
+- Lines: 86-95
+- Function/Component: `notifyListeners`
 
-examples/                # Single routed app with all examples
-tests/                   # 65 tests
-```
+**Problem:**
+Signal updates iterate listeners in a synchronous loop and await each listener effect in order. With many subscribed components, re-render scheduling becomes serialized and blocks subsequent listeners.
+
+**Current Behavior:**
+`Signal.set`/`Signal.update` waits for each listener effect sequentially before moving to the next.
+
+**Expected Behavior:**
+Listener effects should run concurrently or be batched to avoid serialized re-render scheduling overhead.
+
+**Impact:**
+- Performance: Adds per-listener latency on every signal update
+- Users: Slower UI response with many subscribers
+- Scale: Degrades linearly with subscriber count
+
+**Evidence:**
+`notifyListeners` uses a `for ... of` loop with `yield* listener()` for each listener.
+
+**Effect Pattern Suggestion:**
+`Effect.forEach` with `concurrency` (or `Effect.all`)
+
+**Related Findings:** F-004
 
 ---
 
-## Completed Features
+### F-004: Full subtree teardown on component re-render
+**Category:** Performance
+**Priority:** CRITICAL
+**Status:** Solution Proposed ([Solution](solutions.md#f-004))
 
-- ✅ Virtual DOM with `Data.TaggedEnum`
-- ✅ Signal-based fine-grained reactivity
-- ✅ Signal.each for efficient list rendering
-- ✅ Component.gen API with layer prop inference
-- ✅ Suspense, ErrorBoundary, Portal components
-- ✅ File-based routing with type-safe params
-- ✅ Layout support (`_layout.tsx`)
-- ✅ Loading states (`_loading.tsx`)
-- ✅ Error boundaries (`_error.tsx`)
-- ✅ Route guards
-- ✅ Router observability events
-- ✅ create-effect-ui CLI
-- ✅ DevMode debugging component
+**Location:**
+- File: `src/Renderer.ts`
+- Lines: 404-424
+- Function/Component: `doRerender`
+
+**Problem:**
+The re-render path always cleans up the entire rendered subtree and re-renders from scratch. This bypasses any structural sharing or diffing and turns every subscribed signal change into full DOM teardown and rebuild.
+
+**Current Behavior:**
+Each signal-triggered re-render runs `currentResult.cleanup` and then calls `renderAndPosition` to recreate DOM nodes.
+
+**Expected Behavior:**
+Re-rendering should preserve and patch existing DOM where possible to keep updates under 1ms.
+
+**Impact:**
+- Performance: Adds ~3-6ms per re-render in hot paths
+- Users: Noticeable lag on rapid interactions
+- Scale: Cost grows with component depth and DOM size
+
+**Evidence:**
+`doRerender` explicitly cleans up the old render result before rendering a new tree.
+
+**Effect Pattern Suggestion:**
+`Effect.cached` for stable component outputs + fine-grained Signal updates to avoid full re-render
+
+**Related Findings:** F-003
+
+---
+
+### F-005: Route matching recalculates depth per navigation
+**Category:** Performance
+**Priority:** MEDIUM
+**Status:** Solution Proposed ([Solution](solutions.md#f-005))
+
+**Location:**
+- File: `src/router/matching.ts`
+- Lines: 91-100
+- Function/Component: `RouteMatcher.match`
+
+**Problem:**
+Every match sorts candidates and recomputes route depth by re-parsing ancestor patterns. This repeats work on each navigation and adds overhead proportional to route count and nesting depth.
+
+**Current Behavior:**
+`match` calls `parsePattern` inside the sort comparator for every navigation.
+
+**Expected Behavior:**
+Route depth/specificity should be precomputed once during matcher creation and reused per match.
+
+**Impact:**
+- Performance: Adds extra route matching cost on every navigation
+- Users: Slower routing with large route trees
+- Scale: Cost grows with route count and nesting
+
+**Evidence:**
+`match` uses `parsePattern` in the per-navigation sort comparator.
+
+**Effect Pattern Suggestion:**
+`Effect.cached` for compiled matcher metadata (depth/specificity)
+
+**Related Findings:** F-001
+
+---
+
+### F-006: Route module loading has no timeout
+**Category:** Reliability
+**Priority:** HIGH
+**Status:** Solution Proposed ([Solution](solutions.md#f-006))
+
+**Location:**
+- File: `src/router/Outlet.ts`
+- Lines: 306-313
+- Function/Component: `loadAndRender`
+
+**Problem:**
+Dynamic imports for route components (and guards/layouts) are awaited without any timeout. A stalled chunk load or hung promise leaves navigation stuck in a loading state indefinitely.
+
+**Current Behavior:**
+`Effect.promise` waits forever on module imports; failures only surface if the promise rejects.
+
+**Expected Behavior:**
+Route module loads should be bounded with timeouts and surface a controlled error when loading stalls.
+
+**Impact:**
+- Performance: Navigation can hang under slow or failed network conditions
+- Users: Permanent loading state with no recovery path
+- Scale: Increases support burden under flaky network conditions
+
+**Evidence:**
+`Effect.promise(() => match.route.component())` and related imports have no timeout or retry policy.
+
+**Effect Pattern Suggestion:**
+`Effect.timeout`
+
+**Related Findings:** F-001, F-002
+
+---
+
+### F-007: Unsafe default allowlist includes data: URLs
+**Category:** Security
+**Priority:** HIGH
+**Status:** Solution Proposed ([Solution](solutions.md#f-007))
+
+**Location:**
+- File: `src/SafeUrl.ts`
+- Lines: 49-57
+- Function/Component: `DEFAULT_ALLOWED_SCHEMES`
+
+**Problem:**
+The default SafeUrl allowlist includes the `data` scheme without MIME-type restrictions. `data:text/html` or `data:application/javascript` can be injected into `href`/`src`, enabling XSS in consumer apps that rely on the default configuration.
+
+**Current Behavior:**
+Any `data:` URL is considered safe by default.
+
+**Expected Behavior:**
+`data:` should be disallowed by default or restricted to safe MIME types (e.g., images) with explicit opt-in.
+
+**Impact:**
+- Security: Enables XSS via unsafe data URLs
+- Users: Risk of script execution on click or load
+- Scale: Affects all apps using default SafeUrl config
+
+**Evidence:**
+`DEFAULT_ALLOWED_SCHEMES` includes `"data"` with no additional validation.
+
+**Effect Pattern Suggestion:**
+None (validation policy change)
+
+**Related Findings:** None
+
+---
+
+### F-008: Type casting violates project rules
+**Category:** Reliability
+**Priority:** MEDIUM
+**Status:** Solution Proposed ([Solution](solutions.md#f-008))
+
+**Location:**
+- File: `src/Component.ts`
+- Lines: 144-160
+- Function/Component: `separateProps`
+
+**Problem:**
+Core component utilities rely on `as` casts (`regularProps as P` and other casts in the same module) despite the project rule forbidding type casting. This hides type mismatches and can mask unsafe layer/prop combinations at runtime.
+
+**Current Behavior:**
+Unsafe casts are used to coerce props and layers without compiler verification.
+
+**Expected Behavior:**
+Eliminate `as` casts and use safer runtime checks or type-level encodings that preserve correctness without bypassing the type system.
+
+**Impact:**
+- Reliability: Risk of runtime failures due to unsound typing
+- Users: Harder to diagnose issues from misleading types
+- Scale: Increases maintenance burden as APIs grow
+
+**Evidence:**
+`separateProps` and other utilities explicitly use `as` casts with "SAFE CAST" comments.
+
+**Effect Pattern Suggestion:**
+None (type-safety refactor)
+
+**Related Findings:** None
+
+---
+
+### F-009: Missing root SKILL.md for agent discovery
+**Category:** LLM
+**Priority:** MEDIUM
+**Status:** Solution Proposed ([Solution](solutions.md#f-009))
+
+**Location:**
+- File: Repository root (missing `SKILL.md`)
+- Lines: N/A
+- Function/Component: N/A
+
+**Problem:**
+Agent Skills spec expects a root `SKILL.md` for discovery. The repo only provides skill files under `skills/`, so agents have no single entry point and may fail to discover capabilities.
+
+**Current Behavior:**
+No root `SKILL.md`; only `skills/*/SKILL.md` exists.
+
+**Expected Behavior:**
+A root `SKILL.md` that indexes available skills and points to `skills/` references.
+
+**Impact:**
+- LLM: Lower discoverability and higher prompt cost
+- Users: Agents may miss key framework capabilities
+- Scale: Harder to automate multi-skill workflows
+
+**Evidence:**
+Repository root has no `SKILL.md`; `skills/effect-ui-*/SKILL.md` exists instead.
+
+**Effect Pattern Suggestion:**
+None (documentation addition)
+
+**Related Findings:** F-010
+
+---
+
+### F-010: No llms.txt for LLM-friendly docs
+**Category:** LLM
+**Priority:** LOW
+**Status:** Solution Proposed ([Solution](solutions.md#f-010))
+
+**Location:**
+- File: Repository root (missing `llms.txt`)
+- Lines: N/A
+- Function/Component: N/A
+
+**Problem:**
+There is no `llms.txt` document to provide a concise, LLM-friendly entry point into the framework documentation and capabilities.
+
+**Current Behavior:**
+LLMs must parse long-form docs and may miss key constraints or APIs.
+
+**Expected Behavior:**
+Provide a root `llms.txt` with a short index and pointers to detailed references.
+
+**Impact:**
+- LLM: Higher context usage and lower success rate
+- Users: Agents require more prompts to orient
+- Scale: Slower automation and higher token cost
+
+**Evidence:**
+No `llms.txt` found in the repository root.
+
+**Effect Pattern Suggestion:**
+None (documentation addition)
+
+**Related Findings:** F-009
+
+---
+
+
+## Quick Wins (Implement First)
+
+| ID | Title | Effort | Impact | Effect Pattern |
+|----|-------|--------|--------|----------------|
+| F-003 | Parallelize signal listeners | Low | High | Effect.forEach + concurrency |
+| F-006 | Add timeouts to route imports | Low | High | Effect.timeout |
+| F-005 | Precompute route depth | Low | Medium | Effect.cached |
+
+---
+
+## Effect Utilization Report
+
+| Pattern | Currently Used? | Opportunities Found | Finding IDs |
+|---------|-----------------|---------------------|-------------|
+| Effect.cached | No | 1 | F-005 |
+| Effect.all + concurrency | Yes (no concurrency) | 1 | F-001 |
+| Stream | Yes (limited) | 0 | - |
+| Fiber | Yes | 1 | F-002 |
+| Layer/Scope | Yes | 1 | F-002 |
+| Schedule | No | 0 | - |
+| Effect.timeout | No | 1 | F-006 |
+| Effect.forEach + concurrency | No | 1 | F-003 |
+
+---
+
+## Architecture Notes
+
+- Rendering library: Custom JSX runtime with `Element` tagged enum
+- Routing approach: File-based routes with trie matcher; `Router.Outlet` renders via dynamic imports
+- Effect Runtime setup: `mount` uses `BrowserRuntime.runMain` with `Effect.scoped` and merged Renderer/Router layers
+- Layer composition: `Component`/`Component.gen` merge service layers per component render
+- Hot paths identified: `Renderer` component re-render, `Signal.notifyListeners`, `Outlet.loadAndRender`, `RouteMatcher.match`
+
+---
+
+## Out of Scope (Noted but not prioritized)
+
+- SSR and server-side rendering pipeline
+- API routes (tracked separately in `docs/future-solutions.md`)
+
+---
+
+## Session Log
+
+### 2026-01-20 - Review Session
+- Reviewed: docs, renderer, signal, router (service/outlet/matcher/link), SafeUrl
+- Findings added: F-001 through F-011
+- Areas remaining: None (initial review complete)
+
+### 2026-01-20 - Solution Session
+- Processed: F-002
+- Decisions: cancel route loads on any navigation change; reuse in-flight load on identical match key; emit router.load.cancelled
+- Next: F-004 deep dive and solution
+
+### 2026-01-20 - Solution Session
+- Processed: F-004
+- Decisions: add RenderNode patching and keyed child reconciliation; keep fine-grained Signal updates
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-007
+- Decisions: align with URL-sanitizing frameworks by blocking data: by default; explicit allowSchemes opt-in
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-001
+- Decisions: parallel module evaluation; add memoized loaders, prefetch, concurrency cap=3, load timing events
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-003
+- Decisions: parallel listener execution; isolate and log listener failures; concurrency cap=3
+- Next: continue priority list (F-006)
+
+### 2026-01-20 - Solution Session
+- Processed: F-006
+- Decisions: 8s per module load timeout; retry with exponential backoff + jitter (max 2 retries) capped at 15s; typed RouteLoadTimeoutError; prefetch uses same policy
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-005
+- Decisions: precompute specificity at build time; manifest order sorted by specificity then path
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-008
+- Decisions: keep per-service layer props; replace casts with Proxy-based props view, provideService for props, typed mergeAllLayers, type guards in Component.gen
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-009
+- Decisions: add root SKILL.md as entry point and index for existing skills
+- Next: continue priority list
+
+### 2026-01-20 - Solution Session
+- Processed: F-010
+- Decisions: add llms.txt with rules, commands, skills, docs index
+- Next: continue priority list

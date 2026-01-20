@@ -2,24 +2,28 @@
  * @since 1.0.0
  * Router Outlet component for effect-ui
  */
-import { Deferred, Effect, FiberRef, Option, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FiberRef, Option, Scope } from "effect"
 import { Element, componentElement, text, suspense as suspenseElement } from "../Element.js"
 import * as Signal from "../Signal.js"
 import * as Debug from "../debug.js"
-import type { RoutesManifest, RouteMatch, RouterRedirect, RouteErrorInfo } from "./types.js"
+import * as Metrics from "../metrics.js"
+import type { RoutesManifest, RouteMatch, RouterRedirect, RouteErrorInfo, RouteDefinition, RouteParams } from "./types.js"
 import { isRedirect } from "./types.js"
 import { createMatcher } from "./matching.js"
-import { getRouter, CurrentRouteParams, CurrentRouteError } from "./RouterService.js"
+import { moduleLoader } from "./moduleLoader.js"
+import { getRouter, CurrentRouteParams, CurrentRouteError, CurrentOutletChild, CurrentRoutes } from "./RouterService.js"
+import { isEffectComponent } from "../Component.js"
 
 /**
- * Module-level storage for child content passed from parent outlet to nested outlet.
- * Used by layouts - the parent outlet sets this before rendering the layout,
- * and the nested outlet inside the layout reads it.
- * We use a module-level variable instead of FiberRef because FiberRefs are
- * fiber-local and don't persist across component renders.
+ * Type guard for Effect values
  * @internal
  */
-let _currentOutletChild: Option.Option<Element> = Option.none()
+const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
+  typeof value === "object" &&
+  value !== null &&
+  Effect.EffectTypeId in value
+
+
 
 /**
  * Outlet props
@@ -28,50 +32,85 @@ let _currentOutletChild: Option.Option<Element> = Option.none()
 export interface OutletProps {
   /** Routes manifest (optional when used inside layouts) */
   readonly routes?: RoutesManifest
-  /** Fallback element when no route matches */
+  /** 
+   * Fallback element when no route matches and no _404.tsx exists.
+   * Prefer using a _404.tsx file in your routes directory instead.
+   */
   readonly fallback?: Element
 }
 
 /**
- * Internal: Run a guard if present.
+ * Find the _404 route in the manifest (top-level only).
+ * The _404 route should have path "_404" (set by vite plugin).
+ * @internal
+ */
+const find404Route = (routes: RoutesManifest): RouteDefinition | undefined => {
+  for (const route of routes) {
+    // Check for _404 path pattern (vite plugin uses "_404" as the path)
+    if (route.path === "_404" || route.path === "/_404") {
+      return route
+    }
+  }
+  return undefined
+}
+
+/**
+ * Internal: Run a guard if present on a route definition.
  * Returns a redirect if the guard blocks navigation.
  * @internal
  */
-const runGuard: (match: RouteMatch) => Effect.Effect<void | RouterRedirect, unknown, never> = 
-  Effect.fn("runGuard")(function* (match: RouteMatch) {
-    if (match.route.guard) {
-      Debug.log({
+const runGuardForRoute: (route: RouteDefinition) => Effect.Effect<void | RouterRedirect, unknown, never> = 
+  Effect.fn("runGuardForRoute")(function* (route: RouteDefinition) {
+    if (route.guard) {
+      yield* Debug.log({
         event: "router.guard.start",
-        route_pattern: match.route.path,
+        route_pattern: route.path,
         has_guard: true
       })
       
-      const guardModule = yield* Effect.promise(() => match.route.guard!())
+      const guardModule = yield* Effect.promise(() => route.guard!())
       
       if (guardModule.guard) {
         // Run the guard effect - it may return a redirect
         const result = yield* guardModule.guard
         if (isRedirect(result)) {
-          Debug.log({
+          yield* Debug.log({
             event: "router.guard.redirect",
-            route_pattern: match.route.path,
+            route_pattern: route.path,
             redirect_to: result.path
           })
           return result
         }
-        Debug.log({
+        yield* Debug.log({
           event: "router.guard.allow",
-          route_pattern: match.route.path
+          route_pattern: route.path
         })
       } else {
-        Debug.log({
+        yield* Debug.log({
           event: "router.guard.skip",
-          route_pattern: match.route.path,
+          route_pattern: route.path,
           reason: "no guard export in module"
         })
       }
     }
     return undefined
+  })
+
+/**
+ * Internal: Run guards for all routes in the chain (parents + leaf).
+ * Returns a redirect if any guard blocks navigation.
+ * Guards run from root to leaf; first redirect stops execution.
+ * @internal
+ */
+const runGuardsForChain: (match: RouteMatch) => Effect.Effect<void | RouterRedirect, unknown, never> = 
+  Effect.fn("runGuardsForChain")(function* (match: RouteMatch) {
+    // Run guards for parents first (root to leaf order)
+    for (const parent of match.parents) {
+      const result = yield* runGuardForRoute(parent.route)
+      if (result !== undefined) return result
+    }
+    // Run guard for the leaf route
+    return yield* runGuardForRoute(match.route)
   })
 
 /**
@@ -83,88 +122,269 @@ type LoadAndRenderResult =
   | { readonly _tag: "redirect"; readonly redirect: RouterRedirect }
 
 /**
- * Render a component - handles both Effect and Component.gen exports.
- * IMPORTANT: Returns a Component element so the route gets its own render phase.
- * Without this, route signals would be created in Outlet's render phase and
- * get reused incorrectly across different routes.
+ * Render a route component with params embedded via Effect.locally.
+ * 
+ * IMPORTANT: For Component.gen results, we must wrap the INNER run thunk,
+ * not the outer effect. When component({}) returns Element.Component,
+ * its run thunk is what actually executes Router.params(). We extract
+ * that run thunk and wrap it with Effect.locally so params are available.
+ * 
  * @internal
  */
-const renderComponent = (component: unknown): Effect.Effect<Element, unknown, never> => {
-  if (typeof component === "function" && (component as { _tag?: string })._tag === "EffectComponent") {
-    // It's a Component.gen result - call it with empty props to get Element
-    // Wrap in componentElement so it gets its own render phase
+const renderComponent = (
+  component: unknown,
+  params: RouteParams
+): Effect.Effect<Element, unknown, never> => {
+  if (isEffectComponent(component)) {
+    // Component.gen result - calling it returns Element.Component({ run, key })
+    // We need to wrap the INNER run thunk with Effect.locally
+    const element = component({})
+    if (element._tag === "Component") {
+      const originalRun = element.run
+      return Effect.succeed(
+        componentElement(() =>
+          originalRun().pipe(Effect.locally(CurrentRouteParams, params))
+        )
+      )
+    }
+    // Non-Component element (shouldn't happen for Component.gen, but handle gracefully)
+    return Effect.succeed(element)
+  }
+  
+  if (isEffect(component)) {
+    // Effect export - wrap directly with Effect.locally
     return Effect.succeed(
-      componentElement(() => 
-        Effect.succeed((component as (props: Record<string, unknown>) => Element)({}))
+      componentElement(() =>
+        component.pipe(Effect.locally(CurrentRouteParams, params))
       )
     )
   }
-  // It's an Effect - wrap in componentElement so it gets its own render phase
-  // This ensures each route has isolated signals that don't collide across navigation
-  return Effect.succeed(
-    componentElement(() => component as Effect.Effect<Element, unknown, never>)
-  )
+  
+  return Effect.die(new Error("Invalid route component: must be Effect or Component.gen result"))
 }
 
 /**
- * Internal: Load and render a route component, including layout if present.
- * Returns a redirect if the guard blocks navigation.
+ * Render a layout component with child content and params embedded.
+ * 
+ * IMPORTANT: CurrentOutletChild uses FiberRef.set (not Effect.locally) because
+ * the nested <Router.Outlet /> inside the layout runs AFTER the layout's effect
+ * completes. FiberRef.set persists the value in the fiber until the nested
+ * Outlet reads and clears it.
+ * 
+ * CurrentRouteParams uses Effect.locally since it's read DURING the layout's
+ * effect execution.
+ * 
+ * @internal
+ */
+const renderLayout = (
+  layout: unknown,
+  child: Element,
+  params: RouteParams
+): Effect.Effect<Element, unknown, never> => {
+  if (isEffectComponent(layout)) {
+    const element = layout({})
+    if (element._tag === "Component") {
+      const originalRun = element.run
+      return Effect.succeed(
+        componentElement(() =>
+          Effect.gen(function* () {
+            // Set child content for nested Outlet - uses FiberRef.set because
+            // the nested Outlet's effect runs AFTER this effect completes.
+            // The nested Outlet will clear it after reading.
+            yield* FiberRef.set(CurrentOutletChild, Option.some(child))
+            // Run the layout with params set via Effect.locally
+            return yield* originalRun().pipe(
+              Effect.locally(CurrentRouteParams, params)
+            )
+          })
+        )
+      )
+    }
+    return Effect.succeed(element)
+  }
+  
+  if (isEffect(layout)) {
+    return Effect.succeed(
+      componentElement(() =>
+        Effect.gen(function* () {
+          yield* FiberRef.set(CurrentOutletChild, Option.some(child))
+          return yield* layout.pipe(
+            Effect.locally(CurrentRouteParams, params)
+          )
+        })
+      )
+    )
+  }
+  
+  return Effect.die(new Error("Invalid layout component: must be Effect or Component.gen result"))
+}
+
+/**
+ * Merge params from all routes in the chain (parents + leaf).
+ * Later params override earlier ones.
+ * @internal
+ */
+const mergeParams = (match: RouteMatch): Record<string, string> => {
+  let merged: Record<string, string> = {}
+  for (const parent of match.parents) {
+    merged = { ...merged, ...parent.params }
+  }
+  return { ...merged, ...match.params }
+}
+
+/**
+ * Find the nearest error component in the chain (leaf to root).
+ * Returns undefined if none found.
+ * @internal
+ */
+const findNearestErrorComponent = (match: RouteMatch): RouteDefinition["errorComponent"] | undefined => {
+  // Check leaf first
+  if (match.route.errorComponent) {
+    return match.route.errorComponent
+  }
+  // Check parents from nearest to root
+  for (let i = match.parents.length - 1; i >= 0; i--) {
+    const parent = match.parents[i]
+    if (parent?.route.errorComponent) {
+      return parent.route.errorComponent
+    }
+  }
+  return undefined
+}
+
+/**
+ * Find the nearest loading component in the chain (leaf to root).
+ * Returns undefined if none found.
+ * @internal
+ */
+const findNearestLoadingComponent = (match: RouteMatch): RouteDefinition["loadingComponent"] | undefined => {
+  // Check leaf first
+  if (match.route.loadingComponent) {
+    return match.route.loadingComponent
+  }
+  // Check parents from nearest to root
+  for (let i = match.parents.length - 1; i >= 0; i--) {
+    const parent = match.parents[i]
+    if (parent?.route.loadingComponent) {
+      return parent.route.loadingComponent
+    }
+  }
+  return undefined
+}
+
+/**
+ * Internal: Load and render a route component, including nested layouts.
+ * Layouts are stacked from root to leaf: RootLayout -> ChildLayout -> ... -> LeafComponent
+ * Returns a redirect if any guard blocks navigation.
  * @internal
  */
 const loadAndRender: (match: RouteMatch) => Effect.Effect<LoadAndRenderResult, unknown, never> = 
   Effect.fn("loadAndRender")(function* (match: RouteMatch) {
-    Debug.log({
+    const hasParents = match.parents.length > 0
+    
+    yield* Debug.log({
       event: "router.render.start",
       route_pattern: match.route.path,
       params: match.params,
+      parent_count: match.parents.length,
       has_guard: !!match.route.guard,
       has_layout: !!match.route.layout,
       has_loading: !!match.route.loadingComponent,
       has_error: !!match.route.errorComponent
     })
     
-    // Run guard before rendering
-    const guardResult = yield* runGuard(match)
+    // Run guards for the full chain (parents + leaf)
+    const guardResult = yield* runGuardsForChain(match)
     
-    // If guard returned a redirect, don't render - return the redirect
+    // If any guard returned a redirect, don't render - return the redirect
     if (guardResult !== undefined) {
       return { _tag: "redirect" as const, redirect: guardResult }
     }
     
-    // Set route params in FiberRef for params() to access
-    yield* FiberRef.set(CurrentRouteParams, match.params)
+    // Merge params from all levels (embedded into components via Effect.locally)
+    const mergedParams = mergeParams(match)
     
-    // Load the component module
-    const module = yield* Effect.promise(() => match.route.component())
-    const renderedComponent = yield* renderComponent(module.default)
+    // F-001: Parallel module loading
+    // Collect all modules to load, then load in parallel for better performance
     
-    // If this route has a layout, wrap the component in the layout
-    if (match.route.layout) {
-      const layoutModule = yield* Effect.promise(() => match.route.layout!())
-      
-      // Set the child content for nested Outlet to render
-      _currentOutletChild = Option.some(renderedComponent)
-      
-      const layoutElement = yield* renderComponent(layoutModule.default)
-      
-      // Note: _currentOutletChild is cleared by the nested Outlet when it consumes the content
-      
-      Debug.log({
-        event: "router.render.complete",
-        route_pattern: match.route.path,
-        has_layout: true
-      })
-      
-      return { _tag: "element" as const, element: layoutElement }
+    interface ModuleLoadTask {
+      readonly kind: "component" | "layout"
+      readonly path: string
+      readonly loader: () => Promise<{ default: unknown }>
+      /** For layouts: index determines nesting order (innermost = highest) */
+      readonly index: number
     }
     
-    Debug.log({
-      event: "router.render.complete",
-      route_pattern: match.route.path,
-      has_layout: false
+    const tasks: Array<ModuleLoadTask> = []
+    
+    // Leaf component (always present)
+    tasks.push({
+      kind: "component",
+      path: match.route.path,
+      loader: match.route.component,
+      index: -1 // Not used for components
     })
     
-    return { _tag: "element" as const, element: renderedComponent }
+    // Leaf layout (optional) - innermost layout
+    if (match.route.layout) {
+      tasks.push({
+        kind: "layout",
+        path: match.route.path,
+        loader: match.route.layout,
+        index: match.parents.length // Innermost = highest index
+      })
+    }
+    
+    // Parent layouts (from nearest to root)
+    for (let i = match.parents.length - 1; i >= 0; i--) {
+      const parent = match.parents[i]
+      if (parent?.route.layout) {
+        tasks.push({
+          kind: "layout",
+          path: parent.route.path,
+          loader: parent.route.layout,
+          index: i // Index in parent array = nesting level
+        })
+      }
+    }
+    
+    // Load all modules in parallel (browser handles network scheduling)
+    const loadedModules = yield* Effect.all(
+      tasks.map((task) =>
+        moduleLoader.load(task.path, task.kind, false, task.loader).pipe(
+          Effect.map((mod) => ({ ...task, module: mod as { default: unknown } }))
+        )
+      ),
+      { concurrency: "unbounded" }
+    )
+    
+    // Find component module
+    const componentResult = loadedModules.find((m) => m.kind === "component")
+    if (componentResult === undefined) {
+      return yield* Effect.die(new Error("Component module not found"))
+    }
+    
+    // Render the leaf component
+    let currentElement = yield* renderComponent(componentResult.module.default, mergedParams)
+    
+    // Sort layouts by index descending (innermost first, wrap outward to root)
+    const layoutResults = loadedModules
+      .filter((m): m is typeof m & { kind: "layout" } => m.kind === "layout")
+      .sort((a, b) => b.index - a.index)
+    
+    // Wrap with layouts from innermost to outermost
+    for (const layoutResult of layoutResults) {
+      currentElement = yield* renderLayout(layoutResult.module.default, currentElement, mergedParams)
+    }
+    
+    yield* Debug.log({
+      event: "router.render.complete",
+      route_pattern: match.route.path,
+      has_layout: !!match.route.layout || match.parents.some(p => !!p.route.layout),
+      nested_depth: hasParents ? match.parents.length + 1 : 1
+    })
+    
+    return { _tag: "element" as const, element: currentElement }
   })
 
 /**
@@ -186,18 +406,20 @@ const loadAndRender: (match: RouteMatch) => Effect.Effect<LoadAndRenderResult, u
  * ## Error Handling
  * 
  * If a route directory contains `_error.tsx`, errors from the route component will
- * be caught and the error component displayed instead. Use `Router.useRouteError()`
+ * be caught and the error component displayed instead. Use `Router.currentError`
  * to access error details.
  * 
  * ```tsx
  * // routes/_error.tsx
+ * import { Cause, Effect } from "effect"
+ * 
  * export default Effect.gen(function* () {
- *   const { error, path, reset } = yield* Router.useRouteError()
+ *   const { cause, path, reset } = yield* Router.currentError
  *   return (
  *     <div>
  *       <h1>Error</h1>
- *       <p>{String(error)}</p>
- *       <button onClick={() => Effect.sync(reset)}>Retry</button>
+ *       <p>{String(Cause.squash(cause))}</p>
+ *       <button onClick={reset}>Retry</button>
  *     </div>
  *   )
  * })
@@ -238,18 +460,96 @@ const loadAndRender: (match: RouteMatch) => Effect.Effect<LoadAndRenderResult, u
 export const Outlet = (props: OutletProps = {}): Element => {
   const { routes = [], fallback } = props
   
+  // Cache the compiled matcher per routes tree identity (reference equality)
+  // This avoids recompiling on every render when routes don't change
+  let cachedMatcher: ReturnType<typeof createMatcher> | null = null
+  let cachedRoutes: RoutesManifest | null = null
+  
+  // Get or create matcher (memoized by routes reference)
+  const getMatcher = Effect.gen(function* () {
+    if (cachedMatcher === null || cachedRoutes !== routes) {
+      yield* Debug.log({
+        event: "router.matcher.compile",
+        route_count: routes.length,
+        is_recompile: cachedMatcher !== null
+      })
+      cachedMatcher = createMatcher(routes)
+      cachedRoutes = routes
+    } else {
+      yield* Debug.log({
+        event: "router.matcher.cached",
+        route_count: routes.length
+      })
+    }
+    return cachedMatcher
+  })
+  
   // Signal to trigger re-render on reset
   let resetTrigger: Signal.Signal<number> | null = null
+  
+  // --- F-002: Route loading fiber management ---
+  // 
+  // Cancellation is handled on navigation change (matchKey differs) to prevent:
+  // - Wasted work from stale route loads
+  // - Out-of-order renders from rapid navigation
+  // - Resource leaks from accumulated fibers/scopes
+  //
+  // Memory leak prevention: Each forked effect uses Effect.ensuring to close its
+  // scope after completion (success, failure, or interruption). This handles the
+  // unmount case where cancelLoad isn't called. Scope.close is idempotent, so
+  // double-close from cancelLoad is safe.
+  
+  /**
+   * Handle for tracking in-flight route loads.
+   * Used to cancel stale loads on navigation change.
+   * @internal
+   */
+  interface LoadHandle {
+    readonly key: string
+    readonly scope: Scope.CloseableScope
+    // Fiber type is RuntimeFiber<boolean, never> because the effect ends with
+    // Deferred.succeed which returns boolean. We use unknown for flexibility.
+    readonly fiber: Fiber.RuntimeFiber<unknown, unknown>
+    readonly deferred: Deferred.Deferred<Element, unknown>
+  }
+  
+  // Mutable ref for current load (closure variable)
+  let currentLoad: LoadHandle | null = null
+  
+  /**
+   * Build stable key from match for comparison.
+   * Key changes when route path, params, or query change.
+   * @internal
+   */
+  const buildMatchKey = (match: RouteMatch, query: string): string =>
+    JSON.stringify({ path: match.route.path, params: match.params, query })
+  
+  /**
+   * Cancel existing load: interrupt fiber, close scope, log event.
+   * @internal
+   */
+  const cancelLoad = (handle: LoadHandle, newKey: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      yield* Fiber.interrupt(handle.fiber)
+      yield* Scope.close(handle.scope, Exit.void)
+      yield* Debug.log({
+        event: "router.load.cancelled",
+        from_key: handle.key,
+        to_key: newKey
+      })
+    })
+  
+  // --- End F-002 ---
   
   // The outlet is a component that reactively renders based on context
   const outletEffect = Effect.gen(function* () {
     // Check if we're a nested outlet (inside a layout) with pre-set child content
-    const childContent = _currentOutletChild
+    const childContent = yield* FiberRef.get(CurrentOutletChild)
     
     // If there's child content, we're inside a layout - render the child
     // Clear the content so subsequent Outlet renders don't see stale data
     if (Option.isSome(childContent)) {
-      _currentOutletChild = Option.none()
+      yield* FiberRef.set(CurrentOutletChild, Option.none())
       return childContent.value
     }
     
@@ -259,8 +559,11 @@ export const Outlet = (props: OutletProps = {}): Element => {
       return fallback ?? text("No routes configured")
     }
     
-    // Create route matcher
-    const matcher = createMatcher(routes)
+    // F-001: Set routes in FiberRef for prefetching
+    yield* FiberRef.set(CurrentRoutes, routes)
+    
+    // Get route matcher (memoized)
+    const matcher = yield* getMatcher
     
     const router = yield* getRouter
     
@@ -273,18 +576,40 @@ export const Outlet = (props: OutletProps = {}): Element => {
     }
     
     // Match the current path
-    const match = matcher.match(route.path)
+    const matchOption = matcher.match(route.path)
     
-    if (match === null) {
-      Debug.log({
+    if (Option.isNone(matchOption)) {
+      yield* Debug.log({
         event: "router.match.notfound",
         path: route.path
       })
-      // No match - render fallback or empty
+      
+      // Check for _404 route in manifest
+      const notFoundRoute = find404Route(routes)
+      if (notFoundRoute) {
+        yield* Debug.log({
+          event: "router.404.render",
+          path: route.path,
+          has_custom_404: true
+        })
+        
+        // Load and render the _404 component (no route params for 404)
+        const module = yield* Effect.promise(() => notFoundRoute.component())
+        return yield* renderComponent(module.default, {})
+      }
+      
+      // No _404 route - render fallback or default text
+      yield* Debug.log({
+        event: "router.404.fallback",
+        path: route.path,
+        has_custom_404: false
+      })
       return fallback ?? text("404 - Not Found")
     }
     
-    Debug.log({
+    const match = matchOption.value
+    
+    yield* Debug.log({
       event: "router.match",
       path: route.path,
       route_pattern: match.route.path,
@@ -306,16 +631,31 @@ export const Outlet = (props: OutletProps = {}): Element => {
       return result.element
     })
     
-    // Apply error boundary if route has error component
-    if (match.route.errorComponent) {
+    // Find nearest error/loading components in the chain (leaf to root)
+    const nearestErrorComponent = findNearestErrorComponent(match)
+    const nearestLoadingComponent = findNearestLoadingComponent(match)
+    
+    // Apply error boundary if any route in the chain has error component
+    // Use sandbox + catchAllCause to handle both typed failures AND defects (thrown exceptions)
+    if (nearestErrorComponent) {
       const renderWithError = renderWithErrorHandling.pipe(
-        Effect.catchAll((error: unknown) => 
+        Effect.sandbox,
+        Effect.catchAllCause((sandboxedCause) => 
           Effect.gen(function* () {
-            Debug.log({
+            // Flatten the nested Cause<Cause<E>> from sandbox into Cause<E>
+            const cause = Cause.flatten(sandboxedCause)
+            const isDefect = Cause.isDie(cause)
+            
+            yield* Debug.log({
               event: "router.error",
               route_pattern: match.route.path,
-              error: String(error)
+              error: String(Cause.squash(cause)),
+              error_boundary: "nearest",
+              is_defect: isDefect
             })
+            
+            // Record route error metric
+            yield* Metrics.recordRouteError
             
             // Initialize reset trigger if needed
             if (resetTrigger === null) {
@@ -325,45 +665,83 @@ export const Outlet = (props: OutletProps = {}): Element => {
             // Capture the signal for the reset effect
             const capturedTrigger = resetTrigger
             
-            // Create error info and set in FiberRef
+            // Create error info for the error component
             const errorInfo: RouteErrorInfo = {
-              error,
+              cause,
               path: route.path,
               // Reset effect - increments trigger to cause re-render
               reset: Signal.update(capturedTrigger, (n) => n + 1)
             }
-            yield* FiberRef.set(CurrentRouteError, Option.some(errorInfo))
             
-            // Load and render error component
-            const errorModule = yield* Effect.promise(() => match.route.errorComponent!())
-            const errorElement = yield* renderComponent(errorModule.default)
+            // Load the error component module
+            const errorModule = yield* Effect.promise(() => nearestErrorComponent())
+            const errorComponent = errorModule.default
             
-            // Clear error info after rendering
-            yield* FiberRef.set(CurrentRouteError, Option.none())
-            
-            return errorElement
+            // Return a componentElement that wraps execution in Effect.locally
+            // This ensures the error is available when currentError is called,
+            // and automatically clears after the error component renders
+            return componentElement(() => 
+              Effect.locally(
+                Effect.gen(function* () {
+                  // Render the error component inside the Effect.locally scope
+                  // If the error component throws, it will propagate to parent boundary
+                  if (typeof errorComponent === "function" && 
+                      (errorComponent as { _tag?: string })._tag === "EffectComponent") {
+                    // Component.gen result - call it to get Element
+                    return (errorComponent as (props: Record<string, unknown>) => Element)({})
+                  }
+                  // Effect-based component - run the effect
+                  return yield* (errorComponent as Effect.Effect<Element, unknown, never>)
+                }),
+                CurrentRouteError,
+                Option.some(errorInfo)
+              )
+            )
           })
         )
       )
       
-      // If route has loading component, wrap in Suspense-like pattern
-      if (match.route.loadingComponent) {
-        // Load the loading component synchronously (it should be fast)
-        const loadingModule = yield* Effect.promise(() => match.route.loadingComponent!())
-        const loadingElement = yield* renderComponent(loadingModule.default)
+      // If any route in chain has loading component, wrap in Suspense-like pattern
+      if (nearestLoadingComponent) {
+        // Load the nearest loading component synchronously (it should be fast)
+        const loadingModule = yield* Effect.promise(() => nearestLoadingComponent())
+        const loadingElement = yield* renderComponent(loadingModule.default, {})
+        
+        // F-002: Build stable key from match for comparison
+        const matchKey = buildMatchKey(match, route.query.toString())
+        
+        // F-002: Cancel stale load if key changed
+        if (currentLoad !== null && currentLoad.key !== matchKey) {
+          yield* cancelLoad(currentLoad, matchKey)
+          currentLoad = null
+        }
+        
+        // F-002: Reuse existing load if key matches
+        if (currentLoad !== null && currentLoad.key === matchKey) {
+          return suspenseElement(currentLoad.deferred, loadingElement)
+        }
         
         // Create deferred for async route loading
         const deferred = yield* Deferred.make<Element, unknown>()
         const scope = yield* Scope.make()
         
         // Fork the route loading effect
-        yield* Effect.forkIn(
+        // FiberRef values (params, child) are embedded into componentElements via Effect.locally,
+        // so no manual propagation needed
+        const fiber = yield* Effect.forkIn(
           renderWithError.pipe(
+            // renderWithError uses sandbox+catchAllCause so it never fails - 
+            // all errors are handled by the error boundary
             Effect.flatMap((element) => Deferred.succeed(deferred, element)),
-            Effect.catchAll((error) => Deferred.fail(deferred, error))
+            // F-002: Always close scope after completion to prevent memory leaks on unmount
+            // Scope.close is idempotent, so double-close from cancelLoad is safe
+            Effect.ensuring(Scope.close(scope, Exit.void))
           ),
           scope
         )
+        
+        // F-002: Store handle for potential cancellation
+        currentLoad = { key: matchKey, scope, fiber, deferred }
         
         // Return Suspense element
         return suspenseElement(deferred, loadingElement)
@@ -373,20 +751,43 @@ export const Outlet = (props: OutletProps = {}): Element => {
     }
     
     // No error component - just render with loading if present
-    if (match.route.loadingComponent) {
-      const loadingModule = yield* Effect.promise(() => match.route.loadingComponent!())
-      const loadingElement = yield* renderComponent(loadingModule.default)
+    if (nearestLoadingComponent) {
+      const loadingModule = yield* Effect.promise(() => nearestLoadingComponent())
+      const loadingElement = yield* renderComponent(loadingModule.default, {})
+      
+      // F-002: Build stable key from match for comparison
+      const matchKey = buildMatchKey(match, route.query.toString())
+      
+      // F-002: Cancel stale load if key changed
+      if (currentLoad !== null && currentLoad.key !== matchKey) {
+        yield* cancelLoad(currentLoad, matchKey)
+        currentLoad = null
+      }
+      
+      // F-002: Reuse existing load if key matches
+      if (currentLoad !== null && currentLoad.key === matchKey) {
+        return suspenseElement(currentLoad.deferred, loadingElement)
+      }
       
       const deferred = yield* Deferred.make<Element, unknown>()
       const scope = yield* Scope.make()
       
-      yield* Effect.forkIn(
+      // Fork the route loading effect
+      // FiberRef values (params, child) are embedded into componentElements via Effect.locally,
+      // so no manual propagation needed
+      const fiber = yield* Effect.forkIn(
         renderWithErrorHandling.pipe(
           Effect.flatMap((element) => Deferred.succeed(deferred, element)),
-          Effect.catchAll((error) => Deferred.fail(deferred, error))
+          Effect.catchAll((error) => Deferred.fail(deferred, error)),
+          // F-002: Always close scope after completion to prevent memory leaks on unmount
+          // Scope.close is idempotent, so double-close from cancelLoad is safe
+          Effect.ensuring(Scope.close(scope, Exit.void))
         ),
         scope
       )
+      
+      // F-002: Store handle for potential cancellation
+      currentLoad = { key: matchKey, scope, fiber, deferred }
       
       return suspenseElement(deferred, loadingElement)
     }

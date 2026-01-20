@@ -65,7 +65,7 @@ const features = [
     title: "Error Demo",
     path: "/error-demo",
     description: "Error boundary demo - trigger and catch route errors",
-    concepts: ["_error.tsx", "useRouteError", "Error recovery", "Reset effect"]
+    concepts: ["_error.tsx", "currentError", "Error recovery", "Reset effect"]
   }
 ]
 

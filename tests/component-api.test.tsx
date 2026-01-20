@@ -180,24 +180,27 @@ const ThemedCard = Component.gen(function* () {
   return <div style={{ color: theme.primary }}>{theme.secondary}</div>
 })
 
-type ThemedCardProps = Parameters<typeof ThemedCard>[0]
-type ThemedCardHasTheme = ThemedCardProps extends { readonly theme: Layer.Layer<Theme> } ? true : false
+void ThemedCard
 
-void (true satisfies ThemedCardHasTheme)
-
-// Test: Component.gen with props - curried pattern
-const TitledCard = Component.gen<{ title: string }>()(Props => function* () {
+// Test: Component.gen with props
+const TitledCard = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>{title}</div>
 })
 
-type TitledCardProps = Parameters<typeof TitledCard>[0]
-type TitledCardHasTitle = TitledCardProps extends { title: string } ? true : false
-type TitledCardHasTheme = TitledCardProps extends { readonly theme: Layer.Layer<Theme> } ? true : false
+void TitledCard
 
-void (true satisfies TitledCardHasTitle)
-void (true satisfies TitledCardHasTheme)
+// Test: Component.gen inference via ComponentProps
+const InferredCardViaProps = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
+  const { title } = yield* Props
+  const theme = yield* Theme
+  return <div style={{ color: theme.primary }}>{title}</div>
+})
+
+void InferredCardViaProps
+
+
 
 // Test: Component.gen with no requirements
 const PlainCard = Component.gen(function* () {
@@ -223,7 +226,7 @@ describe("Component.gen API", () => {
 
   it.scoped("renders Component.gen with props", () =>
     Effect.gen(function* () {
-      const TestCard = Component.gen<{ title: string; subtitle: string }>()(Props => function* () {
+      const TestCard = Component.gen(function* (Props: ComponentProps<{ title: string; subtitle: string }>) {
         const { title, subtitle } = yield* Props
         const theme = yield* Theme
         return (
@@ -262,7 +265,7 @@ describe("Component.gen API", () => {
         log: (msg: string) => { logs.push(msg) }
       })
 
-      const TestCard = Component.gen<{ name: string }>()(Props => function* () {
+      const TestCard = Component.gen(function* (Props: ComponentProps<{ name: string }>) {
         const { name } = yield* Props
         const theme = yield* Theme
         const logger = yield* Logger

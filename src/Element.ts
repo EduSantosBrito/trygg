@@ -4,7 +4,7 @@
  */
 import { Data, Deferred, Effect } from "effect"
 import type { Signal, EachOptions } from "./Signal.js"
-import { _setEachImpl } from "./Signal.js"
+import { _setEachImpl, peekSync } from "./Signal.js"
 
 /**
  * Check if a value is an Effect
@@ -23,12 +23,24 @@ const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, neve
 export type ElementKey = string | number
 
 /**
- * Event handler type - returns an Effect that will be executed by the renderer
+ * Event handler type - either a function that receives the event and returns an Effect,
+ * or a plain Effect (when you don't need the event).
+ * 
+ * @example
+ * ```tsx
+ * // Function form - when you need the event
+ * <input onInput={(e) => handleInput(e.target.value)} />
+ * 
+ * // Effect form - when you don't need the event
+ * <button onClick={submitForm}>Submit</button>
+ * <button onClick={reset}>Retry</button>
+ * ```
+ * 
  * @since 1.0.0
  */
-export type EventHandler<A = void, E = never, R = never> = (
-  event: Event
-) => Effect.Effect<A, E, R>
+export type EventHandler<A = void, E = never, R = never> = 
+  | ((event: Event) => Effect.Effect<A, E, R>)
+  | Effect.Effect<A, E, R>
 
 /**
  * A Signal of any type (for JSX children)
@@ -43,6 +55,16 @@ type AnySignal = Signal<any>
  * @since 1.0.0
  */
 export type MaybeSignal<T> = T | Signal<T>
+
+export type AttributePrimitive = string | number | boolean
+
+export type AttributeSignal =
+  | Signal<string>
+  | Signal<number>
+  | Signal<boolean>
+  | Signal<AttributePrimitive>
+
+export type AttributeInput = AttributePrimitive | AttributeSignal
 
 /**
  * Valid child types for JSX elements
@@ -66,8 +88,8 @@ export interface BaseProps {
   readonly id?: string
   readonly style?: Readonly<Record<string, string | number>>
   readonly children?: ElementChildren
-  readonly [key: `data-${string}`]: string | undefined
-  readonly [key: `aria-${string}`]: string | undefined
+  readonly [key: `data-${string}`]: AttributeInput | undefined
+  readonly [key: `aria-${string}`]: AttributeInput | undefined
 }
 
 /**
@@ -171,6 +193,20 @@ export type Element = Data.TaggedEnum<{
    */
   readonly SignalText: {
     readonly signal: Signal<unknown>
+  }
+  /**
+   * Reactive element - subscribes to a Signal<Element> and swaps DOM when signal changes.
+   * Enables conditionals without component re-renders via Signal.derive.
+   * @example
+   * ```tsx
+   * const content = yield* Signal.derive(editText, (value) =>
+   *   Option.isSome(value) ? <input /> : <span />
+   * )
+   * return <li>{content}</li>  // No re-render, just DOM swap!
+   * ```
+   */
+  readonly SignalElement: {
+    readonly signal: Signal<Element>
   }
   /**
    * Effect-based component that produces an Element.
@@ -331,7 +367,7 @@ export const isElement = (value: unknown): value is Element =>
   value !== null &&
   "_tag" in value &&
   typeof (value as { _tag: unknown })._tag === "string" &&
-  ["Intrinsic", "Text", "SignalText", "Component", "Fragment", "Suspense", "Portal", "KeyedList"].includes(
+  ["Intrinsic", "Text", "SignalText", "SignalElement", "Component", "Fragment", "Suspense", "Portal", "KeyedList"].includes(
     (value as { _tag: string })._tag
   )
 
@@ -341,6 +377,14 @@ export const isElement = (value: unknown): value is Element =>
  */
 export const signalText = (signal: Signal<unknown>): Element =>
   Element.SignalText({ signal })
+
+/**
+ * Create a reactive element from a Signal<Element>.
+ * Updates DOM directly when signal changes without component re-render.
+ * @since 1.0.0
+ */
+export const signalElement = (signal: Signal<Element>): Element =>
+  Element.SignalElement({ signal })
 
 /**
  * Normalize a child value to an Element
@@ -360,7 +404,13 @@ export const normalizeChild = (child: unknown): Element => {
     return empty
   }
   if (isSignal(child)) {
-    // Signal child - create reactive text node
+    // Signal child - check if it contains an Element or primitive
+    const currentValue = peekSync(child)
+    if (isElement(currentValue)) {
+      // Signal<Element> - use SignalElement for DOM swapping
+      return signalElement(child as Signal<Element>)
+    }
+    // Signal<primitive> - use SignalText for text node updates
     return signalText(child)
   }
   if (isElement(child)) {

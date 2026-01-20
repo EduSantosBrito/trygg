@@ -3,8 +3,8 @@
  *
  * Main settings page accessible at /settings
  */
-import { Effect } from "effect"
-import * as Router from "effect-ui/router"
+import { Effect } from "effect";
+import * as Router from "effect-ui/router";
 
 const SettingsOverview = Effect.gen(function* () {
   return (
@@ -26,7 +26,7 @@ const SettingsOverview = Effect.gen(function* () {
         </div>
       </div>
     </div>
-  )
-})
+  );
+});
 
-export default SettingsOverview
+export default SettingsOverview;

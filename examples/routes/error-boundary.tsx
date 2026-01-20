@@ -9,7 +9,7 @@
  * - Recovery patterns
  */
 import { Context, Data, Effect, Layer } from "effect"
-import { Signal, ErrorBoundary, Component } from "effect-ui"
+import { Signal, ErrorBoundary, Component, type ComponentProps } from "effect-ui"
 
 // =============================================================================
 // Typed Errors
@@ -56,9 +56,9 @@ const defaultErrorTheme = Layer.succeed(ErrorTheme, {
 // =============================================================================
 
 // NetworkErrorDisplay component
-const NetworkErrorDisplay = Component.gen<{
+const NetworkErrorDisplay = Component.gen(function* (Props: ComponentProps<{
   error: NetworkError
-}>()(Props => function* () {
+}>) {
   const { error } = yield* Props
   const theme = yield* ErrorTheme
 
@@ -72,9 +72,9 @@ const NetworkErrorDisplay = Component.gen<{
 })
 
 // ValidationErrorDisplay component
-const ValidationErrorDisplay = Component.gen<{
+const ValidationErrorDisplay = Component.gen(function* (Props: ComponentProps<{
   error: ValidationError
-}>()(Props => function* () {
+}>) {
   const { error } = yield* Props
   const theme = yield* ErrorTheme
 
@@ -88,9 +88,9 @@ const ValidationErrorDisplay = Component.gen<{
 })
 
 // UnknownErrorDisplay component
-const UnknownErrorDisplay = Component.gen<{
+const UnknownErrorDisplay = Component.gen(function* (Props: ComponentProps<{
   error: UnknownError
-}>()(Props => function* () {
+}>) {
   const { error } = yield* Props
   const theme = yield* ErrorTheme
 
@@ -162,11 +162,11 @@ const renderError = (error: AppError) => {
 // Trigger Button Component
 // =============================================================================
 
-const TriggerButton = Component.gen<{
+const TriggerButton = Component.gen(function* (Props: ComponentProps<{
   label: string
   variant: "default" | "danger"
   onClick: () => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, variant, onClick } = yield* Props
   const theme = yield* ErrorTheme
 

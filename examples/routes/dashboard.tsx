@@ -8,7 +8,7 @@
  * - Real-world component patterns
  */
 import { Context, Effect, Layer } from "effect"
-import { Signal, Component } from "effect-ui"
+import { Signal, Component, type ComponentProps } from "effect-ui"
 
 // =============================================================================
 // Services
@@ -76,14 +76,14 @@ const loggerLayer = Layer.succeed(Logger, {
 // =============================================================================
 
 // StatCard - displays a statistic with theme
-const StatCard = Component.gen<{
+const StatCard = Component.gen(function* (Props: ComponentProps<{
   title: string
   value: number | string
   change?: string
-}>()(Props => function* () {
+}>) {
   const { title, value, change } = yield* Props
   const theme = yield* Theme
-  
+
   return (
     <div style={{
       background: theme.cardBackground,
@@ -98,7 +98,7 @@ const StatCard = Component.gen<{
         {value}
       </div>
       {change && (
-        <div style={{ 
+        <div style={{
           color: change.startsWith("+") ? "#28a745" : change.startsWith("-") ? "#dc3545" : theme.textMuted,
           fontSize: "0.875rem",
           marginTop: "0.25rem"
@@ -111,18 +111,18 @@ const StatCard = Component.gen<{
 })
 
 // ActivityItem - displays an activity with theme and analytics
-const ActivityItem = Component.gen<{
+const ActivityItem = Component.gen(function* (Props: ComponentProps<{
   text: string
   time: string
-}>()(Props => function* () {
+}>) {
   const { text, time } = yield* Props
   const theme = yield* Theme
   const analytics = yield* Analytics
-  
+
   const onClick = () => analytics.track("activity_clicked", { text })
-  
+
   return (
-    <div 
+    <div
       onClick={onClick}
       style={{
         padding: "0.75rem",
@@ -137,21 +137,20 @@ const ActivityItem = Component.gen<{
 })
 
 // ActionButton - button with analytics tracking
-const ActionButton = Component.gen<{
+const ActionButton = Component.gen(function* (Props: ComponentProps<{
   label: string
   variant: "primary" | "secondary"
   onClick: () => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, variant, onClick } = yield* Props
   const theme = yield* Theme
   const analytics = yield* Analytics
-  
-  const handleClick = () =>
-    Effect.gen(function* () {
+
+  const handleClick = Effect.gen(function* () {
       yield* analytics.track("button_clicked", { label, variant })
       yield* onClick()
     })
-  
+
   return (
     <button
       onClick={handleClick}
@@ -170,15 +169,15 @@ const ActionButton = Component.gen<{
 })
 
 // Header - uses theme and logger
-const Header = Component.gen<{
+const Header = Component.gen(function* (Props: ComponentProps<{
   userName: string
-}>()(Props => function* () {
+}>) {
   const { userName } = yield* Props
   const theme = yield* Theme
   const logger = yield* Logger
-  
+
   yield* logger.info(`Header rendered for ${userName}`)
-  
+
   return (
     <header style={{
       background: theme.cardBackground,
@@ -204,10 +203,10 @@ const Header = Component.gen<{
 })
 
 // SectionTitle - simple themed section title
-const SectionTitle = Component.gen<{ title: string }>()(Props => function* () {
+const SectionTitle = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props
   const theme = yield* Theme
-  
+
   return (
     <h2 style={{ color: theme.text, marginBottom: "1rem" }}>
       {title}
@@ -222,14 +221,14 @@ const SectionTitle = Component.gen<{ title: string }>()(Props => function* () {
 const DashboardApp = Component.gen(function* () {
   const isDark = yield* Signal.make(false)
   const isDarkValue = yield* Signal.get(isDark)
-  
+
   const currentTheme = isDarkValue ? darkTheme : lightTheme
-  const theme = isDarkValue 
+  const theme = isDarkValue
     ? { name: "Dark", primary: "#4da6ff", background: "#1a1a2e", text: "#e9ecef", cardBackground: "#16213e" }
     : { name: "Light", primary: "#0066cc", background: "#f8f9fa", text: "#212529", cardBackground: "#ffffff" }
-  
+
   const toggleTheme = () => Signal.update(isDark, (v) => !v)
-  
+
   // Sample data
   const activities = [
     { text: "New user registered", time: "2 minutes ago" },
@@ -237,21 +236,21 @@ const DashboardApp = Component.gen(function* () {
     { text: "Payment received", time: "1 hour ago" },
     { text: "Report generated", time: "3 hours ago" }
   ]
-  
+
   return (
-    <div style={{ 
-      minHeight: "100vh", 
+    <div style={{
+      minHeight: "100vh",
       background: theme.background,
       fontFamily: "system-ui, -apple-system, sans-serif",
       margin: "-1.5rem",
       padding: "0"
     }}>
       <Header userName="Developer" theme={currentTheme} logger={loggerLayer} />
-      
+
       <main style={{ padding: "1.5rem", maxWidth: "1200px", margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
           <SectionTitle title="Overview" theme={currentTheme} />
-          <ActionButton 
+          <ActionButton
             label={`Switch to ${isDarkValue ? "Light" : "Dark"}`}
             variant="secondary"
             onClick={toggleTheme}
@@ -259,10 +258,10 @@ const DashboardApp = Component.gen(function* () {
             analytics={analyticsLayer}
           />
         </div>
-        
+
         {/* Stats Grid */}
-        <div style={{ 
-          display: "grid", 
+        <div style={{
+          display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
           gap: "1rem",
           marginBottom: "2rem"
@@ -272,7 +271,7 @@ const DashboardApp = Component.gen(function* () {
           <StatCard title="Orders" value="1,234" change="-3%" theme={currentTheme} />
           <StatCard title="Conversion" value="3.2%" change="+0.5%" theme={currentTheme} />
         </div>
-        
+
         {/* Recent Activity */}
         <SectionTitle title="Recent Activity" theme={currentTheme} />
         <div style={{
@@ -282,26 +281,26 @@ const DashboardApp = Component.gen(function* () {
           boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
         }}>
           {activities.map((activity, i) => (
-            <ActivityItem 
+            <ActivityItem
               key={i}
-              text={activity.text} 
+              text={activity.text}
               time={activity.time}
               theme={currentTheme}
               analytics={analyticsLayer}
             />
           ))}
         </div>
-        
+
         {/* Actions */}
         <div style={{ marginTop: "2rem", display: "flex", gap: "1rem" }}>
-          <ActionButton 
+          <ActionButton
             label="Generate Report"
             variant="primary"
             onClick={() => Effect.log("Generating report...")}
             theme={currentTheme}
             analytics={analyticsLayer}
           />
-          <ActionButton 
+          <ActionButton
             label="Export Data"
             variant="secondary"
             onClick={() => Effect.log("Exporting data...")}
@@ -310,8 +309,8 @@ const DashboardApp = Component.gen(function* () {
           />
         </div>
       </main>
-      
-      <div style={{ 
+
+      <div style={{
         maxWidth: "1200px",
         margin: "0 auto",
         padding: "0 1.5rem 2rem"
@@ -320,26 +319,26 @@ const DashboardApp = Component.gen(function* () {
           background: theme.cardBackground,
         }}>
           <h3 style={{ color: theme.text }}>Component.gen with Multiple Services</h3>
-        <pre style={{ 
+        <pre style={{
           background: theme.background,
           color: theme.text,
         }}>{`// Component requiring Theme + Analytics
-const ActionButton = Component.gen<{
+const ActionButton = Component.gen(function* (Props: ComponentProps<{
   label: string
   onClick: () => Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, onClick } = yield* Props
   const theme = yield* Theme       // Service 1
   const analytics = yield* Analytics  // Service 2
-  
+
   const handleClick = () =>
     Effect.gen(function* () {
       yield* analytics.track("click", { label })
       yield* onClick()
     })
-  
+
   return (
-    <button 
+    <button
       onClick={handleClick}
       style={{ background: theme.primary }}
     >
@@ -350,7 +349,7 @@ const ActionButton = Component.gen<{
 
 // TypeScript infers props:
 // { label, onClick, theme: Layer<Theme>, analytics: Layer<Analytics> }
-<ActionButton 
+<ActionButton
   label="Click me"
   onClick={() => Effect.log("clicked")}
   theme={themeLayer}

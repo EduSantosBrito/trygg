@@ -118,8 +118,8 @@ import {
  * })
  * // TypeScript infers: { theme: Layer<Theme> }
  * 
- * // With props - use curried syntax for full type inference
- * const Card = Component.gen<{ title: string }>()(Props => function* () {
+ * // With props - pass the generator directly
+ * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
  *   const { title } = yield* Props
  *   const theme = yield* Theme
  *   return <div style={{ color: theme.primary }}>{title}</div>
@@ -175,3 +175,24 @@ export {
 // Debug utilities
 // Enable by adding <DevMode /> to your app, or see OBSERVABILITY.md
 export * as Debug from "./debug.js"
+
+// Metrics for observability
+// Counters and histograms for navigation, rendering, and signal updates
+export * as Metrics from "./metrics.js"
+
+// SafeUrl validation for secure href/src attributes
+// Validates URLs against a configurable scheme allowlist
+export * as SafeUrl from "./SafeUrl.js"
+export { UnsafeUrlError } from "./SafeUrl.js"
+
+// Test server for LLM observability
+// Use Debug.serverLayer() to start server with debug plugin integration
+// Access the server via TestServer context tag
+export { 
+  TestServer,
+  type TestServerService, 
+  type TestServerConfig,
+  type StoredLogEvent,
+  type LogLevel,
+  type QueryOptions
+} from "./test-server.js"

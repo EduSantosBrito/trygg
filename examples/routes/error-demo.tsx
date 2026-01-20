@@ -46,7 +46,7 @@ const ErrorDemo = Effect.gen(function* () {
         <h3>How it works</h3>
         <ul style={{ marginTop: "0.5rem", paddingLeft: "1.5rem" }}>
           <li><code>_error.tsx</code> in the routes directory catches route errors</li>
-          <li>Use <code>Router.useRouteError()</code> to access error details</li>
+          <li>Use <code>Router.currentError</code> to access error details</li>
           <li>The <code>reset</code> effect can be used to retry the route</li>
           <li>Error boundaries are inherited - child routes use parent error boundaries</li>
         </ul>

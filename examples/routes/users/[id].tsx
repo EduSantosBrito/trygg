@@ -6,22 +6,44 @@
  * - Type-safe params extraction with Router.params()
  * - Route params inferred from file name [id].tsx
  */
-import { Effect } from "effect"
-import * as Router from "effect-ui/router"
+import { Component } from "effect-ui";
+import * as Router from "effect-ui/router";
 
 // Mock user data
-const users: Record<string, { name: string; email: string; role: string; joined: string }> = {
-  "1": { name: "Alice Johnson", email: "alice@example.com", role: "Admin", joined: "2023-01-15" },
-  "2": { name: "Bob Smith", email: "bob@example.com", role: "Developer", joined: "2023-03-22" },
-  "3": { name: "Charlie Brown", email: "charlie@example.com", role: "Designer", joined: "2023-06-10" },
-  "4": { name: "Diana Prince", email: "diana@example.com", role: "Manager", joined: "2023-02-01" },
-}
+const users: Record<
+  string,
+  { name: string; email: string; role: string; joined: string }
+> = {
+  "1": {
+    name: "Alice Johnson",
+    email: "alice@example.com",
+    role: "Admin",
+    joined: "2023-01-15",
+  },
+  "2": {
+    name: "Bob Smith",
+    email: "bob@example.com",
+    role: "Developer",
+    joined: "2023-03-22",
+  },
+  "3": {
+    name: "Charlie Brown",
+    email: "charlie@example.com",
+    role: "Designer",
+    joined: "2023-06-10",
+  },
+  "4": {
+    name: "Diana Prince",
+    email: "diana@example.com",
+    role: "Manager",
+    joined: "2023-02-01",
+  },
+};
 
-export default Effect.gen(function* () {
-  // Get the :id param from the route - type-safe!
-  const { id } = yield* Router.params<{ id: string }>()
+const Users = Component.gen(function* () {
+  const { id } = yield* Router.params("/users/:id");
 
-  const user = users[id]
+  const user = users[id];
 
   if (!user) {
     return (
@@ -30,7 +52,7 @@ export default Effect.gen(function* () {
         <p>No user with ID "{id}" exists.</p>
         <Router.Link to="/users">Back to Users</Router.Link>
       </div>
-    )
+    );
   }
 
   return (
@@ -56,15 +78,16 @@ export default Effect.gen(function* () {
       <div className="type-safe-demo">
         <h3>Type-Safe Params</h3>
         <pre>{`// The file [id].tsx creates a route /users/:id
-// Router.params() extracts the id type-safely:
+// Router.params() extracts the id type-safely from the path:
 
-const { id } = yield* Router.params<{ id: string }>()
+const { id } = yield* Router.params("/users/:id")
 // id = "${id}"
 
-// With generated RouteMap types, TypeScript knows:
-// - /users/:id requires { id: string }
-// - Link to="/users/:id" must include params prop`}</pre>
+// TypeScript infers { readonly id: string } from the path pattern
+// Link to="/users/:id" must include params prop`}</pre>
       </div>
     </div>
-  )
-})
+  );
+});
+
+export default Users;

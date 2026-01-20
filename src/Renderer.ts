@@ -13,21 +13,24 @@ import {
   FiberRef,
   Layer,
   Match,
+  Option,
   Runtime,
   Scope
 } from "effect"
-import { Element, type ElementProps, type EventHandler } from "./Element.js"
+import { Element, isElement, type ElementProps, type EventHandler } from "./Element.js"
 import * as Signal from "./Signal.js"
 import * as Debug from "./debug.js"
+import * as Metrics from "./metrics.js"
 import * as Router from "./router/index.js"
+import * as SafeUrl from "./SafeUrl.js"
 
 /**
- * Type guard to check if a value is an EventHandler
+ * Type guard to check if a value is an EventHandler (function or Effect)
  * This asserts the type at the boundary where we iterate over props
  * @internal
  */
 const isEventHandler = (value: unknown): value is EventHandler =>
-  typeof value === "function"
+  typeof value === "function" || Effect.isEffect(value)
 
 /**
  * Error thrown when a Portal target cannot be found
@@ -143,6 +146,23 @@ const applyPropValue = (
     }
   } else if (key.startsWith("data-") || key.startsWith("aria-")) {
     node.setAttribute(key, String(value))
+  } else if (key === "href" || key === "src") {
+    // Validate href/src for security - only allow safe URL schemes
+    const url = String(value)
+    const validated = SafeUrl.validateSync(url)
+    if (Option.isSome(validated)) {
+      node.setAttribute(key, validated.value)
+    } else {
+      // Unsafe URL - emit warning and skip attribute
+      // Note: This is sync path, so we use console.warn directly
+      // Debug.log is Effect-based and would need runtime context
+      const config = SafeUrl.getConfig()
+      console.warn(
+        `[effect-ui] Blocked unsafe ${key}="${url}". ` +
+        `Allowed schemes: ${config.allowedSchemes.join(", ")}. ` +
+        `See SafeUrl.allowSchemes() to add custom schemes.`
+      )
+    }
   } else if (key !== "children" && key !== "key" && typeof value !== "function") {
     // Generic attribute
     if (typeof value === "boolean") {
@@ -176,7 +196,10 @@ const applyProps = Effect.fn("applyProps")(function* (
       const eventName = key.slice(2).toLowerCase()
       const handler = value
       const listener = (event: Event) => {
-        const effect = handler(event)
+        // Support both function handlers and plain Effects
+        const effect = typeof handler === "function" 
+          ? handler(event)
+          : handler
         Runtime.runFork(runtime)(effect)
       }
       node.addEventListener(eventName, listener)
@@ -187,32 +210,31 @@ const applyProps = Effect.fn("applyProps")(function* (
       const initialValue = yield* Signal.get(value)
       applyPropValue(node, key, initialValue)
       
-      Debug.log({
-        event: "render.signaltext.initial",
-        signal_id: value._debugId,
-        value: initialValue,
-        element_tag: node.tagName.toLowerCase(),
-        trigger: `prop:${key}`
-      })
+        yield* Debug.log({
+          event: "render.signaltext.initial",
+          signal_id: value._debugId,
+          value: initialValue,
+          element_tag: node.tagName.toLowerCase(),
+          trigger: `prop:${key}`
+        })
       
       // Subscribe to signal changes - update DOM directly
-      // Using Runtime.runSync with captured runtime for sync callbacks
-      const unsubscribe = Signal.subscribe(value, () => {
-        Runtime.runSync(runtime)(
-          Effect.gen(function* () {
-            const newValue = yield* Signal.get(value)
-            Debug.log({
-              event: "render.signaltext.update",
-              signal_id: value._debugId,
-              value: newValue,
-              element_tag: node.tagName.toLowerCase(),
-              trigger: `prop:${key}`
-            })
-            applyPropValue(node, key, newValue)
+      // Listener returns Effect which is run inside notifyListeners
+      const unsubscribe = yield* Signal.subscribe(value, () =>
+        Effect.gen(function* () {
+          const newValue = yield* Signal.get(value)
+          yield* Debug.log({
+            event: "render.signaltext.update",
+            signal_id: value._debugId,
+            value: newValue,
+            element_tag: node.tagName.toLowerCase(),
+            trigger: `prop:${key}`
           })
-        )
-      })
-      cleanups.push(unsubscribe)
+          applyPropValue(node, key, newValue)
+        })
+      )
+      // unsubscribe is an Effect, wrap in sync runner for cleanup array
+      cleanups.push(() => Runtime.runSync(runtime)(unsubscribe))
     } else {
       // Static prop value
       applyPropValue(node, key, value)
@@ -250,33 +272,104 @@ const renderElement = (
         const node = document.createTextNode(String(initialValue))
         parent.appendChild(node)
 
-        Debug.log({
+        yield* Debug.log({
           event: "render.signaltext.initial",
           signal_id: signal._debugId,
           value: initialValue
         })
 
         // Subscribe to signal changes for fine-grained updates
-        // Using Runtime.runSync with captured runtime for sync callbacks
-        const unsubscribe = Signal.subscribe(signal, () => {
-          Runtime.runSync(runtime)(
-            Effect.gen(function* () {
-              const value = yield* Signal.get(signal)
-              Debug.log({
-                event: "render.signaltext.update",
-                signal_id: signal._debugId,
-                value: value
-              })
-              node.textContent = String(value)
+        // Listener returns Effect which is run inside notifyListeners
+        const unsubscribe = yield* Signal.subscribe(signal, () =>
+          Effect.gen(function* () {
+            const value = yield* Signal.get(signal)
+            yield* Debug.log({
+              event: "render.signaltext.update",
+              signal_id: signal._debugId,
+              value: value
             })
-          )
-        })
+            node.textContent = String(value)
+          })
+        )
 
         return {
           node,
-          cleanup: Effect.sync(() => {
-            unsubscribe()
+          cleanup: Effect.gen(function* () {
+            yield* unsubscribe
             node.remove()
+          })
+        }
+      })
+    ),
+
+    Match.tag("SignalElement", ({ signal }) =>
+      Effect.gen(function* () {
+        // Create anchor comment for positioning
+        const anchor = document.createComment("signal-element")
+        parent.appendChild(anchor)
+
+        // State to track current rendered content
+        let currentResult: RenderResult | null = null
+        let isUnmounted = false
+
+        // Helper to render Element or convert primitive to Text
+        const renderValue = (value: unknown): Element =>
+          isElement(value) ? value : Element.Text({ content: String(value) })
+
+        // Render initial value
+        const initialValue = yield* Signal.get(signal)
+        const initialElement = renderValue(initialValue)
+        currentResult = yield* renderElement(initialElement, parent, runtime)
+        // Move rendered content before anchor
+        parent.insertBefore(currentResult.node, anchor)
+
+        yield* Debug.log({
+          event: "render.signalelement.initial",
+          signal_id: signal._debugId
+        })
+
+        // Subscribe to signal changes
+        // Use sync Effect that forks scoped work (same pattern as Component re-render)
+        const unsubscribe = yield* Signal.subscribe(signal, () =>
+          Effect.sync(() => {
+            if (isUnmounted) return
+
+            // Fork scoped effect to handle DOM swap
+            Runtime.runFork(runtime)(
+              Effect.scoped(
+                Effect.gen(function* () {
+                  const newValue = yield* Signal.get(signal)
+                  const newElement = renderValue(newValue)
+
+                  // Cleanup old content
+                  if (currentResult !== null) {
+                    yield* currentResult.cleanup
+                  }
+
+                  // Render new content
+                  currentResult = yield* renderElement(newElement, parent, runtime)
+                  // Position before anchor
+                  parent.insertBefore(currentResult.node, anchor)
+
+                  yield* Debug.log({
+                    event: "render.signalelement.swap",
+                    signal_id: signal._debugId
+                  })
+                })
+              )
+            )
+          })
+        )
+
+        return {
+          node: anchor,
+          cleanup: Effect.gen(function* () {
+            isUnmounted = true
+            yield* unsubscribe
+            if (currentResult !== null) {
+              yield* currentResult.cleanup
+            }
+            anchor.remove()
           })
         }
       })
@@ -286,7 +379,7 @@ const renderElement = (
       Effect.gen(function* () {
         const node = document.createElement(tag)
         
-        Debug.log({
+        yield* Debug.log({
           event: "render.intrinsic",
           element_tag: tag
         })
@@ -340,8 +433,8 @@ const renderElement = (
         // Create render phase for this component (persists across re-renders)
         const renderPhase = yield* Signal.makeRenderPhase
 
-        // Track active subscription cleanups
-        let subscriptionCleanups: Array<() => void> = []
+        // Track active subscription cleanups (each is an Effect that unsubscribes)
+        let subscriptionCleanups: Array<Effect.Effect<void>> = []
 
         // Helper to render and position content before the anchor
         // IMPORTANT: Use anchor.parentNode instead of captured parent because
@@ -373,16 +466,16 @@ const renderElement = (
           }
 
           renderCount++
-          Debug.log({
-            event: "render.component.rerender",
-            trigger: "signal change",
-            accessed_signals: renderPhase.accessed.size
-          })
+          // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
+          // The Debug.log below is triggered from within the Effect.gen that follows
 
           // Re-render
           Runtime.runFork(runtime)(
             Effect.scoped(
               Effect.gen(function* () {
+                // Track re-render duration
+                const rerenderStart = performance.now()
+                
                 // Clean up old render
                 if (currentResult !== null) {
                   yield* currentResult.cleanup
@@ -401,6 +494,11 @@ const renderElement = (
 
                 // Render and position new content
                 currentResult = yield* renderAndPosition(newChildElement)
+                const rerenderDuration = performance.now() - rerenderStart
+                
+                // Record render metrics for re-render
+                yield* Metrics.recordComponentRender
+                yield* Metrics.recordRenderDuration(rerenderDuration)
                 
                 // Check if another re-render was requested during this render
                 const needsAnotherRender = pendingRerender
@@ -417,8 +515,8 @@ const renderElement = (
               })
             ).pipe(
               Effect.tapErrorCause((cause) => 
-                Effect.sync(() => {
-                  Debug.log({
+                Effect.gen(function* () {
+                  yield* Debug.log({
                     event: "render.component.rerender",
                     trigger: "error",
                     reason: String(cause)
@@ -432,15 +530,10 @@ const renderElement = (
         }
 
         // Schedule a re-render via microtask
+        // Note: scheduleRerender is sync because it's called from signal listeners
+        // and must complete synchronously. Logging happens in the rerender Effect.
         scheduleRerender = () => {
           if (isUnmounted) return
-          
-          Debug.log({
-            event: "render.schedule",
-            is_rerendering: isRerendering,
-            pending_rerender: pendingRerender,
-            accessed_signals: renderPhase.accessed.size
-          })
           
           if (isRerendering) {
             // Mark that we need another re-render after the current one completes
@@ -452,28 +545,33 @@ const renderElement = (
           queueMicrotask(doRerender)
         }
 
-        // Function to subscribe to accessed signals using sync callbacks
-        const subscribeToSignals = (
+        // Function to subscribe to accessed signals
+        // Returns Effects for unsubscribing
+        const subscribeToSignals: (
           signals: Set<Signal.Signal<unknown>>
-        ): Effect.Effect<void> =>
-          Effect.sync(() => {
+        ) => Effect.Effect<void> = Effect.fnUntraced(
+          function* (signals: Set<Signal.Signal<unknown>>) {
             // Clear old subscriptions
             const oldCleanups = subscriptionCleanups
             for (const cleanup of oldCleanups) {
-              cleanup()
+              yield* cleanup
             }
             subscriptionCleanups = []
 
             if (signals.size === 0) return
 
             for (const signal of signals) {
-              // Use sync callback subscription
-              const unsubscribe = Signal.subscribe(signal, scheduleRerender)
+              // Subscribe with Effect-based listener that triggers sync rerender
+              const unsubscribe = yield* Signal.subscribe(signal, () =>
+                Effect.sync(scheduleRerender)
+              )
               subscriptionCleanups.push(unsubscribe)
             }
-          })
+          }
+        )
 
-        // Execute the component effect with render phase context
+        // Execute the component effect with render phase context and track duration
+        const renderStart = performance.now()
         const childElement = yield* Effect.locally(
           effect,
           Signal.CurrentRenderPhase,
@@ -482,12 +580,18 @@ const renderElement = (
 
         // Render and position the content
         currentResult = yield* renderAndPosition(childElement)
+        const renderDuration = performance.now() - renderStart
         renderCount++
         
-        Debug.log({
+        yield* Debug.log({
           event: "render.component.initial",
-          accessed_signals: renderPhase.accessed.size
+          accessed_signals: renderPhase.accessed.size,
+          duration_ms: renderDuration
         })
+        
+        // Record render metrics
+        yield* Metrics.recordComponentRender
+        yield* Metrics.recordRenderDuration(renderDuration)
 
         // Subscribe to accessed signals for reactivity
         yield* subscribeToSignals(renderPhase.accessed)
@@ -498,7 +602,7 @@ const renderElement = (
             isUnmounted = true
             // Clean up signal subscriptions
             for (const cleanup of subscriptionCleanups) {
-              cleanup()
+              yield* cleanup
             }
             subscriptionCleanups = []
             // Clean up rendered content
@@ -633,17 +737,68 @@ const renderElement = (
         const listParent = parent
         listParent.appendChild(anchor)
 
-        // Track item states by key: { renderPhase, result, node, index }
+        // Track item states by key
         type ItemState = {
           renderPhase: Signal.RenderPhase
           result: RenderResult
           node: Node
           item: unknown
-          subscriptionCleanups: Array<() => void>
+          /** Map from signal debugId to unsubscribe Effect */
+          subscriptions: Map<string, Effect.Effect<void>>
         }
         const itemStates = new Map<string | number, ItemState>()
         const keyOrder: Array<string | number> = []
         let isUnmounted = false
+
+        /**
+         * Compute Longest Increasing Subsequence indices.
+         * Returns indices in the input array that form the LIS.
+         * Used to determine which nodes don't need to move during reorder.
+         * @internal
+         */
+        const computeLIS = (arr: ReadonlyArray<number>): ReadonlyArray<number> => {
+          const n = arr.length
+          if (n === 0) return []
+          
+          // dp[i] = smallest ending value for IS of length i+1
+          const dp: Array<number> = []
+          // parent[i] = index of previous element in LIS ending at i
+          const parent: Array<number> = new Array(n).fill(-1)
+          // pos[i] = index in arr where dp[i] came from
+          const pos: Array<number> = []
+          
+          for (let i = 0; i < n; i++) {
+            const val = arr[i]
+            if (val === undefined) continue
+            
+            // Binary search for position
+            let lo = 0
+            let hi = dp.length
+            while (lo < hi) {
+              const mid = (lo + hi) >>> 1
+              const dpMid = dp[mid]
+              if (dpMid !== undefined && dpMid < val) {
+                lo = mid + 1
+              } else {
+                hi = mid
+              }
+            }
+            
+            dp[lo] = val
+            pos[lo] = i
+            parent[i] = lo > 0 ? (pos[lo - 1] ?? -1) : -1
+          }
+          
+          // Reconstruct LIS
+          const lisIndices: Array<number> = []
+          let k = pos[dp.length - 1]
+          while (k !== undefined && k !== -1) {
+            lisIndices.push(k)
+            k = parent[k]
+          }
+          lisIndices.reverse()
+          return lisIndices
+        }
 
         // Helper to render a single item with a stable render phase
         const renderItem = Effect.fn("renderItem")(function* (
@@ -672,18 +827,80 @@ const renderElement = (
           return { renderPhase, result }
         })
 
+        /**
+         * Diff subscriptions: unsubscribe from removed signals, subscribe to new ones.
+         * Reuses existing subscriptions for signals that are still accessed.
+         * @internal
+         */
+        const diffSubscriptions: (
+          key: string | number,
+          state: ItemState,
+          newAccessed: Set<Signal.Signal<unknown>>,
+          scheduleRerender: () => Effect.Effect<void>
+        ) => Effect.Effect<void> = Effect.fnUntraced(
+          function* (
+            key: string | number,
+            state: ItemState,
+            newAccessed: Set<Signal.Signal<unknown>>,
+            scheduleRerender: () => Effect.Effect<void>
+          ) {
+            const oldSubs = state.subscriptions
+            const newSubs = new Map<string, Effect.Effect<void>>()
+            
+            // Build set of new signal IDs
+            const newSignalIds = new Set<string>()
+            for (const signal of newAccessed) {
+              newSignalIds.add(signal._debugId)
+            }
+            
+            // Unsubscribe from signals no longer accessed
+            for (const [signalId, unsubscribe] of oldSubs) {
+              if (!newSignalIds.has(signalId)) {
+                yield* unsubscribe
+                yield* Debug.log({
+                  event: "render.keyedlist.subscription.remove",
+                  key,
+                  signal_id: signalId
+                })
+              }
+            }
+            
+            // Subscribe to new signals, reuse existing subscriptions
+            for (const signal of newAccessed) {
+              const existingUnsub = oldSubs.get(signal._debugId)
+              if (existingUnsub !== undefined) {
+                // Reuse existing subscription
+                newSubs.set(signal._debugId, existingUnsub)
+              } else {
+                // New subscription needed
+                const unsubscribe = yield* Signal.subscribe(signal, scheduleRerender)
+                newSubs.set(signal._debugId, unsubscribe)
+                yield* Debug.log({
+                  event: "render.keyedlist.subscription.add",
+                  key,
+                  signal_id: signal._debugId
+                })
+              }
+            }
+            
+            state.subscriptions = newSubs
+          }
+        )
+
         // Function to update the list
+        // Note: updateList is sync because it's called from signal listener,
+        // but it immediately forks an Effect for the actual work.
         const updateList = (): void => {
           if (isUnmounted) return
-
-          Debug.log({
-            event: "render.keyedlist.update",
-            current_keys: keyOrder.length
-          })
 
           Runtime.runFork(runtime)(
             Effect.scoped(
               Effect.gen(function* () {
+                yield* Debug.log({
+                  event: "render.keyedlist.update",
+                  current_keys: keyOrder.length
+                })
+                
                 // Get current items from source signal
                 const items = yield* Signal.get(source)
                 
@@ -691,26 +908,61 @@ const renderElement = (
                 const newKeys = items.map((item, i) => keyFn(item, i))
                 const newKeySet = new Set(newKeys)
                 
+                // Build map of old key -> old index for LIS calculation
+                const oldKeyToIndex = new Map<string | number, number>()
+                for (let i = 0; i < keyOrder.length; i++) {
+                  const key = keyOrder[i]
+                  if (key !== undefined) {
+                    oldKeyToIndex.set(key, i)
+                  }
+                }
+                
                 // Remove items that are no longer in the list
                 for (const key of keyOrder) {
                   if (!newKeySet.has(key)) {
                     const state = itemStates.get(key)
                     if (state) {
                       // Clean up subscriptions
-                      for (const cleanup of state.subscriptionCleanups) {
-                        cleanup()
+                      for (const [, unsubscribe] of state.subscriptions) {
+                        yield* unsubscribe
                       }
                       // Clean up rendered content
                       yield* state.result.cleanup
                       itemStates.delete(key)
+                      yield* Debug.log({
+                        event: "render.keyedlist.item.remove",
+                        key
+                      })
                     }
                   }
                 }
 
-                // Track new order for DOM positioning
-                const newItemStates: Array<{ key: string | number; state: ItemState; isNew: boolean }> = []
+                // Compute old indices for existing items in new order
+                // -1 means new item (not in old list)
+                const oldIndicesInNewOrder: Array<number> = []
+                for (const key of newKeys) {
+                  if (key === undefined) continue
+                  const oldIndex = oldKeyToIndex.get(key)
+                  oldIndicesInNewOrder.push(oldIndex ?? -1)
+                }
+                
+                // Filter to only existing items (non-negative indices) for LIS
+                const existingIndices = oldIndicesInNewOrder.filter(i => i >= 0)
+                const lisIndices = new Set(computeLIS(existingIndices))
+                
+                // Track which existing items (by their old index) are in LIS
+                const stableOldIndices = new Set<number>()
+                let lisIdx = 0
+                for (const oldIdx of existingIndices) {
+                  if (lisIndices.has(lisIdx)) {
+                    stableOldIndices.add(oldIdx)
+                  }
+                  lisIdx++
+                }
 
-                // Render new/update existing items
+                // Render new items and collect all states in new order
+                const newItemStates: Array<{ key: string | number; state: ItemState; isNew: boolean; needsMove: boolean }> = []
+
                 for (let i = 0; i < items.length; i++) {
                   const item = items[i]
                   const key = newKeys[i]
@@ -718,22 +970,30 @@ const renderElement = (
                   if (key === undefined) continue
                   
                   const existingState = itemStates.get(key)
+                  const oldIndex = oldKeyToIndex.get(key)
                   
-                  if (existingState !== undefined) {
-                    // Item exists - check if item data changed
-                    // For now, we keep the existing render (item identity preserved)
-                    // Update the stored item reference
+                  if (existingState !== undefined && oldIndex !== undefined) {
+                    // Item exists - update stored item reference
                     existingState.item = item
-                    newItemStates.push({ key, state: existingState, isNew: false })
+                    // Check if this item needs to move (not in LIS)
+                    const needsMove = !stableOldIndices.has(oldIndex)
+                    newItemStates.push({ key, state: existingState, isNew: false, needsMove })
                   } else {
                     // New item - create new state
                     const { renderPhase, result } = yield* renderItem(item, i, null)
                     
+                    const state: ItemState = {
+                      renderPhase,
+                      result,
+                      node: result.node,
+                      item,
+                      subscriptions: new Map()
+                    }
+                    
                     // Set up subscriptions for this item's accessed signals
-                    const subscriptionCleanups: Array<() => void> = []
-                    for (const signal of renderPhase.accessed) {
-                      const unsubscribe = Signal.subscribe(signal, () => {
-                        // Re-render just this item when its signals change
+                    // scheduleItemRerender returns an Effect that triggers rerender
+                    const scheduleItemRerender = (): Effect.Effect<void> =>
+                      Effect.sync(() => {
                         if (isUnmounted) return
                         const currentState = itemStates.get(key)
                         if (currentState === undefined) return
@@ -741,11 +1001,6 @@ const renderElement = (
                         Runtime.runFork(runtime)(
                           Effect.scoped(
                             Effect.gen(function* () {
-                              // Clean up old subscriptions
-                              for (const cleanup of currentState.subscriptionCleanups) {
-                                cleanup()
-                              }
-                              
                               // Re-render with same phase (preserves signals)
                               const { result: newResult } = yield* renderItem(
                                 currentState.item,
@@ -766,42 +1021,57 @@ const renderElement = (
                               currentState.result = newResult
                               currentState.node = newResult.node
                               
-                              // Set up new subscriptions
-                              currentState.subscriptionCleanups = []
-                              for (const sig of currentState.renderPhase.accessed) {
-                                const unsub = Signal.subscribe(sig, () => {
-                                  // Trigger re-render (recursive, but that's ok)
-                                  const state = itemStates.get(key)
-                                  if (state) {
-                                    // Just mark as needing update - will be handled by same mechanism
-                                  }
-                                })
-                                currentState.subscriptionCleanups.push(unsub)
-                              }
+                              // Diff subscriptions (reuse stable ones)
+                              yield* diffSubscriptions(
+                                key,
+                                currentState,
+                                currentState.renderPhase.accessed,
+                                scheduleItemRerender
+                              )
                             })
                           )
                         )
                       })
-                      subscriptionCleanups.push(unsubscribe)
-                    }
                     
-                    const state: ItemState = {
-                      renderPhase,
-                      result,
-                      node: result.node,
-                      item,
-                      subscriptionCleanups
-                    }
+                    // Initial subscription setup
+                    yield* diffSubscriptions(key, state, renderPhase.accessed, scheduleItemRerender)
+                    
                     itemStates.set(key, state)
-                    newItemStates.push({ key, state, isNew: true })
+                    newItemStates.push({ key, state, isNew: true, needsMove: false })
+                    yield* Debug.log({
+                      event: "render.keyedlist.item.add",
+                      key
+                    })
                   }
                 }
 
-                // Reorder DOM nodes to match new order
-                // Insert each node before the anchor, in order
-                for (const { state } of newItemStates) {
-                  listParent.insertBefore(state.node, anchor)
+                // Reorder DOM nodes using minimal moves (LIS optimization)
+                // Process from end to start, keeping track of next sibling reference
+                // Nodes in LIS stay in place; only move nodes not in LIS
+                let moveCount = 0
+                let nextSibling: Node = anchor
+                
+                // Iterate in reverse to build correct order
+                for (let i = newItemStates.length - 1; i >= 0; i--) {
+                  const entry = newItemStates[i]
+                  if (entry === undefined) continue
+                  const { state, isNew, needsMove } = entry
+                  
+                  if (isNew || needsMove) {
+                    // Insert/move this node before the next sibling
+                    listParent.insertBefore(state.node, nextSibling)
+                    moveCount++
+                  }
+                  // Update next sibling reference for the next iteration
+                  nextSibling = state.node
                 }
+                
+                yield* Debug.log({
+                  event: "render.keyedlist.reorder",
+                  total_items: newItemStates.length,
+                  moves: moveCount,
+                  stable_nodes: newItemStates.length - moveCount
+                })
 
                 // Update key order
                 keyOrder.length = 0
@@ -819,18 +1089,21 @@ const renderElement = (
         yield* Effect.sync(updateList)
 
         // Subscribe to source signal changes
-        const unsubscribeSource = Signal.subscribe(source, updateList)
+        // updateList returns void but is wrapped in sync Effect by the listener
+        const unsubscribeSource = yield* Signal.subscribe(source, () =>
+          Effect.sync(updateList)
+        )
 
         return {
           node: anchor,
           cleanup: Effect.gen(function* () {
             isUnmounted = true
-            unsubscribeSource()
+            yield* unsubscribeSource
             
             // Clean up all items
             for (const [, state] of itemStates) {
-              for (const cleanup of state.subscriptionCleanups) {
-                cleanup()
+              for (const [, unsubscribe] of state.subscriptions) {
+                yield* unsubscribe
               }
               yield* state.result.cleanup
             }
@@ -871,14 +1144,26 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
         // Set up render context
         yield* FiberRef.set(CurrentRenderContext, { runtime, scope })
 
-        // Clear container
-        container.innerHTML = ""
+        // Create an anchor comment to mark the mount point
+        // This replaces innerHTML="" clearing - we only manage our own nodes
+        const mountAnchor = document.createComment("effect-ui-mount")
+        container.appendChild(mountAnchor)
 
-        // Render the element tree
+        // Render the element tree - content is inserted before the anchor
+        // by the renderElement function (for Component, Fragment, etc.)
+        // For elements that append directly, they go after existing content
         const result = yield* renderElement(element, container, runtime)
+        
+        // Move rendered content before the anchor for consistent ordering
+        container.insertBefore(result.node, mountAnchor)
 
-        // Register cleanup on scope finalization
-        yield* Effect.addFinalizer(() => result.cleanup)
+        // Register cleanup on scope finalization using acquireRelease pattern
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            yield* result.cleanup
+            mountAnchor.remove()
+          })
+        )
       }
     )
 

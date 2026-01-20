@@ -9,7 +9,7 @@
  * - List operations (add, remove, toggle)
  */
 import { Context, Effect, Layer, Option } from "effect"
-import { Signal, Component } from "effect-ui"
+import { Signal, Component, type ComponentProps } from "effect-ui"
 
 // =============================================================================
 // Types
@@ -48,11 +48,11 @@ const defaultTodoTheme = Layer.succeed(TodoTheme, {
 // =============================================================================
 
 // TodoInput component
-const TodoInput = Component.gen<{
+const TodoInput = Component.gen(function* (Props: ComponentProps<{
   value: Signal.Signal<string>
   onSubmit: () => Effect.Effect<void>
   onInput: (e: Event) => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { value, onSubmit, onInput } = yield* Props
   const theme = yield* TodoTheme
   
@@ -77,12 +77,12 @@ const TodoInput = Component.gen<{
 })
 
 // FilterButton component
-const FilterButton = Component.gen<{
+const FilterButton = Component.gen(function* (Props: ComponentProps<{
   label: string
   count: number
   isActive: boolean
   onClick: () => Effect.Effect<void>
-}>()(Props => function* () {
+}>) {
   const { label, count, isActive, onClick } = yield* Props
   const theme = yield* TodoTheme
   

@@ -161,7 +161,7 @@ mount(container, Header.pipe(Effect.provide(themeLayer)))
 For typed props and automatic layer injection, use `Component.gen`:
 
 ```tsx
-import { Component } from "effect-ui"
+import { Component, type ComponentProps } from "effect-ui"
 
 // Without props
 const ThemedCard = Component.gen(function* () {
@@ -170,8 +170,8 @@ const ThemedCard = Component.gen(function* () {
 })
 // Props inferred: { theme: Layer<Theme> }
 
-// With props (curried syntax)
-const Card = Component.gen<{ title: string }>()(Props => function* () {
+// With props (direct syntax)
+const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>{title}</div>
@@ -202,6 +202,17 @@ Filter events:
 ```
 
 See [OBSERVABILITY.md](./OBSERVABILITY.md) for the full event reference.
+
+## Agent Skills
+
+effect-ui provides [Agent Skills](https://agentskills.io/) for LLM agents:
+
+- **effect-ui-core** - Components, Signals, reactivity
+- **effect-ui-router** - File-based routing, navigation
+- **effect-ui-testing** - Testing with Effect Vitest
+- **effect-ui-observability** - Debug events, tracing, metrics
+
+Skills are discovered automatically by compatible agents. See [skills/README.md](./skills/README.md) for details.
 
 ## Examples
 
@@ -285,10 +296,12 @@ await handle.dispose()
 | Export | Description |
 |--------|-------------|
 | `Router.Link` | Navigation link component |
-| `Router.NavLink` | Link with active state styling |
+| `Router.isActive(path, exact?)` | Check if a path is currently active |
 | `Router.Outlet` | Renders matched route |
 | `Router.browserLayer` | Browser router layer (included by default) |
 | `Router.testLayer(path)` | In-memory router for testing |
+
+**Note:** `NavLink` is deprecated. Use `Link` with `Router.isActive()` for active state styling.
 
 ## License
 
