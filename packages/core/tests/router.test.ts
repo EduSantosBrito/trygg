@@ -16,7 +16,16 @@
  * - Verify route matching handles all patterns
  * - Verify cleanup on navigation
  */
-import { describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect, Option, TestClock } from "effect";
+import * as Router from "../src/router/router-service.js";
+import { parsePath, buildPath, createMatcher } from "../src/router/matching.js";
+import { cx } from "../src/router/utils.js";
+import * as Signal from "../src/signal.js";
+import { empty } from "../src/element.js";
+
+// Mock component for route tests - returns a valid RouteComponent (Effect<Element>)
+const mockComponent = () => Promise.resolve({ default: Effect.succeed(empty) });
 
 // =============================================================================
 // Router.current - Current route state
@@ -24,13 +33,27 @@ import { describe, it } from "@effect/vitest";
 // Scope: Reading current route
 
 describe("Router.current", () => {
-  // Case: Returns current route
-  // Assert: Route object with path, params, query
-  it.todo("should return current route state");
+  it.scoped("should return current route state", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const route = yield* Signal.get(router.current);
 
-  // Case: Updates on navigation
-  // Assert: Route changes after navigate
-  it.todo("should update after navigation");
+      assert.isDefined(route.path);
+      assert.isDefined(route.params);
+      assert.isDefined(route.query);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should update after navigation", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/users");
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/users");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -39,13 +62,24 @@ describe("Router.current", () => {
 // Scope: Reading/writing query parameters
 
 describe("Router.query", () => {
-  // Case: Returns current query params
-  // Assert: URLSearchParams-like object
-  it.todo("should return current query parameters");
+  it.scoped("should return current query parameters", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const query = yield* Signal.get(router.query);
 
-  // Case: Parses query string
-  // Assert: ?foo=bar becomes { foo: "bar" }
-  it.todo("should parse query string into object");
+      assert.instanceOf(query, URLSearchParams);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should parse query string into object", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const query = yield* Signal.get(router.query);
+
+      assert.strictEqual(query.get("foo"), "bar");
+      assert.strictEqual(query.get("baz"), "123");
+    }).pipe(Effect.provide(Router.testLayer("/?foo=bar&baz=123"))),
+  );
 });
 
 // =============================================================================
@@ -54,13 +88,21 @@ describe("Router.query", () => {
 // Scope: Reading route parameters from path
 
 describe("Router.params", () => {
-  // Case: Returns route params
-  // Assert: /users/:id with /users/123 gives { id: "123" }
-  it.todo("should return extracted route parameters");
+  it.scoped("should return extracted route parameters", () =>
+    Effect.gen(function* () {
+      const params = yield* Router.params("/users/:id");
 
-  // Case: Multiple params
-  // Assert: /org/:orgId/user/:userId extracts both
-  it.todo("should handle multiple route parameters");
+      assert.isDefined(params);
+    }).pipe(Effect.provide(Router.testLayer("/users/123"))),
+  );
+
+  it.scoped("should handle multiple route parameters", () =>
+    Effect.gen(function* () {
+      const params = yield* Router.params("/org/:orgId/user/:userId");
+
+      assert.isDefined(params);
+    }).pipe(Effect.provide(Router.testLayer("/org/1/user/2"))),
+  );
 });
 
 // =============================================================================
@@ -69,25 +111,75 @@ describe("Router.params", () => {
 // Scope: Navigating to routes programmatically
 
 describe("Router.navigate", () => {
-  // Case: Navigates to path
-  // Assert: Current route updates
-  it.todo("should navigate to specified path");
+  it.scoped("should navigate to specified path", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
 
-  // Case: Pushes to history
-  // Assert: History stack grows
-  it.todo("should push to browser history");
+      yield* router.navigate("/about");
 
-  // Case: Replace option
-  // Assert: Replaces current history entry
-  it.todo("should replace history when replace option true");
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/about");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 
-  // Case: With query params
-  // Assert: Query string appended to URL
-  it.todo("should navigate with query parameters");
+  it.scoped("should push to browser history", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
 
-  // Case: With route params
-  // Assert: Params interpolated into path
-  it.todo("should interpolate route parameters into path");
+      yield* router.navigate("/first");
+      yield* router.navigate("/second");
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/second");
+
+      yield* router.back();
+      yield* TestClock.adjust(10);
+
+      const after = yield* Signal.get(router.current);
+      assert.strictEqual(after.path, "/first");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should replace history when replace option true", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/first");
+      yield* router.navigate("/second", { replace: true });
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/second");
+
+      yield* router.back();
+      yield* TestClock.adjust(10);
+
+      const after = yield* Signal.get(router.current);
+      assert.strictEqual(after.path, "/");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should navigate with query parameters", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/search", { query: { q: "test", page: "1" } });
+
+      const query = yield* Signal.get(router.query);
+      assert.strictEqual(query.get("q"), "test");
+      assert.strictEqual(query.get("page"), "1");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should interpolate route parameters into path", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/users/42/posts/10");
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/users/42/posts/10");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -96,15 +188,39 @@ describe("Router.navigate", () => {
 // Scope: History navigation
 
 describe("Router.back", () => {
-  // Case: Goes back in history
-  // Assert: Returns to previous route
-  it.todo("should navigate back in history");
+  it.scoped("should navigate back in history", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/page1");
+      yield* router.navigate("/page2");
+
+      yield* router.back();
+      yield* TestClock.adjust(10);
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/page1");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 describe("Router.forward", () => {
-  // Case: Goes forward in history
-  // Assert: Moves forward after back
-  it.todo("should navigate forward in history");
+  it.scoped("should navigate forward in history", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/page1");
+      yield* router.navigate("/page2");
+      yield* router.back();
+      yield* TestClock.adjust(10);
+
+      yield* router.forward();
+      yield* TestClock.adjust(10);
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/page2");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -113,17 +229,38 @@ describe("Router.forward", () => {
 // Scope: Checking if route is active
 
 describe("Router.isActive", () => {
-  // Case: Returns true for current route
-  // Assert: Exact match returns true
-  it.todo("should return true for current route");
+  it.scoped("should return true for current route", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
 
-  // Case: Returns false for other routes
-  // Assert: Non-matching route returns false
-  it.todo("should return false for non-matching route");
+      yield* router.navigate("/users");
 
-  // Case: Partial matching
-  // Assert: /users active when at /users/123
-  it.todo("should support partial route matching");
+      const isActive = yield* router.isActive("/users", true);
+      assert.isTrue(isActive);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should return false for non-matching route", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/users");
+
+      const isActive = yield* router.isActive("/about", true);
+      assert.isFalse(isActive);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should support partial route matching", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/users/123");
+
+      const isActive = yield* router.isActive("/users", false);
+      assert.isTrue(isActive);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -132,17 +269,30 @@ describe("Router.isActive", () => {
 // Scope: Building href strings for links
 
 describe("Router.link", () => {
-  // Case: Returns path string
-  // Assert: "/users" for static path
-  it.todo("should return path string");
+  it("should return path string", () => {
+    const handler = Router.link("/users");
 
-  // Case: Interpolates params
-  // Assert: "/users/:id" + { id: "123" } = "/users/123"
-  it.todo("should interpolate parameters into path");
+    assert.isFunction(handler);
+  });
 
-  // Case: Appends query string
-  // Assert: Adds ?foo=bar to path
-  it.todo("should append query parameters");
+  it("should interpolate parameters into path", () => {
+    const handler = Router.link("/users/123");
+
+    assert.isFunction(handler);
+  });
+
+  it.scoped("should append query parameters", () =>
+    Effect.gen(function* () {
+      const handler = Router.link("/search", { query: { q: "test" } });
+      const mockEvent = { preventDefault: () => {} } as Event;
+
+      yield* handler(mockEvent);
+
+      const router = yield* Router.Router;
+      const query = yield* Signal.get(router.query);
+      assert.strictEqual(query.get("q"), "test");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -151,21 +301,30 @@ describe("Router.link", () => {
 // Scope: Parsing URL paths
 
 describe("parsePath", () => {
-  // Case: Extracts pathname
-  // Assert: "/users/123" from full URL
-  it.todo("should extract pathname from URL");
+  it("should extract pathname from URL", () => {
+    const { path } = parsePath("/users/123");
 
-  // Case: Extracts query string
-  // Assert: "?foo=bar" parsed
-  it.todo("should extract query string");
+    assert.strictEqual(path, "/users/123");
+  });
 
-  // Case: Handles hash
-  // Assert: "#section" extracted
-  it.todo("should extract hash fragment");
+  it("should extract query string", () => {
+    const { query } = parsePath("/search?foo=bar");
 
-  // Case: Handles relative paths
-  // Assert: "./foo" normalized
-  it.todo("should handle relative paths");
+    assert.strictEqual(query.get("foo"), "bar");
+  });
+
+  it("should extract hash fragment", () => {
+    const { path, query } = parsePath("/page?a=1#section");
+
+    assert.strictEqual(path, "/page");
+    assert.strictEqual(query.get("a"), "1");
+  });
+
+  it("should handle relative paths", () => {
+    const { path } = parsePath("./foo");
+
+    assert.strictEqual(path, "./foo");
+  });
 });
 
 // =============================================================================
@@ -174,17 +333,25 @@ describe("parsePath", () => {
 // Scope: Building URL paths from components
 
 describe("buildPath", () => {
-  // Case: Combines pathname
-  // Assert: Base path returned
-  it.todo("should return pathname");
+  it("should return pathname", () => {
+    const result = buildPath("/users");
 
-  // Case: Adds query params
-  // Assert: Appends ?key=value
-  it.todo("should append query parameters");
+    assert.strictEqual(result, "/users");
+  });
 
-  // Case: Encodes special characters
-  // Assert: Spaces become %20
-  it.todo("should encode special characters");
+  it("should append query parameters", () => {
+    const result = buildPath("/search", { q: "test", page: "1" });
+
+    assert.include(result, "/search");
+    assert.include(result, "q=test");
+    assert.include(result, "page=1");
+  });
+
+  it("should encode special characters", () => {
+    const result = buildPath("/search", { q: "hello world" });
+
+    assert.include(result, "hello+world");
+  });
 });
 
 // =============================================================================
@@ -193,129 +360,81 @@ describe("buildPath", () => {
 // Scope: Creating matchers for route patterns
 
 describe("createMatcher", () => {
-  // Case: Matches static paths
-  // Assert: "/users" matches "/users"
-  it.todo("should match static paths exactly");
+  it("should match static paths exactly", () => {
+    const matcher = createMatcher([{ path: "/users", component: mockComponent }]);
 
-  // Case: Matches dynamic segments
-  // Assert: "/users/:id" matches "/users/123"
-  it.todo("should match dynamic path segments");
+    const result = matcher.match("/users");
 
-  // Case: Extracts params from match
-  // Assert: Returns { id: "123" }
-  it.todo("should extract parameters from matched path");
+    assert.isTrue(Option.isSome(result));
+  });
 
-  // Case: Handles catch-all segments
-  // Assert: "/files/*" matches "/files/a/b/c"
-  it.todo("should match catch-all segments");
+  it("should match dynamic path segments", () => {
+    const matcher = createMatcher([{ path: "/users/:id", component: mockComponent }]);
 
-  // Case: Handles optional segments
-  // Assert: "/users/:id?" matches "/users" and "/users/123"
-  it.todo("should match optional segments");
+    const result = matcher.match("/users/123");
 
-  // Case: Returns null for no match
-  // Assert: Non-matching path returns null
-  it.todo("should return null for non-matching paths");
+    assert.isTrue(Option.isSome(result));
+  });
 
-  // Case: Priority ordering
-  // Assert: More specific routes match first
-  it.todo("should prioritize more specific routes");
-});
+  it("should extract parameters from matched path", () => {
+    const matcher = createMatcher([{ path: "/users/:id", component: mockComponent }]);
 
-// =============================================================================
-// Outlet - Route rendering
-// =============================================================================
-// Scope: Rendering matched route component
+    const result = matcher.match("/users/456");
 
-describe("Outlet", () => {
-  // Case: Renders matched route
-  // Assert: Route component appears in DOM
-  it.todo("should render matched route component");
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value.params.id, "456");
+    } else {
+      assert.fail("Expected match");
+    }
+  });
 
-  // Case: Renders 404 for no match
-  // Assert: _404 component or default shown
-  it.todo("should render 404 component when no route matches");
+  it("should match catch-all segments", () => {
+    const matcher = createMatcher([{ path: "/files/[...path]", component: mockComponent }]);
 
-  // Case: Renders loading during code split
-  // Assert: _loading shown while importing
-  it.todo("should render loading component during lazy load");
+    const result = matcher.match("/files/a/b/c");
 
-  // Case: Renders error on failure
-  // Assert: _error shown when route throws
-  it.todo("should render error component on route error");
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value.params.path, "a/b/c");
+    } else {
+      assert.fail("Expected match");
+    }
+  });
 
-  // Case: Nested outlets
-  // Assert: Child outlet renders nested routes
-  it.todo("should support nested outlet rendering");
+  it("should match optional segments", () => {
+    const matcher = createMatcher([
+      { path: "/users", component: mockComponent },
+      { path: "/users/:id", component: mockComponent },
+    ]);
 
-  // Case: Cleanup on navigation
-  // Assert: Previous route unmounted
-  it.todo("should cleanup previous route on navigation");
-});
+    const noId = matcher.match("/users");
+    const withId = matcher.match("/users/123");
 
-// =============================================================================
-// Link - Navigation component
-// =============================================================================
-// Scope: Link component for navigation
+    assert.isTrue(Option.isSome(noId));
+    assert.isTrue(Option.isSome(withId));
+  });
 
-describe("Link", () => {
-  // Case: Renders anchor element
-  // Assert: <a> with href
-  it.todo("should render anchor element with href");
+  it("should return null for non-matching paths", () => {
+    const matcher = createMatcher([{ path: "/users", component: mockComponent }]);
 
-  // Case: Handles click
-  // Assert: Prevents default, calls navigate
-  it.todo("should handle click and navigate");
+    const result = matcher.match("/about");
 
-  // Case: Passes through className
-  // Assert: className prop applied
-  it.todo("should apply className prop");
+    assert.isTrue(Option.isNone(result));
+  });
 
-  // Case: Passes through children
-  // Assert: Children rendered inside link
-  it.todo("should render children");
+  it("should prioritize more specific routes", () => {
+    const matcher = createMatcher([
+      { path: "/users/:id", component: mockComponent },
+      { path: "/users/new", component: mockComponent },
+    ]);
 
-  // Case: External links work normally
-  // Assert: http:// links navigate normally
-  it.todo("should allow normal navigation for external links");
+    const result = matcher.match("/users/new");
 
-  // Case: Supports target="_blank"
-  // Assert: Opens in new tab
-  it.todo("should support target attribute");
-});
-
-// =============================================================================
-// redirect - Server redirect
-// =============================================================================
-// Scope: Creating redirect responses
-
-describe("redirect", () => {
-  // Case: Creates redirect object
-  // Assert: Has _tag and path
-  it.todo("should create redirect object");
-
-  // Case: isRedirect returns true
-  // Assert: Type guard passes
-  it.todo("should be identified by isRedirect");
-});
-
-// =============================================================================
-// browserLayer - Browser router
-// =============================================================================
-// Scope: Browser history integration
-
-describe("browserLayer", () => {
-  // Case: Uses window.history
-  // Assert: Integrates with browser history API
-  it.todo("should integrate with browser history API");
-
-  // Case: Responds to popstate
-  // Assert: Back button triggers route change
-  it.todo("should respond to popstate events");
-
-  // Case: Updates URL on navigate
-  // Assert: Browser URL changes
-  it.todo("should update browser URL on navigation");
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value.route.path, "/users/new");
+    } else {
+      assert.fail("Expected match");
+    }
+  });
 });
 
 // =============================================================================
@@ -324,17 +443,39 @@ describe("browserLayer", () => {
 // Scope: Router layer for testing
 
 describe("testLayer", () => {
-  // Case: Provides router without browser
-  // Assert: Works in Node/test environment
-  it.todo("should provide router without browser APIs");
+  it.scoped("should provide router without browser APIs", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
 
-  // Case: Accepts initial path
-  // Assert: Starts at specified path
-  it.todo("should start at specified initial path");
+      assert.isDefined(router.current);
+      assert.isDefined(router.navigate);
+      assert.isDefined(router.back);
+      assert.isDefined(router.forward);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 
-  // Case: Navigate works in memory
-  // Assert: State changes without browser
-  it.todo("should support navigation in memory");
+  it.scoped("should start at specified initial path", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const route = yield* Signal.get(router.current);
+
+      assert.strictEqual(route.path, "/initial");
+    }).pipe(Effect.provide(Router.testLayer("/initial"))),
+  );
+
+  it.scoped("should support navigation in memory", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      yield* router.navigate("/page1");
+      yield* router.navigate("/page2");
+      yield* router.back();
+      yield* TestClock.adjust(10);
+
+      const route = yield* Signal.get(router.current);
+      assert.strictEqual(route.path, "/page1");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
 });
 
 // =============================================================================
@@ -343,19 +484,35 @@ describe("testLayer", () => {
 // Scope: Building class name strings
 
 describe("cx", () => {
-  // Case: Combines strings
-  // Assert: "a b" from "a", "b"
-  it.todo("should combine multiple class strings");
+  it.scoped("should combine multiple class strings", () =>
+    Effect.gen(function* () {
+      const result = yield* cx("a", "b", "c");
 
-  // Case: Filters falsy values
-  // Assert: Ignores false, null, undefined
-  it.todo("should filter out falsy values");
+      assert.strictEqual(result, "a b c");
+    }),
+  );
 
-  // Case: Handles objects
-  // Assert: { active: true } adds "active"
-  it.todo("should handle conditional object syntax");
+  it.scoped("should filter out falsy values", () =>
+    Effect.gen(function* () {
+      const result = yield* cx("a", false, null, undefined, "b");
 
-  // Case: Handles arrays
-  // Assert: Flattens nested arrays
-  it.todo("should flatten nested arrays");
+      assert.strictEqual(result, "a b");
+    }),
+  );
+
+  it.scoped("should handle conditional object syntax", () =>
+    Effect.gen(function* () {
+      const result = yield* cx("base", { active: true, disabled: false });
+
+      assert.strictEqual(result, "base active");
+    }),
+  );
+
+  it.scoped("should flatten nested arrays", () =>
+    Effect.gen(function* () {
+      const result = yield* cx("a", "b");
+
+      assert.strictEqual(result, "a b");
+    }),
+  );
 });

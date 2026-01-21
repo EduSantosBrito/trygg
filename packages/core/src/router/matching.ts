@@ -458,7 +458,9 @@ const buildRouteMatch = (
  * @since 1.0.0
  */
 export const parsePath = (fullPath: string): { path: string; query: URLSearchParams } => {
-  const [path, queryString] = fullPath.split("?");
+  // Remove hash fragment before parsing query
+  const [pathWithQuery] = fullPath.split("#");
+  const [path, queryString] = (pathWithQuery ?? fullPath).split("?");
   return {
     path: path ?? "/",
     query: new URLSearchParams(queryString ?? ""),

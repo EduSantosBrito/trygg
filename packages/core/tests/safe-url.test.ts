@@ -8,7 +8,18 @@
  * - Verify safe schemes are allowed
  * - Verify relative URLs work
  */
-import { describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect, Exit, Option } from "effect";
+import * as SafeUrl from "../src/security/safe-url.js";
+
+// Reset config before each test to ensure isolation
+const withResetConfig = <A, E>(effect: Effect.Effect<A, E, never>): Effect.Effect<A, E, never> =>
+  Effect.gen(function* () {
+    SafeUrl.resetConfig();
+    const result = yield* effect;
+    SafeUrl.resetConfig();
+    return result;
+  });
 
 // =============================================================================
 // SafeUrl.validate - Effect-based validation
@@ -16,45 +27,136 @@ import { describe, it } from "@effect/vitest";
 // Scope: Validating URLs with Effect error handling
 
 describe("SafeUrl.validate", () => {
-  // Case: Allows https URLs
-  // Assert: Returns URL unchanged
-  it.todo("should allow https URLs");
+  it.effect("should allow https URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "https://example.com/path";
+        const result = yield* SafeUrl.validate(url);
 
-  // Case: Allows http URLs
-  // Assert: Returns URL unchanged
-  it.todo("should allow http URLs");
+        assert.strictEqual(result, url);
+      }),
+    ),
+  );
 
-  // Case: Allows mailto URLs
-  // Assert: Email links work
-  it.todo("should allow mailto URLs");
+  it.effect("should allow http URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "http://example.com/path";
+        const result = yield* SafeUrl.validate(url);
 
-  // Case: Allows tel URLs
-  // Assert: Phone links work
-  it.todo("should allow tel URLs");
+        assert.strictEqual(result, url);
+      }),
+    ),
+  );
 
-  // Case: Allows relative URLs
-  // Assert: /path and ./path work
-  it.todo("should allow relative URLs without scheme");
+  it.effect("should allow mailto URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "mailto:test@example.com";
+        const result = yield* SafeUrl.validate(url);
 
-  // Case: Blocks javascript: URLs
-  // Assert: Fails with UnsafeUrlError
-  it.todo("should block javascript: URLs");
+        assert.strictEqual(result, url);
+      }),
+    ),
+  );
 
-  // Case: Blocks vbscript: URLs
-  // Assert: Fails with UnsafeUrlError
-  it.todo("should block vbscript: URLs");
+  it.effect("should allow tel URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "tel:+1234567890";
+        const result = yield* SafeUrl.validate(url);
 
-  // Case: Blocks empty URLs
-  // Assert: Fails with empty_url reason
-  it.todo("should block empty URLs");
+        assert.strictEqual(result, url);
+      }),
+    ),
+  );
 
-  // Case: Blocks whitespace-only URLs
-  // Assert: Fails with empty_url reason
-  it.todo("should block whitespace-only URLs");
+  it.effect("should allow relative URLs without scheme", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const paths = ["/path/to/page", "./relative", "../parent", "page.html", "#anchor"];
 
-  // Case: Case insensitive scheme check
-  // Assert: JAVASCRIPT: also blocked
-  it.todo("should block schemes case-insensitively");
+        for (const path of paths) {
+          const result = yield* SafeUrl.validate(path);
+          assert.strictEqual(result, path);
+        }
+      }),
+    ),
+  );
+
+  it.effect("should block javascript: URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "javascript:alert(1)";
+        const exit = yield* Effect.exit(SafeUrl.validate(url));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          assert.isNotNull(error);
+          assert.strictEqual(error?._tag, "UnsafeUrlError");
+          assert.strictEqual(error?.reason, "unsafe_scheme");
+          assert.strictEqual(error?.scheme, "javascript");
+        }
+      }),
+    ),
+  );
+
+  it.effect("should block vbscript: URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const url = "vbscript:msgbox";
+        const exit = yield* Effect.exit(SafeUrl.validate(url));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          assert.strictEqual(error?.reason, "unsafe_scheme");
+        }
+      }),
+    ),
+  );
+
+  it.effect("should block empty URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(SafeUrl.validate(""));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          assert.strictEqual(error?.reason, "empty_url");
+        }
+      }),
+    ),
+  );
+
+  it.effect("should block whitespace-only URLs", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(SafeUrl.validate("   "));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          assert.strictEqual(error?.reason, "empty_url");
+        }
+      }),
+    ),
+  );
+
+  it.effect("should block schemes case-insensitively", () =>
+    withResetConfig(
+      Effect.gen(function* () {
+        const urls = ["JAVASCRIPT:alert(1)", "JavaScript:alert(1)", "JaVaScRiPt:alert(1)"];
+
+        for (const url of urls) {
+          const exit = yield* Effect.exit(SafeUrl.validate(url));
+          assert.isTrue(Exit.isFailure(exit), `Expected ${url} to be blocked`);
+        }
+      }),
+    ),
+  );
 });
 
 // =============================================================================
@@ -63,13 +165,35 @@ describe("SafeUrl.validate", () => {
 // Scope: Sync validation returning Option
 
 describe("SafeUrl.validateSync", () => {
-  // Case: Returns Some for valid URLs
-  // Assert: Option.some(url)
-  it.todo("should return Some for valid URLs");
+  it("should return Some for valid URLs", () => {
+    SafeUrl.resetConfig();
+    const urls = [
+      "https://example.com",
+      "http://localhost:3000",
+      "/path",
+      "mailto:test@example.com",
+    ];
 
-  // Case: Returns None for invalid URLs
-  // Assert: Option.none()
-  it.todo("should return None for invalid URLs");
+    for (const url of urls) {
+      const result = SafeUrl.validateSync(url);
+      assert.isTrue(Option.isSome(result), `Expected Some for ${url}`);
+      if (Option.isSome(result)) {
+        assert.strictEqual(result.value, url);
+      }
+    }
+    SafeUrl.resetConfig();
+  });
+
+  it("should return None for invalid URLs", () => {
+    SafeUrl.resetConfig();
+    const urls = ["javascript:alert(1)", "vbscript:msgbox", "", "   "];
+
+    for (const url of urls) {
+      const result = SafeUrl.validateSync(url);
+      assert.isTrue(Option.isNone(result), `Expected None for "${url}"`);
+    }
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -78,13 +202,32 @@ describe("SafeUrl.validateSync", () => {
 // Scope: Sync validation that throws on failure
 
 describe("SafeUrl.validateOrThrow", () => {
-  // Case: Returns URL for valid
-  // Assert: URL returned unchanged
-  it.todo("should return URL for valid input");
+  it("should return URL for valid input", () => {
+    SafeUrl.resetConfig();
+    const url = "https://example.com";
+    const result = SafeUrl.validateOrThrow(url);
 
-  // Case: Throws UnsafeUrlError for invalid
-  // Assert: Error thrown with details
-  it.todo("should throw UnsafeUrlError for invalid input");
+    assert.strictEqual(result, url);
+    SafeUrl.resetConfig();
+  });
+
+  it("should throw UnsafeUrlError for invalid input", () => {
+    SafeUrl.resetConfig();
+    let thrown: SafeUrl.UnsafeUrlError | null = null;
+
+    try {
+      SafeUrl.validateOrThrow("javascript:alert(1)");
+    } catch (error) {
+      if (error instanceof SafeUrl.UnsafeUrlError) {
+        thrown = error;
+      }
+    }
+
+    assert.isNotNull(thrown);
+    assert.strictEqual(thrown?._tag, "UnsafeUrlError");
+    assert.strictEqual(thrown?.reason, "unsafe_scheme");
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -93,13 +236,25 @@ describe("SafeUrl.validateOrThrow", () => {
 // Scope: Simple boolean validation
 
 describe("SafeUrl.isSafe", () => {
-  // Case: Returns true for safe URLs
-  // Assert: Valid URLs return true
-  it.todo("should return true for safe URLs");
+  it("should return true for safe URLs", () => {
+    SafeUrl.resetConfig();
+    const urls = ["https://example.com", "/path", "mailto:test@example.com"];
 
-  // Case: Returns false for unsafe URLs
-  // Assert: Invalid URLs return false
-  it.todo("should return false for unsafe URLs");
+    for (const url of urls) {
+      assert.isTrue(SafeUrl.isSafe(url), `Expected ${url} to be safe`);
+    }
+    SafeUrl.resetConfig();
+  });
+
+  it("should return false for unsafe URLs", () => {
+    SafeUrl.resetConfig();
+    const urls = ["javascript:alert(1)", "vbscript:msgbox", "", "   "];
+
+    for (const url of urls) {
+      assert.isFalse(SafeUrl.isSafe(url), `Expected "${url}" to be unsafe`);
+    }
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -108,21 +263,54 @@ describe("SafeUrl.isSafe", () => {
 // Scope: Adding custom allowed schemes
 
 describe("SafeUrl.allowSchemes", () => {
-  // Case: Adds custom scheme
-  // Assert: Custom scheme now allowed
-  it.todo("should allow added custom schemes");
+  it("should allow added custom schemes", () => {
+    SafeUrl.resetConfig();
+    SafeUrl.allowSchemes(["myapp"]);
 
-  // Case: Normalizes scheme format
-  // Assert: Trailing colon removed
-  it.todo("should normalize scheme format");
+    const result = SafeUrl.validateSync("myapp://settings");
 
-  // Case: Preserves existing schemes
-  // Assert: Default schemes still work
-  it.todo("should preserve existing allowed schemes");
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
 
-  // Case: Deduplicates schemes
-  // Assert: No duplicate entries
-  it.todo("should deduplicate schemes");
+  it("should normalize scheme format", () => {
+    SafeUrl.resetConfig();
+    // Trailing colon should be removed
+    SafeUrl.allowSchemes(["custom:"]);
+
+    const config = SafeUrl.getConfig();
+    assert.isTrue(config.allowedSchemes.includes("custom"));
+    assert.isFalse(config.allowedSchemes.includes("custom:"));
+
+    const result = SafeUrl.validateSync("custom://test");
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
+
+  it("should preserve existing allowed schemes", () => {
+    SafeUrl.resetConfig();
+    const originalSchemes = [...SafeUrl.getConfig().allowedSchemes];
+
+    SafeUrl.allowSchemes(["newscheme"]);
+
+    const newConfig = SafeUrl.getConfig();
+    for (const scheme of originalSchemes) {
+      assert.isTrue(newConfig.allowedSchemes.includes(scheme), `Should preserve ${scheme}`);
+    }
+    assert.isTrue(newConfig.allowedSchemes.includes("newscheme"));
+    SafeUrl.resetConfig();
+  });
+
+  it("should deduplicate schemes", () => {
+    SafeUrl.resetConfig();
+    SafeUrl.allowSchemes(["https", "https", "https"]);
+
+    const config = SafeUrl.getConfig();
+    const httpsCount = config.allowedSchemes.filter((s) => s === "https").length;
+
+    assert.strictEqual(httpsCount, 1);
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -131,9 +319,14 @@ describe("SafeUrl.allowSchemes", () => {
 // Scope: Resetting configuration
 
 describe("SafeUrl.resetConfig", () => {
-  // Case: Resets to default schemes
-  // Assert: Custom schemes removed
-  it.todo("should reset to default allowed schemes");
+  it("should reset to default allowed schemes", () => {
+    SafeUrl.allowSchemes(["custom1", "custom2"]);
+
+    SafeUrl.resetConfig();
+
+    const config = SafeUrl.getConfig();
+    assert.deepStrictEqual(config.allowedSchemes, SafeUrl.DEFAULT_ALLOWED_SCHEMES);
+  });
 });
 
 // =============================================================================
@@ -142,9 +335,15 @@ describe("SafeUrl.resetConfig", () => {
 // Scope: Reading current configuration
 
 describe("SafeUrl.getConfig", () => {
-  // Case: Returns current config
-  // Assert: Config object with allowedSchemes
-  it.todo("should return current configuration");
+  it("should return current configuration", () => {
+    SafeUrl.resetConfig();
+    const config = SafeUrl.getConfig();
+
+    assert.isDefined(config.allowedSchemes);
+    assert.isArray(config.allowedSchemes);
+    assert.isTrue(config.allowedSchemes.length > 0);
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -153,21 +352,75 @@ describe("SafeUrl.getConfig", () => {
 // Scope: Error message formatting
 
 describe("UnsafeUrlError", () => {
-  // Case: unsafe_scheme reason
-  // Assert: Message includes scheme and allowed list
-  it.todo("should format unsafe_scheme error message");
+  it("should format unsafe_scheme error message", () => {
+    SafeUrl.resetConfig();
+    let error: SafeUrl.UnsafeUrlError | null = null;
 
-  // Case: empty_url reason
-  // Assert: Message indicates empty URL
-  it.todo("should format empty_url error message");
+    try {
+      SafeUrl.validateOrThrow("javascript:alert(1)");
+    } catch (e) {
+      if (e instanceof SafeUrl.UnsafeUrlError) {
+        error = e;
+      }
+    }
 
-  // Case: Includes url in error
-  // Assert: Error has url property
-  it.todo("should include URL in error");
+    assert.isNotNull(error);
+    assert.include(error?.message, "javascript");
+    assert.include(error?.message, "Unsafe URL scheme");
+    SafeUrl.resetConfig();
+  });
 
-  // Case: Includes allowedSchemes in error
-  // Assert: Error has allowedSchemes property
-  it.todo("should include allowed schemes in error");
+  it("should format empty_url error message", () => {
+    SafeUrl.resetConfig();
+    let error: SafeUrl.UnsafeUrlError | null = null;
+
+    try {
+      SafeUrl.validateOrThrow("");
+    } catch (e) {
+      if (e instanceof SafeUrl.UnsafeUrlError) {
+        error = e;
+      }
+    }
+
+    assert.isNotNull(error);
+    assert.include(error?.message, "Empty URL");
+    SafeUrl.resetConfig();
+  });
+
+  it("should include URL in error", () => {
+    SafeUrl.resetConfig();
+    let error: SafeUrl.UnsafeUrlError | null = null;
+
+    try {
+      SafeUrl.validateOrThrow("javascript:alert(1)");
+    } catch (e) {
+      if (e instanceof SafeUrl.UnsafeUrlError) {
+        error = e;
+      }
+    }
+
+    assert.isNotNull(error);
+    assert.strictEqual(error?.url, "javascript:alert(1)");
+    SafeUrl.resetConfig();
+  });
+
+  it("should include allowed schemes in error", () => {
+    SafeUrl.resetConfig();
+    let error: SafeUrl.UnsafeUrlError | null = null;
+
+    try {
+      SafeUrl.validateOrThrow("javascript:alert(1)");
+    } catch (e) {
+      if (e instanceof SafeUrl.UnsafeUrlError) {
+        error = e;
+      }
+    }
+
+    assert.isNotNull(error);
+    assert.isDefined(error?.allowedSchemes);
+    assert.isTrue(error?.allowedSchemes.includes("https"));
+    SafeUrl.resetConfig();
+  });
 });
 
 // =============================================================================
@@ -176,31 +429,76 @@ describe("UnsafeUrlError", () => {
 // Scope: Edge case handling
 
 describe("SafeUrl edge cases", () => {
-  // Case: Data URLs
-  // Assert: data: scheme allowed by default
-  it.todo("should allow data: URLs by default");
+  it("should allow data: URLs by default", () => {
+    SafeUrl.resetConfig();
+    const url = "data:image/png;base64,iVBORw0KGgo=";
+    const result = SafeUrl.validateSync(url);
 
-  // Case: Blob URLs
-  // Assert: blob: scheme allowed by default
-  it.todo("should allow blob: URLs by default");
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
 
-  // Case: Protocol-relative URLs
-  // Assert: //example.com handled correctly
-  it.todo("should handle protocol-relative URLs");
+  it("should allow blob: URLs by default", () => {
+    SafeUrl.resetConfig();
+    const url = "blob:https://example.com/550e8400-e29b-41d4-a716-446655440000";
+    const result = SafeUrl.validateSync(url);
 
-  // Case: URLs with ports
-  // Assert: http://localhost:3000 works
-  it.todo("should handle URLs with ports");
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
 
-  // Case: URLs with auth
-  // Assert: http://user:pass@host works
-  it.todo("should handle URLs with authentication");
+  it("should handle protocol-relative URLs", () => {
+    SafeUrl.resetConfig();
+    // Protocol-relative URLs start with // and are treated as relative
+    const url = "//example.com/path";
+    const result = SafeUrl.validateSync(url);
 
-  // Case: URLs with fragments
-  // Assert: /page#section works
-  it.todo("should handle URLs with hash fragments");
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
 
-  // Case: URLs with query strings
-  // Assert: /page?foo=bar works
-  it.todo("should handle URLs with query strings");
+  it("should handle URLs with ports", () => {
+    SafeUrl.resetConfig();
+    const url = "http://localhost:3000/path";
+    const result = SafeUrl.validateSync(url);
+
+    assert.isTrue(Option.isSome(result));
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value, url);
+    }
+    SafeUrl.resetConfig();
+  });
+
+  it("should handle URLs with authentication", () => {
+    SafeUrl.resetConfig();
+    const url = "https://user:pass@example.com/path";
+    const result = SafeUrl.validateSync(url);
+
+    assert.isTrue(Option.isSome(result));
+    SafeUrl.resetConfig();
+  });
+
+  it("should handle URLs with hash fragments", () => {
+    SafeUrl.resetConfig();
+    const url = "/page#section";
+    const result = SafeUrl.validateSync(url);
+
+    assert.isTrue(Option.isSome(result));
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value, url);
+    }
+    SafeUrl.resetConfig();
+  });
+
+  it("should handle URLs with query strings", () => {
+    SafeUrl.resetConfig();
+    const url = "/page?foo=bar&baz=qux";
+    const result = SafeUrl.validateSync(url);
+
+    assert.isTrue(Option.isSome(result));
+    if (Option.isSome(result)) {
+      assert.strictEqual(result.value, url);
+    }
+    SafeUrl.resetConfig();
+  });
 });

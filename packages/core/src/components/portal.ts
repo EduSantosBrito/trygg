@@ -20,8 +20,9 @@ export interface PortalProps {
   readonly target: HTMLElement | string;
   /**
    * Children to render into the portal target.
+   * Accepts any valid JSX children (Elements, strings, numbers, arrays, etc.)
    */
-  readonly children: ReadonlyArray<Element> | Element;
+  readonly children?: unknown;
 }
 
 /**
@@ -60,7 +61,5 @@ export interface PortalProps {
 export const Portal = (props: PortalProps): Element => {
   const { target, children } = props;
 
-  const normalizedChildren = Array.isArray(children) ? children : normalizeChildren(children);
-
-  return portalElement(target, normalizedChildren);
+  return portalElement(target, normalizeChildren(children));
 };

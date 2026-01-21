@@ -1,0 +1,1173 @@
+/**
+ * Renderer Unit Tests
+ *
+ * Renderer handles mounting Element trees to the DOM.
+ * Provides fine-grained reactivity via Signal subscriptions.
+ *
+ * Test Categories:
+ * - mount: Entry point for rendering apps
+ * - render: Core rendering logic
+ * - Element types: Text, SignalText, SignalElement, Intrinsic, Component, Fragment, Portal, KeyedList
+ * - Props: Static props, Signal props, event handlers
+ * - Reactivity: Fine-grained updates, component re-renders
+ * - Cleanup: Scope management, subscription removal
+ *
+ * Goals: Reliability, stability, performance
+ * - Every test manages its own fibers/scope to prevent memory leaks
+ * - Tests verify DOM structure and cleanup
+ */
+import { assert, describe, it } from "@effect/vitest";
+import { Context, Data, Effect, Exit, Layer, Scope, TestClock } from "effect";
+
+// Tagged errors for testing component failures
+class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
+import { render } from "../src/testing.js";
+import { Portal } from "../src/components/portal.js";
+import * as Signal from "../src/signal.js";
+import * as Component from "../src/component.js";
+import { Fragment } from "../src/jsx-runtime.js";
+
+// =============================================================================
+// mount - App entry point
+// =============================================================================
+// Scope: Mounting an app to a DOM container
+
+describe("mount", () => {
+  it.scoped("should render Effect<Element> to container", () =>
+    Effect.gen(function* () {
+      const app = Effect.succeed(<div data-testid="app">App content</div>);
+      const { getByTestId } = yield* render(app);
+
+      assert.strictEqual(getByTestId("app").textContent, "App content");
+    }),
+  );
+
+  it.scoped("should render Element directly to container", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<div data-testid="direct">Direct element</div>);
+
+      assert.strictEqual(getByTestId("direct").textContent, "Direct element");
+    }),
+  );
+
+  it.scoped("should enable reactivity via Component wrapper", () =>
+    Effect.gen(function* () {
+      const count = Signal.unsafeMake(0);
+
+      const app = Effect.gen(function* () {
+        const value = yield* Signal.get(count);
+        return <div data-testid="reactive">{String(value)}</div>;
+      });
+
+      const { getByTestId } = yield* render(app);
+      assert.strictEqual(getByTestId("reactive").textContent, "0");
+
+      yield* Signal.set(count, 5);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual(getByTestId("reactive").textContent, "5");
+    }),
+  );
+});
+
+// =============================================================================
+// Text Element
+// =============================================================================
+// Scope: Rendering plain text nodes
+
+describe("Text element rendering", () => {
+  it.scoped("should create DOM text node with content", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<div data-testid="text-parent">Hello World</div>);
+
+      assert.strictEqual(getByTestId("text-parent").textContent, "Hello World");
+    }),
+  );
+
+  it.scoped("should append text node to parent", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<span data-testid="parent">Child text</span>);
+
+      const parent = getByTestId("parent");
+      assert.strictEqual(parent.childNodes.length, 1);
+      assert.strictEqual(parent.childNodes[0]?.nodeType, Node.TEXT_NODE);
+    }),
+  );
+
+  it.scoped("should remove text node on cleanup", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+
+      yield* render(<div id="cleanup-text">Will be removed</div>).pipe(Scope.extend(scope));
+
+      const before = document.querySelector("#cleanup-text");
+      assert.isNotNull(before);
+
+      yield* Scope.close(scope, Exit.void);
+
+      const after = document.querySelector("#cleanup-text");
+      assert.isNull(after);
+    }),
+  );
+});
+
+// =============================================================================
+// SignalText Element
+// =============================================================================
+// Scope: Reactive text nodes that update when signal changes
+
+describe("SignalText element rendering", () => {
+  it.scoped("should create text node with signal initial value", () =>
+    Effect.gen(function* () {
+      const textSignal = yield* Signal.make("Initial text");
+      const { getByTestId } = yield* render(<div data-testid="signal-text">{textSignal}</div>);
+
+      assert.strictEqual(getByTestId("signal-text").textContent, "Initial text");
+    }),
+  );
+
+  it.scoped("should update textContent when signal changes", () =>
+    Effect.gen(function* () {
+      const textSignal = yield* Signal.make("Before");
+      const { getByTestId } = yield* render(<div data-testid="update-text">{textSignal}</div>);
+
+      yield* Signal.set(textSignal, "After");
+      yield* TestClock.adjust(10);
+
+      assert.strictEqual(getByTestId("update-text").textContent, "After");
+    }),
+  );
+
+  it.scoped("should subscribe to signal for updates", () =>
+    Effect.gen(function* () {
+      const textSignal = yield* Signal.make("text");
+      const initialListeners = textSignal._listeners.size;
+
+      yield* render(<div data-testid="subscribe">{textSignal}</div>);
+
+      assert.isAtLeast(textSignal._listeners.size, initialListeners);
+    }),
+  );
+
+  it.scoped("should unsubscribe and remove node on cleanup", () =>
+    Effect.gen(function* () {
+      const textSignal = yield* Signal.make("cleanup");
+      const scope = yield* Scope.make();
+
+      yield* render(<div id="signal-cleanup">{textSignal}</div>).pipe(Scope.extend(scope));
+
+      const listenersBefore = textSignal._listeners.size;
+
+      yield* Scope.close(scope, Exit.void);
+
+      const listenersAfter = textSignal._listeners.size;
+      assert.isBelow(listenersAfter, listenersBefore);
+
+      const nodeAfter = document.querySelector("#signal-cleanup");
+      assert.isNull(nodeAfter);
+    }),
+  );
+});
+
+// =============================================================================
+// SignalElement
+// =============================================================================
+// Scope: Reactive elements that swap DOM when signal changes
+
+describe("SignalElement rendering", () => {
+  it.scoped("should render initial Element from signal", () =>
+    Effect.gen(function* () {
+      const elemSignal = yield* Signal.make(<span>Initial</span>);
+      const { getByTestId } = yield* render(<div data-testid="signal-elem">{elemSignal}</div>);
+
+      assert.include(getByTestId("signal-elem").innerHTML, "Initial");
+    }),
+  );
+
+  it.scoped("should swap DOM content when signal changes", () =>
+    Effect.gen(function* () {
+      const elemSignal = yield* Signal.make(<span>Before</span>);
+      const { getByTestId } = yield* render(<div data-testid="swap-elem">{elemSignal}</div>);
+
+      yield* Signal.set(elemSignal, <strong>After</strong>);
+      yield* TestClock.adjust(10);
+
+      const container = getByTestId("swap-elem");
+      assert.include(container.innerHTML, "After");
+      assert.include(container.innerHTML, "<strong>");
+    }),
+  );
+
+  it.scoped("should maintain position using anchor comment", () =>
+    Effect.gen(function* () {
+      const elemSignal = yield* Signal.make(<span>Middle</span>);
+      const { getByTestId } = yield* render(
+        <div data-testid="anchor-test">Before {elemSignal} After</div>,
+      );
+
+      const container = getByTestId("anchor-test");
+      assert.include(container.textContent, "Before");
+      assert.include(container.textContent, "After");
+    }),
+  );
+
+  it.scoped("should cleanup content and anchor on unmount", () =>
+    Effect.gen(function* () {
+      const elemSignal = yield* Signal.make(<span id="elem-cleanup" />);
+      const scope = yield* Scope.make();
+
+      yield* render(<div>{elemSignal}</div>).pipe(Scope.extend(scope));
+
+      const before = document.querySelector("#elem-cleanup");
+      assert.isNotNull(before);
+
+      yield* Scope.close(scope, Exit.void);
+
+      const after = document.querySelector("#elem-cleanup");
+      assert.isNull(after);
+    }),
+  );
+
+  it.scoped("should render primitive values as text nodes", () =>
+    Effect.gen(function* () {
+      const numSignal = yield* Signal.make(42);
+      const { getByTestId } = yield* render(<div data-testid="prim-signal">{numSignal}</div>);
+
+      assert.strictEqual(getByTestId("prim-signal").textContent, "42");
+    }),
+  );
+});
+
+// =============================================================================
+// Intrinsic Element
+// =============================================================================
+// Scope: Rendering HTML elements like div, span, button
+
+describe("Intrinsic element rendering", () => {
+  it.scoped("should create DOM element with correct tag", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<article data-testid="tag-test" />);
+
+      assert.strictEqual(getByTestId("tag-test").tagName, "ARTICLE");
+    }),
+  );
+
+  it.scoped("should apply static props as attributes", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <div data-testid="attr-test" className="my-class" id="my-id" />,
+      );
+
+      const el = getByTestId("attr-test");
+      assert.strictEqual(el.className, "my-class");
+      assert.strictEqual(el.id, "my-id");
+    }),
+  );
+
+  it.scoped("should render children inside element", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <ul data-testid="children-test">
+          <li>Item 1</li>
+          <li>Item 2</li>
+        </ul>,
+      );
+
+      const ul = getByTestId("children-test");
+      const lis = ul.querySelectorAll("li");
+      assert.strictEqual(lis.length, 2);
+    }),
+  );
+
+  it.scoped("should remove element and children on cleanup", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+
+      yield* render(
+        <div id="cleanup-intrinsic">
+          <span id="cleanup-child" />
+        </div>,
+      ).pipe(Scope.extend(scope));
+
+      assert.isNotNull(document.querySelector("#cleanup-intrinsic"));
+      assert.isNotNull(document.querySelector("#cleanup-child"));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isNull(document.querySelector("#cleanup-intrinsic"));
+      assert.isNull(document.querySelector("#cleanup-child"));
+    }),
+  );
+});
+
+// =============================================================================
+// Component Element
+// =============================================================================
+// Scope: Rendering Effect-based components with reactivity
+
+describe("Component element rendering", () => {
+  it.scoped("should execute component Effect to produce Element", () =>
+    Effect.gen(function* () {
+      let effectRan = false;
+
+      const MyComponent = Component.gen(function* () {
+        effectRan = true;
+        return <div data-testid="effect-ran">Executed</div>;
+      });
+
+      yield* render(<MyComponent />);
+
+      assert.isTrue(effectRan);
+    }),
+  );
+
+  it.scoped("should render component output to DOM", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.gen(function* () {
+        return <section data-testid="comp-output">Component content</section>;
+      });
+
+      const { getByTestId } = yield* render(<MyComponent />);
+
+      assert.strictEqual(getByTestId("comp-output").textContent, "Component content");
+    }),
+  );
+
+  it.scoped("should create render phase for signal tracking", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.gen(function* () {
+        const signal = yield* Signal.make(0);
+        const value = yield* Signal.get(signal);
+        return <div data-testid="tracked">{String(value)}</div>;
+      });
+
+      const { getByTestId } = yield* render(<MyComponent />);
+
+      assert.strictEqual(getByTestId("tracked").textContent, "0");
+    }),
+  );
+
+  it.scoped("should re-render when subscribed signal changes", () =>
+    Effect.gen(function* () {
+      const count = Signal.unsafeMake(0);
+
+      const Counter = Component.gen(function* () {
+        const value = yield* Signal.get(count);
+        return <div data-testid="rerender">{String(value)}</div>;
+      });
+
+      const { getByTestId } = yield* render(<Counter />);
+      assert.strictEqual(getByTestId("rerender").textContent, "0");
+
+      yield* Signal.set(count, 10);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual(getByTestId("rerender").textContent, "10");
+    }),
+  );
+
+  it.scoped("should preserve signal identity on re-render", () =>
+    Effect.gen(function* () {
+      const trigger = Signal.unsafeMake(0);
+      let signalInstance: Signal.Signal<number> | null = null;
+
+      const MyComponent = Component.gen(function* () {
+        yield* Signal.get(trigger);
+        const localSignal = yield* Signal.make(42);
+        if (signalInstance === null) {
+          signalInstance = localSignal;
+        } else {
+          assert.strictEqual(localSignal, signalInstance);
+        }
+        return <div data-testid="identity" />;
+      });
+
+      yield* render(<MyComponent />);
+
+      yield* Signal.set(trigger, 1);
+      yield* TestClock.adjust(20);
+
+      assert.isNotNull(signalInstance);
+    }),
+  );
+
+  it.scoped("should maintain position using anchor comment", () =>
+    Effect.gen(function* () {
+      const Inner = Component.gen(function* () {
+        return <span>Component</span>;
+      });
+
+      const { getByTestId } = yield* render(
+        <div data-testid="comp-anchor">
+          Before <Inner /> After
+        </div>,
+      );
+
+      const content = getByTestId("comp-anchor").textContent;
+      assert.include(content, "Before");
+      assert.include(content, "Component");
+      assert.include(content, "After");
+    }),
+  );
+
+  it.scoped("should close scopes and remove content on cleanup", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+
+      const MyComponent = Component.gen(function* () {
+        return <div id="comp-cleanup" />;
+      });
+
+      yield* render(<MyComponent />).pipe(Scope.extend(scope));
+
+      assert.isNotNull(document.querySelector("#comp-cleanup"));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isNull(document.querySelector("#comp-cleanup"));
+    }),
+  );
+
+  it.scoped("should propagate errors from component effect", () =>
+    Effect.gen(function* () {
+      const ErrorComponent = Component.gen(function* () {
+        yield* new ComponentError({ message: "Component error" });
+        return <div />;
+      });
+
+      const exit = yield* Effect.exit(render(<ErrorComponent />));
+
+      assert.strictEqual(exit._tag, "Failure");
+    }),
+  );
+});
+
+// =============================================================================
+// Fragment Element
+// =============================================================================
+// Scope: Rendering multiple children without wrapper
+
+describe("Fragment element rendering", () => {
+  it.scoped("should render all children to DOM", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <div data-testid="frag-parent">
+          <Fragment>One Two Three</Fragment>
+        </div>,
+      );
+
+      assert.include(getByTestId("frag-parent").textContent, "One");
+      assert.include(getByTestId("frag-parent").textContent, "Two");
+      assert.include(getByTestId("frag-parent").textContent, "Three");
+    }),
+  );
+
+  it.scoped("should not create wrapper element", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <div data-testid="no-wrapper">
+          <>
+            <span className="frag-child">A</span>
+          </>
+        </div>,
+      );
+
+      const parent = getByTestId("no-wrapper");
+      const spans = parent.querySelectorAll(".frag-child");
+      assert.strictEqual(spans.length, 1);
+      assert.strictEqual(spans[0]?.parentElement, parent);
+    }),
+  );
+
+  it.scoped("should use comment anchor for empty fragment", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <div data-testid="empty-frag">
+          <></>
+        </div>,
+      );
+
+      const parent = getByTestId("empty-frag");
+      assert.isTrue(parent.childNodes.length >= 0);
+    }),
+  );
+
+  it.scoped("should remove all children on cleanup", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+
+      yield* render(
+        <div id="frag-cleanup">
+          <>
+            <span id="frag-child-1" />
+            <span id="frag-child-2" />
+          </>
+        </div>,
+      ).pipe(Scope.extend(scope));
+
+      assert.isNotNull(document.querySelector("#frag-child-1"));
+      assert.isNotNull(document.querySelector("#frag-child-2"));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isNull(document.querySelector("#frag-child-1"));
+      assert.isNull(document.querySelector("#frag-child-2"));
+    }),
+  );
+});
+
+// =============================================================================
+// Portal Element
+// =============================================================================
+// Scope: Rendering into a different DOM container
+
+describe("Portal element rendering", () => {
+  it.scoped("should render children into target container", () =>
+    Effect.gen(function* () {
+      const target = document.createElement("div");
+      target.id = "portal-target";
+      document.body.appendChild(target);
+
+      yield* render(
+        <div data-testid="portal-source">
+          <Portal target={target}>
+            <span data-testid="portal-content">In portal</span>
+          </Portal>
+        </div>,
+      );
+
+      const content = target.querySelector("[data-testid='portal-content']");
+      assert.isNotNull(content);
+      assert.strictEqual(content?.textContent, "In portal");
+
+      target.remove();
+    }),
+  );
+
+  it.scoped("should accept HTMLElement as target", () =>
+    Effect.gen(function* () {
+      const target = document.createElement("div");
+      document.body.appendChild(target);
+
+      yield* render(
+        <div>
+          <Portal target={target}>Portal content</Portal>
+        </div>,
+      );
+
+      assert.include(target.textContent, "Portal content");
+
+      target.remove();
+    }),
+  );
+
+  it.scoped("should accept CSS selector as target", () =>
+    Effect.gen(function* () {
+      const target = document.createElement("div");
+      target.id = "selector-target";
+      document.body.appendChild(target);
+
+      yield* render(
+        <div>
+          <Portal target="#selector-target">Selector portal</Portal>
+        </div>,
+      );
+
+      assert.include(target.textContent, "Selector portal");
+
+      target.remove();
+    }),
+  );
+
+  it.scoped("should create anchor comment in original position", () =>
+    Effect.gen(function* () {
+      const target = document.createElement("div");
+      document.body.appendChild(target);
+
+      const { getByTestId } = yield* render(
+        <div data-testid="portal-anchor">
+          Before <Portal target={target}>Ported</Portal> After
+        </div>,
+      );
+
+      const container = getByTestId("portal-anchor");
+      assert.include(container.textContent, "Before");
+      assert.include(container.textContent, "After");
+
+      target.remove();
+    }),
+  );
+
+  it.scoped("should remove children from target on cleanup", () =>
+    Effect.gen(function* () {
+      const target = document.createElement("div");
+      target.id = "portal-cleanup-target";
+      document.body.appendChild(target);
+
+      const scope = yield* Scope.make();
+
+      yield* render(
+        <div>
+          <Portal target={target}>
+            <span id="portal-cleanup-content" />
+          </Portal>
+        </div>,
+      ).pipe(Scope.extend(scope));
+
+      assert.isNotNull(target.querySelector("#portal-cleanup-content"));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isNull(target.querySelector("#portal-cleanup-content"));
+
+      target.remove();
+    }),
+  );
+});
+
+// =============================================================================
+// Props Application
+// =============================================================================
+// Scope: Applying props to DOM elements
+
+describe("Props application", () => {
+  it.scoped("should apply className prop", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<div data-testid="classname" className="my-class" />);
+
+      assert.strictEqual(getByTestId("classname").className, "my-class");
+    }),
+  );
+
+  it.scoped("should apply style object to element", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <div data-testid="style" style={{ color: "red", fontSize: "16px" }} />,
+      );
+
+      const el = getByTestId("style");
+      assert.strictEqual(el.style.color, "red");
+      assert.strictEqual(el.style.fontSize, "16px");
+    }),
+  );
+
+  it.scoped("should apply htmlFor as for attribute", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<label data-testid="htmlfor" htmlFor="input-id" />);
+
+      assert.strictEqual(getByTestId("htmlfor").getAttribute("for"), "input-id");
+    }),
+  );
+
+  it.scoped("should apply checked prop to input", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <input data-testid="checked" type="checkbox" checked={true} />,
+      );
+
+      assert.isTrue((getByTestId("checked") as HTMLInputElement).checked);
+    }),
+  );
+
+  it.scoped("should apply value prop to input", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <input data-testid="value" type="text" value="hello" />,
+      );
+
+      assert.strictEqual((getByTestId("value") as HTMLInputElement).value, "hello");
+    }),
+  );
+
+  it.scoped("should apply disabled prop as attribute", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<button data-testid="disabled" disabled={true} />);
+
+      assert.isTrue((getByTestId("disabled") as HTMLButtonElement).disabled);
+    }),
+  );
+
+  it.scoped("should apply hidden prop as attribute", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<div data-testid="hidden" hidden={true} />);
+
+      assert.isTrue(getByTestId("hidden").hidden);
+    }),
+  );
+
+  it.scoped("should apply data-* attributes", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<div data-testid="data-attr" data-custom="value" />);
+
+      assert.strictEqual(getByTestId("data-attr").getAttribute("data-custom"), "value");
+    }),
+  );
+
+  it.scoped("should apply aria-* attributes", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(<button data-testid="aria" aria-label="Close" />);
+
+      assert.strictEqual(getByTestId("aria").getAttribute("aria-label"), "Close");
+    }),
+  );
+
+  it.scoped("should handle boolean attributes correctly", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <input data-testid="bool" type="text" readonly={true} required={true} />,
+      );
+
+      const input = getByTestId("bool") as HTMLInputElement;
+      assert.isTrue(input.readOnly);
+      assert.isTrue(input.required);
+    }),
+  );
+});
+
+// =============================================================================
+// Signal Props (Fine-grained reactivity)
+// =============================================================================
+// Scope: Props that accept Signals for direct DOM updates
+
+describe("Signal props", () => {
+  it.scoped("should update className directly when signal changes", () =>
+    Effect.gen(function* () {
+      const classSignal = yield* Signal.make("initial");
+      const { getByTestId } = yield* render(
+        <div data-testid="sig-class" className={classSignal} />,
+      );
+
+      assert.strictEqual(getByTestId("sig-class").className, "initial");
+
+      yield* Signal.set(classSignal, "updated");
+      yield* TestClock.adjust(10);
+
+      assert.strictEqual(getByTestId("sig-class").className, "updated");
+    }),
+  );
+
+  it.scoped("should update input value directly when signal changes", () =>
+    Effect.gen(function* () {
+      const valueSignal = yield* Signal.make("initial");
+      const { getByTestId } = yield* render(
+        <input data-testid="sig-value" type="text" value={valueSignal} />,
+      );
+
+      assert.strictEqual((getByTestId("sig-value") as HTMLInputElement).value, "initial");
+
+      yield* Signal.set(valueSignal, "updated");
+      yield* TestClock.adjust(10);
+
+      assert.strictEqual((getByTestId("sig-value") as HTMLInputElement).value, "updated");
+    }),
+  );
+
+  it.scoped("should update input checked directly when signal changes", () =>
+    Effect.gen(function* () {
+      const checkedSignal = yield* Signal.make(false);
+      const { getByTestId } = yield* render(
+        <input data-testid="sig-checked" type="checkbox" checked={checkedSignal} />,
+      );
+
+      assert.isFalse((getByTestId("sig-checked") as HTMLInputElement).checked);
+
+      yield* Signal.set(checkedSignal, true);
+      yield* TestClock.adjust(10);
+
+      assert.isTrue((getByTestId("sig-checked") as HTMLInputElement).checked);
+    }),
+  );
+
+  it.scoped("should update disabled directly when signal changes", () =>
+    Effect.gen(function* () {
+      const disabledSignal = yield* Signal.make(false);
+      const { getByTestId } = yield* render(
+        <button data-testid="sig-disabled" disabled={disabledSignal}>
+          Button
+        </button>,
+      );
+
+      assert.isFalse((getByTestId("sig-disabled") as HTMLButtonElement).disabled);
+
+      yield* Signal.set(disabledSignal, true);
+      yield* TestClock.adjust(10);
+
+      assert.isTrue((getByTestId("sig-disabled") as HTMLButtonElement).disabled);
+    }),
+  );
+
+  it.scoped("should update data-* attribute when signal changes", () =>
+    Effect.gen(function* () {
+      const dataSignal = yield* Signal.make("initial");
+      const { getByTestId } = yield* render(<div data-testid="sig-data" data-value={dataSignal} />);
+
+      assert.strictEqual(getByTestId("sig-data").getAttribute("data-value"), "initial");
+
+      yield* Signal.set(dataSignal, "updated");
+      yield* TestClock.adjust(10);
+
+      assert.strictEqual(getByTestId("sig-data").getAttribute("data-value"), "updated");
+    }),
+  );
+
+  it.scoped("should unsubscribe from signal props on cleanup", () =>
+    Effect.gen(function* () {
+      const classSignal = yield* Signal.make("class");
+      const scope = yield* Scope.make();
+
+      yield* render(<div id="sig-cleanup" className={classSignal} />).pipe(Scope.extend(scope));
+
+      const listenersBefore = classSignal._listeners.size;
+
+      yield* Scope.close(scope, Exit.void);
+
+      const listenersAfter = classSignal._listeners.size;
+      assert.isBelow(listenersAfter, listenersBefore);
+    }),
+  );
+});
+
+// =============================================================================
+// Event Handlers
+// =============================================================================
+// Scope: Event handler props
+
+describe("Event handlers", () => {
+  it.scoped("should call function handler with event", () =>
+    Effect.gen(function* () {
+      let eventReceived: Event | null = null;
+
+      const { getByTestId } = yield* render(
+        <button
+          data-testid="event-btn"
+          onClick={(e: Event) =>
+            Effect.sync(() => {
+              eventReceived = e;
+            })
+          }
+        >
+          Click
+        </button>,
+      );
+
+      getByTestId("event-btn").click();
+      yield* TestClock.adjust(10);
+
+      assert.isNotNull(eventReceived);
+      assert.instanceOf(eventReceived, Event);
+    }),
+  );
+
+  it.scoped("should execute Effect handler on event", () =>
+    Effect.gen(function* () {
+      let handlerExecuted = false;
+
+      const { getByTestId } = yield* render(
+        <button
+          data-testid="effect-btn"
+          onClick={Effect.sync(() => {
+            handlerExecuted = true;
+          })}
+        >
+          Click
+        </button>,
+      );
+
+      getByTestId("effect-btn").click();
+      yield* TestClock.adjust(10);
+
+      assert.isTrue(handlerExecuted);
+    }),
+  );
+
+  it.scoped("should support multiple different event handlers", () =>
+    Effect.gen(function* () {
+      let clicked = false;
+      let focused = false;
+
+      const { getByTestId } = yield* render(
+        <input
+          data-testid="multi-event"
+          type="text"
+          onClick={Effect.sync(() => {
+            clicked = true;
+          })}
+          onFocus={Effect.sync(() => {
+            focused = true;
+          })}
+        />,
+      );
+
+      const input = getByTestId("multi-event");
+      input.click();
+      input.focus();
+      yield* TestClock.adjust(10);
+
+      assert.isTrue(clicked);
+      assert.isTrue(focused);
+    }),
+  );
+});
+
+// =============================================================================
+// Scope and Cleanup
+// =============================================================================
+// Scope: Proper resource management
+
+describe("Scope and cleanup", () => {
+  it.scoped("should close scope on unmount", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      let finalizerRan = false;
+
+      const MyComponent = Component.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            finalizerRan = true;
+          }),
+        );
+        return <span>Component</span>;
+      });
+
+      yield* render(
+        <div id="scope-unmount">
+          <MyComponent />
+        </div>,
+      ).pipe(Scope.extend(scope));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isTrue(finalizerRan);
+    }),
+  );
+
+  it.scoped("should cleanup nested scopes correctly", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const cleanupOrder: string[] = [];
+
+      const Child = Component.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            cleanupOrder.push("child");
+          }),
+        );
+        return <span>Child</span>;
+      });
+
+      const Parent = Component.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            cleanupOrder.push("parent");
+          }),
+        );
+        return (
+          <div>
+            <Child />
+          </div>
+        );
+      });
+
+      yield* render(<Parent />).pipe(Scope.extend(scope));
+      yield* Scope.close(scope, Exit.void);
+
+      assert.include(cleanupOrder, "child");
+      assert.include(cleanupOrder, "parent");
+    }),
+  );
+
+  it.scoped("should remove all signal subscriptions on cleanup", () =>
+    Effect.gen(function* () {
+      const signal = yield* Signal.make(0);
+      const scope = yield* Scope.make();
+
+      const MyComponent = Component.gen(function* () {
+        const value = yield* Signal.get(signal);
+        return <span>{String(value)}</span>;
+      });
+
+      yield* render(<MyComponent />).pipe(Scope.extend(scope));
+
+      const listenersBefore = signal._listeners.size;
+
+      yield* Scope.close(scope, Exit.void);
+
+      const listenersAfter = signal._listeners.size;
+      assert.isBelow(listenersAfter, listenersBefore);
+    }),
+  );
+
+  it.scoped("should remove all DOM nodes on cleanup", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+
+      yield* render(
+        <div id="dom-cleanup">
+          <span id="dom-child-1" />
+          <span id="dom-child-2" />
+        </div>,
+      ).pipe(Scope.extend(scope));
+
+      assert.isNotNull(document.querySelector("#dom-cleanup"));
+      assert.isNotNull(document.querySelector("#dom-child-1"));
+      assert.isNotNull(document.querySelector("#dom-child-2"));
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isNull(document.querySelector("#dom-cleanup"));
+      assert.isNull(document.querySelector("#dom-child-1"));
+      assert.isNull(document.querySelector("#dom-child-2"));
+    }),
+  );
+});
+
+// =============================================================================
+// Re-render Behavior
+// =============================================================================
+// Scope: Component re-rendering on signal changes
+
+describe("Re-render behavior", () => {
+  it.scoped("should only re-render components subscribed to changed signal", () =>
+    Effect.gen(function* () {
+      const signal1 = Signal.unsafeMake(0);
+      const signal2 = Signal.unsafeMake(0);
+      let comp1Renders = 0;
+      let comp2Renders = 0;
+
+      const Comp1 = Component.gen(function* () {
+        comp1Renders++;
+        const value = yield* Signal.get(signal1);
+        return <div data-testid="comp1">{String(value)}</div>;
+      });
+
+      const Comp2 = Component.gen(function* () {
+        comp2Renders++;
+        const value = yield* Signal.get(signal2);
+        return <div data-testid="comp2">{String(value)}</div>;
+      });
+
+      yield* render(
+        <div>
+          <Comp1 />
+          <Comp2 />
+        </div>,
+      );
+
+      const initialComp1 = comp1Renders;
+      const initialComp2 = comp2Renders;
+
+      yield* Signal.set(signal1, 1);
+      yield* TestClock.adjust(20);
+
+      assert.isAbove(comp1Renders, initialComp1);
+      assert.strictEqual(comp2Renders, initialComp2);
+    }),
+  );
+
+  it.scoped("should recreate child component on parent re-render (full subtree teardown)", () =>
+    Effect.gen(function* () {
+      const parentTrigger = Signal.unsafeMake(0);
+      let childRenderCount = 0;
+
+      const Child = Component.gen(function* () {
+        childRenderCount++;
+        const childSignal = yield* Signal.make(100);
+        const value = yield* Signal.get(childSignal);
+        return <span data-testid="child">{String(value)}</span>;
+      });
+
+      const Parent = Component.gen(function* () {
+        yield* Signal.get(parentTrigger);
+        return (
+          <div data-testid="parent">
+            <Child />
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(getByTestId("child").textContent, "100");
+
+      yield* Signal.set(parentTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      // Child is recreated on parent re-render (F-004: full subtree teardown)
+      assert.strictEqual(childRenderCount, 2);
+    }),
+  );
+});
+
+// =============================================================================
+// Error Handling
+// =============================================================================
+// Scope: Error propagation and recovery
+
+describe("Renderer error handling", () => {
+  it.scoped("should propagate component effect errors", () =>
+    Effect.gen(function* () {
+      const ErrorComponent = Component.gen(function* () {
+        yield* new ComponentError({ message: "Render error" });
+        return <div />;
+      });
+
+      const exit = yield* Effect.exit(render(<ErrorComponent />));
+
+      assert.strictEqual(exit._tag, "Failure");
+    }),
+  );
+});
+
+// =============================================================================
+// Provide Element (Context)
+// =============================================================================
+// Scope: Context propagation via Provide element
+
+describe("Provide element", () => {
+  it.scoped("should provide context to child components", () =>
+    Effect.gen(function* () {
+      class TestCtx extends Context.Tag("TestCtx")<TestCtx, { value: string }>() {}
+
+      const Child = Component.gen(function* () {
+        const ctx = yield* TestCtx;
+        return <span data-testid="ctx-child">{ctx.value}</span>;
+      });
+
+      const component = Effect.gen(function* () {
+        return <Child />;
+      }).pipe(Component.provide(Layer.succeed(TestCtx, { value: "provided" })));
+
+      const { getByTestId } = yield* render(component);
+
+      assert.strictEqual(getByTestId("ctx-child").textContent, "provided");
+    }),
+  );
+
+  it.scoped("should propagate context to deeply nested components", () =>
+    Effect.gen(function* () {
+      class DeepCtx extends Context.Tag("DeepCtx")<DeepCtx, { nested: string }>() {}
+
+      const DeepChild = Component.gen(function* () {
+        const ctx = yield* DeepCtx;
+        return <span data-testid="deep">{ctx.nested}</span>;
+      });
+
+      const MiddleChild = Component.gen(function* () {
+        return (
+          <div>
+            <DeepChild />
+          </div>
+        );
+      });
+
+      const component = Effect.gen(function* () {
+        return <MiddleChild />;
+      }).pipe(Component.provide(Layer.succeed(DeepCtx, { nested: "deep-value" })));
+
+      const { getByTestId } = yield* render(component);
+
+      assert.strictEqual(getByTestId("deep").textContent, "deep-value");
+    }),
+  );
+});

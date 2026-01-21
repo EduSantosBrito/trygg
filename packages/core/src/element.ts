@@ -4,7 +4,7 @@
  */
 import { Context, Data, Effect } from "effect";
 import type { Signal, EachOptions } from "./signal.js";
-import { _setEachImpl, peekSync } from "./signal.js";
+import { _setEachImpl, _setSignalElementImpl, peekSync } from "./signal.js";
 
 /**
  * Check if a value is an Effect
@@ -268,13 +268,13 @@ export const intrinsic = (
   props: ElementProps,
   children: ReadonlyArray<Element>,
   key: ElementKey | null = null,
-): Element => Element.Intrinsic({ tag, props, children, key });
+) => Element.Intrinsic({ tag, props, children, key });
 
 /**
  * Create a text element
  * @since 1.0.0
  */
-export const text = (content: string): Element => Element.Text({ content });
+export const text = (content: string) => Element.Text({ content });
 
 /**
  * Create a component element from a thunk that produces an Effect.
@@ -304,15 +304,15 @@ export const provideElement = (context: Context.Context<unknown>, child: Element
  * Create a fragment element
  * @since 1.0.0
  */
-export const fragment = (children: ReadonlyArray<Element>): Element =>
-  Element.Fragment({ children });
+export const fragment = (children: ReadonlyArray<Element>) => Element.Fragment({ children });
 
 /**
- * Create a portal element
+ * Create a portal element.
+ * Children are automatically normalized (strings, numbers, arrays, etc. all work).
  * @since 1.0.0
  */
-export const portal = (target: HTMLElement | string, children: ReadonlyArray<Element>): Element =>
-  Element.Portal({ target, children });
+export const portal = (target: HTMLElement | string, children: unknown) =>
+  Element.Portal({ target, children: normalizeChildren(children) });
 
 /**
  * Create a keyed list element for efficient list rendering.
@@ -323,7 +323,7 @@ export const keyedList = <T>(
   source: Signal<ReadonlyArray<T>>,
   renderFn: (item: T, index: number) => Effect.Effect<Element, unknown, unknown>,
   keyFn: (item: T, index: number) => string | number,
-): Element =>
+) =>
   Element.KeyedList({
     source: source as Signal<ReadonlyArray<unknown>>,
     renderFn: renderFn as (
@@ -392,6 +392,9 @@ export const signalText = (signal: Signal<unknown>): Element => Element.SignalTe
  */
 export const signalElement = (signal: Signal<Element>): Element =>
   Element.SignalElement({ signal });
+
+// Initialize signalElement implementation in signal.ts to break circular dependency
+_setSignalElementImpl(signalElement);
 
 /**
  * Normalize a child value to an Element

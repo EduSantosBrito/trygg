@@ -11,7 +11,7 @@
 import { Cause, Effect, Equal, Exit, FiberRef, Ref, Scope, SubscriptionRef } from "effect";
 import * as Debug from "./debug/debug.js";
 import * as Metrics from "./debug/metrics.js";
-import { signalElement } from "./element.js";
+import type { Element } from "./element.js";
 
 /**
  * Callback type for signal change notifications.
@@ -782,7 +782,10 @@ export const suspend: <Props, E>(
     // Return a ComponentType that renders the signal as a SignalElement
     // This allows usage as <SuspendedView /> in JSX
     const suspendedComponent = (_props: Record<string, never>): SuspendElement => {
-      return signalElement(viewSignal as Signal<SuspendElement>);
+      if (!_signalElementImpl) {
+        throw new Error("Signal module not initialized - element.ts must be imported first");
+      }
+      return _signalElementImpl(viewSignal as Signal<SuspendElement>) as SuspendElement;
     };
 
     // Tag as EffectComponent and expose signal for testing
@@ -832,6 +835,17 @@ let _eachImpl: EachFn | null = null;
  */
 export const _setEachImpl = (impl: EachFn): void => {
   _eachImpl = impl;
+};
+
+// Lazy reference to signalElement to break circular dependency
+let _signalElementImpl: ((signal: Signal<Element>) => Element) | null = null;
+
+/**
+ * @internal
+ * Set the implementation of signalElement (called by Element.ts to break circular dependency)
+ */
+export const _setSignalElementImpl = (impl: (signal: Signal<Element>) => Element): void => {
+  _signalElementImpl = impl;
 };
 
 /**

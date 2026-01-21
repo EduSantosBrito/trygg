@@ -14,7 +14,24 @@
  * - Verify all element types construct correctly
  * - Verify normalization handles edge cases
  */
-import { describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect } from "effect";
+import {
+  Element,
+  empty,
+  fragment,
+  getKey,
+  intrinsic,
+  isElement,
+  isEmpty,
+  keyed,
+  keyedList,
+  normalizeChild,
+  normalizeChildren,
+  portal,
+  text,
+} from "../src/element.js";
+import * as Signal from "../src/signal.js";
 
 // =============================================================================
 // intrinsic - HTML element constructor
@@ -22,25 +39,45 @@ import { describe, it } from "@effect/vitest";
 // Scope: Creating Intrinsic elements for HTML tags
 
 describe("intrinsic", () => {
-  // Case: Creates element with tag
-  // Assert: Element has correct _tag and tag property
-  it.todo("should create Intrinsic element with tag name");
+  it("should create Intrinsic element with tag name", () => {
+    const element = intrinsic("div", {}, []);
 
-  // Case: Creates element with props
-  // Assert: Props stored correctly
-  it.todo("should store props on element");
+    assert.strictEqual(element._tag, "Intrinsic");
+    assert.strictEqual(element.tag, "div");
+  });
 
-  // Case: Creates element with children
-  // Assert: Children array stored correctly
-  it.todo("should store children array on element");
+  it("should store props on element", () => {
+    const props = { className: "test", id: "my-id" };
+    const element = intrinsic("div", props, []);
 
-  // Case: Creates element with key
-  // Assert: Key stored for reconciliation
-  it.todo("should store key for list reconciliation");
+    assert.strictEqual(element._tag, "Intrinsic");
+    assert.strictEqual(element.props.className, "test");
+    assert.strictEqual(element.props.id, "my-id");
+  });
 
-  // Case: Key defaults to null
-  // Assert: Missing key is null not undefined
-  it.todo("should default key to null when not provided");
+  it("should store children array on element", () => {
+    const children = [text("child 1"), text("child 2")];
+    const element = intrinsic("div", {}, children);
+
+    assert.strictEqual(element._tag, "Intrinsic");
+    assert.strictEqual(element.children.length, 2);
+    assert.strictEqual(element.children[0]?._tag, "Text");
+    assert.strictEqual(element.children[1]?._tag, "Text");
+  });
+
+  it("should store key for list reconciliation", () => {
+    const element = intrinsic("div", {}, [], "my-key");
+
+    assert.strictEqual(element._tag, "Intrinsic");
+    assert.strictEqual(element.key, "my-key");
+  });
+
+  it("should default key to null when not provided", () => {
+    const element = intrinsic("div", {}, []);
+
+    assert.strictEqual(element._tag, "Intrinsic");
+    assert.isNull(element.key);
+  });
 });
 
 // =============================================================================
@@ -49,13 +86,19 @@ describe("intrinsic", () => {
 // Scope: Creating Text elements
 
 describe("text", () => {
-  // Case: Creates text element
-  // Assert: Element has _tag "Text" and content
-  it.todo("should create Text element with content");
+  it("should create Text element with content", () => {
+    const element = text("Hello World");
 
-  // Case: Handles empty string
-  // Assert: Empty string is valid content
-  it.todo("should handle empty string content");
+    assert.strictEqual(element._tag, "Text");
+    assert.strictEqual(element.content, "Hello World");
+  });
+
+  it("should handle empty string content", () => {
+    const element = text("");
+
+    assert.strictEqual(element._tag, "Text");
+    assert.strictEqual(element.content, "");
+  });
 });
 
 // =============================================================================
@@ -64,13 +107,20 @@ describe("text", () => {
 // Scope: Creating Fragment elements (multiple children, no wrapper)
 
 describe("fragment", () => {
-  // Case: Creates fragment with children
-  // Assert: Element has _tag "Fragment" and children array
-  it.todo("should create Fragment element with children");
+  it("should create Fragment element with children", () => {
+    const children = [text("one"), text("two")];
+    const element = fragment(children);
 
-  // Case: Creates empty fragment
-  // Assert: Empty array is valid
-  it.todo("should create empty fragment with empty array");
+    assert.strictEqual(element._tag, "Fragment");
+    assert.strictEqual(element.children.length, 2);
+  });
+
+  it("should create empty fragment with empty array", () => {
+    const element = fragment([]);
+
+    assert.strictEqual(element._tag, "Fragment");
+    assert.strictEqual(element.children.length, 0);
+  });
 });
 
 // =============================================================================
@@ -79,17 +129,32 @@ describe("fragment", () => {
 // Scope: Creating Portal elements (render into different container)
 
 describe("portal", () => {
-  // Case: Creates portal with HTMLElement target
-  // Assert: Element stores target element reference
-  it.todo("should create Portal with HTMLElement target");
+  it("should create Portal with HTMLElement target", () => {
+    const target = document.createElement("div");
+    const children = [text("portal content")];
+    const element = portal(target, children);
 
-  // Case: Creates portal with string selector target
-  // Assert: Element stores selector string
-  it.todo("should create Portal with CSS selector target");
+    assert.strictEqual(element._tag, "Portal");
+    assert.strictEqual(element.target, target);
+  });
 
-  // Case: Creates portal with children
-  // Assert: Children stored for rendering into target
-  it.todo("should store children for portal");
+  it("should create Portal with CSS selector target", () => {
+    const selector = "#modal-root";
+    const children = [text("portal content")];
+    const element = portal(selector, children);
+
+    assert.strictEqual(element._tag, "Portal");
+    assert.strictEqual(element.target, selector);
+  });
+
+  it("should store children for portal", () => {
+    const target = "#target";
+    const children = [text("child 1"), text("child 2")];
+    const element = portal(target, children);
+
+    assert.strictEqual(element._tag, "Portal");
+    assert.strictEqual(element.children.length, 2);
+  });
 });
 
 // =============================================================================
@@ -98,17 +163,44 @@ describe("portal", () => {
 // Scope: Creating KeyedList elements (efficient list rendering)
 
 describe("keyedList", () => {
-  // Case: Creates keyed list element
-  // Assert: Element has source signal, renderFn, keyFn
-  it.todo("should create KeyedList with source signal");
+  it.scoped("should create KeyedList with source signal", () =>
+    Effect.gen(function* () {
+      const source = yield* Signal.make<ReadonlyArray<string>>([]);
+      const renderFn = (item: string) => Effect.succeed(text(item));
+      const keyFn = (item: string) => item;
 
-  // Case: Stores render function
-  // Assert: renderFn preserved for item rendering
-  it.todo("should store render function");
+      const element = keyedList(source, renderFn, keyFn);
 
-  // Case: Stores key function
-  // Assert: keyFn preserved for item identity
-  it.todo("should store key function");
+      assert.strictEqual(element._tag, "KeyedList");
+      assert.isDefined(element.source);
+    }),
+  );
+
+  it.scoped("should store render function", () =>
+    Effect.gen(function* () {
+      const source = yield* Signal.make<ReadonlyArray<number>>([]);
+      const renderFn = (item: number) => Effect.succeed(text(String(item)));
+      const keyFn = (item: number) => item;
+
+      const element = keyedList(source, renderFn, keyFn);
+
+      assert.strictEqual(element._tag, "KeyedList");
+      assert.isDefined(element.renderFn);
+    }),
+  );
+
+  it.scoped("should store key function", () =>
+    Effect.gen(function* () {
+      const source = yield* Signal.make<ReadonlyArray<{ id: number }>>([]);
+      const renderFn = (item: { id: number }) => Effect.succeed(text(String(item.id)));
+      const keyFn = (item: { id: number }) => item.id;
+
+      const element = keyedList(source, renderFn, keyFn);
+
+      assert.strictEqual(element._tag, "KeyedList");
+      assert.isDefined(element.keyFn);
+    }),
+  );
 });
 
 // =============================================================================
@@ -117,13 +209,19 @@ describe("keyedList", () => {
 // Scope: Empty fragment constant
 
 describe("empty", () => {
-  // Case: Is an empty fragment
-  // Assert: _tag is Fragment, children is empty array
-  it.todo("should be an empty Fragment");
+  it("should be an empty Fragment", () => {
+    if (!Element.$is("Fragment")(empty)) {
+      return assert.fail("Expected Fragment element");
+    }
+    assert.strictEqual(empty.children.length, 0);
+  });
 
-  // Case: Same instance every time
-  // Assert: Singleton pattern
-  it.todo("should be a singleton instance");
+  it("should be a singleton instance", () => {
+    const empty1 = empty;
+    const empty2 = empty;
+
+    assert.strictEqual(empty1, empty2);
+  });
 });
 
 // =============================================================================
@@ -132,45 +230,79 @@ describe("empty", () => {
 // Scope: Normalizing various child types to Element
 
 describe("normalizeChild", () => {
-  // Case: String becomes Text element
-  // Assert: String wrapped in Text
-  it.todo("should convert string to Text element");
+  it("should convert string to Text element", () => {
+    const element = normalizeChild("hello");
 
-  // Case: Number becomes Text element
-  // Assert: Number converted to string then Text
-  it.todo("should convert number to Text element");
+    if (!Element.$is("Text")(element)) {
+      return assert.fail("Expected Text element");
+    }
+    assert.strictEqual(element.content, "hello");
+  });
 
-  // Case: null becomes empty
-  // Assert: null returns empty fragment
-  it.todo("should convert null to empty element");
+  it("should convert number to Text element", () => {
+    const element = normalizeChild(42);
 
-  // Case: undefined becomes empty
-  // Assert: undefined returns empty fragment
-  it.todo("should convert undefined to empty element");
+    if (!Element.$is("Text")(element)) {
+      return assert.fail("Expected Text element");
+    }
+    assert.strictEqual(element.content, "42");
+  });
 
-  // Case: false becomes empty
-  // Assert: false returns empty (for conditional rendering)
-  it.todo("should convert false to empty element");
+  it("should convert null to empty element", () => {
+    const element = normalizeChild(null);
 
-  // Case: true becomes empty
-  // Assert: true returns empty (for conditional rendering)
-  it.todo("should convert true to empty element");
+    assert.isTrue(isEmpty(element));
+  });
 
-  // Case: Element passes through
-  // Assert: Existing Element returned as-is
-  it.todo("should pass through Element unchanged");
+  it("should convert undefined to empty element", () => {
+    const element = normalizeChild(undefined);
 
-  // Case: Signal<primitive> becomes SignalText
-  // Assert: Signal wrapped in SignalText for reactive text
-  it.todo("should convert Signal of primitive to SignalText");
+    assert.isTrue(isEmpty(element));
+  });
 
-  // Case: Signal<Element> becomes SignalElement
-  // Assert: Signal wrapped in SignalElement for reactive swap
-  it.todo("should convert Signal of Element to SignalElement");
+  it("should convert false to empty element", () => {
+    const element = normalizeChild(false);
 
-  // Case: Effect becomes Component
-  // Assert: Effect wrapped in Component element
-  it.todo("should convert Effect to Component element");
+    assert.isTrue(isEmpty(element));
+  });
+
+  it("should convert true to empty element", () => {
+    const element = normalizeChild(true);
+
+    assert.isTrue(isEmpty(element));
+  });
+
+  it("should pass through Element unchanged", () => {
+    const original = intrinsic("div", {}, []);
+    const element = normalizeChild(original);
+
+    assert.strictEqual(element, original);
+  });
+
+  it.scoped("should convert Signal of primitive to SignalText", () =>
+    Effect.gen(function* () {
+      const signal = yield* Signal.make("text value");
+      const element = normalizeChild(signal);
+
+      assert.strictEqual(element._tag, "SignalText");
+    }),
+  );
+
+  it.scoped("should convert Signal of Element to SignalElement", () =>
+    Effect.gen(function* () {
+      const signal = yield* Signal.make(intrinsic("span", {}, [text("content")]));
+      const element = normalizeChild(signal);
+
+      assert.strictEqual(element._tag, "SignalElement");
+    }),
+  );
+
+  it("should convert Effect to Component element", () => {
+    const effect = Effect.succeed(intrinsic("div", {}, []));
+    const element = normalizeChild(effect);
+
+    assert.strictEqual(element._tag, "Component");
+  });
 });
 
 // =============================================================================
@@ -179,25 +311,52 @@ describe("normalizeChild", () => {
 // Scope: Normalizing children arrays including nested arrays
 
 describe("normalizeChildren", () => {
-  // Case: Array of children
-  // Assert: Each child normalized
-  it.todo("should normalize array of children");
+  it("should normalize array of children", () => {
+    const children = normalizeChildren(["one", "two", "three"]);
 
-  // Case: Nested arrays flattened
-  // Assert: [[a, b], c] becomes [a, b, c]
-  it.todo("should flatten nested arrays");
+    assert.strictEqual(children.length, 3);
+    assert.strictEqual(children[0]?._tag, "Text");
+    assert.strictEqual(children[1]?._tag, "Text");
+    assert.strictEqual(children[2]?._tag, "Text");
+  });
 
-  // Case: Filters out empty elements
-  // Assert: null/undefined/false don't create empty fragments
-  it.todo("should filter out empty elements");
+  it("should flatten nested arrays", () => {
+    const children = normalizeChildren([["a", "b"], "c"]);
 
-  // Case: null input returns empty array
-  // Assert: null children becomes []
-  it.todo("should return empty array for null input");
+    assert.strictEqual(children.length, 3);
+    const [c0, c1, c2] = children;
+    if (!Element.$is("Text")(c0) || !Element.$is("Text")(c1) || !Element.$is("Text")(c2)) {
+      return assert.fail("Expected Text elements");
+    }
+    assert.strictEqual(c0.content, "a");
+    assert.strictEqual(c1.content, "b");
+    assert.strictEqual(c2.content, "c");
+  });
 
-  // Case: Single child wrapped
-  // Assert: Non-array child becomes single-element array
-  it.todo("should wrap single child in array");
+  it("should filter out empty elements", () => {
+    const children = normalizeChildren(["text", null, undefined, false, "more"]);
+
+    assert.strictEqual(children.length, 2);
+    const [c0, c1] = children;
+    if (!Element.$is("Text")(c0) || !Element.$is("Text")(c1)) {
+      return assert.fail("Expected Text elements");
+    }
+    assert.strictEqual(c0.content, "text");
+    assert.strictEqual(c1.content, "more");
+  });
+
+  it("should return empty array for null input", () => {
+    const children = normalizeChildren(null);
+
+    assert.strictEqual(children.length, 0);
+  });
+
+  it("should wrap single child in array", () => {
+    const children = normalizeChildren("single");
+
+    assert.strictEqual(children.length, 1);
+    assert.strictEqual(children[0]?._tag, "Text");
+  });
 });
 
 // =============================================================================
@@ -206,33 +365,48 @@ describe("normalizeChildren", () => {
 // Scope: Checking if value is an Element
 
 describe("isElement", () => {
-  // Case: Returns true for Intrinsic
-  // Assert: Intrinsic elements pass
-  it.todo("should return true for Intrinsic element");
+  it("should return true for Intrinsic element", () => {
+    const element = intrinsic("div", {}, []);
 
-  // Case: Returns true for Text
-  // Assert: Text elements pass
-  it.todo("should return true for Text element");
+    assert.isTrue(isElement(element));
+  });
 
-  // Case: Returns true for Fragment
-  // Assert: Fragment elements pass
-  it.todo("should return true for Fragment element");
+  it("should return true for Text element", () => {
+    const element = text("hello");
 
-  // Case: Returns true for Component
-  // Assert: Component elements pass
-  it.todo("should return true for Component element");
+    assert.isTrue(isElement(element));
+  });
 
-  // Case: Returns false for plain objects
-  // Assert: Non-elements rejected
-  it.todo("should return false for plain objects");
+  it("should return true for Fragment element", () => {
+    const element = fragment([]);
 
-  // Case: Returns false for null
-  // Assert: Handles null safely
-  it.todo("should return false for null");
+    assert.isTrue(isElement(element));
+  });
 
-  // Case: Returns false for primitives
-  // Assert: Strings, numbers rejected
-  it.todo("should return false for primitives");
+  it("should return true for Component element", () => {
+    const element = Element.Component({
+      run: () => Effect.succeed(text("component")),
+      key: null,
+    });
+
+    assert.isTrue(isElement(element));
+  });
+
+  it("should return false for plain objects", () => {
+    const obj = { _tag: "Custom", value: 42 };
+
+    assert.isFalse(isElement(obj));
+  });
+
+  it("should return false for null", () => {
+    assert.isFalse(isElement(null));
+  });
+
+  it("should return false for primitives", () => {
+    assert.isFalse(isElement("string"));
+    assert.isFalse(isElement(123));
+    assert.isFalse(isElement(true));
+  });
 });
 
 // =============================================================================
@@ -241,17 +415,22 @@ describe("isElement", () => {
 // Scope: Detecting empty fragments
 
 describe("isEmpty", () => {
-  // Case: Returns true for empty fragment
-  // Assert: Fragment with empty children is empty
-  it.todo("should return true for empty fragment");
+  it("should return true for empty fragment", () => {
+    const element = fragment([]);
 
-  // Case: Returns false for non-empty fragment
-  // Assert: Fragment with children is not empty
-  it.todo("should return false for fragment with children");
+    assert.isTrue(isEmpty(element));
+  });
 
-  // Case: Returns false for other elements
-  // Assert: Text, Intrinsic etc are not empty
-  it.todo("should return false for non-fragment elements");
+  it("should return false for non-empty fragment", () => {
+    const element = fragment([text("content")]);
+
+    assert.isFalse(isEmpty(element));
+  });
+
+  it("should return false for non-fragment elements", () => {
+    assert.isFalse(isEmpty(text("text")));
+    assert.isFalse(isEmpty(intrinsic("div", {}, [])));
+  });
 });
 
 // =============================================================================
@@ -260,21 +439,31 @@ describe("isEmpty", () => {
 // Scope: Getting reconciliation key from elements
 
 describe("getKey", () => {
-  // Case: Returns key from Intrinsic
-  // Assert: Key extracted from keyed Intrinsic
-  it.todo("should return key from Intrinsic element");
+  it("should return key from Intrinsic element", () => {
+    const element = intrinsic("div", {}, [], "my-key");
 
-  // Case: Returns key from Component
-  // Assert: Key extracted from keyed Component
-  it.todo("should return key from Component element");
+    assert.strictEqual(getKey(element), "my-key");
+  });
 
-  // Case: Returns null for unkeyed elements
-  // Assert: No key means null
-  it.todo("should return null for unkeyed elements");
+  it("should return key from Component element", () => {
+    const element = Element.Component({
+      run: () => Effect.succeed(text("comp")),
+      key: "component-key",
+    });
 
-  // Case: Returns null for elements without key support
-  // Assert: Text, Fragment etc return null
-  it.todo("should return null for element types without key support");
+    assert.strictEqual(getKey(element), "component-key");
+  });
+
+  it("should return null for unkeyed elements", () => {
+    const element = intrinsic("div", {}, []);
+
+    assert.isNull(getKey(element));
+  });
+
+  it("should return null for element types without key support", () => {
+    assert.isNull(getKey(text("text")));
+    assert.isNull(getKey(fragment([])));
+  });
 });
 
 // =============================================================================
@@ -283,19 +472,37 @@ describe("getKey", () => {
 // Scope: Adding reconciliation key to elements
 
 describe("keyed", () => {
-  // Case: Adds key to Intrinsic
-  // Assert: Returns new element with key
-  it.todo("should add key to Intrinsic element");
+  it("should add key to Intrinsic element", () => {
+    const original = intrinsic("div", {}, []);
+    const withKey = keyed("new-key", original);
 
-  // Case: Adds key to Component
-  // Assert: Returns new element with key
-  it.todo("should add key to Component element");
+    assert.strictEqual(withKey._tag, "Intrinsic");
+    assert.strictEqual(getKey(withKey), "new-key");
+  });
 
-  // Case: Returns unchanged for unsupported types
-  // Assert: Text, Fragment etc returned as-is
-  it.todo("should return element unchanged for unsupported types");
+  it("should add key to Component element", () => {
+    const original = Element.Component({
+      run: () => Effect.succeed(text("comp")),
+      key: null,
+    });
+    const withKey = keyed("comp-key", original);
 
-  // Case: Replaces existing key
-  // Assert: New key overwrites old
-  it.todo("should replace existing key");
+    assert.strictEqual(withKey._tag, "Component");
+    assert.strictEqual(getKey(withKey), "comp-key");
+  });
+
+  it("should return element unchanged for unsupported types", () => {
+    const original = text("text");
+    const result = keyed("ignored", original);
+
+    assert.strictEqual(result, original);
+    assert.isNull(getKey(result));
+  });
+
+  it("should replace existing key", () => {
+    const original = intrinsic("div", {}, [], "old-key");
+    const withNewKey = keyed("new-key", original);
+
+    assert.strictEqual(getKey(withNewKey), "new-key");
+  });
 });
