@@ -15,7 +15,7 @@ const features = [
   },
   {
     title: "Suspend",
-    path: "/resource",
+    path: "/suspend",
     description: "Async component rendering with Signal.suspend",
     concepts: ["Signal.suspend", "Pending/Failure/Success", "Dep-based caching", "Stale content"]
   },

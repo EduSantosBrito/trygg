@@ -12,10 +12,10 @@ declare module "effect-ui/router" {
     readonly "/": {}
     readonly "/login": {}
     readonly "/protected": {}
-    readonly "/resource": {}
     readonly "/settings": {}
     readonly "/settings/profile": {}
     readonly "/settings/security": {}
+    readonly "/suspend": {}
     readonly "/theme": {}
     readonly "/todo": {}
     readonly "/users/:id": { readonly id: string }
