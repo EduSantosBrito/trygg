@@ -44,6 +44,12 @@ const features = [
     concepts: ["ErrorBoundary", "Typed errors", "Fallback rendering", "Error recovery"],
   },
   {
+    title: "Portal",
+    path: "/portal",
+    description: "Render content outside the component DOM hierarchy",
+    concepts: ["Portal", "Modal dialogs", "Escape overflow", "Nested portals"],
+  },
+  {
     title: "Dashboard",
     path: "/dashboard",
     description: "Component.gen with multiple services, real-world patterns",
