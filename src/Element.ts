@@ -2,7 +2,7 @@
  * @since 1.0.0
  * Virtual DOM Element representation for effect-ui
  */
-import { Data, Deferred, Effect } from "effect"
+import { Context, Data, Deferred, Effect } from "effect"
 import type { Signal, EachOptions } from "./Signal.js"
 import { _setEachImpl, peekSync } from "./Signal.js"
 
@@ -10,7 +10,7 @@ import { _setEachImpl, peekSync } from "./Signal.js"
  * Check if a value is an Effect
  * @internal
  */
-const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
+const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
   typeof value === "object" &&
   value !== null &&
   Effect.EffectTypeId in value
@@ -209,13 +209,20 @@ export type Element = Data.TaggedEnum<{
     readonly signal: Signal<Element>
   }
   /**
+   * Context boundary - provides a captured context to child components.
+   * @internal
+   */
+  readonly Provide: {
+    readonly context: Context.Context<unknown>
+    readonly child: Element
+  }
+  /**
    * Effect-based component that produces an Element.
    * Stores a thunk that creates the effect at render time.
-   * R must be never - all requirements must be satisfied via Effect.provide
-   * before creating a Component element.
+   * Services must be available in the current context before rendering.
    */
   readonly Component: {
-    readonly run: () => Effect.Effect<Element, unknown, never>
+    readonly run: () => Effect.Effect<Element, unknown, unknown>
     readonly key: ElementKey | null
   }
   /**
@@ -244,7 +251,7 @@ export type Element = Data.TaggedEnum<{
    */
   readonly KeyedList: {
     readonly source: Signal<ReadonlyArray<unknown>>
-    readonly renderFn: (item: unknown, index: number) => Effect.Effect<Element, unknown, never>
+    readonly renderFn: (item: unknown, index: number) => Effect.Effect<Element, unknown, unknown>
     readonly keyFn: (item: unknown, index: number) => string | number
   }
 }>
@@ -280,17 +287,27 @@ export const text = (content: string): Element =>
  * This is the low-level function for creating Component elements.
  * For defining JSX-compatible components, use `Component()` from effect-ui instead.
  * 
- * If the effect has unsatisfied requirements (R != never), it will fail
+ * If the effect has unsatisfied requirements, it will fail
  * at runtime with "service not found".
  * 
  * @since 1.0.0
  * @internal
  */
 export const componentElement = <E>(
-  run: () => Effect.Effect<Element, E, never>,
+  run: () => Effect.Effect<Element, E, unknown>,
   key: ElementKey | null = null
 ): Element =>
   Element.Component({ run, key })
+
+/**
+ * Create a context boundary element.
+ * @internal
+ */
+export const provideElement = (
+  context: Context.Context<unknown>,
+  child: Element
+): Element =>
+  Element.Provide({ context, child })
 
 /**
  * Create a fragment element
@@ -326,19 +343,19 @@ export const portal = (
  */
 export const keyedList = <T>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => Effect.Effect<Element, unknown, never>,
+  renderFn: (item: T, index: number) => Effect.Effect<Element, unknown, unknown>,
   keyFn: (item: T, index: number) => string | number
 ): Element =>
   Element.KeyedList({
     source: source as Signal<ReadonlyArray<unknown>>,
-    renderFn: renderFn as (item: unknown, index: number) => Effect.Effect<Element, unknown, never>,
+    renderFn: renderFn as (item: unknown, index: number) => Effect.Effect<Element, unknown, unknown>,
     keyFn: keyFn as (item: unknown, index: number) => string | number
   })
 
 // Initialize Signal.each implementation to break circular dependency
 _setEachImpl(<T, E>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => Effect.Effect<Element, E, never>,
+  renderFn: (item: T, index: number) => Effect.Effect<Element, E, unknown>,
   options: EachOptions<T>
 ): Element => keyedList(source, renderFn, options.key))
 
@@ -367,7 +384,7 @@ export const isElement = (value: unknown): value is Element =>
   value !== null &&
   "_tag" in value &&
   typeof (value as { _tag: unknown })._tag === "string" &&
-  ["Intrinsic", "Text", "SignalText", "SignalElement", "Component", "Fragment", "Suspense", "Portal", "KeyedList"].includes(
+  ["Intrinsic", "Text", "SignalText", "SignalElement", "Provide", "Component", "Fragment", "Suspense", "Portal", "KeyedList"].includes(
     (value as { _tag: string })._tag
   )
 

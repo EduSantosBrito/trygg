@@ -447,7 +447,7 @@ None (documentation addition)
 
 ### 2026-01-20 - Solution Session
 - Processed: F-008
-- Decisions: keep per-service layer props; replace casts with Proxy-based props view, provideService for props, typed mergeAllLayers, type guards in Component.gen
+- Decisions: remove layer auto-injection; propagate context via renderer boundary; use Component.provide at parent; update docs/examples/tests
 - Next: continue priority list
 
 ### 2026-01-20 - Solution Session

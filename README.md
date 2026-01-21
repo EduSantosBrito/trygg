@@ -137,30 +137,34 @@ Event handlers are typed to return Effects:
 
 ### Dependency Injection
 
-Use Effect's built-in context system. No Provider components needed:
+Use Effect's built-in context system. Provide layers in parent effects:
 
 ```tsx
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
+import { Component } from "effect-ui"
 
 // Define a service
 class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
 
 // Component uses the service
-const Header = Effect.gen(function* () {
+const Header = Component.gen(function* () {
   const theme = yield* Theme
   return <h1 style={{ color: theme.primary }}>Welcome</h1>
 })
 
 // Provide the layer
 const themeLayer = Layer.succeed(Theme, { primary: "blue" })
-mount(container, Header.pipe(Effect.provide(themeLayer)))
+mount(container, Effect.gen(function* () {
+  return <Header />
+}).pipe(Component.provide(themeLayer)))
 ```
 
 ## Component.gen API
 
-For typed props and automatic layer injection, use `Component.gen`:
+For typed props and explicit DI, use `Component.gen`:
 
 ```tsx
+import { Effect } from "effect"
 import { Component, type ComponentProps } from "effect-ui"
 
 // Without props
@@ -168,7 +172,6 @@ const ThemedCard = Component.gen(function* () {
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>Card</div>
 })
-// Props inferred: { theme: Layer<Theme> }
 
 // With props (direct syntax)
 const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
@@ -176,10 +179,11 @@ const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) 
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>{title}</div>
 })
-// Props inferred: { title: string, theme: Layer<Theme> }
 
-// Usage - service requirements become layer props
-<Card title="Hello" theme={themeLayer} />
+// Usage - provide layers at the parent
+Effect.gen(function* () {
+  return <Card title="Hello" />
+}).pipe(Component.provide(themeLayer))
 ```
 
 ## Debugging
@@ -226,7 +230,7 @@ bun run examples          # Start at http://localhost:5173
 Examples include:
 - **Counter** - Basic state with Signal
 - **Todo** - List operations with `Signal.each`
-- **Theme** - Dependency injection with layers
+- **Theme** - Dependency injection with Component.provide
 - **Form** - Input handling, validation
 - **Error Boundary** - Error handling patterns
 - **Dashboard** - Multiple services, real-world patterns
@@ -274,7 +278,7 @@ See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
 | `Signal.set(signal, value)` | Set signal value |
 | `Signal.update(signal, fn)` | Update signal with function |
 | `Signal.each(source, fn, opts)` | Efficient list rendering |
-| `Component.gen(fn)` | Create component with auto layer injection |
+| `Component.gen(fn)` | Create component with explicit DI |
 | `DevMode` | Debug event viewer |
 | `Suspense` | Async boundary component |
 | `ErrorBoundary` | Error handling component |

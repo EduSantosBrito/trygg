@@ -4,9 +4,9 @@
  * User profile settings accessible at /settings/profile
  */
 import { Effect } from "effect"
-import { Signal } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
-const ProfileSettings = Effect.gen(function* () {
+const ProfileSettings = Component.gen(function* () {
   const name = yield* Signal.make("Jane Doe")
   const email = yield* Signal.make("jane@example.com")
   

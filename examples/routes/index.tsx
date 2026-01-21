@@ -3,7 +3,7 @@
  * 
  * Overview of all effect-ui examples and what they demonstrate.
  */
-import { Effect } from "effect"
+import { Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 
 const features = [
@@ -14,6 +14,12 @@ const features = [
     concepts: ["Signal.make", "Signal.update", "Component.gen", "Event handlers"]
   },
   {
+    title: "Suspense",
+    path: "/suspense",
+    description: "Async boundaries with fallback UI while loading",
+    concepts: ["Suspense", "Deferred", "Async components", "Loading states"]
+  },
+  {
     title: "Todo List",
     path: "/todo",
     description: "List operations, multiple signals, nested state",
@@ -22,8 +28,8 @@ const features = [
   {
     title: "Theme (DI)",
     path: "/theme",
-    description: "Dependency injection with Effect.provide, swappable layers",
-    concepts: ["Context.Tag", "Layer.succeed", "Auto layer props", "Runtime switching"]
+    description: "Dependency injection with Component.provide, swappable layers",
+    concepts: ["Context.Tag", "Layer.succeed", "Component.provide", "Runtime switching"]
   },
   {
     title: "Form Validation",
@@ -69,7 +75,7 @@ const features = [
   }
 ]
 
-const LandingPage = Effect.gen(function* () {
+const LandingPage = Component.gen(function* () {
   return (
     <div className="landing">
       <div className="hero">
@@ -94,9 +100,9 @@ const LandingPage = Effect.gen(function* () {
       <div className="quick-start">
         <h2>Quick Start</h2>
         <pre>{`import { Effect } from "effect"
-import { mount, Signal } from "effect-ui"
+import { mount, Signal, Component } from "effect-ui"
 
-const App = Effect.gen(function* () {
+const App = Component.gen(function* () {
   const count = yield* Signal.make(0)
   return (
     <button onClick={() => Signal.update(count, n => n + 1)}>
@@ -105,7 +111,7 @@ const App = Effect.gen(function* () {
   )
 })
 
-mount(document.getElementById("root")!, App)`}</pre>
+mount(document.getElementById("root")!, <App />)`}</pre>
       </div>
     </div>
   )

@@ -4,10 +4,10 @@
  * Demonstrates the _layout.tsx pattern for shared navigation.
  * This layout wraps all /settings/* routes with a sidebar.
  */
-import { Effect } from "effect";
+import { Component } from "effect-ui";
 import * as Router from "effect-ui/router";
 
-const SettingsLayout = Effect.gen(function* () {
+const SettingsLayout = Component.gen(function* () {
   return (
     <div className="settings-layout">
       <aside className="settings-sidebar">

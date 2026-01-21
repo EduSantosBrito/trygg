@@ -815,11 +815,10 @@ describe("Renderer scoped DOM graph (F-012)", () => {
                 "button",
                 {
                   id: "btn-fn",
-                  onClick: (_event: Event) =>
-                    Effect.gen(function* () {
-                      const current = yield* Signal.get(log)
-                      yield* Signal.set(log, [...current, "fn-clicked"])
-                    })
+                  onClick: Effect.fnUntraced(function* (_event: Event) {
+                    const current = yield* Signal.get(log)
+                    yield* Signal.set(log, [...current, "fn-clicked"])
+                  })
                 },
                 [text("Function")],
                 null
@@ -829,7 +828,7 @@ describe("Renderer scoped DOM graph (F-012)", () => {
                 "button",
                 {
                   id: "btn-effect",
-                  onClick: Effect.gen(function* () {
+                  onClick: Effect.fnUntraced(function* () {
                     const current = yield* Signal.get(log)
                     yield* Signal.set(log, [...current, "effect-clicked"])
                   })

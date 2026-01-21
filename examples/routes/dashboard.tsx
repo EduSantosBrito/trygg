@@ -237,92 +237,85 @@ const DashboardApp = Component.gen(function* () {
     { text: "Report generated", time: "3 hours ago" }
   ]
 
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: theme.background,
-      fontFamily: "system-ui, -apple-system, sans-serif",
-      margin: "-1.5rem",
-      padding: "0"
-    }}>
-      <Header userName="Developer" theme={currentTheme} logger={loggerLayer} />
-
-      <main style={{ padding: "1.5rem", maxWidth: "1200px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-          <SectionTitle title="Overview" theme={currentTheme} />
-          <ActionButton
-            label={`Switch to ${isDarkValue ? "Light" : "Dark"}`}
-            variant="secondary"
-            onClick={toggleTheme}
-            theme={currentTheme}
-            analytics={analyticsLayer}
-          />
-        </div>
-
-        {/* Stats Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
-          marginBottom: "2rem"
-        }}>
-          <StatCard title="Total Users" value="12,345" change="+12%" theme={currentTheme} />
-          <StatCard title="Revenue" value="$45,678" change="+8%" theme={currentTheme} />
-          <StatCard title="Orders" value="1,234" change="-3%" theme={currentTheme} />
-          <StatCard title="Conversion" value="3.2%" change="+0.5%" theme={currentTheme} />
-        </div>
-
-        {/* Recent Activity */}
-        <SectionTitle title="Recent Activity" theme={currentTheme} />
-        <div style={{
-          background: theme.cardBackground,
-          borderRadius: "8px",
-          overflow: "hidden",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
-        }}>
-          {activities.map((activity, i) => (
-            <ActivityItem
-              key={i}
-              text={activity.text}
-              time={activity.time}
-              theme={currentTheme}
-              analytics={analyticsLayer}
-            />
-          ))}
-        </div>
-
-        {/* Actions */}
-        <div style={{ marginTop: "2rem", display: "flex", gap: "1rem" }}>
-          <ActionButton
-            label="Generate Report"
-            variant="primary"
-            onClick={() => Effect.log("Generating report...")}
-            theme={currentTheme}
-            analytics={analyticsLayer}
-          />
-          <ActionButton
-            label="Export Data"
-            variant="secondary"
-            onClick={() => Effect.log("Exporting data...")}
-            theme={currentTheme}
-            analytics={analyticsLayer}
-          />
-        </div>
-      </main>
-
+  return Effect.gen(function* () {
+    return (
       <div style={{
-        maxWidth: "1200px",
-        margin: "0 auto",
-        padding: "0 1.5rem 2rem"
+        minHeight: "100vh",
+        background: theme.background,
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        margin: "-1.5rem",
+        padding: "0"
       }}>
-        <div className="code-example" style={{
-          background: theme.cardBackground,
+        <Header userName="Developer" />
+
+        <main style={{ padding: "1.5rem", maxWidth: "1200px", margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+            <SectionTitle title="Overview" />
+            <ActionButton
+              label={`Switch to ${isDarkValue ? "Light" : "Dark"}`}
+              variant="secondary"
+              onClick={toggleTheme}
+            />
+          </div>
+
+          {/* Stats Grid */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "1rem",
+            marginBottom: "2rem"
+          }}>
+            <StatCard title="Total Users" value="12,345" change="+12%" />
+            <StatCard title="Revenue" value="$45,678" change="+8%" />
+            <StatCard title="Orders" value="1,234" change="-3%" />
+            <StatCard title="Conversion" value="3.2%" change="+0.5%" />
+          </div>
+
+          {/* Recent Activity */}
+          <SectionTitle title="Recent Activity" />
+          <div style={{
+            background: theme.cardBackground,
+            borderRadius: "8px",
+            overflow: "hidden",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+          }}>
+            {activities.map((activity, i) => (
+              <ActivityItem
+                key={i}
+                text={activity.text}
+                time={activity.time}
+              />
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ marginTop: "2rem", display: "flex", gap: "1rem" }}>
+            <ActionButton
+              label="Generate Report"
+              variant="primary"
+              onClick={() => Effect.log("Generating report...")}
+            />
+            <ActionButton
+              label="Export Data"
+              variant="secondary"
+              onClick={() => Effect.log("Exporting data...")}
+            />
+          </div>
+        </main>
+
+        <div style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "0 1.5rem 2rem"
         }}>
-          <h3 style={{ color: theme.text }}>Component.gen with Multiple Services</h3>
-        <pre style={{
-          background: theme.background,
-          color: theme.text,
-        }}>{`// Component requiring Theme + Analytics
+          <div className="code-example" style={{
+            background: theme.cardBackground,
+          }}>
+            <h3 style={{ color: theme.text }}>Component.gen with Multiple Services</h3>
+          <pre style={{
+            background: theme.background,
+            color: theme.text,
+          }}>{`// Component requiring Theme + Analytics
 const ActionButton = Component.gen(function* (Props: ComponentProps<{
   label: string
   onClick: () => Effect<void>
@@ -347,18 +340,14 @@ const ActionButton = Component.gen(function* (Props: ComponentProps<{
   )
 })
 
-// TypeScript infers props:
-// { label, onClick, theme: Layer<Theme>, analytics: Layer<Analytics> }
-<ActionButton
-  label="Click me"
-  onClick={() => Effect.log("clicked")}
-  theme={themeLayer}
-  analytics={analyticsLayer}
-/>`}</pre>
+return Effect.gen(function* () {
+  return <ActionButton label="Click me" onClick={() => Effect.log("clicked")} />
+}).pipe(Component.provide(Layer.mergeAll(themeLayer, analyticsLayer)))`}</pre>
+          </div>
         </div>
       </div>
-    </div>
-  )
+    )
+  }).pipe(Component.provide(Layer.mergeAll(currentTheme, analyticsLayer, loggerLayer)))
 })
 
 export default DashboardApp

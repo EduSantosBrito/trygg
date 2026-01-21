@@ -16,6 +16,7 @@
  */
 import { Data } from "effect"
 import type { Cause, Effect } from "effect"
+import type { ComponentType } from "../Component.js"
 import type { Element } from "../Element.js"
 import type { Signal } from "../Signal.js"
 
@@ -46,6 +47,14 @@ import type { Signal } from "../Signal.js"
 export interface RouteMap {
   // Augmented by vite plugin
 }
+
+/**
+ * Route component type - Component.gen result or Effect<Element>.
+ * @since 1.0.0
+ */
+export type RouteComponent =
+  | ComponentType<Record<string, never>, unknown>
+  | Effect.Effect<Element, unknown, unknown>
 
 /**
  * Get all route paths from RouteMap.
@@ -226,18 +235,18 @@ export interface NavigateOptions {
 export interface RouteDefinition {
   /** Path pattern (e.g., "/users/:id") */
   readonly path: string
-  /** Component loader - returns Effect<Element> */
-  readonly component: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
+  /** Component loader - returns Component.gen result or Effect<Element> */
+  readonly component: () => Promise<{ default: RouteComponent }>
   /** Optional guard effect */
   readonly guard?: () => Promise<{ guard?: Effect.Effect<void, unknown, never> }>
   /** Optional loading component - displayed while route is loading */
-  readonly loadingComponent?: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
+  readonly loadingComponent?: () => Promise<{ default: RouteComponent }>
   /** Optional error component - displayed when route errors, receives error via RouteError service */
-  readonly errorComponent?: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
+  readonly errorComponent?: () => Promise<{ default: RouteComponent }>
   /** Child routes (for nested layouts) */
   readonly children?: ReadonlyArray<RouteDefinition>
   /** Layout component for children */
-  readonly layout?: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
+  readonly layout?: () => Promise<{ default: RouteComponent }>
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Tests for Component<P>() API with automatic layer prop inference
+ * Tests for Component<P>() API with explicit DI
  */
 import { describe, it, expect } from "@effect/vitest"
 import { Context, Effect, Layer } from "effect"
@@ -37,9 +37,9 @@ type CardProps = Parameters<typeof Card>[0]
 type HasTitle = CardProps extends { title: string } ? true : false
 type HasThemeLayer = CardProps extends { readonly theme: Layer.Layer<Theme> } ? true : false
 
-// These should both be true - void to suppress unused warnings
+// Props should only include regular props
 void (true satisfies HasTitle)
-void (true satisfies HasThemeLayer)
+void (false satisfies HasThemeLayer)
 
 // =============================================================================
 // Test 2: Component with multiple services
@@ -62,8 +62,8 @@ type DashboardHasTheme = DashboardProps extends { readonly theme: Layer.Layer<Th
 type DashboardHasLogger = DashboardProps extends { readonly logger: Layer.Layer<Logger> } ? true : false
 
 void (true satisfies DashboardHasUserId)
-void (true satisfies DashboardHasTheme)
-void (true satisfies DashboardHasLogger)
+void (false satisfies DashboardHasTheme)
+void (false satisfies DashboardHasLogger)
 
 // =============================================================================
 // Test 3: Component with no service requirements
@@ -86,7 +86,7 @@ void (true satisfies SimpleHasMessage)
 // =============================================================================
 
 describe("Component API", () => {
-  it.scoped("renders component with props and layer", () =>
+  it.scoped("renders component with props and provided layer", () =>
     Effect.gen(function* () {
       const TestCard = Component<{ title: string }>()(Props =>
         Effect.gen(function* () {
@@ -97,7 +97,9 @@ describe("Component API", () => {
       )
 
       const { getByTestId } = yield* render(
-        <TestCard title="Hello World" theme={lightTheme} />
+        Effect.gen(function* () {
+          return <TestCard title="Hello World" />
+        }).pipe(Component.provide(lightTheme))
       )
 
       const card = getByTestId("card")
@@ -106,7 +108,7 @@ describe("Component API", () => {
     })
   )
 
-  it.scoped("renders component with multiple layer requirements", () =>
+  it.scoped("renders component with multiple provided layers", () =>
     Effect.gen(function* () {
       const logs: string[] = []
       const loggerLayer = Layer.succeed(Logger, {
@@ -124,7 +126,9 @@ describe("Component API", () => {
       )
 
       const { getByTestId } = yield* render(
-        <LoggingCard title="Test" theme={lightTheme} logger={loggerLayer} />
+        Effect.gen(function* () {
+          return <LoggingCard title="Test" />
+        }).pipe(Component.provide(Layer.mergeAll(lightTheme, loggerLayer)))
       )
 
       expect(getByTestId("card").textContent).toBe("Test")
@@ -149,7 +153,7 @@ describe("Component API", () => {
     })
   )
 
-  it.scoped("component uses different theme layers", () =>
+  it.scoped("component uses different provided themes", () =>
     Effect.gen(function* () {
       const ThemeDisplay = Component()(Props =>
         Effect.gen(function* () {
@@ -160,11 +164,19 @@ describe("Component API", () => {
       )
 
       // Render with light theme
-      const result1 = yield* render(<ThemeDisplay theme={lightTheme} />)
+      const result1 = yield* render(
+        Effect.gen(function* () {
+          return <ThemeDisplay />
+        }).pipe(Component.provide(lightTheme))
+      )
       expect(result1.getByTestId("color").textContent).toBe("#333")
 
       // Render with dark theme (new render)
-      const result2 = yield* render(<ThemeDisplay theme={darkTheme} />)
+      const result2 = yield* render(
+        Effect.gen(function* () {
+          return <ThemeDisplay />
+        }).pipe(Component.provide(darkTheme))
+      )
       expect(result2.getByTestId("color").textContent).toBe("#fff")
     })
   )
@@ -219,7 +231,11 @@ describe("Component.gen API", () => {
         return <div data-testid="themed">{theme.primary}</div>
       })
 
-      const { getByTestId } = yield* render(<TestCard theme={lightTheme} />)
+      const { getByTestId } = yield* render(
+        Effect.gen(function* () {
+          return <TestCard />
+        }).pipe(Component.provide(lightTheme))
+      )
       expect(getByTestId("themed").textContent).toBe("#333")
     })
   )
@@ -238,7 +254,9 @@ describe("Component.gen API", () => {
       })
 
       const { getByTestId } = yield* render(
-        <TestCard title="Hello" subtitle="World" theme={lightTheme} />
+        Effect.gen(function* () {
+          return <TestCard title="Hello" subtitle="World" />
+        }).pipe(Component.provide(lightTheme))
       )
       
       const card = getByTestId("card")
@@ -258,7 +276,7 @@ describe("Component.gen API", () => {
     })
   )
 
-  it.scoped("renders Component.gen with multiple layers", () =>
+  it.scoped("renders Component.gen with provided layers", () =>
     Effect.gen(function* () {
       const logs: string[] = []
       const loggerLayer = Layer.succeed(Logger, {
@@ -274,7 +292,61 @@ describe("Component.gen API", () => {
       })
 
       const { getByTestId } = yield* render(
-        <TestCard name="TestUser" theme={lightTheme} logger={loggerLayer} />
+        Effect.gen(function* () {
+          return <TestCard name="TestUser" />
+        }).pipe(Component.provide(Layer.mergeAll(lightTheme, loggerLayer)))
+      )
+      
+      expect(getByTestId("multi").textContent).toBe("TestUser")
+      expect(logs).toContain("Rendering TestUser")
+    })
+  )
+})
+
+// =============================================================================
+// Component.provide API Tests
+// =============================================================================
+
+describe("Component.provide API", () => {
+  it.scoped("services provided via Component.provide are available to children", () =>
+    Effect.gen(function* () {
+      const TestCard = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
+        const { title } = yield* Props
+        const theme = yield* Theme
+        return <div data-testid="card" style={{ color: theme.primary }}>{title}</div>
+      })
+
+      const { getByTestId } = yield* render(
+        Effect.gen(function* () {
+          return <TestCard title="Hello World" />
+        }).pipe(Component.provide(lightTheme))
+      )
+
+      const card = getByTestId("card")
+      expect(card.textContent).toBe("Hello World")
+      expect(card.style.color).toBe("#333")
+    })
+  )
+
+  it.scoped("multiple layers via Component.provide", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const loggerLayer = Layer.succeed(Logger, {
+        log: (msg: string) => { logs.push(msg) }
+      })
+
+      const TestCard = Component.gen(function* (Props: ComponentProps<{ name: string }>) {
+        const { name } = yield* Props
+        const theme = yield* Theme
+        const logger = yield* Logger
+        logger.log(`Rendering ${name}`)
+        return <div data-testid="multi" style={{ color: theme.primary }}>{name}</div>
+      })
+
+      const { getByTestId } = yield* render(
+        Effect.gen(function* () {
+          return <TestCard name="TestUser" />
+        }).pipe(Component.provide(Layer.mergeAll(lightTheme, loggerLayer)))
       )
       
       expect(getByTestId("multi").textContent).toBe("TestUser")

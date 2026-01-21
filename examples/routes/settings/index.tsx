@@ -3,10 +3,10 @@
  *
  * Main settings page accessible at /settings
  */
-import { Effect } from "effect";
+import { Component } from "effect-ui";
 import * as Router from "effect-ui/router";
 
-const SettingsOverview = Effect.gen(function* () {
+const SettingsOverview = Component.gen(function* () {
   return (
     <div className="settings-page">
       <h1>Settings Overview</h1>

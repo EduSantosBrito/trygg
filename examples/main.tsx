@@ -4,9 +4,9 @@
  * A single routed app showcasing all effect-ui features.
  * Uses file-based routing with the vite plugin.
  */
-import { mount, DevMode, Component } from "effect-ui"
-import * as Router from "effect-ui/router"
-import { routes } from "virtual:effect-ui-routes"
+import { mount, DevMode, Component } from "effect-ui";
+import * as Router from "effect-ui/router";
+import { routes } from "virtual:effect-ui-routes";
 
 // =============================================================================
 // Main App with Router
@@ -20,14 +20,15 @@ const App = Component.gen(function* () {
           <Router.Link to="/">effect-ui</Router.Link>
         </h1>
         <nav>
-          <Router.NavLink to="/counter" activeClassName="active">Counter</Router.NavLink>
-          <Router.NavLink to="/todo" activeClassName="active">Todo</Router.NavLink>
-          <Router.NavLink to="/theme" activeClassName="active">Theme</Router.NavLink>
-          <Router.NavLink to="/form" activeClassName="active">Form</Router.NavLink>
-          <Router.NavLink to="/error-boundary" activeClassName="active">Errors</Router.NavLink>
-          <Router.NavLink to="/dashboard" activeClassName="active">Dashboard</Router.NavLink>
-          <Router.NavLink to="/users" activeClassName="active">Users</Router.NavLink>
-          <Router.NavLink to="/settings" activeClassName="active">Settings</Router.NavLink>
+          <Router.Link to="/counter">Counter</Router.Link>
+          <Router.Link to="/suspense">Suspense</Router.Link>
+          <Router.Link to="/todo">Todo</Router.Link>
+          <Router.Link to="/theme">Theme</Router.Link>
+          <Router.Link to="/form">Form</Router.Link>
+          <Router.Link to="/error-boundary">Errors</Router.Link>
+          <Router.Link to="/dashboard">Dashboard</Router.Link>
+          <Router.Link to="/users">Users</Router.Link>
+          <Router.Link to="/settings">Settings</Router.Link>
         </nav>
       </header>
 
@@ -35,17 +36,18 @@ const App = Component.gen(function* () {
         <Router.Outlet routes={routes} />
       </main>
     </div>
-  )
-})
+  );
+});
 
 // Mount the app - Router.browserLayer is included by default!
-const container = document.getElementById("root")
+// NOTE: DevMode must be BEFORE App to capture initial render logs
+const container = document.getElementById("root");
 if (container) {
   mount(
     container,
     <>
-      <App />
       <DevMode />
-    </>
-  )
+      <App />
+    </>,
+  );
 }

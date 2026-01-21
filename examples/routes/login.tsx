@@ -5,11 +5,11 @@
  * Used together with the /protected route to demonstrate route guards.
  */
 import { Effect, Option } from "effect"
-import { Signal } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 import { authSignal, AuthUser, setAuth } from "./protected"
 
-const LoginPage = Effect.gen(function* () {
+const LoginPage = Component.gen(function* () {
   const username = yield* Signal.make("")
   const error = yield* Signal.make<Option.Option<string>>(Option.none())
   

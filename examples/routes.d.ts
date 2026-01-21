@@ -15,6 +15,7 @@ declare module "effect-ui/router" {
     readonly "/settings": {}
     readonly "/settings/profile": {}
     readonly "/settings/security": {}
+    readonly "/suspense": {}
     readonly "/theme": {}
     readonly "/todo": {}
     readonly "/users/:id": { readonly id: string }

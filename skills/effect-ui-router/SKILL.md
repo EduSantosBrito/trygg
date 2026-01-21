@@ -1,10 +1,6 @@
 ---
 name: effect-ui-router
-description: File-based routing for effect-ui with type-safe navigation, route guards, layouts, and error boundaries. Use when adding routes, navigation, params, query strings, or route protection.
-license: MIT
-metadata:
-  author: effect-ui
-  version: "1.0"
+description: File-based routing for effect-ui with type-safe navigation. Use when: (1) Creating route files (index.tsx, [param].tsx, [...rest].tsx), (2) Adding layouts (_layout.tsx) or error boundaries (_error.tsx), (3) Navigating with Router.Link or Router.navigate, (4) Reading route params with Router.params, (5) Reading query strings with Router.query, (6) Implementing route guards for auth/redirects, (7) Configuring the Vite plugin for routes.
 ---
 
 # effect-ui Router

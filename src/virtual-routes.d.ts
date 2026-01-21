@@ -17,7 +17,7 @@
  */
 declare module "virtual:effect-ui-routes" {
   import type { Effect } from "effect"
-  import type { Element } from "effect-ui"
+  import type { ComponentType, Element } from "effect-ui"
   
   // ==========================================
   // Type Utilities for Route Param Extraction
@@ -59,8 +59,8 @@ declare module "virtual:effect-ui-routes" {
   
   interface RouteDefinition {
     readonly path: string
-    readonly component: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
-    readonly layout?: () => Promise<{ default: Effect.Effect<Element, unknown, never> }>
+    readonly component: () => Promise<{ default: ComponentType<Record<string, never>, unknown> | Effect.Effect<Element, unknown, unknown> }>
+    readonly layout?: () => Promise<{ default: ComponentType<Record<string, never>, unknown> | Effect.Effect<Element, unknown, unknown> }>
     readonly guard?: () => Promise<{ guard?: Effect.Effect<void, unknown, never> }>
   }
   

@@ -1,10 +1,6 @@
 ---
 name: effect-ui-observability
-description: Debug events, tracing, and metrics for effect-ui applications. Use when debugging components, adding logging, tracking performance, or setting up monitoring.
-license: MIT
-metadata:
-  author: effect-ui
-  version: "1.0"
+description: Debug events, tracing, and metrics for effect-ui applications. Use when: (1) Adding DevMode component for debug output, (2) Filtering debug events by category (signal, render, router), (3) Creating custom debug plugins, (4) Correlating events with traceId, (5) Adding manual spans with Debug.startSpan/withSpan, (6) Reading metrics with Metrics.snapshot, (7) Exporting metrics to external systems, (8) Debugging "why did my component re-render" issues.
 ---
 
 # effect-ui Observability

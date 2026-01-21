@@ -1581,94 +1581,25 @@ const sortedMatches = matches.sort((a, b) => {
 
 ---
 
-### F-008: Type casting violates project rules
-**Status:** ✅ Closed (By Design)
-**Category:** Reliability
-**Priority:** MEDIUM
-**Files Affected:** `src/Component.ts`
+### F-008: Remove layer auto-injection
+**Status:** ✅ Implemented
+**Category:** API
+**Priority:** HIGH
+**Files Affected:** `src/Component.ts`, `src/Renderer.ts`, `src/Element.ts`, `examples/`, `docs/`, `tests/`
 **Reviewed:** 2026-01-20
 **Reviewer:** Claude
 
-**Resolution:** By Design — No changes needed
+**Resolution:** Layer props removed; parent effects provide services explicitly.
 
 **Rationale:**
-The casts in `Component.ts` are:
-1. **Documented** — Each has a "SAFE CAST" comment explaining the rationale
-2. **Necessary** — TypeScript cannot express variance-safe `Effect.provide` chains or runtime property filtering
-3. **Safe** — Type correctness is enforced at call sites; casts only bridge TypeScript's inference gaps
-4. **Standard** — Effect library itself uses the same pattern internally
+- Layer props obscured DI boundaries and encouraged prop plumbing.
+- Explicit `Component.provide` keeps DI at the parent and keeps component props clean.
+- Top-level effects remain `R = never`; component effects may require services.
 
-**Project Rule Update:**
-Allow `as` casts in type-complex modules when accompanied by "SAFE CAST" rationale comments.
-
-#### Original Finding
-> Core component utilities rely on `as` casts (`regularProps as P` and other casts in the same module) despite the project rule forbidding type casting. This hides type mismatches and can mask unsafe layer/prop combinations at runtime.
-
-#### Clarifying Questions
-1. Can we remove auto layer-prop injection entirely?
-   - **Answer:** No; keep auto layer prop injection.
-
-2. Are API changes (like `layers` prop) acceptable?
-   - **Answer:** No; keep current per-service layer props.
-
-3. Scope: remove all `as` casts in `src/Component.ts`?
-   - **Answer:** Yes; remove all `as` casts in this module.
-
-#### Analysis
-- `separateProps` uses `as` to coerce runtime-split props into `P`.
-- `Effect.provide` chains use `as` because layer merging loses type info.
-- `Component.gen` uses `as` to coerce generator function overloads.
-- These casts violate project rules and mask runtime mismatches.
-
-#### Proposed Solution
-- Replace `separateProps` with a Proxy-based props view that hides layer props at runtime without casting.
-- Provide props via `Effect.provideService(PropsTag, props)` to avoid layer casting.
-- Preserve typed layer outputs by using `Layer.mergeAll(layers[0], ...layers.slice(1))` over `LayerValue<R>`.
-- Remove all `as` in `Component.ts` by:
-  - Annotating `componentFn` with explicit type.
-  - Refactoring `gen` overload routing with type guards.
-
-#### Implementation Plan
-- [ ] Add `LayerValue<R>` / `LayerOutput<R>` helpers to keep layer types.
-- [ ] Implement `separateProps` to return `{ layers, regularProps }` using Proxy + layer key set.
-- [ ] Replace props layer injection with `Effect.provideService`.
-- [ ] Replace merged-layer cast by typed `mergeAllLayers` using `Layer.mergeAll`.
-- [ ] Replace `gen` overload casts with `isGeneratorNoProps` / `isGeneratorWithProps` type guards.
-- [ ] Remove all `as` usage from `src/Component.ts`.
-
-#### Code Changes
-**File:** `src/Component.ts`
-```ts
-// After (sketch)
-type LayerValue<R> = RequirementsToLayerProps<R>[keyof RequirementsToLayerProps<R>]
-
-const separateProps = <P extends object, R>(
-  allProps: ComponentPropsWithLayers<P, R>
-): { layers: ReadonlyArray<LayerValue<R>>; regularProps: P } => {
-  const layers: Array<LayerValue<R>> = []
-  const layerKeys = new Set<string>()
-
-  for (const [key, value] of Object.entries(allProps)) {
-    if (isLayer(value)) {
-      layers.push(value)
-      layerKeys.add(key)
-    }
-  }
-
-  const regularProps: P = new Proxy(allProps, {
-    ownKeys: (target) => Reflect.ownKeys(target).filter((key) => !layerKeys.has(String(key))),
-    getOwnPropertyDescriptor: (target, key) =>
-      layerKeys.has(String(key)) ? undefined : Object.getOwnPropertyDescriptor(target, key)
-  })
-
-  return { layers, regularProps }
-}
-```
-
-#### Verification
-- [ ] `src/Component.ts` contains no `as` or `!` tokens.
-- [ ] Layer props do not appear in `yield* Props` results or `...props` spread.
-- [ ] Components still accept per-service layer props with unchanged call sites.
+**Implementation:**
+- Removed layer prop inference and runtime layer extraction.
+- `Component.provide` captures the current Effect context and wraps a Provide boundary for children.
+- Examples, tests, and docs updated to use `Effect.gen(...).pipe(Component.provide(layer))` at parent boundaries.
 
 ---
 

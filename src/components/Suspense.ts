@@ -19,9 +19,8 @@ export interface SuspenseProps<E = never> {
   readonly fallback: Element
   /**
    * Async child element - an Effect that produces an Element.
-   * Must have R = never (all requirements satisfied).
    */
-  readonly children: Effect.Effect<Element, E, never>
+  readonly children: Effect.Effect<Element, E, unknown>
 }
 
 /**
@@ -30,8 +29,7 @@ export interface SuspenseProps<E = never> {
  * Provides an async boundary that shows a fallback element while waiting
  * for the child Effect to resolve. Uses Effect's Deferred for coordination.
  * 
- * The child effect must have all its requirements satisfied (R = never).
- * Use Effect.provide to satisfy requirements before passing to Suspense.
+ * The child effect can rely on services provided by parent context.
  * 
  * @example
  * ```tsx
@@ -40,12 +38,12 @@ export interface SuspenseProps<E = never> {
  *   return <div>{data}</div>
  * })
  * 
- * // AsyncContent must have R = never
- * const App = Effect.gen(function* () {
- *   return Suspense({
- *     fallback: <div>Loading...</div>,
- *     children: AsyncContent
- *   })
+ * const App = Component.gen(function* () {
+ *   return (
+ *     <Suspense fallback={<div>Loading...</div>}>
+ *       {AsyncContent}
+ *     </Suspense>
+ *   )
  * })
  * ```
  * 

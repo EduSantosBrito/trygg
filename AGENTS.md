@@ -13,7 +13,7 @@ Effect-native UI framework with JSX support and fine-grained reactivity.
 ## Core Rules
 
 - **No type casting**: Never use `as` or `!`. Use Option, pattern matching, or proper null checks.
-- **R = never**: Components must have `R = never`. Use `Effect.provide` before JSX.
+- **R = never at the top**: Components may require services, but the top-level effect passed to mount must have `R = never`. Use `Component.provide` on parent effects.
 - **effect-solutions**: Run `effect-solutions show <topic>` before writing Effect code.
 - **./effect/ is read-only**: Cloned Effect repo for reference. Never modify files in this directory.
 - **Fix all LSP issues**: Resolve all LSP errors, warnings, and messages immediately.

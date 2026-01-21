@@ -7,7 +7,7 @@
  * The guard is an exported Effect that runs before the component renders.
  */
 import { Context, Effect, FiberRef, Layer, Option } from "effect"
-import { Signal } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 
 // ============================================================================
@@ -76,7 +76,7 @@ export const guard = Effect.gen(function* () {
 // Protected Component
 // ============================================================================
 
-const ProtectedPage = Effect.gen(function* () {
+const ProtectedPage = Component.gen(function* () {
   // Get current user (we know they're authenticated because guard passed)
   const user = yield* Signal.get(authSignal)
   

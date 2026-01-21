@@ -15,7 +15,7 @@
  * </>)
  * ```
  */
-import { Effect, FiberRef, Layer } from "effect"
+import { Effect, FiberRef, Layer, Runtime } from "effect"
 import type { TestServerConfig } from "./test-server.js"
 import { TestServer } from "./test-server.js"
 
@@ -206,6 +206,55 @@ type RenderKeyedListReorderEvent = BaseEvent & {
   readonly total_items: number
   readonly moves: number
   readonly stable_nodes: number
+}
+
+/** Suspense events */
+type RenderSuspenseStartEvent = BaseEvent & {
+  readonly event: "render.suspense.start"
+  readonly parent_type: string
+  readonly parent_connected: boolean
+}
+
+type RenderSuspenseFallbackEvent = BaseEvent & {
+  readonly event: "render.suspense.fallback"
+  readonly node_type: string
+  readonly node_connected: boolean
+}
+
+type RenderSuspenseWaitStartEvent = BaseEvent & {
+  readonly event: "render.suspense.wait.start"
+}
+
+type RenderSuspenseDeferredResolvedEvent = BaseEvent & {
+  readonly event: "render.suspense.deferred.resolved"
+  readonly element_tag: string
+}
+
+type RenderSuspenseActualParentEvent = BaseEvent & {
+  readonly event: "render.suspense.actual_parent"
+  readonly has_parent: boolean
+  readonly parent_type: string
+  readonly placeholder_connected: boolean
+}
+
+type RenderSuspenseSkipUnmountedEvent = BaseEvent & {
+  readonly event: "render.suspense.skip.unmounted"
+}
+
+type RenderSuspenseFallbackCleanedEvent = BaseEvent & {
+  readonly event: "render.suspense.fallback.cleaned"
+}
+
+type RenderSuspenseResolvedRenderedEvent = BaseEvent & {
+  readonly event: "render.suspense.resolved.rendered"
+  readonly node_type: string
+  readonly node_connected: boolean
+}
+
+type RenderSuspenseErrorEvent = BaseEvent & {
+  readonly event: "render.suspense.error"
+  readonly suspense_id: string
+  readonly error: string
 }
 
 /** Router events */
@@ -434,6 +483,16 @@ export type DebugEvent =
   | RenderKeyedListSubscriptionAddEvent
   | RenderKeyedListSubscriptionRemoveEvent
   | RenderKeyedListReorderEvent
+  // Suspense events
+  | RenderSuspenseStartEvent
+  | RenderSuspenseFallbackEvent
+  | RenderSuspenseWaitStartEvent
+  | RenderSuspenseDeferredResolvedEvent
+  | RenderSuspenseActualParentEvent
+  | RenderSuspenseSkipUnmountedEvent
+  | RenderSuspenseFallbackCleanedEvent
+  | RenderSuspenseResolvedRenderedEvent
+  | RenderSuspenseErrorEvent
   // Router events
   | RouterNavigateEvent
   | RouterNavigateCompleteEvent
@@ -904,11 +963,13 @@ export const startSpan: (
     })
     
     // Return Effect to end span (intentionally returns Effect for later execution)
-    return Effect.all([
-      log({ event: "trace.span.end", name, status: "ok" }),
-      FiberRef.set(CurrentSpanId, previousSpanId),
-      FiberRef.set(CurrentParentSpanId, previousParentSpanId)
-    ], { discard: true })
+    return yield* Effect.succeed(
+      Effect.all([
+        log({ event: "trace.span.end", name, status: "ok" }),
+        FiberRef.set(CurrentSpanId, previousSpanId),
+        FiberRef.set(CurrentParentSpanId, previousParentSpanId)
+      ], { discard: true })
+    )
   }
 )
 
@@ -1043,10 +1104,11 @@ export const serverLayer = (config: TestServerConfig = {}): Layer.Layer<TestServ
       // Dynamic import to avoid bundling test-server in production
       const { startInternal } = yield* Effect.promise(() => import("./test-server.js"))
       const server = yield* startInternal(config)
+      const runtime = yield* Effect.runtime<never>()
       
       // Create and register debug plugin
       const plugin = createPlugin("test-server", (event) => {
-        Effect.runSync(server.store(event))
+        Runtime.runSync(runtime)(server.store(event))
       })
       registerPlugin(plugin)
       

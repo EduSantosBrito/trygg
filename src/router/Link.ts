@@ -33,7 +33,7 @@
  * 
  * **Note:** `NavLink` is deprecated. Use `Link` + `Router.isActive()` instead.
  */
-import { Effect } from "effect"
+import { Effect, Runtime } from "effect"
 import { Element, intrinsic, componentElement, normalizeChildren, type ElementProps } from "../Element.js"
 import * as Signal from "../Signal.js"
 import * as Debug from "../debug.js"
@@ -166,6 +166,7 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
   // Link needs router for click handler, but does NOT subscribe to route changes
   const linkEffect = Effect.gen(function* () {
     const router = yield* getRouter
+    const runtime = yield* Effect.runtime<never>()
     
     // F-001: Prefetch state and handlers
     let prefetchTriggered = false
@@ -180,12 +181,12 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
     
     // Mouse enter handler - 50ms debounce before prefetch
     const handleMouseEnter = prefetch === "intent"
-      ? Effect.fnUntraced(function* () {
-          if (prefetchTriggered) return
-          hoverTimeout = setTimeout(() => {
-            Effect.runFork(triggerPrefetch)
-          }, PREFETCH_HOVER_DELAY_MS)
-        })
+        ? Effect.fnUntraced(function* () {
+            if (prefetchTriggered) return
+            hoverTimeout = setTimeout(() => {
+              Runtime.runFork(runtime)(triggerPrefetch)
+            }, PREFETCH_HOVER_DELAY_MS)
+          })
       : undefined
     
     // Mouse leave handler - cancel pending prefetch

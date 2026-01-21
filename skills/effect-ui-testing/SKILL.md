@@ -1,10 +1,6 @@
 ---
 name: effect-ui-testing
-description: Test effect-ui components with Effect Vitest integration. Use when writing tests, mocking services, testing signals, or verifying component behavior.
-license: MIT
-metadata:
-  author: effect-ui
-  version: "1.0"
+description: Test effect-ui components with Effect Vitest integration. Use when: (1) Writing component tests with it.scoped and Effect.gen, (2) Using render/click/type/waitFor test utilities, (3) Mocking services with Layer.succeed, (4) Testing router with Router.testLayer, (5) Testing signals and reactivity, (6) Testing error boundaries, (7) Querying test logs for debugging, (8) Setting up vitest.config.ts with happy-dom.
 ---
 
 # effect-ui Testing
@@ -60,7 +56,7 @@ describe("Counter", () => {
 ```ts
 const result = yield* render(Component)
 // or with layers
-const result = yield* render(Component.pipe(Effect.provide(testLayer)))
+const result = yield* render(Component.pipe(Component.provide(testLayer)))
 ```
 
 Returns: `container`, `getByTestId`, `getByText`, `queryByTestId`, `queryByText`
@@ -86,6 +82,7 @@ yield* type(inputElement, "hello@example.com")
 ## Testing with Router
 
 ```ts
+import { Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 
 describe("UserPage", () => {
@@ -93,7 +90,7 @@ describe("UserPage", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         UserPage.pipe(
-          Effect.provide(Router.testLayer("/users/123"))
+          Component.provide(Router.testLayer("/users/123"))
         )
       )
       
@@ -149,7 +146,7 @@ describe("UserProfile", () => {
   it.scoped("displays user from API", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
-        UserProfile.pipe(Effect.provide(mockApiLayer))
+        UserProfile.pipe(Component.provide(mockApiLayer))
       )
       
       yield* waitFor(() =>

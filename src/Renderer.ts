@@ -17,7 +17,7 @@ import {
   Runtime,
   Scope
 } from "effect"
-import { Element, isElement, type ElementProps, type EventHandler } from "./Element.js"
+import { Element, isElement, normalizeChild, type ElementProps, type EventHandler } from "./Element.js"
 import * as Signal from "./Signal.js"
 import * as Debug from "./debug.js"
 import * as Metrics from "./metrics.js"
@@ -31,6 +31,8 @@ import * as SafeUrl from "./SafeUrl.js"
  */
 const isEventHandler = (value: unknown): value is EventHandler =>
   typeof value === "function" || Effect.isEffect(value)
+
+const emptyContext = Context.unsafeMake<unknown>(new Map())
 
 /**
  * Error thrown when a Portal target cannot be found
@@ -251,7 +253,8 @@ const applyProps = Effect.fn("applyProps")(function* (
 const renderElement = (
   element: Element,
   parent: Node,
-  runtime: Runtime.Runtime<never>
+  runtime: Runtime.Runtime<never>,
+  context: Context.Context<unknown> | null
 ): Effect.Effect<RenderResult, unknown, Scope.Scope> =>
   Match.value(element).pipe(
     Match.tag("Text", ({ content }) =>
@@ -319,7 +322,7 @@ const renderElement = (
         // Render initial value
         const initialValue = yield* Signal.get(signal)
         const initialElement = renderValue(initialValue)
-        currentResult = yield* renderElement(initialElement, parent, runtime)
+        currentResult = yield* renderElement(initialElement, parent, runtime, context)
         // Move rendered content before anchor
         parent.insertBefore(currentResult.node, anchor)
 
@@ -347,7 +350,7 @@ const renderElement = (
                   }
 
                   // Render new content
-                  currentResult = yield* renderElement(newElement, parent, runtime)
+                  currentResult = yield* renderElement(newElement, parent, runtime, context)
                   // Position before anchor
                   parent.insertBefore(currentResult.node, anchor)
 
@@ -375,6 +378,10 @@ const renderElement = (
       })
     ),
 
+    Match.tag("Provide", ({ context: providedContext, child }) =>
+      renderElement(child, parent, runtime, providedContext)
+    ),
+
     Match.tag("Intrinsic", ({ tag, props, children }) =>
       Effect.gen(function* () {
         const node = document.createElement(tag)
@@ -390,7 +397,7 @@ const renderElement = (
         // Render children
         const childResults: Array<RenderResult> = []
         for (const child of children) {
-          const result = yield* renderElement(child, node, runtime)
+          const result = yield* renderElement(child, node, runtime, context)
           childResults.push(result)
         }
 
@@ -418,6 +425,10 @@ const renderElement = (
       Effect.gen(function* () {
         // Create the effect from the thunk
         const effect = run()
+        const effectWithContext = Effect.provide(
+          effect,
+          context ?? emptyContext
+        )
         
         // Create a placeholder comment as anchor for this component
         const anchor = document.createComment("component")
@@ -448,7 +459,7 @@ const renderElement = (
           if (actualParent === null) {
             throw new Error("Component anchor has no parent - component may have been unmounted")
           }
-          const result = yield* renderElement(childElement, actualParent, runtime)
+          const result = yield* renderElement(childElement, actualParent, runtime, context)
           // Move rendered content before the anchor
           actualParent.insertBefore(result.node, anchor)
           return result
@@ -487,13 +498,13 @@ const renderElement = (
 
                 // Re-execute the component effect with render phase context
                 const newChildElement = yield* Effect.locally(
-                  effect,
+                  effectWithContext,
                   Signal.CurrentRenderPhase,
                   renderPhase
                 )
 
                 // Render and position new content
-                currentResult = yield* renderAndPosition(newChildElement)
+                currentResult = yield* renderAndPosition(normalizeChild(newChildElement))
                 const rerenderDuration = performance.now() - rerenderStart
                 
                 // Record render metrics for re-render
@@ -573,13 +584,13 @@ const renderElement = (
         // Execute the component effect with render phase context and track duration
         const renderStart = performance.now()
         const childElement = yield* Effect.locally(
-          effect,
+          effectWithContext,
           Signal.CurrentRenderPhase,
           renderPhase
         )
 
         // Render and position the content
-        currentResult = yield* renderAndPosition(childElement)
+        currentResult = yield* renderAndPosition(normalizeChild(childElement))
         const renderDuration = performance.now() - renderStart
         renderCount++
         
@@ -621,7 +632,7 @@ const renderElement = (
         const childResults: Array<RenderResult> = []
 
         for (const child of children) {
-          const result = yield* renderElement(child, fragment, runtime)
+          const result = yield* renderElement(child, fragment, runtime, context)
           childResults.push(result)
         }
 
@@ -654,13 +665,33 @@ const renderElement = (
 
     Match.tag("Suspense", ({ deferred, fallback }) =>
       Effect.gen(function* () {
+        // Generate unique ID for this Suspense instance for debugging
+        const suspenseId = `sus_${Math.random().toString(36).slice(2, 8)}`
+        
         // Create placeholder comment and keep parent reference
         const placeholder = document.createComment("suspense")
         const suspenseParent = parent
         suspenseParent.appendChild(placeholder)
 
-        // Render fallback initially
-        let currentResult = yield* renderElement(fallback, suspenseParent, runtime)
+        yield* Debug.log({
+          event: "render.suspense.start",
+          suspense_id: suspenseId,
+          parent_type: suspenseParent.constructor.name,
+          parent_connected: suspenseParent.isConnected
+        })
+
+        // Render fallback into fragment first, then insert before placeholder.
+        // This ensures all content (including Component anchors) stays together.
+        const fallbackFragment = document.createDocumentFragment()
+        let currentResult = yield* renderElement(fallback, fallbackFragment, runtime, context)
+        suspenseParent.insertBefore(fallbackFragment, placeholder)
+
+        yield* Debug.log({
+          event: "render.suspense.fallback",
+          suspense_id: suspenseId,
+          node_type: currentResult.node.constructor.name,
+          node_connected: currentResult.node.isConnected
+        })
 
         // Fork a daemon fiber to wait for the deferred and swap content.
         // Using forkDaemon instead of forkScoped because the parent re-render
@@ -669,19 +700,71 @@ const renderElement = (
         const waitFiber = yield* Effect.forkDaemon(
           Effect.scoped(
             Effect.gen(function* () {
+              yield* Debug.log({ event: "render.suspense.wait.start", suspense_id: suspenseId })
+              
               // Wait for the async content
               const resolvedElement = yield* Deferred.await(deferred)
 
+              yield* Debug.log({
+                event: "render.suspense.deferred.resolved",
+                suspense_id: suspenseId,
+                element_tag: resolvedElement._tag
+              })
+
+              // IMPORTANT: Use placeholder.parentNode instead of captured parent because
+              // when Suspense is inside a Fragment, the initial parent is a DocumentFragment
+              // which becomes empty after appendChild. The placeholder moves to the real parent.
+              const actualParent = placeholder.parentNode
+              
+              yield* Debug.log({
+                event: "render.suspense.actual_parent",
+                suspense_id: suspenseId,
+                has_parent: actualParent !== null,
+                parent_type: actualParent?.constructor.name ?? "null",
+                placeholder_connected: placeholder.isConnected
+              })
+              
+              if (actualParent === null) {
+                // Suspense was unmounted before deferred resolved - skip rendering
+                yield* Debug.log({ event: "render.suspense.skip.unmounted", suspense_id: suspenseId })
+                return
+              }
+
               // Clean up fallback
               yield* currentResult.cleanup
+              
+              yield* Debug.log({ event: "render.suspense.fallback.cleaned", suspense_id: suspenseId })
 
-              // Render resolved content (deferred resolves to Element)
+              // Render into a temporary fragment first, then insert before placeholder.
+              // This is necessary because for Component elements, renderElement appends
+              // an anchor to parent, then renders content before the anchor. If we render
+              // directly to actualParent, the content ends up at the end, and insertBefore
+              // only moves the anchor, leaving content behind.
+              const fragment = document.createDocumentFragment()
               currentResult = yield* renderElement(
                 resolvedElement,
-                suspenseParent,
-                runtime
+                fragment,
+                runtime,
+                context
               )
+              // Insert entire fragment contents before placeholder
+              actualParent.insertBefore(fragment, placeholder)
+              
+              yield* Debug.log({
+                event: "render.suspense.resolved.rendered",
+                suspense_id: suspenseId,
+                node_type: currentResult.node.constructor.name,
+                node_connected: currentResult.node.isConnected
+              })
             })
+          ).pipe(
+            Effect.catchAllCause((cause) =>
+              Debug.log({
+                event: "render.suspense.error",
+                suspense_id: suspenseId,
+                error: String(cause)
+              })
+            )
           )
         )
 
@@ -710,7 +793,7 @@ const renderElement = (
         // Render children into target
         const childResults: Array<RenderResult> = []
         for (const child of children) {
-          const result = yield* renderElement(child, targetElement, runtime)
+          const result = yield* renderElement(child, targetElement, runtime, context)
           childResults.push(result)
         }
 
@@ -814,15 +897,20 @@ const renderElement = (
             yield* Signal.resetRenderPhase(renderPhase)
           }
 
-          // Execute render function with render phase context
-          const element = yield* Effect.locally(
+          // Execute render function with render phase context and parent context
+          const renderEffect = Effect.provide(
             renderFn(item, index),
+            context ?? emptyContext
+          )
+
+          const element = yield* Effect.locally(
+            renderEffect,
             Signal.CurrentRenderPhase,
             renderPhase
           )
 
-          // Render the element
-          const result = yield* renderElement(element, listParent, runtime)
+          // Render the element with parent context
+          const result = yield* renderElement(normalizeChild(element), listParent, runtime, context)
           
           return { renderPhase, result }
         })
@@ -1152,7 +1240,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
         // Render the element tree - content is inserted before the anchor
         // by the renderElement function (for Component, Fragment, etc.)
         // For elements that append directly, they go after existing content
-        const result = yield* renderElement(element, container, runtime)
+        const result = yield* renderElement(element, container, runtime, null)
         
         // Move rendered content before the anchor for consistent ordering
         container.insertBefore(result.node, mountAnchor)
@@ -1170,7 +1258,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
     const renderToParent = Effect.fn("Renderer.render")(
       function* (element: Element, parent: Node) {
         const runtime = yield* Effect.runtime<never>()
-        return yield* renderElement(element, parent, runtime)
+        return yield* renderElement(element, parent, runtime, null)
       }
     )
 

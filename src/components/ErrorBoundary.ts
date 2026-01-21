@@ -15,9 +15,8 @@ import { Element, componentElement } from "../Element.js"
 export interface ErrorBoundaryProps<E = unknown> {
   /**
    * Child element - an Effect that may fail.
-   * Must have R = never (all requirements satisfied).
    */
-  readonly children: Effect.Effect<Element, E, never>
+  readonly children: Effect.Effect<Element, E, unknown>
   /**
    * Fallback element to show when an error occurs.
    * Can be a static element or a function that receives the error.
@@ -27,7 +26,7 @@ export interface ErrorBoundaryProps<E = unknown> {
    * Optional callback when an error is caught.
    * Returns an Effect for logging, telemetry, etc.
    */
-  readonly onError?: (error: E) => Effect.Effect<void, never, never>
+  readonly onError?: (error: E) => Effect.Effect<void, never, unknown>
 }
 
 /**
@@ -37,8 +36,7 @@ export interface ErrorBoundaryProps<E = unknown> {
  * and displays a fallback UI. This is similar to React's ErrorBoundary
  * but integrated with Effect's error handling.
  * 
- * The child effect must have all its requirements satisfied (R = never).
- * Use Effect.provide to satisfy requirements before passing to ErrorBoundary.
+ * The child effect can rely on services provided by parent context.
  * 
  * @example
  * ```tsx
@@ -47,22 +45,26 @@ export interface ErrorBoundaryProps<E = unknown> {
  *   return <div>{data}</div>
  * })
  * 
- * const App = Effect.gen(function* () {
- *   return ErrorBoundary({
- *     fallback: <div>Something went wrong</div>,
- *     children: RiskyComponent
- *   })
+ * const App = Component.gen(function* () {
+ *   return (
+ *     <ErrorBoundary fallback={<div>Something went wrong</div>}>
+ *       {RiskyComponent}
+ *     </ErrorBoundary>
+ *   )
  * })
  * ```
  * 
  * @example With error rendering
  * ```tsx
- * const App = Effect.gen(function* () {
- *   return ErrorBoundary({
- *     fallback: (error) => <div>Error: {String(error)}</div>,
- *     children: RiskyComponent,
- *     onError: (error) => Effect.log(`Caught error: ${error}`)
- *   })
+ * const App = Component.gen(function* () {
+ *   return (
+ *     <ErrorBoundary
+ *       fallback={(error) => <div>Error: {String(error)}</div>}
+ *       onError={(error) => Effect.log(`Caught error: ${error}`)}
+ *     >
+ *       {RiskyComponent}
+ *     </ErrorBoundary>
+ *   )
  * })
  * ```
  * 

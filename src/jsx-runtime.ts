@@ -27,37 +27,30 @@ export interface JSXProps extends ElementProps {
 /**
  * Component function type - a function that takes props and returns an Effect<Element>.
  * 
- * The effect must have R=never - all service requirements must be satisfied via
- * Effect.provide before the component can be used in JSX.
+ * Effects can require services if they are provided by a parent context.
  * 
- * For components that need services, use the yield* pattern:
- * ```tsx
- * const App = Effect.gen(function* () {
- *   const counter = yield* Counter  // Counter needs AtomRegistry
- *   return <div>{counter}</div>
- * })
- * ```
+ * For services, provide layers in a parent component (or <Provide />).
  * 
  * @since 1.0.0
  */
-export type ComponentFunction<Props = Record<string, unknown>, E = never> = (
+export type ComponentFunction<Props = Record<string, unknown>, E = never, R = unknown> = (
   props: Props
-) => Effect.Effect<Element, E, never>
+) => Effect.Effect<Element, E, R>
 
 /**
  * JSX element type - either a string (intrinsic), a component function, or an Effect
  * @since 1.0.0
  */
-export type JSXElementType<Props = Record<string, unknown>, E = never> =
+export type JSXElementType<Props = Record<string, unknown>, E = never, R = unknown> =
   | string
-  | ComponentFunction<Props, E>
-  | Effect.Effect<Element, E, never>
+  | ComponentFunction<Props, E, R>
+  | Effect.Effect<Element, E, R>
 
 /**
  * Check if a value is an Effect
  * @internal
  */
-const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
+const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
   typeof value === "object" &&
   value !== null &&
   Effect.EffectTypeId in value

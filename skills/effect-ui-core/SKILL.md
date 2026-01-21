@@ -1,10 +1,6 @@
 ---
 name: effect-ui-core
-description: Build Effect-native UI components with fine-grained reactivity. Use when creating components, managing state with Signals, handling events, or using dependency injection in effect-ui.
-license: MIT
-metadata:
-  author: effect-ui
-  version: "1.0"
+description: Build Effect-native UI components with fine-grained reactivity using Signals. Use when: (1) Creating new components with Effect.gen, (2) Managing state with Signal.make/get/set/update, (3) Rendering lists with Signal.each, (4) Handling DOM events that return Effects, (5) Using dependency injection with Context.Tag and Layer, (6) Wrapping async content with Suspense/ErrorBoundary, (7) Providing layers via Component.provide.
 ---
 
 # effect-ui Core Components
@@ -14,7 +10,7 @@ Build Effect-native UI components with fine-grained reactivity.
 ## Key Rules
 
 1. **Components are Effects**: Use `Effect.gen(function* () { ... })` returning JSX
-2. **R must be never**: Components must have `R = never`. Use `Effect.provide` before JSX
+2. **R must be never**: Components must have `R = never`. Use `Component.provide` before JSX
 3. **No type casting**: Never use `as` or `!`. Use Option, pattern matching, or proper null checks
 4. **Signal.make vs Signal.get**:
    - `Signal.make(initial)` creates a signal (does NOT subscribe)
@@ -77,7 +73,8 @@ const TodoList = Effect.gen(function* () {
 ### Dependency Injection
 
 ```tsx
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
+import { Component } from "effect-ui"
 
 class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
 
@@ -87,10 +84,10 @@ const Header = Effect.gen(function* () {
 })
 
 const themeLayer = Layer.succeed(Theme, { primary: "blue" })
-mount(container, Header.pipe(Effect.provide(themeLayer)))
+mount(container, Header.pipe(Component.provide(themeLayer)))
 ```
 
-### Component.gen for Auto Layer Props
+### Component.gen for Typed Props
 
 ```tsx
 import { Component, type ComponentProps } from "effect-ui"
@@ -100,7 +97,7 @@ const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) 
   const theme = yield* Theme
   return <div style={{ color: theme.primary }}>{title}</div>
 })
-// Props inferred: { title: string, theme: Layer<Theme> }
+// Props inferred: { title: string }
 
 <Card title="Hello" theme={themeLayer} />
 ```

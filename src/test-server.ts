@@ -32,7 +32,7 @@
  * Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(Debug.serverLayer({ port: 4567 })))))
  * ```
  */
-import { Schema, Effect, Context, Scope } from "effect"
+import { Schema, Effect, Context, Scope, Runtime } from "effect"
 import type { DebugEvent, EventType } from "./debug.js"
 
 // ============================================================================
@@ -120,6 +120,12 @@ const deriveLevel = (eventType: EventType): LogLevel => {
   ) return "info"
   return "debug"
 }
+
+const isLogLevel = (value: string): value is LogLevel =>
+  value === "debug" || value === "info" || value === "warn" || value === "error"
+
+const parseLogLevel = (value: string | null): LogLevel | undefined =>
+  value !== null && isLogLevel(value) ? value : undefined
 
 // ============================================================================
 // SQL Schema
@@ -279,10 +285,11 @@ Stop the server. Call this when done querying.
  * Plugin registration is handled by Debug.serverLayer.
  * @internal
  */
-export const startInternal = (
-  config: TestServerConfig = {}
-): Effect.Effect<TestServerService, never, Scope.Scope> =>
-  Effect.gen(function* () {
+export const startInternal: (
+  config?: TestServerConfig
+) => Effect.Effect<TestServerService, never, Scope.Scope> = Effect.fn(
+  "TestServer.startInternal"
+)(function* (config: TestServerConfig = {}) {
     const cfg: Required<TestServerConfig> = { ...defaultConfig, ...config }
 
     // Dynamic import for Bun-specific module
@@ -359,17 +366,20 @@ export const startInternal = (
             payload: string
           }>
 
-          return rows.map((row): StoredLogEvent => ({
-            id: row.id,
-            timestamp: row.timestamp,
-            level: row.level as LogLevel,
-            eventType: row.event_type,
-            traceId: row.trace_id,
-            spanId: row.span_id,
-            parentSpanId: row.parent_span_id,
-            durationMs: row.duration_ms,
-            payload: row.payload
-          }))
+          return rows.map((row): StoredLogEvent => {
+            const level = isLogLevel(row.level) ? row.level : "info"
+            return {
+              id: row.id,
+              timestamp: row.timestamp,
+              level,
+              eventType: row.event_type,
+              traceId: row.trace_id,
+              spanId: row.span_id,
+              parentSpanId: row.parent_span_id,
+              durationMs: row.duration_ms,
+              payload: row.payload
+            }
+          })
         }),
 
       stats: () =>
@@ -380,8 +390,8 @@ export const startInternal = (
 
           const result: Record<LogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 }
           for (const row of rows) {
-            if (row.level in result) {
-              result[row.level as LogLevel] = row.count
+            if (isLogLevel(row.level)) {
+              result[row.level] = row.count
             }
           }
           return result
@@ -400,6 +410,7 @@ export const startInternal = (
     }
 
     // Start HTTP server using Bun.serve
+    const runtime = yield* Effect.runtime<never>()
     const httpServer = Bun.serve({
       port: cfg.port,
       fetch(req) {
@@ -420,24 +431,23 @@ export const startInternal = (
 
         // GET /logs
         if (path === "/logs") {
+          const limitParam = url.searchParams.get("limit")
           const options: QueryOptions = {
-            level: url.searchParams.get("level") as LogLevel | undefined,
+            level: parseLogLevel(url.searchParams.get("level")),
             eventType: url.searchParams.get("eventType") ?? undefined,
             traceId: url.searchParams.get("traceId") ?? undefined,
             after: url.searchParams.get("after") ?? undefined,
             before: url.searchParams.get("before") ?? undefined,
-            limit: url.searchParams.has("limit")
-              ? parseInt(url.searchParams.get("limit")!, 10)
-              : undefined
+            limit: limitParam ? Number.parseInt(limitParam, 10) : undefined
           }
 
-          const result = Effect.runSync(server.query(options))
+          const result = Runtime.runSync(runtime)(server.query(options))
           return Response.json({ events: result, count: result.length })
         }
 
         // GET /stats
         if (path === "/stats") {
-          const result = Effect.runSync(server.stats())
+          const result = Runtime.runSync(runtime)(server.stats())
           return Response.json(result)
         }
 
@@ -499,5 +509,3 @@ export const startInternal = (
 
     return server
   })
-
-

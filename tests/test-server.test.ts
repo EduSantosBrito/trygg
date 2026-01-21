@@ -5,9 +5,39 @@
  * Run with: bun test tests/test-server.test.ts
  */
 import { describe, it, expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import * as Debug from "../src/debug.js"
 import { TestServer } from "../src/test-server.js"
+
+const HealthSchema = Schema.Struct({
+  status: Schema.String,
+  port: Schema.Number
+})
+
+const LogsSchema = Schema.Struct({
+  events: Schema.Array(Schema.Struct({ level: Schema.String })),
+  count: Schema.Number
+})
+
+const StatsSchema = Schema.Struct({
+  debug: Schema.Number,
+  info: Schema.Number,
+  warn: Schema.Number,
+  error: Schema.Number
+})
+
+const ConnectionInfoSchema = Schema.Struct({
+  type: Schema.String,
+  port: Schema.Number,
+  url: Schema.String
+})
+
+const decodeHealth = Schema.decodeUnknown(HealthSchema)
+const decodeLogs = Schema.decodeUnknown(LogsSchema)
+const decodeStats = Schema.decodeUnknown(StatsSchema)
+const decodeConnectionInfo = Schema.decodeUnknown(
+  Schema.parseJson(ConnectionInfoSchema)
+)
 
 describe("TestServer via Debug.serverLayer", () => {
   it("starts and stops server", async () => {
@@ -92,9 +122,8 @@ describe("TestServer via Debug.serverLayer", () => {
           const response = yield* Effect.promise(() =>
             fetch(`${server.url}/health`)
           )
-          const data = yield* Effect.promise(() =>
-            response.json() as Promise<{ status: string; port: number }>
-          )
+          const payload = yield* Effect.promise(() => response.json())
+          const data = yield* decodeHealth(payload)
 
           expect(data.status).toBe("ok")
           expect(data.port).toBe(14570)
@@ -121,9 +150,8 @@ describe("TestServer via Debug.serverLayer", () => {
           const response = yield* Effect.promise(() =>
             fetch(`${server.url}/logs?level=error`)
           )
-          const data = yield* Effect.promise(() =>
-            response.json() as Promise<{ events: Array<{ level: string }>; count: number }>
-          )
+          const payload = yield* Effect.promise(() => response.json())
+          const data = yield* decodeLogs(payload)
 
           expect(data.count).toBe(1)
           expect(data.events[0]?.level).toBe("error")
@@ -164,9 +192,8 @@ describe("TestServer via Debug.serverLayer", () => {
           const response = yield* Effect.promise(() =>
             fetch(`${server.url}/stats`)
           )
-          const httpStats = yield* Effect.promise(() =>
-            response.json() as Promise<Record<string, number>>
-          )
+          const payload = yield* Effect.promise(() => response.json())
+          const httpStats = yield* decodeStats(payload)
           expect(httpStats.debug).toBe(1)
           expect(httpStats.error).toBe(1)
         }).pipe(Effect.provide(Debug.serverLayer({ port: 14572, dbPath: ":memory:" })))
@@ -194,7 +221,7 @@ describe("TestServer via Debug.serverLayer", () => {
             const fs = await import("node:fs/promises")
             return fs.readFile(infoPath, "utf-8")
           })
-          const info = JSON.parse(content) as { type: string; port: number; url: string }
+          const info = yield* decodeConnectionInfo(content)
 
           expect(info.type).toBe("http")
           expect(info.port).toBe(14573)

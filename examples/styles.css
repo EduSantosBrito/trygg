@@ -624,3 +624,149 @@ input:focus {
 .btn-primary:hover {
   background: #0055aa;
 }
+
+/* Suspense / Skeleton Loading */
+.suspense-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.suspense-demo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.suspense-full-width {
+  grid-column: 1 / -1;
+}
+
+.suspense-section {
+  padding: 1rem;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.suspense-section h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: #666;
+}
+
+.skeleton {
+  animation: shimmer 1.5s infinite;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-line {
+  height: 1rem;
+  background: #e0e0e0;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.user-skeleton {
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.posts-skeleton {
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.user-card {
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.user-card h3 {
+  margin: 0 0 0.25rem;
+  color: #333;
+}
+
+.user-card p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.stats-card {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.stats-card .stat {
+  flex: 1;
+  text-align: center;
+}
+
+.stats-card .stat-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #0066cc;
+}
+
+.stats-card .stat-label {
+  display: block;
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.stats-skeleton {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.stats-skeleton .skeleton-line {
+  flex: 1;
+  height: 2.5rem;
+}
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.post-list li {
+  padding: 0.75rem;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  border: 1px solid #e0e0e0;
+}
+
+.post-list li:last-child {
+  margin-bottom: 0;
+}
+
+.post-list strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #333;
+}
+
+.post-list p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}

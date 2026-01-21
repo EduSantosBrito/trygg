@@ -4,9 +4,9 @@
  * Security settings accessible at /settings/security
  */
 import { Effect } from "effect"
-import { Signal } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 
-const SecuritySettings = Effect.gen(function* () {
+const SecuritySettings = Component.gen(function* () {
   const twoFactorEnabled = yield* Signal.make(false)
   const twoFactorValue = yield* Signal.get(twoFactorEnabled)
   

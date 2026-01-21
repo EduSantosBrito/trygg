@@ -2,7 +2,7 @@
  * F-003: Tests for parallel signal notification and error isolation
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, SubscriptionRef } from "effect"
+import { Effect } from "effect"
 import * as Signal from "../src/Signal.js"
 import * as Debug from "../src/debug.js"
 
@@ -16,19 +16,19 @@ describe("Signal parallel notification (F-003)", () => {
       const startTime = Date.now()
 
       // Create 3 listeners that record when they're called
-      const _unsub1 = yield* Signal.subscribe(signal, () =>
+      const unsub1 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           callOrder.push({ listener: 1, time: Date.now() - startTime })
         })
       )
 
-      const _unsub2 = yield* Signal.subscribe(signal, () =>
+      const unsub2 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           callOrder.push({ listener: 2, time: Date.now() - startTime })
         })
       )
 
-      const _unsub3 = yield* Signal.subscribe(signal, () =>
+      const unsub3 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           callOrder.push({ listener: 3, time: Date.now() - startTime })
         })
@@ -43,6 +43,10 @@ describe("Signal parallel notification (F-003)", () => {
       // Check all listeners were called (order may vary with parallel execution)
       const calledListeners = callOrder.map(c => c.listener).sort()
       expect(calledListeners).toEqual([1, 2, 3])
+
+      yield* unsub1
+      yield* unsub2
+      yield* unsub3
     })
   )
 
@@ -52,19 +56,19 @@ describe("Signal parallel notification (F-003)", () => {
       const results: Array<string> = []
 
       // First listener - succeeds
-      const _unsub1 = yield* Signal.subscribe(signal, () =>
+      const unsub1 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           results.push("listener1-called")
         })
       )
 
       // Second listener - throws error
-      const _unsub2 = yield* Signal.subscribe(signal, () =>
-        Effect.fail(new Error("Listener 2 failed"))
+      const unsub2 = yield* Signal.subscribe(signal, () =>
+        Effect.dieMessage("Listener 2 failed")
       )
 
       // Third listener - succeeds
-      const _unsub3 = yield* Signal.subscribe(signal, () =>
+      const unsub3 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           results.push("listener3-called")
         })
@@ -76,6 +80,10 @@ describe("Signal parallel notification (F-003)", () => {
       // Both non-failing listeners should have been called
       expect(results).toContain("listener1-called")
       expect(results).toContain("listener3-called")
+
+      yield* unsub1
+      yield* unsub2
+      yield* unsub3
     })
   )
 
@@ -91,7 +99,7 @@ describe("Signal parallel notification (F-003)", () => {
         const signal = yield* Signal.make(0)
 
         // Add a listener that throws
-        const _unsub = yield* Signal.subscribe(signal, () =>
+        const unsub = yield* Signal.subscribe(signal, () =>
           Effect.die("Test error")
         )
 
@@ -99,20 +107,24 @@ describe("Signal parallel notification (F-003)", () => {
         yield* Signal.set(signal, 1)
 
         // Find the error event
+        type ListenerErrorEvent = Extract<
+          Debug.DebugEvent,
+          { event: "signal.listener.error" }
+        >
+
         const errorEvents = events.filter(
-          (e) => e.event === "signal.listener.error"
+          (event): event is ListenerErrorEvent => event.event === "signal.listener.error"
         )
-        
+
         expect(errorEvents.length).toBe(1)
-        const errorEvent = errorEvents[0] as {
-          event: string
-          signal_id: string
-          listener_index: number
-          cause: string
-        }
+        const errorEvent = errorEvents[0]
+        expect(errorEvent).toBeDefined()
+        if (errorEvent === undefined) return
         expect(errorEvent.signal_id).toBe(signal._debugId)
         expect(errorEvent.listener_index).toBe(0)
         expect(errorEvent.cause).toContain("Test error")
+
+        yield* unsub
       } finally {
         Debug.unregisterPlugin("test-collector")
         Debug.disable()
@@ -129,7 +141,7 @@ describe("Signal parallel notification (F-003)", () => {
       let unsub2: Effect.Effect<void> | null = null
 
       // First listener - unsubscribes second listener
-      const _unsub1 = yield* Signal.subscribe(signal, () =>
+      const unsub1 = yield* Signal.subscribe(signal, () =>
         Effect.gen(function* () {
           results.push("listener1-start")
           // Unsubscribe listener2 mid-notification
@@ -148,7 +160,7 @@ describe("Signal parallel notification (F-003)", () => {
       )
 
       // Third listener
-      const _unsub3 = yield* Signal.subscribe(signal, () =>
+      const unsub3 = yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
           results.push("listener3-called")
         })
@@ -172,6 +184,12 @@ describe("Signal parallel notification (F-003)", () => {
       expect(results).toContain("listener1-end")
       expect(results).not.toContain("listener2-called")
       expect(results).toContain("listener3-called")
+
+      yield* unsub1
+      if (unsub2 !== null) {
+        yield* unsub2
+      }
+      yield* unsub3
     })
   )
 
@@ -193,14 +211,14 @@ describe("Signal parallel notification (F-003)", () => {
       const signal = yield* Signal.make(0)
 
       // All listeners fail
-      const _unsub1 = yield* Signal.subscribe(signal, () =>
-        Effect.fail(new Error("Listener 1 failed"))
+      const unsub1 = yield* Signal.subscribe(signal, () =>
+        Effect.dieMessage("Listener 1 failed")
       )
-      const _unsub2 = yield* Signal.subscribe(signal, () =>
-        Effect.fail(new Error("Listener 2 failed"))
+      const unsub2 = yield* Signal.subscribe(signal, () =>
+        Effect.dieMessage("Listener 2 failed")
       )
-      const _unsub3 = yield* Signal.subscribe(signal, () =>
-        Effect.fail(new Error("Listener 3 failed"))
+      const unsub3 = yield* Signal.subscribe(signal, () =>
+        Effect.dieMessage("Listener 3 failed")
       )
 
       // Signal.set should still succeed (errors are isolated)
@@ -209,6 +227,10 @@ describe("Signal parallel notification (F-003)", () => {
       // Value should be updated
       const value = yield* Signal.get(signal)
       expect(value).toBe(42)
+
+      yield* unsub1
+      yield* unsub2
+      yield* unsub3
     })
   )
 

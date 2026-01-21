@@ -5,10 +5,10 @@
  * the _error.tsx error boundary functionality.
  */
 import { Effect } from "effect"
-import { Signal } from "effect-ui"
+import { Signal, Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 
-const ErrorDemo = Effect.gen(function* () {
+const ErrorDemo = Component.gen(function* () {
   const shouldError = yield* Signal.make(false)
   
   // Read the signal value (subscribes to re-renders)
@@ -52,9 +52,11 @@ const ErrorDemo = Effect.gen(function* () {
         </ul>
       </div>
       
-      <Router.Link to="/" className="back-link" style={{ display: "block", marginTop: "1rem" }}>
-        Back to Home
-      </Router.Link>
+      <div style={{ marginTop: "1rem" }}>
+        <Router.Link to="/" className="back-link">
+          Back to Home
+        </Router.Link>
+      </div>
     </div>
   )
 })

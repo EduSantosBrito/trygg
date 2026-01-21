@@ -222,72 +222,71 @@ const FormApp = Component.gen(function* () {
       yield* Signal.set(submitted, false)
     })
 
-  return (
-    <div className="example">
-      <h2>Form Validation</h2>
-      <p className="description">Typed errors, validation Effects, form state</p>
-      
-      {submittedValue ? (
-        <SuccessMessage 
-          email={emailValueForDisplay} 
-          onReset={resetForm}
-          formTheme={defaultFormTheme}
-        />
-      ) : (
-        <form onSubmit={onSubmit}>
-          <FormField
-            label="Email"
-            type="email"
-            value={email}
-            error={emailErrorValue}
-            placeholder="Enter your email"
-            onInput={onEmailChange}
-            formTheme={defaultFormTheme}
+  return Effect.gen(function* () {
+    return (
+      <div className="example">
+        <h2>Form Validation</h2>
+        <p className="description">Typed errors, validation Effects, form state</p>
+        
+        {submittedValue ? (
+          <SuccessMessage 
+            email={emailValueForDisplay} 
+            onReset={resetForm}
           />
+        ) : (
+          <form onSubmit={onSubmit}>
+            <FormField
+              label="Email"
+              type="email"
+              value={email}
+              error={emailErrorValue}
+              placeholder="Enter your email"
+              onInput={onEmailChange}
+            />
 
-          <FormField
-            label="Password"
-            type="password"
-            value={password}
-            error={passwordErrorValue}
-            placeholder="Enter your password"
-            hint="Must be at least 8 characters with at least one number"
-            onInput={onPasswordChange}
-            formTheme={defaultFormTheme}
-          />
+            <FormField
+              label="Password"
+              type="password"
+              value={password}
+              error={passwordErrorValue}
+              placeholder="Enter your password"
+              hint="Must be at least 8 characters with at least one number"
+              onInput={onPasswordChange}
+            />
 
-          <button type="submit" className="primary">
-            Submit
-          </button>
-        </form>
-      )}
+            <button type="submit" className="primary">
+              Submit
+            </button>
+          </form>
+        )}
 
-      <div className="code-example">
-        <h3>Typed Validation Errors</h3>
-        <pre>{`// Define typed errors
-class EmailInvalid extends Data.TaggedError("EmailInvalid")<{
-  readonly email: string
-}> {}
-
-// Validation function returns typed Effect
-const validateEmail = (email: string): Effect<string, EmailRequired | EmailInvalid> => {
-  if (!email.includes("@")) {
-    return Effect.fail(new EmailInvalid({ email }))
-  }
-  return Effect.succeed(email)
-}
-
-// Pattern match on error type
-const getErrorMessage = (error: ValidationError): string => {
-  switch (error._tag) {
-    case "EmailInvalid":
-      return \`"\${error.email}" is not valid\`
-    // ...
-  }
-}`}</pre>
+        <div className="code-example">
+          <h3>Typed Validation Errors</h3>
+          <pre>{`// Define typed errors
+ class EmailInvalid extends Data.TaggedError("EmailInvalid")<{
+   readonly email: string
+ }> {}
+ 
+ // Validation function returns typed Effect
+ const validateEmail = (email: string): Effect<string, EmailRequired | EmailInvalid> => {
+   if (!email.includes("@")) {
+     return Effect.fail(new EmailInvalid({ email }))
+   }
+   return Effect.succeed(email)
+ }
+ 
+ // Pattern match on error type
+ const getErrorMessage = (error: ValidationError): string => {
+   switch (error._tag) {
+     case "EmailInvalid":
+       return \`"\${error.email}" is not valid\`
+     // ...
+   }
+ }`}</pre>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }).pipe(Component.provide(defaultFormTheme))
 })
 
 export default FormApp

@@ -4,10 +4,11 @@
  * This component is displayed when any route throws an error.
  * Uses Router.currentError to access error details.
  */
-import { Cause, Effect } from "effect"
+import { Cause } from "effect"
+import { Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 
-const ErrorPage = Effect.gen(function* () {
+const ErrorPage = Component.gen(function* () {
   const { cause, path, reset } = yield* Router.currentError
 
   const error = Cause.squash(cause)

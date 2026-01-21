@@ -1,12 +1,12 @@
 # effect-ui Agent Skills
 
-Skills for LLM agents working with effect-ui. Follows the [Agent Skills specification](https://agentskills.io/specification).
+Skills for LLM agents working with effect-ui. Follows the [skills.sh](https://skills.sh) format.
 
 ## Installation
 
-Skills can be discovered and used by any [Agent Skills compatible agent](https://agentskills.io/integrate-skills).
-
-Each skill folder contains a `SKILL.md` with YAML frontmatter metadata and Markdown instructions.
+```bash
+npx skills add anomalyco/effect-ui
+```
 
 ## Available Skills
 
@@ -19,11 +19,14 @@ Each skill folder contains a `SKILL.md` with YAML frontmatter metadata and Markd
 
 ## Skill Format
 
-Each skill follows the Agent Skills specification:
+Each skill follows the [skills.sh](https://skills.sh/docs) format:
 
 ```
 skill-name/
-└── SKILL.md    # Required: frontmatter + instructions
+├── SKILL.md          # Required: frontmatter + instructions
+├── scripts/          # Optional: executable code
+├── references/       # Optional: documentation loaded as needed
+└── assets/           # Optional: files used in output
 ```
 
 ### SKILL.md Structure
@@ -31,11 +34,7 @@ skill-name/
 ```yaml
 ---
 name: skill-name
-description: What this skill does and when to use it.
-license: MIT
-metadata:
-  author: effect-ui
-  version: "1.0"
+description: What this skill does. Use when: (1) trigger condition, (2) another trigger...
 ---
 
 # Skill Title
@@ -87,7 +86,7 @@ it.scoped("test name", () =>
 
 ## Framework Rules
 
-1. **R must be never**: Components need `R = never`. Use `Effect.provide` before JSX
+1. **R must be never**: Components need `R = never`. Use `Component.provide` before JSX
 2. **No type casting**: Use Option, pattern matching, or proper null checks
 3. **Event handlers return Effects**: `onClick={() => Effect.log("clicked")}`
 4. **Use Signal.get sparingly**: Only for conditional rendering that needs re-render
@@ -95,4 +94,4 @@ it.scoped("test name", () =>
 ## Resources
 
 - [Effect Documentation](https://effect.website)
-- [Agent Skills Specification](https://agentskills.io/specification)
+- [skills.sh Documentation](https://skills.sh/docs)

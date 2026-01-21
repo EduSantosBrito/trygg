@@ -33,7 +33,6 @@ const defaultTheme = Layer.succeed(Theme, {
 // =============================================================================
 
 // Display component with typed props and theme requirement
-// TypeScript infers: { value: Signal<number>, theme: Layer<Theme> }
 const CountDisplay = Component.gen(function* (Props: ComponentProps<{ value: Signal.Signal<number> }>) {
   const { value } = yield* Props
   const theme = yield* Theme
@@ -49,7 +48,6 @@ const CountDisplay = Component.gen(function* (Props: ComponentProps<{ value: Sig
 })
 
 // Button component with typed props and theme requirement
-// TypeScript infers: { label: string, onClick: () => Effect<void>, theme: Layer<Theme> }
 const CounterButton = Component.gen(function* (Props: ComponentProps<{ 
   label: string
   onClick: () => Effect.Effect<void>
@@ -78,36 +76,39 @@ const Counter = Component.gen(function* () {
   const decrement = () => Signal.update(count, (n: number) => n - 1)
   const reset = () => Signal.set(count, 0)
 
-  return (
-    <div className="example">
-      <h2>Counter</h2>
-      <p className="description">Basic state with Signal, event handlers as Effects</p>
-      
-      <div className="counter">
-        <CounterButton label="-" onClick={decrement} theme={defaultTheme} />
-        <CountDisplay value={count} theme={defaultTheme} />
-        <CounterButton label="+" onClick={increment} theme={defaultTheme} />
-      </div>
-      <div style={{ marginTop: "1rem" }}>
-        <CounterButton label="Reset" onClick={reset} theme={defaultTheme} />
-      </div>
-      
-      <div className="code-example">
-        <h3>Component.gen Pattern</h3>
-        <pre>{`// Component with props and theme requirement
+  return Effect.gen(function* () {
+    return (
+      <div className="example">
+        <h2>Counter</h2>
+        <p className="description">Basic state with Signal, event handlers as Effects</p>
+        
+        <div className="counter">
+          <CounterButton label="-" onClick={decrement} />
+          <CountDisplay value={count} />
+          <CounterButton label="+" onClick={increment} />
+        </div>
+        <div style={{ marginTop: "1rem" }}>
+          <CounterButton label="Reset" onClick={reset} />
+        </div>
+        
+        <div className="code-example">
+          <h3>Component.gen Pattern</h3>
+          <pre>{`// Component with props and theme requirement
 const CountDisplay = Component.gen(function* (Props: ComponentProps<{ 
   value: Signal<number> 
 }>) {
   const { value } = yield* Props
-  const theme = yield* Theme  // Service requirement
+  const theme = yield* Theme
   return <span style={{ color: theme.primary }}>{value}</span>
 })
 
-// TypeScript infers props: { value: Signal<number>, theme: Layer<Theme> }
-<CountDisplay value={count} theme={themeLayer} />`}</pre>
+return Effect.gen(function* () {
+  return <CountDisplay value={count} />
+}).pipe(Component.provide(themeLayer))`}</pre>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }).pipe(Component.provide(defaultTheme))
 })
 
 export default Counter

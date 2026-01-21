@@ -5,14 +5,14 @@
 **effect-ui** is a UI framework built entirely on Effect, providing:
 
 - **JSX as the authoring format** - Custom runtime, no React dependency
-- **Components are Effects** - `Effect<Element, E, never>` with R=never constraint
+- **Components are Effects** - `Effect<Element, E, R>`; app entrypoint must have `R = never`
 - **Reactive state via Signal** - Built on SubscriptionRef, position-based identity like React hooks
-- **Dependency injection via Effect.provide** - Use `Effect.provide(component, layer)` directly
+- **Dependency injection via Component.provide** - Use `Component.provide(layer)` on parent effects
 - **Explicit side-effect handling** - Event handlers return Effects, executed by the renderer
 
 ### Core Principles
 
-1. **Effect-Native**: Everything is an Effect. Use `Effect.provide` for DI, not special components.
+1. **Effect-Native**: Everything is an Effect. Use `Component.provide` for DI, not special components.
 2. **Type-Safe**: Errors tracked at type level. R=never enforced - no type casts.
 3. **Testable**: Components can be rendered with test layers in isolation.
 4. **Explicit**: Side effects are visible in the type signature.
@@ -333,9 +333,9 @@ const TodoList = Effect.gen(function* () {
 
 ## 5. Component.gen API
 
-### 5.1 Typed Components with Automatic Layer Inference
+### 5.1 Typed Components with Explicit DI
 
-The `Component.gen` API enables JSX components with typed props and automatic layer prop inference:
+The `Component.gen` API enables JSX components with typed props and explicit dependency injection:
 
 ```tsx
 import { Context, Effect, Layer } from "effect"
@@ -357,18 +357,20 @@ const ThemedCard = Component.gen(function* () {
   return <div>{theme.name}</div>
 })
 
-// TypeScript infers: { title: string, theme: Layer<Theme> }
 const themeLayer = Layer.succeed(Theme, { primary: "blue" })
-mount(container, <Card title="Hello" theme={themeLayer} />)
+mount(
+  container,
+  Effect.gen(function* () {
+    return <Card title="Hello" />
+  }).pipe(Component.provide(themeLayer))
+)
 ```
 
 ### 5.2 How It Works
 
 1. **Props as Context.Tag**: Regular props are wrapped in a `PropsMarker` Context.Tag
 2. **yield* Props**: Access props consistently with services using generator syntax
-3. **Service detection**: Effect's R type is analyzed using `Context.TagClassShape`
-4. **Auto layer props**: Each service requirement becomes a `layer: Layer<Service>` prop
-5. **Auto-provide**: At render time, props are wrapped in Layer and provided automatically
+3. **Parent DI**: Provide layers in a parent effect using `Component.provide`
 
 ### 5.3 Multiple Services
 
@@ -380,8 +382,9 @@ const Dashboard = Component.gen(function* (Props: ComponentProps<{ userId: strin
   return <div>...</div>
 })
 
-// Inferred props: { userId: string, theme: Layer<Theme>, logger: Layer<Logger> }
-<Dashboard userId="123" theme={themeLayer} logger={loggerLayer} />
+Effect.gen(function* () {
+  return <Dashboard userId="123" />
+}).pipe(Component.provide(Layer.mergeAll(themeLayer, loggerLayer)))
 ```
 
 ### 5.4 No Service Requirements
@@ -392,7 +395,7 @@ const SimpleCard = Component.gen(function* (Props: ComponentProps<{ message: str
   return <div>{message}</div>
 })
 
-// Inferred props: { message: string } - no layer props
+// Inferred props: { message: string }
 <SimpleCard message="Hello" />
 ```
 
@@ -405,7 +408,7 @@ const SimpleCard = Component.gen(function* (Props: ComponentProps<{ message: str
 **Effect-native DI**: Use Effect's built-in context system. No special Provider components.
 
 ```tsx
-const Header = Effect.gen(function* () {
+const Header = Component.gen(function* () {
   const theme = yield* Theme  // R = Theme
   return <header>{theme.title}</header>
 })
@@ -413,20 +416,18 @@ const Header = Effect.gen(function* () {
 // Provide layers to satisfy requirements
 mount(
   container,
-  App.pipe(Effect.provide(ThemeLayer))
+  Effect.gen(function* () {
+    return <Header />
+  }).pipe(Component.provide(ThemeLayer))
 )
 ```
 
 ### 6.2 Nested Layers
 
 ```tsx
-const ThemedSection = Effect.provide(
-  Effect.gen(function* () {
-    const header = yield* Header
-    return <section>{header}</section>
-  }),
-  DarkThemeLayer
-)
+const ThemedSection = Effect.gen(function* () {
+  return <Header />
+}).pipe(Component.provide(DarkThemeLayer))
 ```
 
 ---
@@ -541,8 +542,8 @@ mount(document.getElementById("root")!, Counter)
 | Async handling | `Deferred<Element, E>` | Fits Effect model, explicit Suspense boundaries |
 | Rendering target | Browser DOM first | Start simple, add SSR later |
 | Event handlers | Return `Effect` | Renderer handles execution via `Runtime.runFork` |
-| DI pattern | `Effect.provide` directly | No Provider component, just use Effect |
-| Component API | `Component.gen` with props inference | Clean syntax, typed props + auto layer props |
+| DI pattern | `Component.provide` | No Provider component, just use Component |
+| Component API | `Component.gen` with props inference | Clean syntax, typed props + explicit DI |
 | Entrypoint | `mount()` simple, `render()` composable | Easy start, flexible when needed |
 | Scope lifecycle | `Effect.never` keeps scope open | Prevents cleanup from removing DOM |
 

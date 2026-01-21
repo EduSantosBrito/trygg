@@ -6,7 +6,7 @@
  * - Type-safe navigation with Link params
  * - List rendering with Router.Link
  */
-import { Effect } from "effect";
+import { Component } from "effect-ui";
 import * as Router from "effect-ui/router";
 
 // Mock user data
@@ -17,7 +17,7 @@ const users = [
   { id: "4", name: "Diana Prince", email: "diana@example.com" },
 ];
 
-export default Effect.gen(function* () {
+export default Component.gen(function* () {
   return (
     <div className="users-page">
       <h2>Users</h2>

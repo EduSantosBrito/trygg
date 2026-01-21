@@ -8,7 +8,7 @@
  * - Per-load timeout with configurable duration
  * - Exponential backoff retry with jitter
  */
-import { Duration, Effect, Schedule } from "effect"
+import { Duration, Effect, Schedule, Runtime } from "effect"
 import * as Debug from "../debug.js"
 import { RouteLoadTimeoutError } from "./types.js"
 
@@ -80,145 +80,144 @@ export const createModuleLoader = (config: Partial<ModuleLoaderConfig> = {}) => 
 
   const cacheKey = (path: string, kind: ModuleKind): string => `${path}:${kind}`
 
-  const load = <A>(
+  const load = Effect.fn("router.module.load")(function* <A>(
     path: string,
     kind: ModuleKind,
     isPrefetch: boolean,
     loader: () => Promise<A>
-  ): Effect.Effect<A, RouteLoadTimeoutError> =>
-    Effect.gen(function* () {
-      const key = cacheKey(path, kind)
+  ) {
+    const runtime = yield* Effect.runtime<never>()
+    const key = cacheKey(path, kind)
 
-      // Check resolved cache
-      const cached = cache.get(key)
-      if (cached !== undefined && cached.expiresAt > Date.now()) {
-        yield* Debug.log({
-          event: "router.module.load.cache_hit",
-          path,
-          kind,
-          is_prefetch: isPrefetch
-        })
-        return cached.module as A
-      }
-
-      // Check in-flight - await existing promise
-      const existing = inFlight.get(key)
-      if (existing !== undefined) {
-        const result = yield* Effect.promise(() => existing)
-        if (result._tag === "error") {
-          // TaggedError extends Effect, so we can yield* it directly
-          return yield* result.error
-        }
-        return result.module as A
-      }
-
-      // Create the load effect with timeout
-      const loadWithTimeout = (attempt: number): Effect.Effect<A, RouteLoadTimeoutError> =>
-        Effect.gen(function* () {
-          const startTime = Date.now()
-
-          yield* Debug.log({
-            event: "router.module.load.start",
-            path,
-            kind,
-            is_prefetch: isPrefetch,
-            attempt
-          })
-
-          const module = yield* Effect.promise(loader).pipe(
-            Effect.timeoutFail({
-              duration: Duration.millis(cfg.timeoutMs),
-              onTimeout: () =>
-                new RouteLoadTimeoutError({
-                  path,
-                  kind,
-                  timeout_ms: cfg.timeoutMs,
-                  attempt,
-                  is_prefetch: isPrefetch
-                })
-            })
-          )
-
-          const duration = Date.now() - startTime
-
-          yield* Debug.log({
-            event: "router.module.load.complete",
-            path,
-            kind,
-            duration_ms: duration,
-            is_prefetch: isPrefetch,
-            attempt
-          })
-
-          return module
-        })
-
-      // Build retry schedule: exponential backoff with jitter, capped by time and count
-      const retrySchedule = Schedule.exponential(Duration.millis(cfg.retryBackoffMs), 2).pipe(
-        Schedule.jittered,
-        Schedule.intersect(Schedule.recurs(cfg.maxRetries)),
-        Schedule.upTo(Duration.millis(cfg.retryWindowMs))
-      )
-
-      // Track attempt number across retries
-      let currentAttempt = 0
-
-      const loadEffect: Effect.Effect<A, RouteLoadTimeoutError> = Effect.suspend(() => {
-        currentAttempt += 1
-        return loadWithTimeout(currentAttempt)
-      }).pipe(
-        Effect.retry({
-          schedule: retrySchedule,
-          while: (error) => {
-            // Log timeout event before retry
-            Effect.runSync(
-              Debug.log({
-                event: "router.module.load.timeout",
-                path,
-                kind,
-                timeout_ms: cfg.timeoutMs,
-                is_prefetch: isPrefetch,
-                attempt: error.attempt
-              })
-            )
-            // Only retry RouteLoadTimeoutError
-            return error._tag === "RouteLoadTimeoutError"
-          }
-        })
-      )
-
-      // Convert effect to promise that captures result as LoadResult (never rejects)
-      const loadPromise: Promise<LoadResult<A>> = Effect.runPromise(
-        loadEffect.pipe(
-          Effect.map((module): LoadResult<A> => ({ _tag: "success", module })),
-          Effect.catchAll((error) =>
-            Effect.succeed<LoadResult<A>>({ _tag: "error", error })
-          )
-        )
-      ).finally(() => {
-        // Remove from in-flight when done
-        inFlight.delete(key)
+    // Check resolved cache
+    const cached = cache.get(key)
+    if (cached !== undefined && cached.expiresAt > Date.now()) {
+      yield* Debug.log({
+        event: "router.module.load.cache_hit",
+        path,
+        kind,
+        is_prefetch: isPrefetch
       })
+      return cached.module as A
+    }
 
-      // Store in-flight
-      inFlight.set(key, loadPromise as Promise<LoadResult<unknown>>)
-
-      // Await and handle result
-      const result = yield* Effect.promise(() => loadPromise)
-
+    // Check in-flight - await existing promise
+    const existing = inFlight.get(key)
+    if (existing !== undefined) {
+      const result = yield* Effect.promise(() => existing)
       if (result._tag === "error") {
         // TaggedError extends Effect, so we can yield* it directly
         return yield* result.error
       }
+      return result.module as A
+    }
 
-      // Cache on success
-      cache.set(key, {
-        module: result.module,
-        expiresAt: Date.now() + cfg.cacheTtlMs
+    // Create the load effect with timeout
+    const loadWithTimeout = Effect.fn("router.module.loadWithTimeout")(function* (attempt: number) {
+      const startTime = Date.now()
+
+      yield* Debug.log({
+        event: "router.module.load.start",
+        path,
+        kind,
+        is_prefetch: isPrefetch,
+        attempt
       })
 
-      return result.module
+      const module = yield* Effect.promise(loader).pipe(
+        Effect.timeoutFail({
+          duration: Duration.millis(cfg.timeoutMs),
+          onTimeout: () =>
+            new RouteLoadTimeoutError({
+              path,
+              kind,
+              timeout_ms: cfg.timeoutMs,
+              attempt,
+              is_prefetch: isPrefetch
+            })
+        })
+      )
+
+      const duration = Date.now() - startTime
+
+      yield* Debug.log({
+        event: "router.module.load.complete",
+        path,
+        kind,
+        duration_ms: duration,
+        is_prefetch: isPrefetch,
+        attempt
+      })
+
+      return module
     })
+
+    // Build retry schedule: exponential backoff with jitter, capped by time and count
+    const retrySchedule = Schedule.exponential(Duration.millis(cfg.retryBackoffMs), 2).pipe(
+      Schedule.jittered,
+      Schedule.intersect(Schedule.recurs(cfg.maxRetries)),
+      Schedule.upTo(Duration.millis(cfg.retryWindowMs))
+    )
+
+    // Track attempt number across retries
+    let currentAttempt = 0
+
+    const loadEffect: Effect.Effect<A, RouteLoadTimeoutError> = Effect.suspend(() => {
+      currentAttempt += 1
+      return loadWithTimeout(currentAttempt)
+    }).pipe(
+      Effect.retry({
+        schedule: retrySchedule,
+        while: (error) => {
+          // Log timeout event before retry
+          Runtime.runSync(runtime)(
+            Debug.log({
+              event: "router.module.load.timeout",
+              path,
+              kind,
+              timeout_ms: cfg.timeoutMs,
+              is_prefetch: isPrefetch,
+              attempt: error.attempt
+            })
+          )
+          // Only retry RouteLoadTimeoutError
+          return error._tag === "RouteLoadTimeoutError"
+        }
+      })
+    )
+
+    // Convert effect to promise that captures result as LoadResult (never rejects)
+    const loadPromise: Promise<LoadResult<A>> = Runtime.runPromise(runtime)(
+      loadEffect.pipe(
+        Effect.map((module): LoadResult<A> => ({ _tag: "success", module })),
+        Effect.catchAll((error) =>
+          Effect.succeed<LoadResult<A>>({ _tag: "error", error })
+        )
+      )
+    ).finally(() => {
+      // Remove from in-flight when done
+      inFlight.delete(key)
+    })
+
+    // Store in-flight
+    inFlight.set(key, loadPromise as Promise<LoadResult<unknown>>)
+
+    // Await and handle result
+    const result = yield* Effect.promise(() => loadPromise)
+
+    if (result._tag === "error") {
+      // TaggedError extends Effect, so we can yield* it directly
+      return yield* result.error
+    }
+
+    // Cache on success
+    cache.set(key, {
+      module: result.module,
+      expiresAt: Date.now() + cfg.cacheTtlMs
+    })
+
+    return result.module
+  })
 
   const invalidate = (path: string, kind?: ModuleKind): void => {
     if (kind !== undefined) {

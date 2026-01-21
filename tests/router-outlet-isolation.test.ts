@@ -103,6 +103,7 @@ describe("Outlet state isolation (F-005)", () => {
         // In the same fiber, we see the cumulative effect
         // But this test verifies FiberRef semantics work correctly
         expect(Option.isSome(fiber1Value)).toBe(true)
+        expect(Option.isNone(fiber2Value)).toBe(true)
       })
     )
   })

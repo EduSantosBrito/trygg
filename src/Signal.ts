@@ -556,13 +556,19 @@ export const subscribe: <A>(
       listener_count: signal._listeners.size
     })
     // Return unsubscribe effect (intentionally returns Effect for later execution)
-    return Effect.sync(() => signal._listeners.delete(listener)).pipe(
-      Effect.andThen(
-        Debug.log({
-          event: "signal.unsubscribe",
-          signal_id: signal._debugId,
-          listener_count: signal._listeners.size
-        })
+    return yield* Effect.succeed(
+      Effect.sync(() => {
+        signal._listeners.delete(listener)
+        return signal._listeners.size
+      }).pipe(
+        Effect.tap((listenerCount) =>
+          Debug.log({
+            event: "signal.unsubscribe",
+            signal_id: signal._debugId,
+            listener_count: listenerCount
+          })
+        ),
+        Effect.asVoid
       )
     )
   }
@@ -594,7 +600,7 @@ export interface EachOptions<T> {
 type EachFn = <T, E>(
   source: Signal<ReadonlyArray<T>>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderFn: (item: T, index: number) => Effect.Effect<any, E, never>,
+  renderFn: (item: T, index: number) => Effect.Effect<any, E, unknown>,
   options: EachOptions<T>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ) => any

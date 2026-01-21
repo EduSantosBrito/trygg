@@ -18,7 +18,7 @@ import { isEffectComponent } from "../Component.js"
  * Type guard for Effect values
  * @internal
  */
-const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
+const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
   typeof value === "object" &&
   value !== null &&
   Effect.EffectTypeId in value
@@ -528,16 +528,18 @@ export const Outlet = (props: OutletProps = {}): Element => {
    * Cancel existing load: interrupt fiber, close scope, log event.
    * @internal
    */
-  const cancelLoad = (handle: LoadHandle, newKey: string): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      yield* Fiber.interrupt(handle.fiber)
-      yield* Scope.close(handle.scope, Exit.void)
-      yield* Debug.log({
-        event: "router.load.cancelled",
-        from_key: handle.key,
-        to_key: newKey
-      })
+  const cancelLoad = Effect.fn("router.load.cancel")(function* (
+    handle: LoadHandle,
+    newKey: string
+  ) {
+    yield* Fiber.interrupt(handle.fiber)
+    yield* Scope.close(handle.scope, Exit.void)
+    yield* Debug.log({
+      event: "router.load.cancelled",
+      from_key: handle.key,
+      to_key: newKey
     })
+  })
   
   // --- End F-002 ---
   
@@ -685,10 +687,9 @@ export const Outlet = (props: OutletProps = {}): Element => {
                 Effect.gen(function* () {
                   // Render the error component inside the Effect.locally scope
                   // If the error component throws, it will propagate to parent boundary
-                  if (typeof errorComponent === "function" && 
-                      (errorComponent as { _tag?: string })._tag === "EffectComponent") {
+                  if (isEffectComponent(errorComponent)) {
                     // Component.gen result - call it to get Element
-                    return (errorComponent as (props: Record<string, unknown>) => Element)({})
+                    return errorComponent({})
                   }
                   // Effect-based component - run the effect
                   return yield* (errorComponent as Effect.Effect<Element, unknown, never>)

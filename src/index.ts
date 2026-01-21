@@ -5,10 +5,9 @@
  * ## Quick Start
  *
  * ```tsx
- * import { Effect } from "effect"
- * import { mount, Signal } from "effect-ui"
+ * import { mount, Signal, Component } from "effect-ui"
  *
- * const Counter = Effect.gen(function* () {
+ * const Counter = Component.gen(function* () {
  *   const count = yield* Signal.make(0)
  *   return (
  *     <button onClick={() => Signal.update(count, n => n + 1)}>
@@ -17,12 +16,12 @@
  *   )
  * })
  *
- * mount(document.getElementById("root")!, Counter)
+ * mount(document.getElementById("root")!, <Counter />)
  * ```
  *
  * ## Key Concepts
  *
- * - **Components are Effects**: Use `Effect.gen(function* () { ... })` to define components
+ * - **Components via Component.gen**: Define components with `Component.gen` and JSX
  * - **Signal for state**: `Signal.make(initial)` creates reactive state
  * - **Fine-grained updates**: Pass signals directly to JSX for surgical DOM updates
  * - **Re-renders**: Use `Signal.get(signal)` when you need the component to re-render
@@ -31,7 +30,7 @@
  *
  * - {@link mount} - Mount an app to the DOM
  * - {@link Signal} - Reactive state primitives
- * - {@link Component} - Typed components with auto layer injection
+ * - {@link Component} - Typed components with explicit DI
  * - {@link DevMode} - Debug event viewer
  *
  * @see README.md for full documentation
@@ -92,10 +91,11 @@ export {
 // Signal - Effect-native reactive state
 export * as Signal from "./Signal.js"
 
-// Component API for typed props and layer injection
+// Component API for typed props
 import {
   Component as ComponentFn,
   gen as componentGen,
+  provide as componentProvide,
   isEffectComponent,
   type ComponentType,
   type ComponentProps,
@@ -103,44 +103,40 @@ import {
 } from "./Component.js"
 
 /**
- * Component API for creating JSX components with typed props and automatic layer injection.
- * 
+ * Component API for creating JSX components with typed props.
+ *
  * ## Usage
- * 
+ *
  * Use `Component.gen` for the recommended syntax:
- * 
+ *
  * @example
  * ```tsx
- * // Without props - just pass the generator directly
- * const ThemedCard = Component.gen(function* () {
- *   const theme = yield* Theme
- *   return <div style={{ color: theme.primary }}>{theme.name}</div>
- * })
- * // TypeScript infers: { theme: Layer<Theme> }
- * 
- * // With props - pass the generator directly
  * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
  *   const { title } = yield* Props
  *   const theme = yield* Theme
  *   return <div style={{ color: theme.primary }}>{title}</div>
  * })
- * // TypeScript infers: { title: string, theme: Layer<Theme> }
+ *
+ * const App = Component.gen(function* () {
+ *   return Effect.gen(function* () {
+ *     return <Card title="Hello" />
+ *   }).pipe(Component.provide(themeLayer))
+ * })
  * ```
- * 
- * ## How It Works
- * 
- * Service requirements (like Theme, Logger) are automatically detected from
- * the Effect's type and become layer props. When you use the component in JSX,
- * TypeScript requires you to pass the corresponding layers:
- * 
- * ```tsx
- * const themeLayer = Layer.succeed(Theme, { primary: "blue" })
- * <Card title="Hello" theme={themeLayer} />
- * ```
- * 
+ *
+ * Service requirements are satisfied by parent effects, not props.
+ *
  * @see DESIGN.md Section 5 for detailed documentation
  */
-export const Component = Object.assign(ComponentFn, { gen: componentGen })
+type ComponentApi = typeof ComponentFn & {
+  readonly gen: typeof componentGen
+  readonly provide: typeof componentProvide
+}
+
+export const Component: ComponentApi = Object.assign(
+  ComponentFn,
+  { gen: componentGen, provide: componentProvide }
+)
 
 export { 
   isEffectComponent, 
