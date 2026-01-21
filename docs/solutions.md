@@ -55,7 +55,7 @@
 - Used `Effect.ensuring` instead of `Effect.addFinalizer` for unmount cleanup. `Effect.addFinalizer` requires a scoped context during initial render (not available). `Effect.ensuring` guarantees scope closure after fiber completion, which covers the unmount case. `Scope.close` is idempotent, so double-close from `cancelLoad` is safe.
 
 #### Original Finding
-> Route loading for Suspense creates a new Scope and forks a fiber, but the scope is never closed and the fiber is never interrupted when navigation changes. Stale route loads continue in the background after the Outlet re-renders.
+> Route loading for the loading fallback creates a new Scope and forks a fiber, but the scope is never closed and the fiber is never interrupted when navigation changes. Stale route loads continue in the background after the Outlet re-renders.
 
 #### Clarifying Questions
 1. Should route-loading fibers be interrupted on any navigation change (path/params/query), or only when the matched route chain changes?

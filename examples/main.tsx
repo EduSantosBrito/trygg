@@ -21,7 +21,7 @@ const App = Component.gen(function* () {
         </h1>
         <nav>
           <Router.Link to="/counter">Counter</Router.Link>
-          <Router.Link to="/suspense">Suspense</Router.Link>
+          <Router.Link to="/resource">Resource</Router.Link>
           <Router.Link to="/todo">Todo</Router.Link>
           <Router.Link to="/theme">Theme</Router.Link>
           <Router.Link to="/form">Form</Router.Link>

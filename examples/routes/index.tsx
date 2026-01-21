@@ -14,10 +14,10 @@ const features = [
     concepts: ["Signal.make", "Signal.update", "Component.gen", "Event handlers"]
   },
   {
-    title: "Suspense",
-    path: "/suspense",
-    description: "Async boundaries with fallback UI while loading",
-    concepts: ["Suspense", "Deferred", "Async components", "Loading states"]
+    title: "Suspend",
+    path: "/resource",
+    description: "Async component rendering with Signal.suspend",
+    concepts: ["Signal.suspend", "Pending/Failure/Success", "Dep-based caching", "Stale content"]
   },
   {
     title: "Todo List",

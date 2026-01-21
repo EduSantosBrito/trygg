@@ -54,7 +54,6 @@ export {
   text,
   componentElement,
   fragment,
-  suspense,
   portal,
   keyedList,
   empty,
@@ -146,7 +145,6 @@ export {
 }
 
 // Components
-export { Suspense, type SuspenseProps } from "./components/Suspense.js"
 export {
   ErrorBoundary,
   type ErrorBoundaryProps

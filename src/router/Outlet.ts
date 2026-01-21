@@ -2,8 +2,8 @@
  * @since 1.0.0
  * Router Outlet component for effect-ui
  */
-import { Cause, Deferred, Effect, Exit, Fiber, FiberRef, Option, Scope } from "effect"
-import { Element, componentElement, text, suspense as suspenseElement } from "../Element.js"
+import { Cause, Effect, Exit, FiberRef, Option } from "effect"
+import { Element, componentElement, text, signalElement } from "../Element.js"
 import * as Signal from "../Signal.js"
 import * as Debug from "../debug.js"
 import * as Metrics from "../metrics.js"
@@ -486,62 +486,39 @@ export const Outlet = (props: OutletProps = {}): Element => {
   
   // Signal to trigger re-render on reset
   let resetTrigger: Signal.Signal<number> | null = null
-  
-  // --- F-002: Route loading fiber management ---
-  // 
-  // Cancellation is handled on navigation change (matchKey differs) to prevent:
-  // - Wasted work from stale route loads
-  // - Out-of-order renders from rapid navigation
-  // - Resource leaks from accumulated fibers/scopes
-  //
-  // Memory leak prevention: Each forked effect uses Effect.ensuring to close its
-  // scope after completion (success, failure, or interruption). This handles the
-  // unmount case where cancelLoad isn't called. Scope.close is idempotent, so
-  // double-close from cancelLoad is safe.
-  
-  /**
-   * Handle for tracking in-flight route loads.
-   * Used to cancel stale loads on navigation change.
-   * @internal
-   */
-  interface LoadHandle {
-    readonly key: string
-    readonly scope: Scope.CloseableScope
-    // Fiber type is RuntimeFiber<boolean, never> because the effect ends with
-    // Deferred.succeed which returns boolean. We use unknown for flexibility.
-    readonly fiber: Fiber.RuntimeFiber<unknown, unknown>
-    readonly deferred: Deferred.Deferred<Element, unknown>
-  }
-  
-  // Mutable ref for current load (closure variable)
-  let currentLoad: LoadHandle | null = null
-  
+
+  // Track the active match key to trigger resource refreshes on navigation or reset
+  let currentMatchKey: string | null = null
+
   /**
    * Build stable key from match for comparison.
-   * Key changes when route path, params, or query change.
+   * Key changes when route path, params, query, or reset trigger change.
    * @internal
    */
-  const buildMatchKey = (match: RouteMatch, query: string): string =>
-    JSON.stringify({ path: match.route.path, params: match.params, query })
-  
-  /**
-   * Cancel existing load: interrupt fiber, close scope, log event.
-   * @internal
-   */
-  const cancelLoad = Effect.fn("router.load.cancel")(function* (
-    handle: LoadHandle,
-    newKey: string
-  ) {
-    yield* Fiber.interrupt(handle.fiber)
-    yield* Scope.close(handle.scope, Exit.void)
-    yield* Debug.log({
-      event: "router.load.cancelled",
-      from_key: handle.key,
-      to_key: newKey
-    })
-  })
-  
-  // --- End F-002 ---
+  const buildMatchKey = (
+    match: RouteMatch,
+    query: string,
+    resetValue: number | null
+  ): string =>
+    JSON.stringify({ path: match.route.path, params: match.params, query, resetValue })
+
+  const resolveResourceState = (
+    state: Signal.ResourceState<unknown, Element>,
+    fallbackElement: Element
+  ): Element => {
+    switch (state._tag) {
+      case "Loading":
+        return fallbackElement
+      case "Refreshing":
+        return Exit.isSuccess(state.previous)
+          ? state.previous.value
+          : fallbackElement
+      case "Success":
+        return state.value
+      case "Failure":
+        return fallbackElement
+    }
+  }
   
   // The outlet is a component that reactively renders based on context
   const outletEffect = Effect.gen(function* () {
@@ -573,8 +550,9 @@ export const Outlet = (props: OutletProps = {}): Element => {
     const route = yield* Signal.get(router.current)
     
     // Subscribe to reset trigger if it exists
+    let resetValue: number | null = null
     if (resetTrigger !== null) {
-      yield* Signal.get(resetTrigger)
+      resetValue = yield* Signal.get(resetTrigger)
     }
     
     // Match the current path
@@ -702,52 +680,28 @@ export const Outlet = (props: OutletProps = {}): Element => {
         )
       )
       
-      // If any route in chain has loading component, wrap in Suspense-like pattern
+      // If any route in chain has loading component, map resource state to loading fallback
       if (nearestLoadingComponent) {
-        // Load the nearest loading component synchronously (it should be fast)
         const loadingModule = yield* Effect.promise(() => nearestLoadingComponent())
         const loadingElement = yield* renderComponent(loadingModule.default, {})
-        
-        // F-002: Build stable key from match for comparison
-        const matchKey = buildMatchKey(match, route.query.toString())
-        
-        // F-002: Cancel stale load if key changed
-        if (currentLoad !== null && currentLoad.key !== matchKey) {
-          yield* cancelLoad(currentLoad, matchKey)
-          currentLoad = null
+
+        const resource = yield* Signal.resource(renderWithError)
+        const matchKey = buildMatchKey(match, route.query.toString(), resetValue)
+
+        if (currentMatchKey === null) {
+          currentMatchKey = matchKey
+        } else if (currentMatchKey !== matchKey) {
+          currentMatchKey = matchKey
+          yield* resource.refresh
         }
-        
-        // F-002: Reuse existing load if key matches
-        if (currentLoad !== null && currentLoad.key === matchKey) {
-          return suspenseElement(currentLoad.deferred, loadingElement)
-        }
-        
-        // Create deferred for async route loading
-        const deferred = yield* Deferred.make<Element, unknown>()
-        const scope = yield* Scope.make()
-        
-        // Fork the route loading effect
-        // FiberRef values (params, child) are embedded into componentElements via Effect.locally,
-        // so no manual propagation needed
-        const fiber = yield* Effect.forkIn(
-          renderWithError.pipe(
-            // renderWithError uses sandbox+catchAllCause so it never fails - 
-            // all errors are handled by the error boundary
-            Effect.flatMap((element) => Deferred.succeed(deferred, element)),
-            // F-002: Always close scope after completion to prevent memory leaks on unmount
-            // Scope.close is idempotent, so double-close from cancelLoad is safe
-            Effect.ensuring(Scope.close(scope, Exit.void))
-          ),
-          scope
+
+        const view = yield* Signal.derive(resource.state, (state) =>
+          resolveResourceState(state, loadingElement)
         )
-        
-        // F-002: Store handle for potential cancellation
-        currentLoad = { key: matchKey, scope, fiber, deferred }
-        
-        // Return Suspense element
-        return suspenseElement(deferred, loadingElement)
+
+        return signalElement(view)
       }
-      
+
       return yield* renderWithError
     }
     
@@ -756,41 +710,21 @@ export const Outlet = (props: OutletProps = {}): Element => {
       const loadingModule = yield* Effect.promise(() => nearestLoadingComponent())
       const loadingElement = yield* renderComponent(loadingModule.default, {})
       
-      // F-002: Build stable key from match for comparison
-      const matchKey = buildMatchKey(match, route.query.toString())
-      
-      // F-002: Cancel stale load if key changed
-      if (currentLoad !== null && currentLoad.key !== matchKey) {
-        yield* cancelLoad(currentLoad, matchKey)
-        currentLoad = null
+      const resource = yield* Signal.resource(renderWithErrorHandling)
+      const matchKey = buildMatchKey(match, route.query.toString(), resetValue)
+
+      if (currentMatchKey === null) {
+        currentMatchKey = matchKey
+      } else if (currentMatchKey !== matchKey) {
+        currentMatchKey = matchKey
+        yield* resource.refresh
       }
-      
-      // F-002: Reuse existing load if key matches
-      if (currentLoad !== null && currentLoad.key === matchKey) {
-        return suspenseElement(currentLoad.deferred, loadingElement)
-      }
-      
-      const deferred = yield* Deferred.make<Element, unknown>()
-      const scope = yield* Scope.make()
-      
-      // Fork the route loading effect
-      // FiberRef values (params, child) are embedded into componentElements via Effect.locally,
-      // so no manual propagation needed
-      const fiber = yield* Effect.forkIn(
-        renderWithErrorHandling.pipe(
-          Effect.flatMap((element) => Deferred.succeed(deferred, element)),
-          Effect.catchAll((error) => Deferred.fail(deferred, error)),
-          // F-002: Always close scope after completion to prevent memory leaks on unmount
-          // Scope.close is idempotent, so double-close from cancelLoad is safe
-          Effect.ensuring(Scope.close(scope, Exit.void))
-        ),
-        scope
+
+      const view = yield* Signal.derive(resource.state, (state) =>
+        resolveResourceState(state, loadingElement)
       )
-      
-      // F-002: Store handle for potential cancellation
-      currentLoad = { key: matchKey, scope, fiber, deferred }
-      
-      return suspenseElement(deferred, loadingElement)
+
+      return signalElement(view)
     }
     
     return yield* renderWithErrorHandling

@@ -625,31 +625,31 @@ input:focus {
   background: #0055aa;
 }
 
-/* Suspense / Skeleton Loading */
-.suspense-controls {
+/* Resource / Skeleton Loading */
+.resource-controls {
   display: flex;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
 }
 
-.suspense-demo {
+.resource-demo {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
 }
 
-.suspense-full-width {
+.resource-full-width {
   grid-column: 1 / -1;
 }
 
-.suspense-section {
+.resource-section {
   padding: 1rem;
   background: #f9f9f9;
   border-radius: 8px;
   border: 1px solid #e0e0e0;
 }
 
-.suspense-section h3 {
+.resource-section h3 {
   margin: 0 0 1rem;
   font-size: 1rem;
   color: #666;
@@ -739,6 +739,24 @@ input:focus {
 .stats-skeleton .skeleton-line {
   flex: 1;
   height: 2.5rem;
+}
+
+.error-card {
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #ffcccc;
+  background: #fff5f5;
+  color: #cc3333;
+}
+
+.error-card strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.error-card p {
+  margin: 0;
+  font-size: 0.85rem;
 }
 
 .post-list {

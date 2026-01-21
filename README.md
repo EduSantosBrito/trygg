@@ -277,10 +277,10 @@ See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
 | `Signal.get(signal)` | Read value and subscribe to changes |
 | `Signal.set(signal, value)` | Set signal value |
 | `Signal.update(signal, fn)` | Update signal with function |
+| `Signal.resource(effect)` | Async state with Exit/Cause and auto refresh |
 | `Signal.each(source, fn, opts)` | Efficient list rendering |
 | `Component.gen(fn)` | Create component with explicit DI |
 | `DevMode` | Debug event viewer |
-| `Suspense` | Async boundary component |
 | `ErrorBoundary` | Error handling component |
 | `Portal` | Render to different container |
 

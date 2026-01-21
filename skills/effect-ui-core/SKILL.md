@@ -1,6 +1,6 @@
 ---
 name: effect-ui-core
-description: Build Effect-native UI components with fine-grained reactivity using Signals. Use when: (1) Creating new components with Effect.gen, (2) Managing state with Signal.make/get/set/update, (3) Rendering lists with Signal.each, (4) Handling DOM events that return Effects, (5) Using dependency injection with Context.Tag and Layer, (6) Wrapping async content with Suspense/ErrorBoundary, (7) Providing layers via Component.provide.
+description: Build Effect-native UI components with fine-grained reactivity using Signals. Use when: (1) Creating new components with Effect.gen, (2) Managing state with Signal.make/get/set/update, (3) Rendering lists with Signal.each, (4) Handling DOM events that return Effects, (5) Using dependency injection with Context.Tag and Layer, (6) Managing async state with Signal.resource/ErrorBoundary, (7) Providing layers via Component.provide.
 ---
 
 # effect-ui Core Components
@@ -124,14 +124,17 @@ import { ErrorBoundary } from "effect-ui"
 </ErrorBoundary>
 ```
 
-### Suspense for Async
+### Signal.resource for Async
 
 ```tsx
-import { Suspense } from "effect-ui"
+import { Signal } from "effect-ui"
 
-<Suspense fallback={<div>Loading...</div>}>
-  {AsyncComponent}
-</Suspense>
+const data = yield* Signal.resource(fetchStuff)
+const view = yield* Signal.derive(data.state, (state) =>
+  state._tag === "Loading" ? <div>Loading...</div> : <AsyncComponent value={state.value} />
+)
+
+return <>{view}</>
 ```
 
 ## API Reference
@@ -146,7 +149,7 @@ import { Suspense } from "effect-ui"
 | `Signal.each(source, fn, opts)` | List rendering |
 | `Component.gen(fn)` | Auto layer injection |
 | `DevMode` | Debug events |
-| `Suspense` | Async boundary |
+| `Signal.resource(effect)` | Async state with refresh |
 | `ErrorBoundary` | Error handling |
 | `Portal` | Render elsewhere |
 

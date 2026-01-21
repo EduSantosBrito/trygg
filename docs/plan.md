@@ -65,7 +65,7 @@ Module imports should be parallelized or prefetched so navigation is near-instan
 - Function/Component: `Outlet`
 
 **Problem:**
-Route loading for Suspense creates a new `Scope` and forks a fiber, but the scope is never closed and the fiber is never interrupted when navigation changes. Stale route loads continue in the background after the Outlet re-renders.
+Route loading for the loading fallback creates a new `Scope` and forks a fiber, but the scope is never closed and the fiber is never interrupted when navigation changes. Stale route loads continue in the background after the Outlet re-renders.
 
 **Current Behavior:**
 Each navigation starts a new forked load that outlives the current render and can continue after route changes.

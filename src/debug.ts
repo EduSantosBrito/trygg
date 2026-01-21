@@ -208,55 +208,6 @@ type RenderKeyedListReorderEvent = BaseEvent & {
   readonly stable_nodes: number
 }
 
-/** Suspense events */
-type RenderSuspenseStartEvent = BaseEvent & {
-  readonly event: "render.suspense.start"
-  readonly parent_type: string
-  readonly parent_connected: boolean
-}
-
-type RenderSuspenseFallbackEvent = BaseEvent & {
-  readonly event: "render.suspense.fallback"
-  readonly node_type: string
-  readonly node_connected: boolean
-}
-
-type RenderSuspenseWaitStartEvent = BaseEvent & {
-  readonly event: "render.suspense.wait.start"
-}
-
-type RenderSuspenseDeferredResolvedEvent = BaseEvent & {
-  readonly event: "render.suspense.deferred.resolved"
-  readonly element_tag: string
-}
-
-type RenderSuspenseActualParentEvent = BaseEvent & {
-  readonly event: "render.suspense.actual_parent"
-  readonly has_parent: boolean
-  readonly parent_type: string
-  readonly placeholder_connected: boolean
-}
-
-type RenderSuspenseSkipUnmountedEvent = BaseEvent & {
-  readonly event: "render.suspense.skip.unmounted"
-}
-
-type RenderSuspenseFallbackCleanedEvent = BaseEvent & {
-  readonly event: "render.suspense.fallback.cleaned"
-}
-
-type RenderSuspenseResolvedRenderedEvent = BaseEvent & {
-  readonly event: "render.suspense.resolved.rendered"
-  readonly node_type: string
-  readonly node_connected: boolean
-}
-
-type RenderSuspenseErrorEvent = BaseEvent & {
-  readonly event: "render.suspense.error"
-  readonly suspense_id: string
-  readonly error: string
-}
-
 /** Router events */
 type RouterNavigateEvent = BaseEvent & {
   readonly event: "router.navigate"
@@ -483,16 +434,6 @@ export type DebugEvent =
   | RenderKeyedListSubscriptionAddEvent
   | RenderKeyedListSubscriptionRemoveEvent
   | RenderKeyedListReorderEvent
-  // Suspense events
-  | RenderSuspenseStartEvent
-  | RenderSuspenseFallbackEvent
-  | RenderSuspenseWaitStartEvent
-  | RenderSuspenseDeferredResolvedEvent
-  | RenderSuspenseActualParentEvent
-  | RenderSuspenseSkipUnmountedEvent
-  | RenderSuspenseFallbackCleanedEvent
-  | RenderSuspenseResolvedRenderedEvent
-  | RenderSuspenseErrorEvent
   // Router events
   | RouterNavigateEvent
   | RouterNavigateCompleteEvent

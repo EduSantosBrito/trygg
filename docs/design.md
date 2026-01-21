@@ -50,11 +50,6 @@ export type Element = Data.TaggedEnum<{
   Fragment: {
     readonly children: ReadonlyArray<Element>
   }
-  /** Async boundary - shows fallback while waiting for Deferred */
-  Suspense: {
-    readonly deferred: Deferred.Deferred<Element, unknown>
-    readonly fallback: Element
-  }
   /** Portal - renders into a different DOM container */
   Portal: {
     readonly target: HTMLElement | string
@@ -539,7 +534,7 @@ mount(document.getElementById("root")!, Counter)
 | Signal API | `Signal.make()` returns Signal object | Fine-grained: pass to JSX, re-render: use `Signal.get()` |
 | Subscription model | Only `Signal.get()` subscribes | Enables fine-grained updates without re-render |
 | Signal props | `value={signal}` for inputs | Fine-grained DOM updates, no input focus loss |
-| Async handling | `Deferred<Element, E>` | Fits Effect model, explicit Suspense boundaries |
+| Async handling | `Signal.resource` + `ResourceState` | Effect-native async state with Exit/Cause |
 | Rendering target | Browser DOM first | Start simple, add SSR later |
 | Event handlers | Return `Effect` | Renderer handles execution via `Runtime.runFork` |
 | DI pattern | `Component.provide` | No Provider component, just use Component |

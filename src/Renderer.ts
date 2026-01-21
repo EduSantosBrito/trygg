@@ -7,9 +7,8 @@
 import {
   Context,
   Data,
-  Deferred,
   Effect,
-  Fiber,
+  Exit,
   FiberRef,
   Layer,
   Match,
@@ -313,16 +312,43 @@ const renderElement = (
 
         // State to track current rendered content
         let currentResult: RenderResult | null = null
+        let currentScope: Scope.CloseableScope | null = null
         let isUnmounted = false
 
         // Helper to render Element or convert primitive to Text
         const renderValue = (value: unknown): Element =>
           isElement(value) ? value : Element.Text({ content: String(value) })
 
+        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+          if (currentResult !== null) {
+            yield* currentResult.cleanup
+            currentResult = null
+          }
+          if (currentScope !== null) {
+            const scope = currentScope
+            currentScope = null
+            yield* Scope.close(scope, Exit.void)
+          }
+        })
+
+        const renderWithScope: (
+          value: unknown
+        ) => Effect.Effect<{ result: RenderResult; scope: Scope.CloseableScope }, unknown, never> =
+          Effect.fnUntraced(function* (value: unknown) {
+            const scope = yield* Scope.make()
+            const element = renderValue(value)
+            const result = yield* renderElement(element, parent, runtime, context).pipe(
+              Effect.provideService(Scope.Scope, scope),
+              Effect.onError(() => Scope.close(scope, Exit.void))
+            )
+            return { result, scope }
+          })
+
         // Render initial value
         const initialValue = yield* Signal.get(signal)
-        const initialElement = renderValue(initialValue)
-        currentResult = yield* renderElement(initialElement, parent, runtime, context)
+        const initialRender = yield* renderWithScope(initialValue)
+        currentResult = initialRender.result
+        currentScope = initialRender.scope
         // Move rendered content before anchor
         parent.insertBefore(currentResult.node, anchor)
 
@@ -337,29 +363,24 @@ const renderElement = (
           Effect.sync(() => {
             if (isUnmounted) return
 
-            // Fork scoped effect to handle DOM swap
             Runtime.runFork(runtime)(
-              Effect.scoped(
-                Effect.gen(function* () {
-                  const newValue = yield* Signal.get(signal)
-                  const newElement = renderValue(newValue)
+              Effect.gen(function* () {
+                const newValue = yield* Signal.get(signal)
 
-                  // Cleanup old content
-                  if (currentResult !== null) {
-                    yield* currentResult.cleanup
-                  }
+                // Cleanup old content + scope
+                yield* cleanupCurrent
 
-                  // Render new content
-                  currentResult = yield* renderElement(newElement, parent, runtime, context)
-                  // Position before anchor
-                  parent.insertBefore(currentResult.node, anchor)
+                // Render new content in a long-lived scope
+                const nextRender = yield* renderWithScope(newValue)
+                currentResult = nextRender.result
+                currentScope = nextRender.scope
+                parent.insertBefore(currentResult.node, anchor)
 
-                  yield* Debug.log({
-                    event: "render.signalelement.swap",
-                    signal_id: signal._debugId
-                  })
+                yield* Debug.log({
+                  event: "render.signalelement.swap",
+                  signal_id: signal._debugId
                 })
-              )
+              })
             )
           })
         )
@@ -369,9 +390,7 @@ const renderElement = (
           cleanup: Effect.gen(function* () {
             isUnmounted = true
             yield* unsubscribe
-            if (currentResult !== null) {
-              yield* currentResult.cleanup
-            }
+            yield* cleanupCurrent
             anchor.remove()
           })
         }
@@ -436,16 +455,52 @@ const renderElement = (
 
         // State for reactive re-rendering
         let currentResult: RenderResult | null = null
+        let currentRenderScope: Scope.CloseableScope | null = null
         let isRerendering = false
         let isUnmounted = false
         let pendingRerender = false  // Track if signal changed during re-render
         let renderCount = 0
 
+        // Component lifetime scope (persists across re-renders)
+        const componentScope = yield* Scope.make()
+
         // Create render phase for this component (persists across re-renders)
         const renderPhase = yield* Signal.makeRenderPhase
 
+        const rendererScope = yield* Effect.scope
+
         // Track active subscription cleanups (each is an Effect that unsubscribes)
         let subscriptionCleanups: Array<Effect.Effect<void>> = []
+
+        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+          if (currentResult !== null) {
+            yield* currentResult.cleanup
+            currentResult = null
+          }
+          if (currentRenderScope !== null) {
+            const scope = currentRenderScope
+            currentRenderScope = null
+            yield* Scope.close(scope, Exit.void)
+          }
+        })
+
+        const runComponentEffect: () => Effect.Effect<
+          { element: Element; scope: Scope.CloseableScope },
+          unknown,
+          never
+        > = Effect.fnUntraced(function* () {
+          const renderScope = yield* Scope.make()
+          const element = yield* Effect.locally(
+            Effect.locally(
+              Effect.locally(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
+              Signal.CurrentComponentScope,
+              componentScope
+            ),
+            Signal.CurrentRenderScope,
+            renderScope
+          ).pipe(Effect.onError(() => Scope.close(renderScope, Exit.void)))
+          return { element, scope: renderScope }
+        })
 
         // Helper to render and position content before the anchor
         // IMPORTANT: Use anchor.parentNode instead of captured parent because
@@ -481,50 +536,42 @@ const renderElement = (
           // The Debug.log below is triggered from within the Effect.gen that follows
 
           // Re-render
-          Runtime.runFork(runtime)(
-            Effect.scoped(
-              Effect.gen(function* () {
-                // Track re-render duration
-                const rerenderStart = performance.now()
-                
-                // Clean up old render
-                if (currentResult !== null) {
-                  yield* currentResult.cleanup
-                  currentResult = null
-                }
+          const rerenderEffect = Effect.gen(function* () {
+              // Track re-render duration
+              const rerenderStart = performance.now()
+              
+              // Clean up old render + scope
+              yield* cleanupCurrent
 
-                // Reset render phase for re-render
-                yield* Signal.resetRenderPhase(renderPhase)
+              // Reset render phase for re-render
+              yield* Signal.resetRenderPhase(renderPhase)
 
-                // Re-execute the component effect with render phase context
-                const newChildElement = yield* Effect.locally(
-                  effectWithContext,
-                  Signal.CurrentRenderPhase,
-                  renderPhase
-                )
+              // Re-execute the component effect with render phase context
+              const nextRender = yield* runComponentEffect()
+              const nextResult = yield* renderAndPosition(normalizeChild(nextRender.element)).pipe(
+                Effect.onError(() => Scope.close(nextRender.scope, Exit.void))
+              )
+              currentRenderScope = nextRender.scope
+              currentResult = nextResult
+              const rerenderDuration = performance.now() - rerenderStart
+              
+              // Record render metrics for re-render
+              yield* Metrics.recordComponentRender
+              yield* Metrics.recordRenderDuration(rerenderDuration)
+              
+              // Check if another re-render was requested during this render
+              const needsAnotherRender = pendingRerender
+              isRerendering = false
+              pendingRerender = false
 
-                // Render and position new content
-                currentResult = yield* renderAndPosition(normalizeChild(newChildElement))
-                const rerenderDuration = performance.now() - rerenderStart
-                
-                // Record render metrics for re-render
-                yield* Metrics.recordComponentRender
-                yield* Metrics.recordRenderDuration(rerenderDuration)
-                
-                // Check if another re-render was requested during this render
-                const needsAnotherRender = pendingRerender
-                isRerendering = false
-                pendingRerender = false
+              // Re-subscribe to signals (may be different set after re-render)
+              yield* subscribeToSignals(renderPhase.accessed)
 
-                // Re-subscribe to signals (may be different set after re-render)
-                yield* subscribeToSignals(renderPhase.accessed)
-
-                // If a signal changed during re-render, schedule another re-render
-                if (needsAnotherRender) {
-                  scheduleRerender()
-                }
-              })
-            ).pipe(
+              // If a signal changed during re-render, schedule another re-render
+              if (needsAnotherRender) {
+                scheduleRerender()
+              }
+            }).pipe(
               Effect.tapErrorCause((cause) => 
                 Effect.gen(function* () {
                   yield* Debug.log({
@@ -535,9 +582,11 @@ const renderElement = (
                   isRerendering = false
                   pendingRerender = false
                 })
-              )
+              ),
+              Effect.provideService(Scope.Scope, rendererScope)
             )
-          )
+
+          Runtime.runFork(runtime)(rerenderEffect)
         }
 
         // Schedule a re-render via microtask
@@ -583,14 +632,14 @@ const renderElement = (
 
         // Execute the component effect with render phase context and track duration
         const renderStart = performance.now()
-        const childElement = yield* Effect.locally(
-          effectWithContext,
-          Signal.CurrentRenderPhase,
-          renderPhase
-        )
+        const initialRender = yield* runComponentEffect()
 
         // Render and position the content
-        currentResult = yield* renderAndPosition(normalizeChild(childElement))
+        const initialResult = yield* renderAndPosition(normalizeChild(initialRender.element)).pipe(
+          Effect.onError(() => Scope.close(initialRender.scope, Exit.void))
+        )
+        currentRenderScope = initialRender.scope
+        currentResult = initialResult
         const renderDuration = performance.now() - renderStart
         renderCount++
         
@@ -616,10 +665,9 @@ const renderElement = (
               yield* cleanup
             }
             subscriptionCleanups = []
-            // Clean up rendered content
-            if (currentResult !== null) {
-              yield* currentResult.cleanup
-            }
+            // Clean up rendered content + render scope
+            yield* cleanupCurrent
+            yield* Scope.close(componentScope, Exit.void)
             anchor.remove()
           })
         }
@@ -658,123 +706,6 @@ const renderElement = (
             for (const child of childResults) {
               yield* child.cleanup
             }
-          })
-        }
-      })
-    ),
-
-    Match.tag("Suspense", ({ deferred, fallback }) =>
-      Effect.gen(function* () {
-        // Generate unique ID for this Suspense instance for debugging
-        const suspenseId = `sus_${Math.random().toString(36).slice(2, 8)}`
-        
-        // Create placeholder comment and keep parent reference
-        const placeholder = document.createComment("suspense")
-        const suspenseParent = parent
-        suspenseParent.appendChild(placeholder)
-
-        yield* Debug.log({
-          event: "render.suspense.start",
-          suspense_id: suspenseId,
-          parent_type: suspenseParent.constructor.name,
-          parent_connected: suspenseParent.isConnected
-        })
-
-        // Render fallback into fragment first, then insert before placeholder.
-        // This ensures all content (including Component anchors) stays together.
-        const fallbackFragment = document.createDocumentFragment()
-        let currentResult = yield* renderElement(fallback, fallbackFragment, runtime, context)
-        suspenseParent.insertBefore(fallbackFragment, placeholder)
-
-        yield* Debug.log({
-          event: "render.suspense.fallback",
-          suspense_id: suspenseId,
-          node_type: currentResult.node.constructor.name,
-          node_connected: currentResult.node.isConnected
-        })
-
-        // Fork a daemon fiber to wait for the deferred and swap content.
-        // Using forkDaemon instead of forkScoped because the parent re-render
-        // scope closes when re-render completes, which would interrupt the fiber
-        // before the Deferred resolves. forkDaemon lets the fiber run independently.
-        const waitFiber = yield* Effect.forkDaemon(
-          Effect.scoped(
-            Effect.gen(function* () {
-              yield* Debug.log({ event: "render.suspense.wait.start", suspense_id: suspenseId })
-              
-              // Wait for the async content
-              const resolvedElement = yield* Deferred.await(deferred)
-
-              yield* Debug.log({
-                event: "render.suspense.deferred.resolved",
-                suspense_id: suspenseId,
-                element_tag: resolvedElement._tag
-              })
-
-              // IMPORTANT: Use placeholder.parentNode instead of captured parent because
-              // when Suspense is inside a Fragment, the initial parent is a DocumentFragment
-              // which becomes empty after appendChild. The placeholder moves to the real parent.
-              const actualParent = placeholder.parentNode
-              
-              yield* Debug.log({
-                event: "render.suspense.actual_parent",
-                suspense_id: suspenseId,
-                has_parent: actualParent !== null,
-                parent_type: actualParent?.constructor.name ?? "null",
-                placeholder_connected: placeholder.isConnected
-              })
-              
-              if (actualParent === null) {
-                // Suspense was unmounted before deferred resolved - skip rendering
-                yield* Debug.log({ event: "render.suspense.skip.unmounted", suspense_id: suspenseId })
-                return
-              }
-
-              // Clean up fallback
-              yield* currentResult.cleanup
-              
-              yield* Debug.log({ event: "render.suspense.fallback.cleaned", suspense_id: suspenseId })
-
-              // Render into a temporary fragment first, then insert before placeholder.
-              // This is necessary because for Component elements, renderElement appends
-              // an anchor to parent, then renders content before the anchor. If we render
-              // directly to actualParent, the content ends up at the end, and insertBefore
-              // only moves the anchor, leaving content behind.
-              const fragment = document.createDocumentFragment()
-              currentResult = yield* renderElement(
-                resolvedElement,
-                fragment,
-                runtime,
-                context
-              )
-              // Insert entire fragment contents before placeholder
-              actualParent.insertBefore(fragment, placeholder)
-              
-              yield* Debug.log({
-                event: "render.suspense.resolved.rendered",
-                suspense_id: suspenseId,
-                node_type: currentResult.node.constructor.name,
-                node_connected: currentResult.node.isConnected
-              })
-            })
-          ).pipe(
-            Effect.catchAllCause((cause) =>
-              Debug.log({
-                event: "render.suspense.error",
-                suspense_id: suspenseId,
-                error: String(cause)
-              })
-            )
-          )
-        )
-
-        return {
-          node: placeholder,
-          cleanup: Effect.gen(function* () {
-            // Interrupt the wait fiber if still running (cleanup before resolve)
-            yield* Fiber.interrupt(waitFiber)
-            yield* currentResult.cleanup
-            placeholder.remove()
           })
         }
       })

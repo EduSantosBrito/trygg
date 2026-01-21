@@ -2,7 +2,7 @@
  * @since 1.0.0
  * Virtual DOM Element representation for effect-ui
  */
-import { Context, Data, Deferred, Effect } from "effect"
+import { Context, Data, Effect } from "effect"
 import type { Signal, EachOptions } from "./Signal.js"
 import { _setEachImpl, peekSync } from "./Signal.js"
 
@@ -232,13 +232,6 @@ export type Element = Data.TaggedEnum<{
     readonly children: ReadonlyArray<Element>
   }
   /**
-   * Suspense boundary - shows fallback while Deferred resolves
-   */
-  readonly Suspense: {
-    readonly deferred: Deferred.Deferred<Element, unknown>
-    readonly fallback: Element
-  }
-  /**
    * Portal - renders children into a different DOM container
    */
   readonly Portal: {
@@ -317,16 +310,6 @@ export const fragment = (children: ReadonlyArray<Element>): Element =>
   Element.Fragment({ children })
 
 /**
- * Create a suspense boundary
- * @since 1.0.0
- */
-export const suspense = (
-  deferred: Deferred.Deferred<Element, unknown>,
-  fallback: Element
-): Element =>
-  Element.Suspense({ deferred, fallback })
-
-/**
  * Create a portal element
  * @since 1.0.0
  */
@@ -384,7 +367,7 @@ export const isElement = (value: unknown): value is Element =>
   value !== null &&
   "_tag" in value &&
   typeof (value as { _tag: unknown })._tag === "string" &&
-  ["Intrinsic", "Text", "SignalText", "SignalElement", "Provide", "Component", "Fragment", "Suspense", "Portal", "KeyedList"].includes(
+  ["Intrinsic", "Text", "SignalText", "SignalElement", "Provide", "Component", "Fragment", "Portal", "KeyedList"].includes(
     (value as { _tag: string })._tag
   )
 
