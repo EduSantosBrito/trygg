@@ -1,9 +1,9 @@
 {
   "name": "effect-ui",
   "version": "0.1.0",
-  "module": "./src/index.ts",
-  "type": "module",
   "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./router": "./src/router/index.ts",
@@ -14,11 +14,18 @@
   "scripts": {
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
+    "effect:check": "effect-language-service diagnostics --project tsconfig.json",
     "test": "npx vitest run",
     "test:watch": "npx vitest"
   },
+  "dependencies": {
+    "@effect-atom/atom": "^0.4.13",
+    "@effect/platform": "^0.94.1",
+    "@effect/platform-browser": "^0.74.0",
+    "effect": "^3.19.14"
+  },
   "devDependencies": {
-    "@effect/language-service": "^0.67.0",
+    "@effect/language-service": "^0.72.0",
     "@effect/platform-bun": "^0.87.0",
     "@effect/sql": "^0.49.0",
     "@effect/sql-sqlite-bun": "^0.50.0",
@@ -36,11 +43,5 @@
     "vite": {
       "optional": true
     }
-  },
-  "dependencies": {
-    "@effect-atom/atom": "^0.4.13",
-    "@effect/platform": "^0.94.1",
-    "@effect/platform-browser": "^0.74.0",
-    "effect": "^3.19.14"
   }
 }

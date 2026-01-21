@@ -20,12 +20,10 @@
     }
   },
   "include": [
-    "./**/*.ts", 
-    "./**/*.tsx", 
+    "./**/*.ts",
+    "./**/*.tsx",
     "../../packages/core/src/**/*.ts",
     "../../packages/core/src/**/*.d.ts"
   ],
-  "exclude": [
-    "vite.config.ts"
-  ]
+  "exclude": ["vite.config.ts"]
 }

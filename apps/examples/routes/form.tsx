@@ -8,8 +8,8 @@
  * - Form state with multiple signals
  * - Conditional error display
  */
-import { Context, Data, Effect, Either, Layer, Option } from "effect"
-import { Signal, Component, type ComponentProps } from "effect-ui"
+import { Context, Data, Effect, Either, Layer, Option } from "effect";
+import { Signal, Component, type ComponentProps } from "effect-ui";
 
 // =============================================================================
 // Typed Validation Errors
@@ -17,29 +17,25 @@ import { Signal, Component, type ComponentProps } from "effect-ui"
 
 class EmailRequired extends Data.TaggedError("EmailRequired") {}
 class EmailInvalid extends Data.TaggedError("EmailInvalid")<{
-  readonly email: string
+  readonly email: string;
 }> {}
 class PasswordTooShort extends Data.TaggedError("PasswordTooShort")<{
-  readonly minLength: number
-  readonly actualLength: number
+  readonly minLength: number;
+  readonly actualLength: number;
 }> {}
 class PasswordNoNumber extends Data.TaggedError("PasswordNoNumber") {}
 
-type ValidationError =
-  | EmailRequired
-  | EmailInvalid
-  | PasswordTooShort
-  | PasswordNoNumber
+type ValidationError = EmailRequired | EmailInvalid | PasswordTooShort | PasswordNoNumber;
 
 // =============================================================================
 // Form Theme Service
 // =============================================================================
 
 interface FormThemeConfig {
-  readonly errorColor: string
-  readonly successColor: string
-  readonly labelColor: string
-  readonly inputBorder: string
+  readonly errorColor: string;
+  readonly successColor: string;
+  readonly labelColor: string;
+  readonly inputBorder: string;
 }
 
 class FormTheme extends Context.Tag("FormTheme")<FormTheme, FormThemeConfig>() {}
@@ -48,26 +44,28 @@ const defaultFormTheme = Layer.succeed(FormTheme, {
   errorColor: "#dc3545",
   successColor: "#28a745",
   labelColor: "#333",
-  inputBorder: "#ccc"
-})
+  inputBorder: "#ccc",
+});
 
 // =============================================================================
 // Form Components using Component.gen
 // =============================================================================
 
 // FormField component with typed props and theme requirement
-const FormField = Component.gen(function* (Props: ComponentProps<{
-  label: string
-  type: "text" | "email" | "password"
-  value: Signal.Signal<string>
-  error: Option.Option<string>
-  placeholder: string
-  hint?: string
-  onInput: (e: Event) => Effect.Effect<void>
-}>) {
-  const { label, type, value, error, placeholder, hint, onInput } = yield* Props
-  const theme = yield* FormTheme
-  
+const FormField = Component.gen(function* (
+  Props: ComponentProps<{
+    label: string;
+    type: "text" | "email" | "password";
+    value: Signal.Signal<string>;
+    error: Option.Option<string>;
+    placeholder: string;
+    hint?: string;
+    onInput: (e: Event) => Effect.Effect<void>;
+  }>,
+) {
+  const { label, type, value, error, placeholder, hint, onInput } = yield* Props;
+  const theme = yield* FormTheme;
+
   return (
     <div className="form-group">
       <label style={{ color: theme.labelColor }}>{label}</label>
@@ -77,7 +75,7 @@ const FormField = Component.gen(function* (Props: ComponentProps<{
         onInput={onInput}
         placeholder={placeholder}
         style={{
-          borderColor: Option.isSome(error) ? theme.errorColor : theme.inputBorder
+          borderColor: Option.isSome(error) ? theme.errorColor : theme.inputBorder,
         }}
       />
       {Option.isSome(error) && (
@@ -85,29 +83,29 @@ const FormField = Component.gen(function* (Props: ComponentProps<{
           {error.value}
         </div>
       )}
-      {hint && (
-        <small style={{ color: "#666" }}>{hint}</small>
-      )}
+      {hint && <small style={{ color: "#666" }}>{hint}</small>}
     </div>
-  )
-})
+  );
+});
 
 // SuccessMessage component
-const SuccessMessage = Component.gen(function* (Props: ComponentProps<{
-  email: string
-  onReset: () => Effect.Effect<void>
-}>) {
-  const { email, onReset } = yield* Props
-  const theme = yield* FormTheme
-  
+const SuccessMessage = Component.gen(function* (
+  Props: ComponentProps<{
+    email: string;
+    onReset: () => Effect.Effect<void>;
+  }>,
+) {
+  const { email, onReset } = yield* Props;
+  const theme = yield* FormTheme;
+
   return (
     <div className="success" style={{ color: theme.successColor }}>
       <h3>Success!</h3>
       <p>Form submitted successfully with email: {email}</p>
       <button onClick={onReset}>Reset Form</button>
     </div>
-  )
-})
+  );
+});
 
 // =============================================================================
 // Validation Logic
@@ -115,36 +113,38 @@ const SuccessMessage = Component.gen(function* (Props: ComponentProps<{
 
 const validateEmail = (email: string): Effect.Effect<string, EmailRequired | EmailInvalid> => {
   if (email.trim() === "") {
-    return Effect.fail(new EmailRequired())
+    return Effect.fail(new EmailRequired());
   }
   if (!email.includes("@") || !email.includes(".")) {
-    return Effect.fail(new EmailInvalid({ email }))
+    return Effect.fail(new EmailInvalid({ email }));
   }
-  return Effect.succeed(email)
-}
+  return Effect.succeed(email);
+};
 
-const validatePassword = (password: string): Effect.Effect<string, PasswordTooShort | PasswordNoNumber> => {
+const validatePassword = (
+  password: string,
+): Effect.Effect<string, PasswordTooShort | PasswordNoNumber> => {
   if (password.length < 8) {
-    return Effect.fail(new PasswordTooShort({ minLength: 8, actualLength: password.length }))
+    return Effect.fail(new PasswordTooShort({ minLength: 8, actualLength: password.length }));
   }
   if (!/\d/.test(password)) {
-    return Effect.fail(new PasswordNoNumber())
+    return Effect.fail(new PasswordNoNumber());
   }
-  return Effect.succeed(password)
-}
+  return Effect.succeed(password);
+};
 
 const getErrorMessage = (error: ValidationError): string => {
   switch (error._tag) {
     case "EmailRequired":
-      return "Email is required"
+      return "Email is required";
     case "EmailInvalid":
-      return `"${error.email}" is not a valid email address`
+      return `"${error.email}" is not a valid email address`;
     case "PasswordTooShort":
-      return `Password must be at least ${error.minLength} characters (currently ${error.actualLength})`
+      return `Password must be at least ${error.minLength} characters (currently ${error.actualLength})`;
     case "PasswordNoNumber":
-      return "Password must contain at least one number"
+      return "Password must contain at least one number";
   }
-}
+};
 
 // =============================================================================
 // Main Form Component
@@ -152,87 +152,84 @@ const getErrorMessage = (error: ValidationError): string => {
 
 const FormApp = Component.gen(function* () {
   // Input signals - passed directly to inputs for fine-grained updates
-  const email = yield* Signal.make("")
-  const password = yield* Signal.make("")
-  
+  const email = yield* Signal.make("");
+  const password = yield* Signal.make("");
+
   // UI state signals - read with Signal.get() for conditional rendering
-  const emailError = yield* Signal.make<Option.Option<string>>(Option.none())
-  const passwordError = yield* Signal.make<Option.Option<string>>(Option.none())
-  const submitted = yield* Signal.make(false)
+  const emailError = yield* Signal.make<Option.Option<string>>(Option.none());
+  const passwordError = yield* Signal.make<Option.Option<string>>(Option.none());
+  const submitted = yield* Signal.make(false);
 
   // Read signals that control conditional rendering
-  const emailErrorValue = yield* Signal.get(emailError)
-  const passwordErrorValue = yield* Signal.get(passwordError)
-  const submittedValue = yield* Signal.get(submitted)
-  
+  const emailErrorValue = yield* Signal.get(emailError);
+  const passwordErrorValue = yield* Signal.get(passwordError);
+  const submittedValue = yield* Signal.get(submitted);
+
   // For success message display
-  const emailValueForDisplay = submittedValue ? yield* Signal.get(email) : ""
+  const emailValueForDisplay = submittedValue ? yield* Signal.get(email) : "";
 
   // Handle input changes
   const onEmailChange = (e: Event) =>
     Effect.gen(function* () {
-      const target = e.target
+      const target = e.target;
       if (target instanceof HTMLInputElement) {
-        yield* Signal.set(email, target.value)
-        yield* Signal.set(emailError, Option.none())
+        yield* Signal.set(email, target.value);
+        yield* Signal.set(emailError, Option.none());
       }
-    })
+    });
 
   const onPasswordChange = (e: Event) =>
     Effect.gen(function* () {
-      const target = e.target
+      const target = e.target;
       if (target instanceof HTMLInputElement) {
-        yield* Signal.set(password, target.value)
-        yield* Signal.set(passwordError, Option.none())
+        yield* Signal.set(password, target.value);
+        yield* Signal.set(passwordError, Option.none());
       }
-    })
+    });
 
   // Validate and submit
   const onSubmit = (e: Event) =>
     Effect.gen(function* () {
-      e.preventDefault()
-      
-      yield* Signal.set(submitted, false)
-      yield* Signal.set(emailError, Option.none())
-      yield* Signal.set(passwordError, Option.none())
+      e.preventDefault();
 
-      const currentEmail = yield* Signal.get(email)
-      const currentPassword = yield* Signal.get(password)
+      yield* Signal.set(submitted, false);
+      yield* Signal.set(emailError, Option.none());
+      yield* Signal.set(passwordError, Option.none());
 
-      const emailResult = yield* validateEmail(currentEmail).pipe(Effect.either)
+      const currentEmail = yield* Signal.get(email);
+      const currentPassword = yield* Signal.get(password);
+
+      const emailResult = yield* validateEmail(currentEmail).pipe(Effect.either);
       if (Either.isLeft(emailResult)) {
-        yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.left)))
-        return
+        yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.left)));
+        return;
       }
 
-      const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.either)
+      const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.either);
       if (Either.isLeft(passwordResult)) {
-        yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.left)))
-        return
+        yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.left)));
+        return;
       }
 
-      yield* Signal.set(submitted, true)
-      yield* Effect.log(`Form submitted: email=${emailResult.right}`)
-    })
+      yield* Signal.set(submitted, true);
+      yield* Effect.log(`Form submitted: email=${emailResult.right}`);
+    });
 
   const resetForm = () =>
     Effect.gen(function* () {
-      yield* Signal.set(email, "")
-      yield* Signal.set(password, "")
-      yield* Signal.set(submitted, false)
-    })
+      yield* Signal.set(email, "");
+      yield* Signal.set(password, "");
+      yield* Signal.set(submitted, false);
+    });
 
   return Effect.gen(function* () {
     return (
       <div className="example">
         <h2>Form Validation</h2>
         <p className="description">Typed errors, validation Effects, form state</p>
-        
+
         {submittedValue ? (
-          <SuccessMessage 
-            email={emailValueForDisplay} 
-            onReset={resetForm}
-          />
+          <SuccessMessage email={emailValueForDisplay} onReset={resetForm} />
         ) : (
           <form onSubmit={onSubmit}>
             <FormField
@@ -285,8 +282,8 @@ const FormApp = Component.gen(function* () {
  }`}</pre>
         </div>
       </div>
-    )
-  }).pipe(Component.provide(defaultFormTheme))
-})
+    );
+  }).pipe(Component.provide(defaultFormTheme));
+});
 
-export default FormApp
+export default FormApp;

@@ -71,9 +71,7 @@ const ThemedCard = Component.gen(function* () {
 // =============================================================================
 
 // Component with typed props - Theme requirement from context
-const ThemedTitle = Component.gen(function* (
-  Props: ComponentProps<{ title: string }>,
-) {
+const ThemedTitle = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props;
   const theme = yield* Theme;
   return (
@@ -107,14 +105,10 @@ const ThemeApp = Component.gen(function* () {
     return (
       <div className="example">
         <h2>Theme (Dependency Injection)</h2>
-        <p className="description">
-          Dependency injection with Component.provide, swappable layers
-        </p>
+        <p className="description">Dependency injection with Component.provide, swappable layers</p>
 
         <div className="theme-switcher">
-          <button onClick={toggleTheme}>
-            Switch to {isDarkValue ? "Light" : "Dark"} Theme
-          </button>
+          <button onClick={toggleTheme}>Switch to {isDarkValue ? "Light" : "Dark"} Theme</button>
         </div>
 
         <ThemedCard />

@@ -11,6 +11,16 @@
     "test": "bun run --cwd packages/core test",
     "test:watch": "bun run --cwd packages/core test:watch",
     "examples": "bun run --cwd apps/examples dev",
-    "examples:install": "bun install --cwd apps/examples"
+    "examples:install": "bun install --cwd apps/examples",
+    "lint": "oxlint packages apps",
+    "lint:fix": "oxlint packages apps --fix",
+    "format": "oxfmt packages apps '!**/dist/**' --check",
+    "format:fix": "oxfmt packages apps '!**/dist/**' --write",
+    "effect:check": "bun run --cwd packages/core effect:check",
+    "check": "bun run lint && bun run format && bun run typecheck && bun run effect:check"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.26.0",
+    "oxlint": "^1.41.0"
   }
 }

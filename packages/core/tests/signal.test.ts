@@ -1,9 +1,9 @@
 /**
  * Signal Unit Tests
- * 
+ *
  * Signal is the core reactive primitive of effect-ui.
  * Built on SubscriptionRef with sync callbacks for fine-grained reactivity.
- * 
+ *
  * Test Categories:
  * - Creation: make, unsafeMake
  * - Reading: get, peekSync
@@ -14,12 +14,12 @@
  * - Suspend: suspend (component suspension)
  * - Lists: each (keyed list)
  * - Scope: RenderPhase, position-based identity
- * 
+ *
  * Goals: Reliability, stability, performance
  * - Every test manages its own fibers/scope to prevent memory leaks
  * - Tests are unbiased (no assumptions about internal implementation)
  */
-import { describe, it } from "@effect/vitest"
+import { describe, it } from "@effect/vitest";
 
 // =============================================================================
 // Signal.make - Create reactive state
@@ -32,32 +32,32 @@ import { describe, it } from "@effect/vitest"
 describe("Signal.make", () => {
   // Case: Creates signal with initial value
   // Assert: Signal holds initial value, can be read
-  it.todo("should create signal with initial primitive value")
+  it.todo("should create signal with initial primitive value");
 
   // Case: Creates signal with object value
   // Assert: Signal holds object reference correctly
-  it.todo("should create signal with object value")
+  it.todo("should create signal with object value");
 
   // Case: Creates signal with array value
   // Assert: Signal holds array reference correctly
-  it.todo("should create signal with array value")
+  it.todo("should create signal with array value");
 
   // Case: Creates standalone signal (outside render phase)
   // Assert: Signal is created without render phase context
-  it.todo("should create standalone signal outside render phase")
+  it.todo("should create standalone signal outside render phase");
 
   // Case: Creates signal inside render phase
   // Assert: Signal is tracked in render phase signals array
-  it.todo("should track signal in render phase when created during render")
+  it.todo("should track signal in render phase when created during render");
 
   // Case: Reuses signal on re-render (position-based identity)
   // Assert: Same signal instance returned for same position
-  it.todo("should return same signal instance for same position on re-render")
+  it.todo("should return same signal instance for same position on re-render");
 
   // Case: Creates new signal for new position
   // Assert: Different positions get different signals
-  it.todo("should create new signal for additional calls on first render")
-})
+  it.todo("should create new signal for additional calls on first render");
+});
 
 // =============================================================================
 // Signal.unsafeMake - Sync signal creation
@@ -67,12 +67,12 @@ describe("Signal.make", () => {
 describe("Signal.unsafeMake", () => {
   // Case: Creates signal synchronously
   // Assert: Signal created without Effect context
-  it.todo("should create signal synchronously without Effect context")
+  it.todo("should create signal synchronously without Effect context");
 
   // Case: Works at module load time
   // Assert: Can be used for global state initialization
-  it.todo("should work for module-level global signals")
-})
+  it.todo("should work for module-level global signals");
+});
 
 // =============================================================================
 // Signal.get - Read value with subscription
@@ -82,16 +82,16 @@ describe("Signal.unsafeMake", () => {
 describe("Signal.get", () => {
   // Case: Reads current value
   // Assert: Returns the signal's current value
-  it.todo("should return current signal value")
+  it.todo("should return current signal value");
 
   // Case: Subscribes component to changes (in render phase)
   // Assert: Signal added to phase.accessed set
-  it.todo("should add signal to accessed set when in render phase")
+  it.todo("should add signal to accessed set when in render phase");
 
   // Case: Does not subscribe outside render phase
   // Assert: No subscription when called outside render
-  it.todo("should not add to accessed set when outside render phase")
-})
+  it.todo("should not add to accessed set when outside render phase");
+});
 
 // =============================================================================
 // Signal.peekSync - Read without subscription
@@ -101,12 +101,12 @@ describe("Signal.get", () => {
 describe("Signal.peekSync", () => {
   // Case: Reads value synchronously
   // Assert: Returns current value without Effect
-  it.todo("should return current value synchronously")
+  it.todo("should return current value synchronously");
 
   // Case: Does not subscribe
   // Assert: No side effects, no tracking
-  it.todo("should not trigger any subscription")
-})
+  it.todo("should not trigger any subscription");
+});
 
 // =============================================================================
 // Signal.set - Write value
@@ -116,24 +116,24 @@ describe("Signal.peekSync", () => {
 describe("Signal.set", () => {
   // Case: Updates signal value
   // Assert: Value is changed
-  it.todo("should update signal to new value")
+  it.todo("should update signal to new value");
 
   // Case: Notifies all listeners
   // Assert: All subscribed listeners called
-  it.todo("should notify all listeners when value changes")
+  it.todo("should notify all listeners when value changes");
 
   // Case: Skips notification if value unchanged (Equal.equals)
   // Assert: No notification when value is equal
-  it.todo("should skip notification when value is unchanged")
+  it.todo("should skip notification when value is unchanged");
 
   // Case: Notifies listeners in parallel
   // Assert: Listeners run concurrently, not sequentially
-  it.todo("should notify listeners in parallel with unbounded concurrency")
+  it.todo("should notify listeners in parallel with unbounded concurrency");
 
   // Case: Isolates listener errors
   // Assert: Error in one listener doesn't affect others
-  it.todo("should isolate errors between listeners")
-})
+  it.todo("should isolate errors between listeners");
+});
 
 // =============================================================================
 // Signal.update - Update with function
@@ -143,16 +143,16 @@ describe("Signal.set", () => {
 describe("Signal.update", () => {
   // Case: Updates value using function
   // Assert: New value is f(oldValue)
-  it.todo("should apply update function to current value")
+  it.todo("should apply update function to current value");
 
   // Case: Notifies listeners
   // Assert: All listeners called after update
-  it.todo("should notify listeners after update")
+  it.todo("should notify listeners after update");
 
   // Case: Skips if function returns same value
   // Assert: No notification when unchanged
-  it.todo("should skip notification when update function returns equal value")
-})
+  it.todo("should skip notification when update function returns equal value");
+});
 
 // =============================================================================
 // Signal.modify - Modify and return result
@@ -162,16 +162,16 @@ describe("Signal.update", () => {
 describe("Signal.modify", () => {
   // Case: Modifies value and returns result
   // Assert: Returns first element of tuple, stores second
-  it.todo("should return first tuple element and store second")
+  it.todo("should return first tuple element and store second");
 
   // Case: Notifies listeners after modify
   // Assert: Listeners called with new value
-  it.todo("should notify listeners after modify")
+  it.todo("should notify listeners after modify");
 
   // Case: Atomic operation
   // Assert: No race between read and write
-  it.todo("should perform read and write atomically")
-})
+  it.todo("should perform read and write atomically");
+});
 
 // =============================================================================
 // Signal.subscribe - Manual subscription
@@ -181,20 +181,20 @@ describe("Signal.modify", () => {
 describe("Signal.subscribe", () => {
   // Case: Adds listener to signal
   // Assert: Listener receives notifications on change
-  it.todo("should add listener that receives change notifications")
+  it.todo("should add listener that receives change notifications");
 
   // Case: Returns unsubscribe effect
   // Assert: Running unsubscribe removes listener
-  it.todo("should return unsubscribe effect that removes listener")
+  it.todo("should return unsubscribe effect that removes listener");
 
   // Case: Multiple listeners
   // Assert: All listeners receive notifications
-  it.todo("should support multiple concurrent listeners")
+  it.todo("should support multiple concurrent listeners");
 
   // Case: Unsubscribe during notification
   // Assert: No crash when listener unsubscribes during notify
-  it.todo("should handle listener unsubscribing during notification")
-})
+  it.todo("should handle listener unsubscribing during notification");
+});
 
 // =============================================================================
 // Signal.derive - Computed signals
@@ -204,28 +204,28 @@ describe("Signal.subscribe", () => {
 describe("Signal.derive", () => {
   // Case: Creates derived signal from source
   // Assert: Initial value is f(sourceValue)
-  it.todo("should create derived signal with transformed initial value")
+  it.todo("should create derived signal with transformed initial value");
 
   // Case: Updates when source changes
   // Assert: Derived value updates automatically
-  it.todo("should update derived value when source changes")
+  it.todo("should update derived value when source changes");
 
   // Case: Cleans up subscription on scope close
   // Assert: No memory leak, subscription removed
-  it.todo("should cleanup subscription when scope closes")
+  it.todo("should cleanup subscription when scope closes");
 
   // Case: Uses explicit scope option
   // Assert: Respects provided scope for cleanup
-  it.todo("should use explicit scope when provided")
+  it.todo("should use explicit scope when provided");
 
   // Case: Uses render scope when in render phase
   // Assert: Cleanup happens on re-render
-  it.todo("should use render scope when in render phase")
+  it.todo("should use render scope when in render phase");
 
   // Case: Chains multiple derives
   // Assert: Multi-level derivation works correctly
-  it.todo("should support chaining multiple derive calls")
-})
+  it.todo("should support chaining multiple derive calls");
+});
 
 // =============================================================================
 // Signal.suspend - Component suspension
@@ -235,28 +235,28 @@ describe("Signal.derive", () => {
 describe("Signal.suspend", () => {
   // Case: Shows Pending while loading
   // Assert: Renders Pending handler initially
-  it.todo("should render Pending handler while async in progress")
+  it.todo("should render Pending handler while async in progress");
 
   // Case: Shows Success after completion
   // Assert: Renders Success handler after completion
-  it.todo("should render Success handler after async completes")
+  it.todo("should render Success handler after async completes");
 
   // Case: Shows Failure on error
   // Assert: Renders Failure handler with cause
-  it.todo("should render Failure handler with cause on error")
+  it.todo("should render Failure handler with cause on error");
 
   // Case: Stale content caching per dep-key
   // Assert: Shows stale for previously-seen dep-key
-  it.todo("should show stale content for previously-seen dependency key")
+  it.todo("should show stale content for previously-seen dependency key");
 
   // Case: No stale for new dep-key
   // Assert: Shows Pending(null) for new dep-key
-  it.todo("should show Pending with null stale for new dependency key")
+  it.todo("should show Pending with null stale for new dependency key");
 
   // Case: Cleanup on scope close
   // Assert: Subscriptions and fibers cleaned up
-  it.todo("should cleanup subscriptions when scope closes")
-})
+  it.todo("should cleanup subscriptions when scope closes");
+});
 
 // =============================================================================
 // Signal.each - Keyed list rendering
@@ -266,20 +266,20 @@ describe("Signal.suspend", () => {
 describe("Signal.each", () => {
   // Case: Creates KeyedList element
   // Assert: Returns Element with KeyedList tag
-  it.todo("should create KeyedList element")
+  it.todo("should create KeyedList element");
 
   // Case: Stable scope per key
   // Assert: Same key retains signals across list updates
-  it.todo("should maintain stable scope for items with same key")
+  it.todo("should maintain stable scope for items with same key");
 
   // Case: Cleanup on item removal
   // Assert: Scope closed when item removed from list
-  it.todo("should cleanup scope when item is removed")
+  it.todo("should cleanup scope when item is removed");
 
   // Case: Error if Signal.each not initialized
   // Assert: Throws helpful error message
-  it.todo("should throw error if called before initialization")
-})
+  it.todo("should throw error if called before initialization");
+});
 
 // =============================================================================
 // Signal.isSignal - Type guard
@@ -289,16 +289,16 @@ describe("Signal.each", () => {
 describe("Signal.isSignal", () => {
   // Case: Returns true for signals
   // Assert: Signal objects return true
-  it.todo("should return true for Signal objects")
+  it.todo("should return true for Signal objects");
 
   // Case: Returns false for non-signals
   // Assert: Other objects return false
-  it.todo("should return false for non-Signal values")
+  it.todo("should return false for non-Signal values");
 
   // Case: Returns false for null/undefined
   // Assert: Handles null/undefined safely
-  it.todo("should return false for null and undefined")
-})
+  it.todo("should return false for null and undefined");
+});
 
 // =============================================================================
 // RenderPhase - Component render context
@@ -308,12 +308,12 @@ describe("Signal.isSignal", () => {
 describe("RenderPhase", () => {
   // Case: makeRenderPhase creates new phase
   // Assert: Phase has signalIndex, signals, accessed
-  it.todo("should create render phase with signalIndex, signals, and accessed")
+  it.todo("should create render phase with signalIndex, signals, and accessed");
 
   // Case: resetRenderPhase resets index
   // Assert: Index reset to 0, accessed cleared, signals preserved
-  it.todo("should reset signalIndex and clear accessed on reset")
-})
+  it.todo("should reset signalIndex and clear accessed on reset");
+});
 
 // =============================================================================
 // Parallel Notification
@@ -323,16 +323,16 @@ describe("RenderPhase", () => {
 describe("Signal parallel notification", () => {
   // Case: Listeners run concurrently
   // Assert: All listeners start approximately at same time
-  it.todo("should run all listeners concurrently not sequentially")
+  it.todo("should run all listeners concurrently not sequentially");
 
   // Case: Error in one listener doesn't block others
   // Assert: Other listeners complete despite one failing
-  it.todo("should not block other listeners when one throws")
+  it.todo("should not block other listeners when one throws");
 
   // Case: Errors are logged via debug event
   // Assert: signal.listener.error event emitted
-  it.todo("should emit signal.listener.error event for failed listeners")
-})
+  it.todo("should emit signal.listener.error event for failed listeners");
+});
 
 // =============================================================================
 // Boundary Values
@@ -342,28 +342,28 @@ describe("Signal parallel notification", () => {
 describe("Signal boundary values", () => {
   // Case: Empty string value
   // Assert: Works with empty string
-  it.todo("should handle empty string value")
+  it.todo("should handle empty string value");
 
   // Case: Zero value
   // Assert: Works with zero
-  it.todo("should handle zero value")
+  it.todo("should handle zero value");
 
   // Case: Negative numbers
   // Assert: Works with negative numbers
-  it.todo("should handle negative number values")
+  it.todo("should handle negative number values");
 
   // Case: Large arrays
   // Assert: Works with large array values
-  it.todo("should handle large array values")
+  it.todo("should handle large array values");
 
   // Case: Many listeners
   // Assert: Handles many concurrent listeners
-  it.todo("should handle many concurrent listeners efficiently")
+  it.todo("should handle many concurrent listeners efficiently");
 
   // Case: Rapid updates
   // Assert: Handles rapid sequential updates
-  it.todo("should handle rapid sequential updates")
-})
+  it.todo("should handle rapid sequential updates");
+});
 
 // =============================================================================
 // Memory and Resource Management
@@ -373,13 +373,13 @@ describe("Signal boundary values", () => {
 describe("Signal memory management", () => {
   // Case: Unsubscribed listeners are garbage collected
   // Assert: No reference retained after unsubscribe
-  it.todo("should not retain references after unsubscribe")
+  it.todo("should not retain references after unsubscribe");
 
   // Case: Derived cleanup removes source subscription
   // Assert: Source signal listener count decreases
-  it.todo("should remove source subscription on derive cleanup")
+  it.todo("should remove source subscription on derive cleanup");
 
   // Case: Resource cleanup stops all fibers
   // Assert: No orphaned fibers after scope close
-  it.todo("should stop all fibers when resource scope closes")
-})
+  it.todo("should stop all fibers when resource scope closes");
+});

@@ -34,10 +34,7 @@ interface TodoThemeConfig {
   readonly primaryColor: string;
 }
 
-class TodoTheme extends Context.Tag("TodoTheme")<
-  TodoTheme,
-  TodoThemeConfig
->() {}
+class TodoTheme extends Context.Tag("TodoTheme")<TodoTheme, TodoThemeConfig>() {}
 
 const defaultTodoTheme = Layer.succeed(TodoTheme, {
   completedColor: "#888",
@@ -62,23 +59,13 @@ const TodoInput = Component.gen(function* (
   const theme = yield* TodoTheme;
 
   const handleSubmit = (e: Event) =>
-    Effect.sync(() => e.preventDefault()).pipe(
-      Effect.flatMap(() => onSubmit()),
-    );
+    Effect.sync(() => e.preventDefault()).pipe(Effect.flatMap(() => onSubmit()));
 
   return (
     <form onSubmit={handleSubmit}>
       <div className="todo-input">
-        <input
-          type="text"
-          value={value}
-          onInput={onInput}
-          placeholder="What needs to be done?"
-        />
-        <button
-          type="submit"
-          style={{ background: theme.primaryColor, color: "white" }}
-        >
+        <input type="text" value={value} onInput={onInput} placeholder="What needs to be done?" />
+        <button type="submit" style={{ background: theme.primaryColor, color: "white" }}>
           Add
         </button>
       </div>
@@ -142,25 +129,18 @@ const TodoApp = Component.gen(function* () {
       if (text === "") return;
 
       const id = yield* Signal.get(nextId);
-      yield* Signal.update(todos, (list) => [
-        ...list,
-        { id, text, completed: false },
-      ]);
+      yield* Signal.update(todos, (list) => [...list, { id, text, completed: false }]);
       yield* Signal.update(nextId, (n) => n + 1);
       yield* Signal.set(inputValue, "");
     });
 
   const toggleTodo = (id: number) =>
     Signal.update(todos, (list) =>
-      list.map((todo) =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo,
-      ),
+      list.map((todo) => (todo.id === id ? { ...todo, completed: !todo.completed } : todo)),
     );
 
   const updateTodoText = (id: number, text: string) =>
-    Signal.update(todos, (list) =>
-      list.map((todo) => (todo.id === id ? { ...todo, text } : todo)),
-    );
+    Signal.update(todos, (list) => list.map((todo) => (todo.id === id ? { ...todo, text } : todo)));
 
   const removeTodo = (id: number) =>
     Signal.update(todos, (list) => list.filter((todo) => todo.id !== id));
@@ -184,9 +164,7 @@ const TodoApp = Component.gen(function* () {
     (todo) =>
       Effect.gen(function* () {
         // Nested signal - stable per todo.id!
-        const editText = yield* Signal.make<Option.Option<string>>(
-          Option.none(),
-        );
+        const editText = yield* Signal.make<Option.Option<string>>(Option.none());
         const editTextValue = yield* Signal.get(editText);
         const isEditing = Option.isSome(editTextValue);
 
@@ -223,10 +201,7 @@ const TodoApp = Component.gen(function* () {
           });
 
         return (
-          <li
-            key={todo.id}
-            className={todo.completed ? "todo-item completed" : "todo-item"}
-          >
+          <li key={todo.id} className={todo.completed ? "todo-item completed" : "todo-item"}>
             <input
               type="checkbox"
               checked={todo.completed}
@@ -262,15 +237,11 @@ const TodoApp = Component.gen(function* () {
       <div className="example">
         <h2>Todo List</h2>
         <p className="description">
-          Double-click a todo to edit. Try adding/removing todos while editing -
-          the edit state persists!
+          Double-click a todo to edit. Try adding/removing todos while editing - the edit state
+          persists!
         </p>
 
-        <TodoInput
-          value={inputValue}
-          onSubmit={addTodo}
-          onInput={onInputChange}
-        />
+        <TodoInput value={inputValue} onSubmit={addTodo} onInput={onInputChange} />
 
         <ul className="todo-list">{todoListElement}</ul>
 
@@ -298,9 +269,7 @@ const TodoApp = Component.gen(function* () {
         )}
 
         {todosValue.length === 0 && (
-          <p style={{ color: "#999", textAlign: "center" }}>
-            No todos yet. Add one above!
-          </p>
+          <p style={{ color: "#999", textAlign: "center" }}>No todos yet. Add one above!</p>
         )}
 
         <div className="code-example">

@@ -10,10 +10,7 @@ import { Component } from "effect-ui";
 import * as Router from "effect-ui/router";
 
 // Mock user data
-const users: Record<
-  string,
-  { name: string; email: string; role: string; joined: string }
-> = {
+const users: Record<string, { name: string; email: string; role: string; joined: string }> = {
   "1": {
     name: "Alice Johnson",
     email: "alice@example.com",

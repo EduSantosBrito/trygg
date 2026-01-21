@@ -1,10 +1,10 @@
 /**
  * Global Loading Fallback
- * 
+ *
  * This component is displayed while any route is loading.
  * Uses CSS animation for a smooth loading indicator.
  */
-import { Component } from "effect-ui"
+import { Component } from "effect-ui";
 
 const Loading = Component.gen(function* () {
   return (
@@ -12,7 +12,7 @@ const Loading = Component.gen(function* () {
       <div className="loading-spinner" />
       <p>Loading...</p>
     </div>
-  )
-})
+  );
+});
 
-export default Loading
+export default Loading;

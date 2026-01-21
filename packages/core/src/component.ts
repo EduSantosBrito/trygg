@@ -29,11 +29,11 @@
  * mount(container, <App />)
  * ```
  */
-import { Context, Effect, Layer } from "effect"
-import { YieldWrap } from "effect/Utils"
-import { type Element, componentElement, provideElement } from "./element.js"
+import { Context, Effect, Layer } from "effect";
+import { YieldWrap } from "effect/Utils";
+import { type Element, componentElement, provideElement } from "./element.js";
 
-const emptyContext = Context.unsafeMake<unknown>(new Map())
+const emptyContext = Context.unsafeMake<unknown>(new Map());
 
 // =============================================================================
 // Type Utilities
@@ -45,15 +45,15 @@ const emptyContext = Context.unsafeMake<unknown>(new Map())
  * @since 1.0.0
  */
 export interface PropsMarker<P> {
-  readonly _brand: "@effect-ui/Props"
-  readonly _P: P
+  readonly _brand: "@effect-ui/Props";
+  readonly _P: P;
 }
 
 /**
  * Props tag type used in Component.gen for inference.
  * @since 1.0.0
  */
-export type ComponentProps<P> = Context.Tag<PropsMarker<P>, P>
+export type ComponentProps<P> = Context.Tag<PropsMarker<P>, P>;
 
 // =============================================================================
 // Component Types
@@ -63,24 +63,24 @@ export type ComponentProps<P> = Context.Tag<PropsMarker<P>, P>
  * Component type - a callable that returns an Element when used in JSX.
  * @since 1.0.0
  */
-export interface ComponentType<Props = Record<string, never>, E = never> {
-  readonly _tag: "EffectComponent"
-  (props: Props): Element
+export interface ComponentType<Props = Record<string, never>, _E = never> {
+  readonly _tag: "EffectComponent";
+  (props: Props): Element;
 }
 
-type ComponentResult = Element | Effect.Effect<Element, unknown, unknown>
+type ComponentResult = Element | Effect.Effect<Element, unknown, unknown>;
 
-const effectComponentTag: "EffectComponent" = "EffectComponent"
+const effectComponentTag = "EffectComponent" as const;
 
 const tagComponent = <Props, E>(fn: (props: Props) => Element): ComponentType<Props, E> =>
-  Object.assign(fn, { _tag: effectComponentTag })
+  Object.assign(fn, { _tag: effectComponentTag });
 
 const normalizeResult = <E, R>(
-  effect: Effect.Effect<ComponentResult, E, R>
+  effect: Effect.Effect<ComponentResult, E, R>,
 ): Effect.Effect<Element, E, R> =>
   Effect.map(effect, (result) =>
-    Effect.isEffect(result) ? componentElement(() => result) : result
-  )
+    Effect.isEffect(result) ? componentElement(() => result) : result,
+  );
 
 // =============================================================================
 // Component Function
@@ -93,25 +93,25 @@ const normalizeResult = <E, R>(
  * @since 1.0.0
  */
 export function Component<P extends object = {}>(): <E, R>(
-  effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>
+  effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
 ) => ComponentType<P, E> {
   return <E, R>(
-    effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>
+    effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
   ): ComponentType<P, E> => {
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props")
+    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, R> => {
-        const baseEffect = effectFn(PropsTag)
-        const withProps = Effect.provideService(baseEffect, PropsTag, props)
-        return normalizeResult(withProps)
-      }
+        const baseEffect = effectFn(PropsTag);
+        const withProps = Effect.provideService(baseEffect, PropsTag, props);
+        return normalizeResult(withProps);
+      };
 
-      return componentElement(run)
-    }
+      return componentElement(run);
+    };
 
-    return tagComponent(componentFn)
-  }
+    return tagComponent(componentFn);
+  };
 }
 
 /**
@@ -122,39 +122,28 @@ export function Component<P extends object = {}>(): <E, R>(
  *
  * @since 1.0.0
  */
-export const provide = <ROut, E2, RIn>(
-  layer: Layer.Layer<ROut, E2, RIn>
-) =>
-  <E, R>(self: Effect.Effect<Element, E, R>): Effect.Effect<Element, E | E2, RIn | Exclude<R, ROut>> =>
+export const provide =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <E, R>(
+    self: Effect.Effect<Element, E, R>,
+  ): Effect.Effect<Element, E | E2, RIn | Exclude<R, ROut>> =>
     Effect.contextWithEffect((context: Context.Context<R | ROut>) =>
-      Effect.map(self, (element) =>
-        provideElement(Context.merge(emptyContext, context), element)
-      )
-    ).pipe(Effect.provide(layer))
+      Effect.map(self, (element) => provideElement(Context.merge(emptyContext, context), element)),
+    ).pipe(Effect.provide(layer));
 
 // =============================================================================
 // Type Guards
 // =============================================================================
 
 const hasTag = (value: unknown): value is { _tag: unknown } =>
-  typeof value === "function" && value !== null && "_tag" in value
+  typeof value === "function" && value !== null && "_tag" in value;
 
 /**
  * Check if a value is an EffectComponent
  * @since 1.0.0
  */
 export const isEffectComponent = (value: unknown): value is ComponentType<unknown> =>
-  hasTag(value) && value._tag === effectComponentTag
-
-const hasEffect = (value: unknown): value is { effect: unknown } =>
-  typeof value === "function" && value !== null && "effect" in value
-
-/**
- * Check if a value is a legacy component (has .effect property)
- * @internal
- */
-export const isLegacyComponent = (value: unknown): value is { effect: Effect.Effect<Element, unknown, unknown> } =>
-  hasEffect(value) && Effect.isEffect(value.effect)
+  hasTag(value) && value._tag === effectComponentTag;
 
 // =============================================================================
 // Component.gen API
@@ -164,7 +153,7 @@ export const isLegacyComponent = (value: unknown): value is { effect: Effect.Eff
  * Type alias for the YieldWrap type used in Effect.gen
  * @internal
  */
-type EffectYieldWrap<A, E, R> = YieldWrap<Effect.Effect<A, E, R>>
+type EffectYieldWrap<A, E, R> = YieldWrap<Effect.Effect<A, E, R>>;
 
 /**
  * Extract error type from YieldWrap union
@@ -174,25 +163,27 @@ type ExtractError<Eff> = [Eff] extends [never]
   ? never
   : [Eff] extends [YieldWrap<Effect.Effect<infer _A, infer E, infer _R>>]
     ? E
-    : never
+    : never;
 
 /**
  * Create component without props from generator function.
  * @internal
  */
-function genNoProps<Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends ComponentResult>(
-  f: (resume?: Effect.Adapter) => Generator<Eff, AEff, never>
+function genNoProps<
+  Eff extends EffectYieldWrap<unknown, unknown, unknown>,
+  AEff extends ComponentResult,
+>(
+  f: (resume?: Effect.Adapter) => Generator<Eff, AEff, never>,
 ): ComponentType<Record<string, never>, ExtractError<Eff>> {
-  type E = ExtractError<Eff>
+  type E = ExtractError<Eff>;
 
   const componentFn = (_props: Record<string, never>): Element => {
-    const run = (): Effect.Effect<Element, E, unknown> =>
-      normalizeResult(Effect.gen(f))
+    const run = (): Effect.Effect<Element, E, unknown> => normalizeResult(Effect.gen(f));
 
-    return componentElement(run)
-  }
+    return componentElement(run);
+  };
 
-  return tagComponent(componentFn)
+  return tagComponent(componentFn);
 }
 
 /**
@@ -201,28 +192,32 @@ function genNoProps<Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff
  */
 function genWithProps<P extends object>(): <
   Eff extends EffectYieldWrap<unknown, unknown, unknown>,
-  AEff extends ComponentResult
+  AEff extends ComponentResult,
 >(
-  f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>
+  f: (
+    Props: Context.Tag<PropsMarker<P>, P>,
+  ) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>,
 ) => ComponentType<P, ExtractError<Eff>> {
   return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends ComponentResult>(
-    f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>
+    f: (
+      Props: Context.Tag<PropsMarker<P>, P>,
+    ) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>,
   ): ComponentType<P, ExtractError<Eff>> => {
-    type E = ExtractError<Eff>
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props")
+    type E = ExtractError<Eff>;
+    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, unknown> => {
-        const baseEffect = Effect.gen(f(PropsTag))
-        const withProps = Effect.provideService(baseEffect, PropsTag, props)
-        return normalizeResult(withProps)
-      }
+        const baseEffect = Effect.gen(f(PropsTag));
+        const withProps = Effect.provideService(baseEffect, PropsTag, props);
+        return normalizeResult(withProps);
+      };
 
-      return componentElement(run)
-    }
+      return componentElement(run);
+    };
 
-    return tagComponent(componentFn)
-  }
+    return tagComponent(componentFn);
+  };
 }
 
 /**
@@ -231,16 +226,21 @@ function genWithProps<P extends object>(): <
  */
 function genWithPropsDirect<P extends object>(): <
   Eff extends EffectYieldWrap<unknown, unknown, unknown>,
-  AEff extends ComponentResult
+  AEff extends ComponentResult,
 >(
-  f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, AEff, never>
+  f: (
+    Props: Context.Tag<PropsMarker<P>, P>,
+    resume?: Effect.Adapter,
+  ) => Generator<Eff, AEff, never>,
 ) => ComponentType<P, ExtractError<Eff>> {
-  const withProps = genWithProps<P>()
+  const withProps = genWithProps<P>();
 
   return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends ComponentResult>(
-    f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, AEff, never>
-  ): ComponentType<P, ExtractError<Eff>> =>
-    withProps((Props) => (resume) => f(Props, resume))
+    f: (
+      Props: Context.Tag<PropsMarker<P>, P>,
+      resume?: Effect.Adapter,
+    ) => Generator<Eff, AEff, never>,
+  ): ComponentType<P, ExtractError<Eff>> => withProps((Props) => (resume) => f(Props, resume));
 }
 
 /**
@@ -249,10 +249,10 @@ function genWithPropsDirect<P extends object>(): <
  */
 type GeneratorComponentFn = (
   ...args: ReadonlyArray<unknown>
-) => Generator<EffectYieldWrap<unknown, unknown, unknown>, ComponentResult, never>
+) => Generator<EffectYieldWrap<unknown, unknown, unknown>, ComponentResult, never>;
 
 const isGeneratorFunction = (fn: unknown): fn is GeneratorComponentFn =>
-  typeof fn === "function" && fn.constructor.name === "GeneratorFunction"
+  typeof fn === "function" && fn.constructor.name === "GeneratorFunction";
 
 /**
  * Component.gen - Create components using generator syntax.
@@ -266,32 +266,43 @@ const isGeneratorFunction = (fn: unknown): fn is GeneratorComponentFn =>
  */
 type Gen = {
   <Eff extends EffectYieldWrap<unknown, unknown, unknown>>(
-    f: (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>
-  ): ComponentType<Record<string, never>, ExtractError<Eff>>
+    f: (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>,
+  ): ComponentType<Record<string, never>, ExtractError<Eff>>;
   <
     P extends object = {},
-    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<unknown, unknown, unknown>
+    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<
+      unknown,
+      unknown,
+      unknown
+    >,
   >(
-    f: (Props: Context.Tag<PropsMarker<P>, P>, resume?: Effect.Adapter) => Generator<Eff, ComponentResult, never>
-  ): ComponentType<P, ExtractError<Eff>>
+    f: (
+      Props: Context.Tag<PropsMarker<P>, P>,
+      resume?: Effect.Adapter,
+    ) => Generator<Eff, ComponentResult, never>,
+  ): ComponentType<P, ExtractError<Eff>>;
   <P extends object = {}>(): <
-    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<unknown, unknown, unknown>
+    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<
+      unknown,
+      unknown,
+      unknown
+    >,
   >(
-    f: (Props: Context.Tag<PropsMarker<P>, P>) => (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>
-  ) => ComponentType<P, ExtractError<Eff>>
-}
+    f: (
+      Props: Context.Tag<PropsMarker<P>, P>,
+    ) => (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>,
+  ) => ComponentType<P, ExtractError<Eff>>;
+};
 
-export const gen: Gen = function <P extends object>(
-  f?: unknown
-): any {
+export const gen: Gen = function <P extends object>(f?: unknown): any {
   if (f !== undefined && isGeneratorFunction(f)) {
     if (f.length === 0) {
-      return genNoProps((resume) => f(resume))
+      return genNoProps((resume) => f(resume));
     }
-    return genWithPropsDirect<P>()((Props, resume) => f(Props, resume))
+    return genWithPropsDirect<P>()((Props, resume) => f(Props, resume));
   }
   if (f === undefined) {
-    return genWithProps<P>()
+    return genWithProps<P>();
   }
-  throw new Error("Component.gen: expected a generator function or call with type parameter first")
-}
+  throw new Error("Component.gen: expected a generator function or call with type parameter first");
+};

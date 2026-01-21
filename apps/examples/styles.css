@@ -5,7 +5,10 @@
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   line-height: 1.6;
   margin: 0;
   padding: 0;
@@ -60,7 +63,9 @@ h1 {
   text-decoration: none;
   border-radius: 4px;
   font-size: 0.9rem;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .app-header nav a:hover {
@@ -115,7 +120,9 @@ h1 {
   border-radius: 8px;
   border: 1px solid #e0e0e0;
   text-decoration: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .landing .feature-card:hover {
@@ -426,7 +433,9 @@ input:focus {
   color: #666;
   text-decoration: none;
   border-radius: 4px;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .settings-sidebar nav a:hover {
@@ -662,8 +671,12 @@ input:focus {
 }
 
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .skeleton-line {

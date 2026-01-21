@@ -4,23 +4,23 @@
 // Augment the RouteMap interface with actual routes for type-safe navigation
 declare module "effect-ui/router" {
   interface RouteMap {
-    readonly "/counter": {}
-    readonly "/dashboard": {}
-    readonly "/error-boundary": {}
-    readonly "/error-demo": {}
-    readonly "/form": {}
-    readonly "/": {}
-    readonly "/login": {}
-    readonly "/protected": {}
-    readonly "/settings": {}
-    readonly "/settings/profile": {}
-    readonly "/settings/security": {}
-    readonly "/suspend": {}
-    readonly "/theme": {}
-    readonly "/todo": {}
-    readonly "/users/:id": { readonly id: string }
-    readonly "/users": {}
+    readonly "/counter": {};
+    readonly "/dashboard": {};
+    readonly "/error-boundary": {};
+    readonly "/error-demo": {};
+    readonly "/form": {};
+    readonly "/": {};
+    readonly "/login": {};
+    readonly "/protected": {};
+    readonly "/settings": {};
+    readonly "/settings/profile": {};
+    readonly "/settings/security": {};
+    readonly "/suspend": {};
+    readonly "/theme": {};
+    readonly "/todo": {};
+    readonly "/users/:id": { readonly id: string };
+    readonly "/users": {};
   }
 }
 
-export {}
+export {};

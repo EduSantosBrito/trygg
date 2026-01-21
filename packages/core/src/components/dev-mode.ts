@@ -14,9 +14,9 @@
  * </>)
  * ```
  */
-import { Effect } from "effect"
-import * as Debug from "../debug/debug.js"
-import { Element, empty, componentElement } from "../element.js"
+import { Effect } from "effect";
+import * as Debug from "../debug/debug.js";
+import { Element, empty, componentElement } from "../element.js";
 
 /**
  * Props for the DevMode component
@@ -35,7 +35,7 @@ export interface DevModeProps {
    * <DevMode filter={["signal", "render.component"]} />
    * ```
    */
-  readonly filter?: string | ReadonlyArray<string>
+  readonly filter?: string | ReadonlyArray<string>;
 
   /**
    * Whether debug mode is enabled. Defaults to true.
@@ -46,7 +46,7 @@ export interface DevModeProps {
    * <DevMode enabled={import.meta.env.DEV} />
    * ```
    */
-  readonly enabled?: boolean
+  readonly enabled?: boolean;
 
   /**
    * Custom plugins to use for debug output.
@@ -67,7 +67,7 @@ export interface DevModeProps {
    * <DevMode plugins={[Debug.consolePlugin, myPlugin]} />
    * ```
    */
-  readonly plugins?: ReadonlyArray<Debug.DebugPlugin>
+  readonly plugins?: ReadonlyArray<Debug.DebugPlugin>;
 }
 
 /**
@@ -116,28 +116,28 @@ export interface DevModeProps {
  * @since 1.0.0
  */
 export const DevMode = (props: DevModeProps = {}): Element => {
-  const { filter, enabled = true, plugins } = props
+  const { filter, enabled = true, plugins } = props;
 
   // If disabled, return empty immediately (no effect)
   if (!enabled) {
-    return empty
+    return empty;
   }
 
   // Create a component effect that enables debug on mount
   const effect = Effect.sync(() => {
     // Enable debug logging
-    Debug.enable(filter)
-    
+    Debug.enable(filter);
+
     // Register custom plugins if provided
     if (plugins !== undefined && plugins.length > 0) {
       for (const plugin of plugins) {
-        Debug.registerPlugin(plugin)
+        Debug.registerPlugin(plugin);
       }
     }
-    
-    // Return empty element (DevMode renders nothing)
-    return empty
-  })
 
-  return componentElement(() => effect)
-}
+    // Return empty element (DevMode renders nothing)
+    return empty;
+  });
+
+  return componentElement(() => effect);
+};

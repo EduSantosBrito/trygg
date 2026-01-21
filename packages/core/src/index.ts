@@ -62,8 +62,8 @@ export {
   normalizeChild,
   normalizeChildren,
   getKey,
-  keyed
-} from "./element.js"
+  keyed,
+} from "./element.js";
 
 // JSX Runtime
 export {
@@ -72,8 +72,8 @@ export {
   Fragment,
   type JSXProps,
   type ComponentFunction,
-  type JSXElementType
-} from "./jsx-runtime.js"
+  type JSXElementType,
+} from "./jsx-runtime.js";
 
 // Renderer
 export {
@@ -84,11 +84,11 @@ export {
   type RenderContext,
   type RenderResult,
   CurrentRenderContext,
-  PortalTargetNotFoundError
-} from "./renderer.js"
+  PortalTargetNotFoundError,
+} from "./renderer.js";
 
 // Signal - Effect-native reactive state
-export * as Signal from "./signal.js"
+export * as Signal from "./signal.js";
 
 // Component API for typed props
 import {
@@ -98,8 +98,8 @@ import {
   isEffectComponent,
   type ComponentType,
   type ComponentProps,
-  type PropsMarker
-} from "./component.js"
+  type PropsMarker,
+} from "./component.js";
 
 /**
  * Component API for creating JSX components with typed props.
@@ -128,29 +128,21 @@ import {
  * @see DESIGN.md Section 5 for detailed documentation
  */
 type ComponentApi = typeof ComponentFn & {
-  readonly gen: typeof componentGen
-  readonly provide: typeof componentProvide
-}
+  readonly gen: typeof componentGen;
+  readonly provide: typeof componentProvide;
+};
 
-export const Component: ComponentApi = Object.assign(
-  ComponentFn,
-  { gen: componentGen, provide: componentProvide }
-)
+export const Component: ComponentApi = Object.assign(ComponentFn, {
+  gen: componentGen,
+  provide: componentProvide,
+});
 
-export { 
-  isEffectComponent, 
-  type ComponentType,
-  type ComponentProps,
-  type PropsMarker
-}
+export { isEffectComponent, type ComponentType, type ComponentProps, type PropsMarker };
 
 // Components
-export {
-  ErrorBoundary,
-  type ErrorBoundaryProps
-} from "./components/error-boundary.js"
-export { Portal, type PortalProps } from "./components/portal.js"
-export { DevMode, type DevModeProps } from "./components/dev-mode.js"
+export { ErrorBoundary, type ErrorBoundaryProps } from "./components/error-boundary.js";
+export { Portal, type PortalProps } from "./components/portal.js";
+export { DevMode, type DevModeProps } from "./components/dev-mode.js";
 
 // Testing utilities (re-export for convenience)
 export {
@@ -163,30 +155,30 @@ export {
   type TestRenderResult,
   type RenderInput,
   ElementNotFoundError,
-  WaitForTimeoutError
-} from "./testing.js"
+  WaitForTimeoutError,
+} from "./testing.js";
 
 // Debug utilities
 // Enable by adding <DevMode /> to your app, or see OBSERVABILITY.md
-export * as Debug from "./debug/debug.js"
+export * as Debug from "./debug/debug.js";
 
 // Metrics for observability
 // Counters and histograms for navigation, rendering, and signal updates
-export * as Metrics from "./debug/metrics.js"
+export * as Metrics from "./debug/metrics.js";
 
 // SafeUrl validation for secure href/src attributes
 // Validates URLs against a configurable scheme allowlist
-export * as SafeUrl from "./security/safe-url.js"
-export { UnsafeUrlError } from "./security/safe-url.js"
+export * as SafeUrl from "./security/safe-url.js";
+export { UnsafeUrlError } from "./security/safe-url.js";
 
 // Test server for LLM observability
 // Use Debug.serverLayer() to start server with debug plugin integration
 // Access the server via TestServer context tag
-export { 
+export {
   TestServer,
-  type TestServerService, 
+  type TestServerService,
   type TestServerConfig,
   type StoredLogEvent,
   type LogLevel,
-  type QueryOptions
-} from "./debug/test-server.js"
+  type QueryOptions,
+} from "./debug/test-server.js";

@@ -2,7 +2,16 @@
   "name": "create-effect-ui",
   "version": "0.1.0",
   "description": "Create a new effect-ui project",
-  "type": "module",
+  "keywords": [
+    "create",
+    "effect",
+    "effect-ui",
+    "jsx",
+    "template",
+    "ui"
+  ],
+  "license": "MIT",
+  "author": "",
   "bin": {
     "create-effect-ui": "./index.ts"
   },
@@ -10,20 +19,11 @@
     "index.ts",
     "template"
   ],
-  "keywords": [
-    "effect",
-    "effect-ui",
-    "create",
-    "template",
-    "ui",
-    "jsx"
-  ],
-  "author": "",
-  "license": "MIT",
+  "type": "module",
   "dependencies": {
-    "effect": "^3.19.14",
     "@effect/cli": "^0.62.0",
     "@effect/platform": "^0.94.1",
-    "@effect/platform-bun": "^0.60.0"
+    "@effect/platform-bun": "^0.60.0",
+    "effect": "^3.19.14"
   }
 }

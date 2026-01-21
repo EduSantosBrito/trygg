@@ -1,8 +1,8 @@
 /**
  * Router Unit Tests
- * 
+ *
  * Router provides file-based routing with automatic code splitting.
- * 
+ *
  * Test Categories:
  * - RouterService: Core service for navigation state
  * - Navigation: navigate, back, forward
@@ -10,13 +10,13 @@
  * - Outlet: Route rendering component
  * - Link: Navigation links
  * - Layers: browserLayer, testLayer
- * 
+ *
  * Goals: Reliability, stability, performance
  * - Verify navigation state updates correctly
  * - Verify route matching handles all patterns
  * - Verify cleanup on navigation
  */
-import { describe, it } from "@effect/vitest"
+import { describe, it } from "@effect/vitest";
 
 // =============================================================================
 // Router.current - Current route state
@@ -26,12 +26,12 @@ import { describe, it } from "@effect/vitest"
 describe("Router.current", () => {
   // Case: Returns current route
   // Assert: Route object with path, params, query
-  it.todo("should return current route state")
+  it.todo("should return current route state");
 
   // Case: Updates on navigation
   // Assert: Route changes after navigate
-  it.todo("should update after navigation")
-})
+  it.todo("should update after navigation");
+});
 
 // =============================================================================
 // Router.query - Query parameters
@@ -41,12 +41,12 @@ describe("Router.current", () => {
 describe("Router.query", () => {
   // Case: Returns current query params
   // Assert: URLSearchParams-like object
-  it.todo("should return current query parameters")
+  it.todo("should return current query parameters");
 
   // Case: Parses query string
   // Assert: ?foo=bar becomes { foo: "bar" }
-  it.todo("should parse query string into object")
-})
+  it.todo("should parse query string into object");
+});
 
 // =============================================================================
 // Router.params - Route parameters
@@ -56,12 +56,12 @@ describe("Router.query", () => {
 describe("Router.params", () => {
   // Case: Returns route params
   // Assert: /users/:id with /users/123 gives { id: "123" }
-  it.todo("should return extracted route parameters")
+  it.todo("should return extracted route parameters");
 
   // Case: Multiple params
   // Assert: /org/:orgId/user/:userId extracts both
-  it.todo("should handle multiple route parameters")
-})
+  it.todo("should handle multiple route parameters");
+});
 
 // =============================================================================
 // Router.navigate - Programmatic navigation
@@ -71,24 +71,24 @@ describe("Router.params", () => {
 describe("Router.navigate", () => {
   // Case: Navigates to path
   // Assert: Current route updates
-  it.todo("should navigate to specified path")
+  it.todo("should navigate to specified path");
 
   // Case: Pushes to history
   // Assert: History stack grows
-  it.todo("should push to browser history")
+  it.todo("should push to browser history");
 
   // Case: Replace option
   // Assert: Replaces current history entry
-  it.todo("should replace history when replace option true")
+  it.todo("should replace history when replace option true");
 
   // Case: With query params
   // Assert: Query string appended to URL
-  it.todo("should navigate with query parameters")
+  it.todo("should navigate with query parameters");
 
   // Case: With route params
   // Assert: Params interpolated into path
-  it.todo("should interpolate route parameters into path")
-})
+  it.todo("should interpolate route parameters into path");
+});
 
 // =============================================================================
 // Router.back / Router.forward - History navigation
@@ -98,14 +98,14 @@ describe("Router.navigate", () => {
 describe("Router.back", () => {
   // Case: Goes back in history
   // Assert: Returns to previous route
-  it.todo("should navigate back in history")
-})
+  it.todo("should navigate back in history");
+});
 
 describe("Router.forward", () => {
   // Case: Goes forward in history
   // Assert: Moves forward after back
-  it.todo("should navigate forward in history")
-})
+  it.todo("should navigate forward in history");
+});
 
 // =============================================================================
 // Router.isActive - Active route checking
@@ -115,16 +115,16 @@ describe("Router.forward", () => {
 describe("Router.isActive", () => {
   // Case: Returns true for current route
   // Assert: Exact match returns true
-  it.todo("should return true for current route")
+  it.todo("should return true for current route");
 
   // Case: Returns false for other routes
   // Assert: Non-matching route returns false
-  it.todo("should return false for non-matching route")
+  it.todo("should return false for non-matching route");
 
   // Case: Partial matching
   // Assert: /users active when at /users/123
-  it.todo("should support partial route matching")
-})
+  it.todo("should support partial route matching");
+});
 
 // =============================================================================
 // Router.link - Generate href
@@ -134,16 +134,16 @@ describe("Router.isActive", () => {
 describe("Router.link", () => {
   // Case: Returns path string
   // Assert: "/users" for static path
-  it.todo("should return path string")
+  it.todo("should return path string");
 
   // Case: Interpolates params
   // Assert: "/users/:id" + { id: "123" } = "/users/123"
-  it.todo("should interpolate parameters into path")
+  it.todo("should interpolate parameters into path");
 
   // Case: Appends query string
   // Assert: Adds ?foo=bar to path
-  it.todo("should append query parameters")
-})
+  it.todo("should append query parameters");
+});
 
 // =============================================================================
 // parsePath - URL parsing
@@ -153,20 +153,20 @@ describe("Router.link", () => {
 describe("parsePath", () => {
   // Case: Extracts pathname
   // Assert: "/users/123" from full URL
-  it.todo("should extract pathname from URL")
+  it.todo("should extract pathname from URL");
 
   // Case: Extracts query string
   // Assert: "?foo=bar" parsed
-  it.todo("should extract query string")
+  it.todo("should extract query string");
 
   // Case: Handles hash
   // Assert: "#section" extracted
-  it.todo("should extract hash fragment")
+  it.todo("should extract hash fragment");
 
   // Case: Handles relative paths
   // Assert: "./foo" normalized
-  it.todo("should handle relative paths")
-})
+  it.todo("should handle relative paths");
+});
 
 // =============================================================================
 // buildPath - URL building
@@ -176,16 +176,16 @@ describe("parsePath", () => {
 describe("buildPath", () => {
   // Case: Combines pathname
   // Assert: Base path returned
-  it.todo("should return pathname")
+  it.todo("should return pathname");
 
   // Case: Adds query params
   // Assert: Appends ?key=value
-  it.todo("should append query parameters")
+  it.todo("should append query parameters");
 
   // Case: Encodes special characters
   // Assert: Spaces become %20
-  it.todo("should encode special characters")
-})
+  it.todo("should encode special characters");
+});
 
 // =============================================================================
 // createMatcher - Route matching
@@ -195,32 +195,32 @@ describe("buildPath", () => {
 describe("createMatcher", () => {
   // Case: Matches static paths
   // Assert: "/users" matches "/users"
-  it.todo("should match static paths exactly")
+  it.todo("should match static paths exactly");
 
   // Case: Matches dynamic segments
   // Assert: "/users/:id" matches "/users/123"
-  it.todo("should match dynamic path segments")
+  it.todo("should match dynamic path segments");
 
   // Case: Extracts params from match
   // Assert: Returns { id: "123" }
-  it.todo("should extract parameters from matched path")
+  it.todo("should extract parameters from matched path");
 
   // Case: Handles catch-all segments
   // Assert: "/files/*" matches "/files/a/b/c"
-  it.todo("should match catch-all segments")
+  it.todo("should match catch-all segments");
 
   // Case: Handles optional segments
   // Assert: "/users/:id?" matches "/users" and "/users/123"
-  it.todo("should match optional segments")
+  it.todo("should match optional segments");
 
   // Case: Returns null for no match
   // Assert: Non-matching path returns null
-  it.todo("should return null for non-matching paths")
+  it.todo("should return null for non-matching paths");
 
   // Case: Priority ordering
   // Assert: More specific routes match first
-  it.todo("should prioritize more specific routes")
-})
+  it.todo("should prioritize more specific routes");
+});
 
 // =============================================================================
 // Outlet - Route rendering
@@ -230,28 +230,28 @@ describe("createMatcher", () => {
 describe("Outlet", () => {
   // Case: Renders matched route
   // Assert: Route component appears in DOM
-  it.todo("should render matched route component")
+  it.todo("should render matched route component");
 
   // Case: Renders 404 for no match
   // Assert: _404 component or default shown
-  it.todo("should render 404 component when no route matches")
+  it.todo("should render 404 component when no route matches");
 
   // Case: Renders loading during code split
   // Assert: _loading shown while importing
-  it.todo("should render loading component during lazy load")
+  it.todo("should render loading component during lazy load");
 
   // Case: Renders error on failure
   // Assert: _error shown when route throws
-  it.todo("should render error component on route error")
+  it.todo("should render error component on route error");
 
   // Case: Nested outlets
   // Assert: Child outlet renders nested routes
-  it.todo("should support nested outlet rendering")
+  it.todo("should support nested outlet rendering");
 
   // Case: Cleanup on navigation
   // Assert: Previous route unmounted
-  it.todo("should cleanup previous route on navigation")
-})
+  it.todo("should cleanup previous route on navigation");
+});
 
 // =============================================================================
 // Link - Navigation component
@@ -261,28 +261,28 @@ describe("Outlet", () => {
 describe("Link", () => {
   // Case: Renders anchor element
   // Assert: <a> with href
-  it.todo("should render anchor element with href")
+  it.todo("should render anchor element with href");
 
   // Case: Handles click
   // Assert: Prevents default, calls navigate
-  it.todo("should handle click and navigate")
+  it.todo("should handle click and navigate");
 
   // Case: Passes through className
   // Assert: className prop applied
-  it.todo("should apply className prop")
+  it.todo("should apply className prop");
 
   // Case: Passes through children
   // Assert: Children rendered inside link
-  it.todo("should render children")
+  it.todo("should render children");
 
   // Case: External links work normally
   // Assert: http:// links navigate normally
-  it.todo("should allow normal navigation for external links")
+  it.todo("should allow normal navigation for external links");
 
   // Case: Supports target="_blank"
   // Assert: Opens in new tab
-  it.todo("should support target attribute")
-})
+  it.todo("should support target attribute");
+});
 
 // =============================================================================
 // redirect - Server redirect
@@ -292,12 +292,12 @@ describe("Link", () => {
 describe("redirect", () => {
   // Case: Creates redirect object
   // Assert: Has _tag and path
-  it.todo("should create redirect object")
+  it.todo("should create redirect object");
 
   // Case: isRedirect returns true
   // Assert: Type guard passes
-  it.todo("should be identified by isRedirect")
-})
+  it.todo("should be identified by isRedirect");
+});
 
 // =============================================================================
 // browserLayer - Browser router
@@ -307,16 +307,16 @@ describe("redirect", () => {
 describe("browserLayer", () => {
   // Case: Uses window.history
   // Assert: Integrates with browser history API
-  it.todo("should integrate with browser history API")
+  it.todo("should integrate with browser history API");
 
   // Case: Responds to popstate
   // Assert: Back button triggers route change
-  it.todo("should respond to popstate events")
+  it.todo("should respond to popstate events");
 
   // Case: Updates URL on navigate
   // Assert: Browser URL changes
-  it.todo("should update browser URL on navigation")
-})
+  it.todo("should update browser URL on navigation");
+});
 
 // =============================================================================
 // testLayer - Test router
@@ -326,16 +326,16 @@ describe("browserLayer", () => {
 describe("testLayer", () => {
   // Case: Provides router without browser
   // Assert: Works in Node/test environment
-  it.todo("should provide router without browser APIs")
+  it.todo("should provide router without browser APIs");
 
   // Case: Accepts initial path
   // Assert: Starts at specified path
-  it.todo("should start at specified initial path")
+  it.todo("should start at specified initial path");
 
   // Case: Navigate works in memory
   // Assert: State changes without browser
-  it.todo("should support navigation in memory")
-})
+  it.todo("should support navigation in memory");
+});
 
 // =============================================================================
 // cx - Class name utility
@@ -345,17 +345,17 @@ describe("testLayer", () => {
 describe("cx", () => {
   // Case: Combines strings
   // Assert: "a b" from "a", "b"
-  it.todo("should combine multiple class strings")
+  it.todo("should combine multiple class strings");
 
   // Case: Filters falsy values
   // Assert: Ignores false, null, undefined
-  it.todo("should filter out falsy values")
+  it.todo("should filter out falsy values");
 
   // Case: Handles objects
   // Assert: { active: true } adds "active"
-  it.todo("should handle conditional object syntax")
+  it.todo("should handle conditional object syntax");
 
   // Case: Handles arrays
   // Assert: Flattens nested arrays
-  it.todo("should flatten nested arrays")
-})
+  it.todo("should flatten nested arrays");
+});

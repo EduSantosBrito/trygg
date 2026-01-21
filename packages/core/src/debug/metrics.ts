@@ -21,7 +21,7 @@
  * )
  * ```
  */
-import { Effect, Metric, MetricBoundaries, MetricState } from "effect"
+import { Effect, Metric, MetricBoundaries, MetricState } from "effect";
 
 // --- Naming Convention ---
 // All metrics use `effectui.` prefix
@@ -37,8 +37,8 @@ import { Effect, Metric, MetricBoundaries, MetricState } from "effect"
  */
 export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
   "effectui.router.navigate.count",
-  { description: "Total number of navigation events", incremental: true }
-)
+  { description: "Total number of navigation events", incremental: true },
+);
 
 /**
  * Counter for route errors.
@@ -47,8 +47,8 @@ export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
  */
 export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
   "effectui.router.error.count",
-  { description: "Total number of route errors", incremental: true }
-)
+  { description: "Total number of route errors", incremental: true },
+);
 
 /**
  * Counter for signal updates.
@@ -57,8 +57,8 @@ export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
  */
 export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter(
   "effectui.signal.update.count",
-  { description: "Total number of signal value changes", incremental: true }
-)
+  { description: "Total number of signal value changes", incremental: true },
+);
 
 /**
  * Counter for component renders.
@@ -67,8 +67,8 @@ export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter
  */
 export const componentRenderCounter: Metric.Metric.Counter<number> = Metric.counter(
   "effectui.render.component.count",
-  { description: "Total number of component renders", incremental: true }
-)
+  { description: "Total number of component renders", incremental: true },
+);
 
 // --- Histograms ---
 
@@ -77,8 +77,8 @@ export const componentRenderCounter: Metric.Metric.Counter<number> = Metric.coun
  * Buckets: 0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000
  * @since 1.0.0
  */
-export const renderDurationBoundaries: MetricBoundaries.MetricBoundaries = 
-  MetricBoundaries.fromIterable([0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000])
+export const renderDurationBoundaries: MetricBoundaries.MetricBoundaries =
+  MetricBoundaries.fromIterable([0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000]);
 
 /**
  * Histogram for component render duration.
@@ -88,8 +88,8 @@ export const renderDurationBoundaries: MetricBoundaries.MetricBoundaries =
 export const renderDurationHistogram: Metric.Metric.Histogram<number> = Metric.histogram(
   "effectui.render.duration_ms",
   renderDurationBoundaries,
-  "Distribution of component render durations in milliseconds"
-)
+  "Distribution of component render durations in milliseconds",
+);
 
 // --- Metric Recording API ---
 
@@ -97,25 +97,25 @@ export const renderDurationHistogram: Metric.Metric.Histogram<number> = Metric.h
  * Increment the navigation counter.
  * @since 1.0.0
  */
-export const recordNavigation: Effect.Effect<void> = Metric.increment(navigationCounter)
+export const recordNavigation: Effect.Effect<void> = Metric.increment(navigationCounter);
 
 /**
  * Increment the route error counter.
  * @since 1.0.0
  */
-export const recordRouteError: Effect.Effect<void> = Metric.increment(routeErrorCounter)
+export const recordRouteError: Effect.Effect<void> = Metric.increment(routeErrorCounter);
 
 /**
  * Increment the signal update counter.
  * @since 1.0.0
  */
-export const recordSignalUpdate: Effect.Effect<void> = Metric.increment(signalUpdateCounter)
+export const recordSignalUpdate: Effect.Effect<void> = Metric.increment(signalUpdateCounter);
 
 /**
  * Increment the component render counter.
  * @since 1.0.0
  */
-export const recordComponentRender: Effect.Effect<void> = Metric.increment(componentRenderCounter)
+export const recordComponentRender: Effect.Effect<void> = Metric.increment(componentRenderCounter);
 
 /**
  * Record a render duration in milliseconds.
@@ -123,8 +123,8 @@ export const recordComponentRender: Effect.Effect<void> = Metric.increment(compo
  */
 export const recordRenderDuration = (durationMs: number): Effect.Effect<void> =>
   Effect.sync(() => {
-    renderDurationHistogram.unsafeUpdate(durationMs, [])
-  })
+    renderDurationHistogram.unsafeUpdate(durationMs, []);
+  });
 
 // --- Snapshot API ---
 
@@ -135,21 +135,21 @@ export const recordRenderDuration = (durationMs: number): Effect.Effect<void> =>
  */
 export interface MetricsSnapshot {
   /** Total number of navigation events */
-  readonly navigationCount: number
+  readonly navigationCount: number;
   /** Total number of route errors */
-  readonly routeErrorCount: number
+  readonly routeErrorCount: number;
   /** Total number of signal value changes */
-  readonly signalUpdateCount: number
+  readonly signalUpdateCount: number;
   /** Total number of component renders */
-  readonly componentRenderCount: number
+  readonly componentRenderCount: number;
   /** Render duration histogram state */
   readonly renderDurationHistogram: {
-    readonly count: number
-    readonly min: number
-    readonly max: number
-    readonly sum: number
-    readonly buckets: ReadonlyArray<readonly [number, number]>
-  }
+    readonly count: number;
+    readonly min: number;
+    readonly max: number;
+    readonly sum: number;
+    readonly buckets: ReadonlyArray<readonly [number, number]>;
+  };
 }
 
 /**
@@ -158,40 +158,42 @@ export interface MetricsSnapshot {
  * @since 1.0.0
  */
 export const snapshot: Effect.Effect<MetricsSnapshot> = Effect.gen(function* () {
-  const navState = yield* Metric.value(navigationCounter)
-  const errorState = yield* Metric.value(routeErrorCounter)
-  const signalState = yield* Metric.value(signalUpdateCounter)
-  const renderState = yield* Metric.value(componentRenderCounter)
-  const histState = yield* Metric.value(renderDurationHistogram)
-  
+  const navState = yield* Metric.value(navigationCounter);
+  const errorState = yield* Metric.value(routeErrorCounter);
+  const signalState = yield* Metric.value(signalUpdateCounter);
+  const renderState = yield* Metric.value(componentRenderCounter);
+  const histState = yield* Metric.value(renderDurationHistogram);
+
   return {
     navigationCount: extractCounterValue(navState),
     routeErrorCount: extractCounterValue(errorState),
     signalUpdateCount: extractCounterValue(signalState),
     componentRenderCount: extractCounterValue(renderState),
-    renderDurationHistogram: extractHistogramValue(histState)
-  }
-})
+    renderDurationHistogram: extractHistogramValue(histState),
+  };
+});
 
 /**
  * Extract numeric value from counter state.
  */
 const extractCounterValue = (state: MetricState.MetricState.Counter<number>): number => {
-  return state.count
-}
+  return state.count;
+};
 
 /**
  * Extract histogram values from histogram state.
  */
-const extractHistogramValue = (state: MetricState.MetricState.Histogram): MetricsSnapshot["renderDurationHistogram"] => {
+const extractHistogramValue = (
+  state: MetricState.MetricState.Histogram,
+): MetricsSnapshot["renderDurationHistogram"] => {
   return {
     count: state.count,
     min: state.min,
     max: state.max,
     sum: state.sum,
-    buckets: state.buckets
-  }
-}
+    buckets: state.buckets,
+  };
+};
 
 // --- Export Sink API ---
 
@@ -202,13 +204,13 @@ const extractHistogramValue = (state: MetricState.MetricState.Histogram): Metric
  */
 export interface MetricsSink {
   /** Unique sink identifier */
-  readonly name: string
-  
+  readonly name: string;
+
   /**
    * Export a metrics snapshot.
    * Called periodically or on-demand.
    */
-  readonly export: (snapshot: MetricsSnapshot) => Effect.Effect<void>
+  readonly export: (snapshot: MetricsSnapshot) => Effect.Effect<void>;
 }
 
 /**
@@ -217,45 +219,45 @@ export interface MetricsSink {
  */
 export const createSink = (
   name: string,
-  exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void>
-): MetricsSink => ({ name, export: exportFn })
+  exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void>,
+): MetricsSink => ({ name, export: exportFn });
 
 /**
  * Registered metrics sinks.
  */
-const _sinks: Map<string, MetricsSink> = new Map()
+const _sinks: Map<string, MetricsSink> = new Map();
 
 /**
  * Register a metrics sink.
  * @since 1.0.0
  */
 export const registerSink = (sink: MetricsSink): void => {
-  _sinks.set(sink.name, sink)
-}
+  _sinks.set(sink.name, sink);
+};
 
 /**
  * Unregister a metrics sink by name.
  * @since 1.0.0
  */
 export const unregisterSink = (name: string): void => {
-  _sinks.delete(name)
-}
+  _sinks.delete(name);
+};
 
 /**
  * Get all registered sink names.
  * @since 1.0.0
  */
 export const getSinks = (): ReadonlyArray<string> => {
-  return Array.from(_sinks.keys())
-}
+  return Array.from(_sinks.keys());
+};
 
 /**
  * Check if a sink is registered.
  * @since 1.0.0
  */
 export const hasSink = (name: string): boolean => {
-  return _sinks.has(name)
-}
+  return _sinks.has(name);
+};
 
 /**
  * Export current metrics to all registered sinks.
@@ -263,21 +265,21 @@ export const hasSink = (name: string): boolean => {
  * @since 1.0.0
  */
 export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
-  if (_sinks.size === 0) return
-  
-  const currentSnapshot = yield* snapshot
-  
+  if (_sinks.size === 0) return;
+
+  const currentSnapshot = yield* snapshot;
+
   for (const sink of _sinks.values()) {
     yield* sink.export(currentSnapshot).pipe(
       Effect.catchAllCause((cause) =>
         Effect.sync(() => {
           // eslint-disable-next-line no-console
-          console.error(`[effectui] Metrics sink "${sink.name}" error:`, cause)
-        })
-      )
-    )
+          console.error(`[effectui] Metrics sink "${sink.name}" error:`, cause);
+        }),
+      ),
+    );
   }
-})
+});
 
 // --- Built-in Sinks ---
 
@@ -286,9 +288,8 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
  * Useful for development.
  * @since 1.0.0
  */
-export const consoleSink: MetricsSink = createSink(
-  "console",
-  (s) => Effect.sync(() => {
+export const consoleSink: MetricsSink = createSink("console", (s) =>
+  Effect.sync(() => {
     // eslint-disable-next-line no-console
     console.log("[effectui metrics]", {
       navigation: s.navigationCount,
@@ -299,22 +300,23 @@ export const consoleSink: MetricsSink = createSink(
         count: s.renderDurationHistogram.count,
         min: s.renderDurationHistogram.min,
         max: s.renderDurationHistogram.max,
-        avg: s.renderDurationHistogram.count > 0 
-          ? s.renderDurationHistogram.sum / s.renderDurationHistogram.count 
-          : 0
-      }
-    })
-  })
-)
+        avg:
+          s.renderDurationHistogram.count > 0
+            ? s.renderDurationHistogram.sum / s.renderDurationHistogram.count
+            : 0,
+      },
+    });
+  }),
+);
 
 /**
  * Create a collector sink that stores snapshots in an array.
  * Useful for testing.
  * @since 1.0.0
  */
-export const createCollectorSink = (
-  name: string,
-  snapshots: MetricsSnapshot[]
-): MetricsSink => createSink(name, (s) => Effect.sync(() => {
-  snapshots.push(s)
-}))
+export const createCollectorSink = (name: string, snapshots: MetricsSnapshot[]): MetricsSink =>
+  createSink(name, (s) =>
+    Effect.sync(() => {
+      snapshots.push(s);
+    }),
+  );

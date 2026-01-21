@@ -5,9 +5,9 @@
  * Provides helpers for rendering and querying components in tests.
  * Works with @effect/vitest for Effect-based testing.
  */
-import { Effect, Layer, Scope } from "effect"
-import { Element, isElement } from "./element.js"
-import { browserLayer, Renderer } from "./renderer.js"
+import { Effect, Layer, Scope } from "effect";
+import { Element, isElement } from "./element.js";
+import { browserLayer, Renderer } from "./renderer.js";
 
 /**
  * Result of rendering an element for testing
@@ -17,51 +17,49 @@ export interface TestRenderResult {
   /**
    * The container element that holds the rendered content
    */
-  readonly container: HTMLElement
+  readonly container: HTMLElement;
 
   /**
    * Get an element by its text content (exact match)
    */
-  readonly getByText: (text: string) => HTMLElement
+  readonly getByText: (text: string) => HTMLElement;
 
   /**
    * Query for an element by its text content (returns null if not found)
    */
-  readonly queryByText: (text: string) => HTMLElement | null
+  readonly queryByText: (text: string) => HTMLElement | null;
 
   /**
    * Get an element by its test id (data-testid attribute)
    */
-  readonly getByTestId: (testId: string) => HTMLElement
+  readonly getByTestId: (testId: string) => HTMLElement;
 
   /**
    * Query for an element by its test id (returns null if not found)
    */
-  readonly queryByTestId: (testId: string) => HTMLElement | null
+  readonly queryByTestId: (testId: string) => HTMLElement | null;
 
   /**
    * Get an element by its role attribute
    */
-  readonly getByRole: (role: string) => HTMLElement
+  readonly getByRole: (role: string) => HTMLElement;
 
   /**
    * Query for an element by its role (returns null if not found)
    */
-  readonly queryByRole: (role: string) => HTMLElement | null
+  readonly queryByRole: (role: string) => HTMLElement | null;
 
   /**
    * Get an element by CSS selector
    */
-  readonly querySelector: <T extends HTMLElement = HTMLElement>(
-    selector: string
-  ) => T
+  readonly querySelector: <T extends HTMLElement = HTMLElement>(selector: string) => T;
 
   /**
    * Query all elements matching a CSS selector
    */
   readonly querySelectorAll: <T extends HTMLElement = HTMLElement>(
-    selector: string
-  ) => ReadonlyArray<T>
+    selector: string,
+  ) => ReadonlyArray<T>;
 }
 
 /**
@@ -69,14 +67,14 @@ export interface TestRenderResult {
  * @since 1.0.0
  */
 export class ElementNotFoundError extends Error {
-  readonly _tag = "ElementNotFoundError"
+  readonly _tag = "ElementNotFoundError";
 
   constructor(
     readonly queryType: string,
-    readonly query: string
+    readonly query: string,
   ) {
-    super(`Unable to find element by ${queryType}: "${query}"`)
-    this.name = "ElementNotFoundError"
+    super(`Unable to find element by ${queryType}: "${query}"`);
+    this.name = "ElementNotFoundError";
   }
 }
 
@@ -84,69 +82,64 @@ export class ElementNotFoundError extends Error {
  * Create query helpers for a container element
  * @internal
  */
-const createQueryHelpers = (
-  container: HTMLElement
-): Omit<TestRenderResult, "container"> => {
+const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "container"> => {
   const getByText = (text: string): HTMLElement => {
-    const result = queryByText(text)
+    const result = queryByText(text);
     if (!result) {
-      throw new ElementNotFoundError("text", text)
+      throw new ElementNotFoundError("text", text);
     }
-    return result
-  }
+    return result;
+  };
 
   const queryByText = (text: string): HTMLElement | null => {
     // Walk the tree to find elements with matching text content
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, {
       acceptNode(node) {
         // Only accept leaf elements (no child elements, only text)
-        const element = node as HTMLElement
+        const element = node as HTMLElement;
         if (element.children.length === 0) {
           return element.textContent?.trim() === text
             ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_SKIP
+            : NodeFilter.FILTER_SKIP;
         }
         // Check direct text content for elements with children
         for (const child of Array.from(element.childNodes)) {
-          if (
-            child.nodeType === Node.TEXT_NODE &&
-            child.textContent?.trim() === text
-          ) {
-            return NodeFilter.FILTER_ACCEPT
+          if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim() === text) {
+            return NodeFilter.FILTER_ACCEPT;
           }
         }
-        return NodeFilter.FILTER_SKIP
-      }
-    })
+        return NodeFilter.FILTER_SKIP;
+      },
+    });
 
-    const node = walker.nextNode()
-    return node ? (node as HTMLElement) : null
-  }
+    const node = walker.nextNode();
+    return node ? (node as HTMLElement) : null;
+  };
 
   const getByTestId = (testId: string): HTMLElement => {
-    const result = queryByTestId(testId)
+    const result = queryByTestId(testId);
     if (!result) {
-      throw new ElementNotFoundError("testId", testId)
+      throw new ElementNotFoundError("testId", testId);
     }
-    return result
-  }
+    return result;
+  };
 
   const queryByTestId = (testId: string): HTMLElement | null => {
-    return container.querySelector(`[data-testid="${testId}"]`)
-  }
+    return container.querySelector(`[data-testid="${testId}"]`);
+  };
 
   const getByRole = (role: string): HTMLElement => {
-    const result = queryByRole(role)
+    const result = queryByRole(role);
     if (!result) {
-      throw new ElementNotFoundError("role", role)
+      throw new ElementNotFoundError("role", role);
     }
-    return result
-  }
+    return result;
+  };
 
   const queryByRole = (role: string): HTMLElement | null => {
     // Check explicit role attribute
-    const explicit = container.querySelector<HTMLElement>(`[role="${role}"]`)
-    if (explicit) return explicit
+    const explicit = container.querySelector<HTMLElement>(`[role="${role}"]`);
+    if (explicit) return explicit;
 
     // Check implicit roles for common elements
     const implicitRoleMap: Record<string, string> = {
@@ -174,34 +167,32 @@ const createQueryHelpers = (
       table: "table",
       tr: "row",
       td: "cell",
-      th: "columnheader"
-    }
+      th: "columnheader",
+    };
 
     for (const [tag, implicitRole] of Object.entries(implicitRoleMap)) {
       if (implicitRole === role) {
-        const element = container.querySelector<HTMLElement>(tag)
-        if (element) return element
+        const element = container.querySelector<HTMLElement>(tag);
+        if (element) return element;
       }
     }
 
-    return null
-  }
+    return null;
+  };
 
-  const querySelector = <T extends HTMLElement = HTMLElement>(
-    selector: string
-  ): T => {
-    const result = container.querySelector<T>(selector)
+  const querySelector = <T extends HTMLElement = HTMLElement>(selector: string): T => {
+    const result = container.querySelector<T>(selector);
     if (!result) {
-      throw new ElementNotFoundError("selector", selector)
+      throw new ElementNotFoundError("selector", selector);
     }
-    return result
-  }
+    return result;
+  };
 
   const querySelectorAll = <T extends HTMLElement = HTMLElement>(
-    selector: string
+    selector: string,
   ): ReadonlyArray<T> => {
-    return Array.from(container.querySelectorAll<T>(selector))
-  }
+    return Array.from(container.querySelectorAll<T>(selector));
+  };
 
   return {
     getByText,
@@ -211,9 +202,9 @@ const createQueryHelpers = (
     getByRole,
     queryByRole,
     querySelector,
-    querySelectorAll
-  }
-}
+    querySelectorAll,
+  };
+};
 
 /**
  * Render an Element for testing
@@ -239,31 +230,29 @@ const createQueryHelpers = (
  *
  * @since 1.0.0
  */
-export const renderElement = Effect.fn("renderElement")(function* (
-  element: Element
-) {
-  const renderer = yield* Renderer
+export const renderElement = Effect.fn("renderElement")(function* (element: Element) {
+  const renderer = yield* Renderer;
 
   // Create a container for the rendered element
-  const container = document.createElement("div")
-  container.setAttribute("data-testid", "test-container")
-  document.body.appendChild(container)
+  const container = document.createElement("div");
+  container.setAttribute("data-testid", "test-container");
+  document.body.appendChild(container);
 
   // Render the element
-  yield* renderer.mount(container, element)
+  yield* renderer.mount(container, element);
 
   // Clean up container when scope closes
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      container.remove()
-    })
-  )
+      container.remove();
+    }),
+  );
 
   return {
     container,
-    ...createQueryHelpers(container)
-  } satisfies TestRenderResult
-})
+    ...createQueryHelpers(container),
+  } satisfies TestRenderResult;
+});
 
 /**
  * Test layer that provides the browser renderer
@@ -280,7 +269,7 @@ export const renderElement = Effect.fn("renderElement")(function* (
  *
  * @since 1.0.0
  */
-export const testLayer: Layer.Layer<Renderer> = browserLayer
+export const testLayer: Layer.Layer<Renderer> = browserLayer;
 
 /**
  * Simulate a click event on an element
@@ -288,8 +277,8 @@ export const testLayer: Layer.Layer<Renderer> = browserLayer
  */
 export const click = (element: HTMLElement): Effect.Effect<void> =>
   Effect.sync(() => {
-    element.click()
-  })
+    element.click();
+  });
 
 /**
  * Simulate typing into an input element
@@ -297,29 +286,28 @@ export const click = (element: HTMLElement): Effect.Effect<void> =>
  */
 export const type = (
   element: HTMLInputElement | HTMLTextAreaElement,
-  value: string
+  value: string,
 ): Effect.Effect<void> =>
   Effect.sync(() => {
-    element.value = value
-    element.dispatchEvent(new Event("input", { bubbles: true }))
-    element.dispatchEvent(new Event("change", { bubbles: true }))
-  })
+    element.value = value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 
 /**
  * Error thrown when waitFor times out
  * @since 1.0.0
  */
 export class WaitForTimeoutError extends Error {
-  readonly _tag = "WaitForTimeoutError"
+  readonly _tag = "WaitForTimeoutError";
 
   constructor(
     readonly timeout: number,
-    readonly lastError: unknown
+    readonly lastError: unknown,
   ) {
-    const message =
-      lastError instanceof Error ? lastError.message : String(lastError)
-    super(`waitFor timed out after ${timeout}ms: ${message}`)
-    this.name = "WaitForTimeoutError"
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    super(`waitFor timed out after ${timeout}ms: ${message}`);
+    this.name = "WaitForTimeoutError";
   }
 }
 
@@ -332,35 +320,35 @@ export class WaitForTimeoutError extends Error {
  */
 export const waitFor = <T>(
   fn: () => T,
-  options: { timeout?: number; interval?: number } = {}
+  options: { timeout?: number; interval?: number } = {},
 ): Effect.Effect<T, WaitForTimeoutError> => {
-  const { timeout = 1000, interval = 50 } = options
+  const { timeout = 1000, interval = 50 } = options;
 
   return Effect.async<T, WaitForTimeoutError>((resume) => {
-    const start = Date.now()
+    const start = Date.now();
 
     const check = () => {
       try {
-        const result = fn()
-        resume(Effect.succeed(result))
+        const result = fn();
+        resume(Effect.succeed(result));
       } catch (error) {
         if (Date.now() - start >= timeout) {
-          resume(Effect.fail(new WaitForTimeoutError(timeout, error)))
+          resume(Effect.fail(new WaitForTimeoutError(timeout, error)));
         } else {
-          setTimeout(check, interval)
+          setTimeout(check, interval);
         }
       }
-    }
+    };
 
-    check()
-  })
-}
+    check();
+  });
+};
 
 /**
  * Input type for render - can be an Element or an Effect that produces an Element
  * @since 1.0.0
  */
-export type RenderInput<E = never> = Element | Effect.Effect<Element, E, never>
+export type RenderInput<E = never> = Element | Effect.Effect<Element, E, never>;
 
 /**
  * Convenience function to render and provide the test layer
@@ -391,27 +379,25 @@ export type RenderInput<E = never> = Element | Effect.Effect<Element, E, never>
  * @since 1.0.0
  */
 export const render = <E>(
-  input: RenderInput<E>
+  input: RenderInput<E>,
 ): Effect.Effect<TestRenderResult, E | unknown, Scope.Scope> => {
   // Check if input is an Element (has _tag property) or an Effect
   if (isElement(input)) {
-    return renderElement(input).pipe(Effect.provide(testLayer))
+    return renderElement(input).pipe(Effect.provide(testLayer));
   }
 
   // Input is an Effect<Element, E, never>
   // Wrap in Component for reactive re-rendering
   return Effect.gen(function* () {
     // Get the test's scope - this will be used for the component's lifecycle
-    const scope = yield* Effect.scope
+    const scope = yield* Effect.scope;
 
     // Wrap in Component for reactive re-rendering
     const componentElement = Element.Component({
       run: () => input,
-      key: null
-    })
+      key: null,
+    });
 
-    return yield* renderElement(componentElement).pipe(
-      Effect.provideService(Scope.Scope, scope)
-    )
-  }).pipe(Effect.provide(testLayer))
-}
+    return yield* renderElement(componentElement).pipe(Effect.provideService(Scope.Scope, scope));
+  }).pipe(Effect.provide(testLayer));
+};

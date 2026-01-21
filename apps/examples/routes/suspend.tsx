@@ -7,77 +7,77 @@
  * - Dep-based caching (new deps = Loading, cached deps = stale content)
  * - Clean declarative API vs manual switch statements
  */
-import { Cause, Duration, Effect } from "effect"
-import { Signal, Component, type ComponentProps } from "effect-ui"
+import { Cause, Duration, Effect } from "effect";
+import { Signal, Component, type ComponentProps } from "effect-ui";
 
 // =============================================================================
 // Simulated async data fetching
 // =============================================================================
 
 interface User {
-  readonly id: number
-  readonly name: string
-  readonly email: string
+  readonly id: number;
+  readonly name: string;
+  readonly email: string;
 }
 
 interface Post {
-  readonly id: number
-  readonly title: string
-  readonly body: string
+  readonly id: number;
+  readonly title: string;
+  readonly body: string;
 }
 
 interface Stats {
-  readonly followers: number
-  readonly following: number
-  readonly posts: number
+  readonly followers: number;
+  readonly following: number;
+  readonly posts: number;
 }
 
 const fetchUser = (id: number) =>
   Effect.gen(function* () {
-    yield* Effect.sleep(Duration.millis(800))
+    yield* Effect.sleep(Duration.millis(800));
     return {
       id,
       name: `User ${id}`,
-      email: `user${id}@example.com`
-    } satisfies User
-  })
+      email: `user${id}@example.com`,
+    } satisfies User;
+  });
 
 const fetchStats = (userId: number) =>
   Effect.gen(function* () {
-    yield* Effect.sleep(Duration.millis(800))
+    yield* Effect.sleep(Duration.millis(800));
     return {
       followers: userId * 100 + 42,
       following: userId * 50 + 17,
-      posts: userId * 10 + 3
-    } satisfies Stats
-  })
+      posts: userId * 10 + 3,
+    } satisfies Stats;
+  });
 
 const fetchPosts = (userId: number) =>
   Effect.gen(function* () {
-    yield* Effect.sleep(Duration.millis(1200))
+    yield* Effect.sleep(Duration.millis(1200));
     return [
       { id: 1, title: "First Post", body: `Content from user ${userId}` },
       { id: 2, title: "Second Post", body: "More interesting content" },
-      { id: 3, title: "Third Post", body: "Even more to read" }
-    ] satisfies ReadonlyArray<Post>
-  })
+      { id: 3, title: "Third Post", body: "Even more to read" },
+    ] satisfies ReadonlyArray<Post>;
+  });
 
 // =============================================================================
 // View Components (pure, sync rendering)
 // =============================================================================
 
 const UserCard = Component.gen(function* (Props: ComponentProps<{ user: User }>) {
-  const { user } = yield* Props
+  const { user } = yield* Props;
   return (
     <div className="user-card">
       <h3>{user.name}</h3>
       <p>{user.email}</p>
     </div>
-  )
-})
+  );
+});
 
 const StatsCard = Component.gen(function* (Props: ComponentProps<{ stats: Stats }>) {
-  const { stats } = yield* Props
+  const { stats } = yield* Props;
   return (
     <div className="stats-card">
       <div className="stat">
@@ -93,11 +93,11 @@ const StatsCard = Component.gen(function* (Props: ComponentProps<{ stats: Stats 
         <span className="stat-label">Posts</span>
       </div>
     </div>
-  )
-})
+  );
+});
 
 const PostList = Component.gen(function* (Props: ComponentProps<{ posts: ReadonlyArray<Post> }>) {
-  const { posts } = yield* Props
+  const { posts } = yield* Props;
   return (
     <ul className="post-list">
       {posts.map((post) => (
@@ -107,18 +107,20 @@ const PostList = Component.gen(function* (Props: ComponentProps<{ posts: Readonl
         </li>
       ))}
     </ul>
-  )
-})
+  );
+});
 
-const ErrorCard = Component.gen(function* (Props: ComponentProps<{ label: string; cause: Cause.Cause<unknown> }>) {
-  const { label, cause } = yield* Props
+const ErrorCard = Component.gen(function* (
+  Props: ComponentProps<{ label: string; cause: Cause.Cause<unknown> }>,
+) {
+  const { label, cause } = yield* Props;
   return (
     <div className="error-card">
       <strong>{label} failed</strong>
       <p>{String(Cause.squash(cause))}</p>
     </div>
-  )
-})
+  );
+});
 
 // =============================================================================
 // Fallback Components
@@ -130,8 +132,8 @@ const UserSkeleton = Component.gen(function* () {
       <div className="skeleton-line" style={{ width: "60%" }} />
       <div className="skeleton-line" style={{ width: "80%" }} />
     </div>
-  )
-})
+  );
+});
 
 const StatsSkeleton = Component.gen(function* () {
   return (
@@ -140,8 +142,8 @@ const StatsSkeleton = Component.gen(function* () {
       <div className="skeleton-line" style={{ width: "30%" }} />
       <div className="skeleton-line" style={{ width: "30%" }} />
     </div>
-  )
-})
+  );
+});
 
 const PostsSkeleton = Component.gen(function* () {
   return (
@@ -153,15 +155,15 @@ const PostsSkeleton = Component.gen(function* () {
       <div className="skeleton-line" style={{ width: "40%" }} />
       <div className="skeleton-line" style={{ width: "75%" }} />
     </div>
-  )
-})
+  );
+});
 
 // =============================================================================
 // Async Components (do async work internally)
 // =============================================================================
 
 interface UserProfileProps {
-  readonly userId: Signal.Signal<number>
+  readonly userId: Signal.Signal<number>;
 }
 
 /**
@@ -169,14 +171,14 @@ interface UserProfileProps {
  * Reads userId signal and fetches user data.
  */
 const UserProfileAsync = Component.gen(function* (Props: ComponentProps<UserProfileProps>) {
-  const { userId } = yield* Props
-  const id = yield* Signal.get(userId)
-  const user = yield* fetchUser(id)
-  return <UserCard user={user} />
-})
+  const { userId } = yield* Props;
+  const id = yield* Signal.get(userId);
+  const user = yield* fetchUser(id);
+  return <UserCard user={user} />;
+});
 
 interface StatsProps {
-  readonly userId: Signal.Signal<number>
+  readonly userId: Signal.Signal<number>;
 }
 
 /**
@@ -184,14 +186,14 @@ interface StatsProps {
  * Reads userId signal and fetches stats data.
  */
 const StatsAsync = Component.gen(function* (Props: ComponentProps<StatsProps>) {
-  const { userId } = yield* Props
-  const id = yield* Signal.get(userId)
-  const stats = yield* fetchStats(id)
-  return <StatsCard stats={stats} />
-})
+  const { userId } = yield* Props;
+  const id = yield* Signal.get(userId);
+  const stats = yield* fetchStats(id);
+  return <StatsCard stats={stats} />;
+});
 
 interface PostsProps {
-  readonly userId: Signal.Signal<number>
+  readonly userId: Signal.Signal<number>;
 }
 
 /**
@@ -199,18 +201,18 @@ interface PostsProps {
  * Reads userId signal and fetches posts data.
  */
 const PostsAsync = Component.gen(function* (Props: ComponentProps<PostsProps>) {
-  const { userId } = yield* Props
-  const id = yield* Signal.get(userId)
-  const posts = yield* fetchPosts(id)
-  return <PostList posts={posts} />
-})
+  const { userId } = yield* Props;
+  const id = yield* Signal.get(userId);
+  const posts = yield* fetchPosts(id);
+  return <PostList posts={posts} />;
+});
 
 // =============================================================================
 // Main Component
 // =============================================================================
 
 const SuspendDemo = Component.gen(function* () {
-  const userId = yield* Signal.make(1)
+  const userId = yield* Signal.make(1);
 
   // Signal.suspend: tracks async state of the Success component
   // - New dep values (never-fetched userId) -> shows Pending (skeleton)
@@ -219,29 +221,27 @@ const SuspendDemo = Component.gen(function* () {
   const SuspendedUserProfile = yield* Signal.suspend(UserProfileAsync, {
     Pending: (stale) => stale ?? <UserSkeleton />,
     Failure: (cause) => <ErrorCard label="User" cause={cause} />,
-    Success: <UserProfileAsync userId={userId} />
-  })
+    Success: <UserProfileAsync userId={userId} />,
+  });
 
   const SuspendedStats = yield* Signal.suspend(StatsAsync, {
     Pending: (stale) => stale ?? <StatsSkeleton />,
     Failure: (cause) => <ErrorCard label="Stats" cause={cause} />,
-    Success: <StatsAsync userId={userId} />
-  })
+    Success: <StatsAsync userId={userId} />,
+  });
 
   const SuspendedPosts = yield* Signal.suspend(PostsAsync, {
     Pending: (stale) => stale ?? <PostsSkeleton />,
     Failure: (cause) => <ErrorCard label="Posts" cause={cause} />,
-    Success: <PostsAsync userId={userId} />
-  })
+    Success: <PostsAsync userId={userId} />,
+  });
 
-  const nextUser = () => Signal.update(userId, (id) => (id % 3) + 1)
+  const nextUser = () => Signal.update(userId, (id) => (id % 3) + 1);
 
   return (
     <div className="example">
       <h2>Suspend</h2>
-      <p className="description">
-        Async component state with Signal.suspend and dep-based caching
-      </p>
+      <p className="description">Async component state with Signal.suspend and dep-based caching</p>
 
       <div className="resource-controls">
         <button onClick={nextUser}>Switch User (ID: {userId})</button>
@@ -289,7 +289,7 @@ const SuspendedProfile = yield* Signal.suspend(UserProfile, {
 return <SuspendedProfile />`}</pre>
       </div>
     </div>
-  )
-})
+  );
+});
 
-export default SuspendDemo
+export default SuspendDemo;

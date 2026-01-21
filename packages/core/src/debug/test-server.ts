@@ -32,8 +32,8 @@
  * Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(Debug.serverLayer({ port: 4567 })))))
  * ```
  */
-import { Schema, Effect, Context, Scope, Runtime } from "effect"
-import type { DebugEvent, EventType } from "./debug.js"
+import { Schema, Effect, Context, Scope, Runtime } from "effect";
+import type { DebugEvent, EventType } from "./debug.js";
 
 // ============================================================================
 // Configuration
@@ -45,13 +45,13 @@ import type { DebugEvent, EventType } from "./debug.js"
  */
 export interface TestServerConfig {
   /** HTTP server port (default: 4567) */
-  readonly port?: number
+  readonly port?: number;
   /** SQLite database path (default: ".effect/debug-events.db") */
-  readonly dbPath?: string
+  readonly dbPath?: string;
   /** Write connection info to this file (default: ".effect/llm-test-server.json") */
-  readonly connectionInfoPath?: string
+  readonly connectionInfoPath?: string;
   /** Keep server running after scope closes, until /shutdown is called (default: false) */
-  readonly keepAlive?: boolean
+  readonly keepAlive?: boolean;
 }
 
 /**
@@ -61,8 +61,8 @@ const defaultConfig: Required<TestServerConfig> = {
   port: 4567,
   dbPath: ".effect/debug-events.db",
   connectionInfoPath: ".effect/llm-test-server.json",
-  keepAlive: false
-}
+  keepAlive: false,
+};
 
 // ============================================================================
 // Schema Definitions
@@ -72,22 +72,22 @@ const defaultConfig: Required<TestServerConfig> = {
  * Log level for filtering events
  * @since 1.0.0
  */
-export type LogLevel = "debug" | "info" | "warn" | "error"
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
  * Stored log event
  * @since 1.0.0
  */
 export interface StoredLogEvent {
-  readonly id: number
-  readonly timestamp: string
-  readonly level: LogLevel
-  readonly eventType: string
-  readonly traceId: string | null
-  readonly spanId: string | null
-  readonly parentSpanId: string | null
-  readonly durationMs: number | null
-  readonly payload: string
+  readonly id: number;
+  readonly timestamp: string;
+  readonly level: LogLevel;
+  readonly eventType: string;
+  readonly traceId: string | null;
+  readonly spanId: string | null;
+  readonly parentSpanId: string | null;
+  readonly durationMs: number | null;
+  readonly payload: string;
 }
 
 /**
@@ -100,32 +100,33 @@ export const QueryOptionsSchema = Schema.Struct({
   traceId: Schema.optional(Schema.String),
   after: Schema.optional(Schema.String),
   before: Schema.optional(Schema.String),
-  limit: Schema.optional(Schema.Number)
-})
+  limit: Schema.optional(Schema.Number),
+});
 
-export type QueryOptions = typeof QueryOptionsSchema.Type
+export type QueryOptions = typeof QueryOptionsSchema.Type;
 
 // ============================================================================
 // Level Derivation
 // ============================================================================
 
 const deriveLevel = (eventType: EventType): LogLevel => {
-  if (eventType.includes("error") || eventType.includes("fail")) return "error"
-  if (eventType.includes("skip") || eventType.includes("timeout")) return "warn"
+  if (eventType.includes("error") || eventType.includes("fail")) return "error";
+  if (eventType.includes("skip") || eventType.includes("timeout")) return "warn";
   if (
     eventType.startsWith("router.navigate") ||
     eventType.startsWith("trace.span") ||
     eventType.includes("complete") ||
     eventType.includes("create")
-  ) return "info"
-  return "debug"
-}
+  )
+    return "info";
+  return "debug";
+};
 
 const isLogLevel = (value: string): value is LogLevel =>
-  value === "debug" || value === "info" || value === "warn" || value === "error"
+  value === "debug" || value === "info" || value === "warn" || value === "error";
 
 const parseLogLevel = (value: string | null): LogLevel | undefined =>
-  value !== null && isLogLevel(value) ? value : undefined
+  value !== null && isLogLevel(value) ? value : undefined;
 
 // ============================================================================
 // SQL Schema
@@ -148,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_events_level ON events(level);
 CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_trace_id ON events(trace_id);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-`
+`;
 
 // ============================================================================
 // TestServer Service
@@ -160,15 +161,15 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
  */
 export interface TestServerService {
   /** Store a debug event */
-  readonly store: (event: DebugEvent) => Effect.Effect<void>
+  readonly store: (event: DebugEvent) => Effect.Effect<void>;
   /** Query events */
-  readonly query: (options: QueryOptions) => Effect.Effect<ReadonlyArray<StoredLogEvent>>
+  readonly query: (options: QueryOptions) => Effect.Effect<ReadonlyArray<StoredLogEvent>>;
   /** Get counts by level */
-  readonly stats: () => Effect.Effect<Record<LogLevel, number>>
+  readonly stats: () => Effect.Effect<Record<LogLevel, number>>;
   /** Server port */
-  readonly port: number
+  readonly port: number;
   /** Server URL */
-  readonly url: string
+  readonly url: string;
 }
 
 /**
@@ -274,7 +275,7 @@ Stop the server. Call this when done querying.
 2. Query /logs?level=error to find errors
 3. Use traceId to correlate related events
 4. Call POST /shutdown when done
-`
+`;
 
 // ============================================================================
 // Internal API (used by Debug.serverLayer)
@@ -286,18 +287,17 @@ Stop the server. Call this when done querying.
  * @internal
  */
 export const startInternal: (
-  config?: TestServerConfig
-) => Effect.Effect<TestServerService, never, Scope.Scope> = Effect.fn(
-  "TestServer.startInternal"
-)(function* (config: TestServerConfig = {}) {
-    const cfg: Required<TestServerConfig> = { ...defaultConfig, ...config }
+  config?: TestServerConfig,
+) => Effect.Effect<TestServerService, never, Scope.Scope> = Effect.fn("TestServer.startInternal")(
+  function* (config: TestServerConfig = {}) {
+    const cfg: Required<TestServerConfig> = { ...defaultConfig, ...config };
 
     // Dynamic import for Bun-specific module
-    const { Database } = yield* Effect.promise(() => import("bun:sqlite"))
+    const { Database } = yield* Effect.promise(() => import("bun:sqlite"));
 
     // Create SQLite database
-    const db = new Database(cfg.dbPath, { create: true })
-    db.run(SQL_SCHEMA)
+    const db = new Database(cfg.dbPath, { create: true });
+    db.run(SQL_SCHEMA);
 
     // Create service implementation
     const server: TestServerService = {
@@ -317,57 +317,59 @@ export const startInternal: (
               event.spanId ?? null,
               event.parentSpanId ?? null,
               event.duration_ms ?? null,
-              JSON.stringify(event)
-            ]
-          )
+              JSON.stringify(event),
+            ],
+          );
         }),
 
       query: (options: QueryOptions) =>
         Effect.sync(() => {
-          const conditions: string[] = []
-          const params: Array<string | number | null> = []
+          const conditions: string[] = [];
+          const params: Array<string | number | null> = [];
 
           if (options.level !== undefined) {
-            conditions.push("level = ?")
-            params.push(options.level)
+            conditions.push("level = ?");
+            params.push(options.level);
           }
           if (options.eventType !== undefined) {
-            conditions.push("(event_type = ? OR event_type LIKE ?)")
-            params.push(options.eventType, options.eventType + ".%")
+            conditions.push("(event_type = ? OR event_type LIKE ?)");
+            params.push(options.eventType, options.eventType + ".%");
           }
           if (options.traceId !== undefined) {
-            conditions.push("trace_id = ?")
-            params.push(options.traceId)
+            conditions.push("trace_id = ?");
+            params.push(options.traceId);
           }
           if (options.after !== undefined) {
-            conditions.push("timestamp > ?")
-            params.push(options.after)
+            conditions.push("timestamp > ?");
+            params.push(options.after);
           }
           if (options.before !== undefined) {
-            conditions.push("timestamp < ?")
-            params.push(options.before)
+            conditions.push("timestamp < ?");
+            params.push(options.before);
           }
 
-          const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
-          const limit = options.limit ?? 1000
+          const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+          const limit = options.limit ?? 1000;
 
-          const rows = db.query(
-            `SELECT id, timestamp, level, event_type, trace_id, span_id, parent_span_id, duration_ms, payload
-             FROM events ${where} ORDER BY timestamp DESC LIMIT ?`
-          ).all(...params, limit) as Array<{
-            id: number
-            timestamp: string
-            level: string
-            event_type: string
-            trace_id: string | null
-            span_id: string | null
-            parent_span_id: string | null
-            duration_ms: number | null
-            payload: string
-          }>
+          const rows = db
+            .query(
+              `SELECT id, timestamp, level, event_type, trace_id, span_id, parent_span_id, duration_ms, payload
+             FROM events ${where} ORDER BY timestamp DESC LIMIT ?`,
+            )
+            .all(...params, limit) as Array<{
+            id: number;
+            timestamp: string;
+            level: string;
+            event_type: string;
+            trace_id: string | null;
+            span_id: string | null;
+            parent_span_id: string | null;
+            duration_ms: number | null;
+            payload: string;
+          }>;
 
           return rows.map((row): StoredLogEvent => {
-            const level = isLogLevel(row.level) ? row.level : "info"
+            const level = isLogLevel(row.level) ? row.level : "info";
             return {
               id: row.id,
               timestamp: row.timestamp,
@@ -377,97 +379,97 @@ export const startInternal: (
               spanId: row.span_id,
               parentSpanId: row.parent_span_id,
               durationMs: row.duration_ms,
-              payload: row.payload
-            }
-          })
+              payload: row.payload,
+            };
+          });
         }),
 
       stats: () =>
         Effect.sync(() => {
-          const rows = db.query(
-            `SELECT level, COUNT(*) as count FROM events GROUP BY level`
-          ).all() as Array<{ level: string; count: number }>
+          const rows = db
+            .query(`SELECT level, COUNT(*) as count FROM events GROUP BY level`)
+            .all() as Array<{ level: string; count: number }>;
 
-          const result: Record<LogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 }
+          const result: Record<LogLevel, number> = { debug: 0, info: 0, warn: 0, error: 0 };
           for (const row of rows) {
             if (isLogLevel(row.level)) {
-              result[row.level] = row.count
+              result[row.level] = row.count;
             }
           }
-          return result
-        })
-    }
+          return result;
+        }),
+    };
 
     // Shutdown state
-    let shutdownCalled = false
+    let shutdownCalled = false;
     const shutdown = () => {
-      if (shutdownCalled) return
-      shutdownCalled = true
-      httpServer.stop()
-      db.close()
+      if (shutdownCalled) return;
+      shutdownCalled = true;
+      httpServer.stop();
+      db.close();
       // eslint-disable-next-line no-console
-      console.log(`[effect-ui] TestServer stopped`)
-    }
+      console.log(`[effect-ui] TestServer stopped`);
+    };
 
     // Start HTTP server using Bun.serve
-    const runtime = yield* Effect.runtime<never>()
+    const runtime = yield* Effect.runtime<never>();
     const httpServer = Bun.serve({
       port: cfg.port,
       fetch(req) {
-        const url = new URL(req.url)
-        const path = url.pathname
+        const url = new URL(req.url);
+        const path = url.pathname;
 
         // GET / - Documentation
         if (path === "/" || path === "") {
           return new Response(llmsTxt(cfg.port), {
-            headers: { "Content-Type": "text/plain; charset=utf-8" }
-          })
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         }
 
         // GET /health
         if (path === "/health") {
-          return Response.json({ status: "ok", port: cfg.port, keepAlive: cfg.keepAlive })
+          return Response.json({ status: "ok", port: cfg.port, keepAlive: cfg.keepAlive });
         }
 
         // GET /logs
         if (path === "/logs") {
-          const limitParam = url.searchParams.get("limit")
+          const limitParam = url.searchParams.get("limit");
           const options: QueryOptions = {
             level: parseLogLevel(url.searchParams.get("level")),
             eventType: url.searchParams.get("eventType") ?? undefined,
             traceId: url.searchParams.get("traceId") ?? undefined,
             after: url.searchParams.get("after") ?? undefined,
             before: url.searchParams.get("before") ?? undefined,
-            limit: limitParam ? Number.parseInt(limitParam, 10) : undefined
-          }
+            limit: limitParam ? Number.parseInt(limitParam, 10) : undefined,
+          };
 
-          const result = Runtime.runSync(runtime)(server.query(options))
-          return Response.json({ events: result, count: result.length })
+          const result = Runtime.runSync(runtime)(server.query(options));
+          return Response.json({ events: result, count: result.length });
         }
 
         // GET /stats
         if (path === "/stats") {
-          const result = Runtime.runSync(runtime)(server.stats())
-          return Response.json(result)
+          const result = Runtime.runSync(runtime)(server.stats());
+          return Response.json(result);
         }
 
         // POST /shutdown - Stop the server (for LLM to call when done)
         if (path === "/shutdown" && req.method === "POST") {
-          shutdown()
-          return Response.json({ status: "shutdown" })
+          shutdown();
+          return Response.json({ status: "shutdown" });
         }
 
-        return new Response("Not Found", { status: 404 })
-      }
-    })
+        return new Response("Not Found", { status: 404 });
+      },
+    });
 
     // Write connection info
     yield* Effect.tryPromise(async () => {
-      const fs = await import("node:fs/promises")
-      const path = await import("node:path")
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
 
-      const dir = path.dirname(cfg.connectionInfoPath)
-      await fs.mkdir(dir, { recursive: true })
+      const dir = path.dirname(cfg.connectionInfoPath);
+      await fs.mkdir(dir, { recursive: true });
 
       await fs.writeFile(
         cfg.connectionInfoPath,
@@ -482,30 +484,31 @@ export const startInternal: (
               logs: "/logs",
               stats: "/stats",
               health: "/health",
-              shutdown: "/shutdown"
-            }
+              shutdown: "/shutdown",
+            },
           },
           null,
-          2
-        )
-      )
-    }).pipe(Effect.catchAll(() => Effect.void))
+          2,
+        ),
+      );
+    }).pipe(Effect.catchAll(() => Effect.void));
 
     // eslint-disable-next-line no-console
-    console.log(`[effect-ui] TestServer running at ${server.url}`)
+    console.log(`[effect-ui] TestServer running at ${server.url}`);
     if (cfg.keepAlive) {
       // eslint-disable-next-line no-console
-      console.log(`[effect-ui] Server will stay alive until POST /shutdown is called`)
+      console.log(`[effect-ui] Server will stay alive until POST /shutdown is called`);
     }
 
     // Register finalizer for cleanup (skipped if keepAlive)
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         if (!cfg.keepAlive) {
-          shutdown()
+          shutdown();
         }
-      })
-    )
+      }),
+    );
 
-    return server
-  })
+    return server;
+  },
+);

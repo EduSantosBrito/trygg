@@ -6,18 +6,18 @@
  * - Signal passed directly to JSX for fine-grained updates
  * - Event handlers that return Effects
  */
-import { Effect } from "effect"
-import { mount, Signal } from "effect-ui"
+import { Effect } from "effect";
+import { mount, Signal } from "effect-ui";
 
 // Counter component using Signal for state
 const Counter = Effect.gen(function* () {
   // Signal.make returns a Signal object
   // Pass it directly to JSX - updates are fine-grained!
-  const count = yield* Signal.make(0)
+  const count = yield* Signal.make(0);
 
   // Event handlers return Effects that update the signal
-  const increment = () => Signal.update(count, (n: number) => n + 1)
-  const decrement = () => Signal.update(count, (n: number) => n - 1)
+  const increment = () => Signal.update(count, (n: number) => n + 1);
+  const decrement = () => Signal.update(count, (n: number) => n - 1);
 
   return (
     <div>
@@ -31,11 +31,11 @@ const Counter = Effect.gen(function* () {
         Edit <code>src/main.tsx</code> to get started.
       </p>
     </div>
-  )
-})
+  );
+});
 
 // Mount the app
-const container = document.getElementById("root")
+const container = document.getElementById("root");
 if (container) {
-  mount(container, Counter)
+  mount(container, Counter);
 }

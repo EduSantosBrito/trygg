@@ -1,12 +1,12 @@
 /**
  * @since 1.0.0
  * Portal component for rendering children into a different DOM container
- * 
+ *
  * Portals allow rendering content into a DOM node that exists outside
  * the hierarchy of the parent component. Useful for modals, tooltips,
  * and overlays.
  */
-import { portal as portalElement, type Element, normalizeChildren } from "../element.js"
+import { portal as portalElement, type Element, normalizeChildren } from "../element.js";
 
 /**
  * Props for the Portal component
@@ -17,21 +17,21 @@ export interface PortalProps {
    * Target container - either an HTMLElement or a CSS selector string.
    * If a string, will be resolved via document.querySelector at render time.
    */
-  readonly target: HTMLElement | string
+  readonly target: HTMLElement | string;
   /**
    * Children to render into the portal target.
    */
-  readonly children: ReadonlyArray<Element> | Element
+  readonly children: ReadonlyArray<Element> | Element;
 }
 
 /**
  * Portal component
- * 
+ *
  * Renders children into a DOM node that exists outside the parent's
  * DOM hierarchy. The children maintain their position in the virtual
  * DOM tree (for context, event bubbling, etc.) but render into the
  * specified target container.
- * 
+ *
  * @example Using a CSS selector
  * ```tsx
  * const Modal = Effect.gen(function* () {
@@ -46,7 +46,7 @@ export interface PortalProps {
  *   })
  * })
  * ```
- * 
+ *
  * @example Using an HTMLElement
  * ```tsx
  * const tooltip = Portal({
@@ -54,15 +54,13 @@ export interface PortalProps {
  *   children: [<div className="tooltip">Tooltip text</div>]
  * })
  * ```
- * 
+ *
  * @since 1.0.0
  */
 export const Portal = (props: PortalProps): Element => {
-  const { target, children } = props
-  
-  const normalizedChildren = Array.isArray(children)
-    ? children
-    : normalizeChildren(children)
-  
-  return portalElement(target, normalizedChildren)
-}
+  const { target, children } = props;
+
+  const normalizedChildren = Array.isArray(children) ? children : normalizeChildren(children);
+
+  return portalElement(target, normalizedChildren);
+};

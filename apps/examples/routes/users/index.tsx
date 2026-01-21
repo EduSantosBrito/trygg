@@ -21,9 +21,7 @@ export default Component.gen(function* () {
   return (
     <div className="users-page">
       <h2>Users</h2>
-      <p>
-        Click on a user to view their profile (demonstrates type-safe routing).
-      </p>
+      <p>Click on a user to view their profile (demonstrates type-safe routing).</p>
 
       <div className="type-safe-demo">
         <h3>Type-Safe Links</h3>
