@@ -28,6 +28,7 @@ import * as Signal from "./signal.js";
 import * as Debug from "./debug/debug.js";
 import * as Metrics from "./debug/metrics.js";
 import * as Router from "./router/index.js";
+import { ResourceRegistryLive } from "./Resource.js";
 import * as SafeUrl from "./security/safe-url.js";
 
 /**
@@ -442,6 +443,7 @@ const renderElement = (
         yield* Debug.log({
           event: "render.intrinsic",
           element_tag: tag,
+          element: node,
         });
 
         // Apply props and get cleanup functions
@@ -1507,8 +1509,8 @@ export const mount = <E>(
   // Normalize to Effect
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
 
-  // Merge Renderer and Router layers - Router is included by default
-  const appLayer = Layer.merge(browserLayer, Router.browserLayer);
+    // Merge Renderer, Router, and ResourceRegistry layers - all included by default
+    const appLayer = Layer.mergeAll(browserLayer, Router.browserLayer, ResourceRegistryLive);
 
   // Dynamic import to avoid bundling platform-browser for non-browser usage
   import("@effect/platform-browser/BrowserRuntime").then(({ runMain }) => {

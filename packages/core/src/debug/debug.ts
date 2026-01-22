@@ -1073,37 +1073,85 @@ const shouldLog = (event: EventType): boolean => {
   return false;
 };
 
-/** Color mapping for event categories */
-const getColor = (event: EventType): string => {
-  if (event.startsWith("signal")) return "#9b59b6"; // purple
-  if (event.startsWith("render.component")) return "#e74c3c"; // red
-  if (event.startsWith("render.signaltext")) return "#27ae60"; // green
-  if (event.startsWith("render.signalelement")) return "#2ecc71"; // bright green (distinct from signaltext)
-  if (event.startsWith("render.intrinsic")) return "#3498db"; // blue
-  if (event.startsWith("render.schedule")) return "#f39c12"; // orange
-  if (event.startsWith("render.keyedlist")) return "#16a085"; // teal
-  if (event.startsWith("router")) return "#e91e63"; // pink
-  if (event.startsWith("trace")) return "#00bcd4"; // cyan
-  return "#95a5a6"; // gray
+// --- Console Formatting ---
+
+const categoryColors: Record<string, { bg: string; fg: string }> = {
+  render: { bg: "#818cf8", fg: "#1e1b4b" },
+  signal: { bg: "#34d399", fg: "#022c22" },
+  resource: { bg: "#fbbf24", fg: "#451a03" },
+  router: { bg: "#a78bfa", fg: "#2e1065" },
+  trace: { bg: "#f472b6", fg: "#500724" },
+};
+
+const badgeStyle = (bg: string, fg: string) =>
+  `background:${bg};color:${fg};padding:1px 5px;border-radius:3px;font-weight:600;font-size:11px`;
+
+const subtypeStyle = "color:#c4b5fd;font-weight:500";
+const dimStyle = "color:#9ca3af;font-weight:400";
+const durationStyle = "color:#67e8f9;font-weight:400";
+const resetStyle = "color:inherit;font-weight:400";
+
+const formatDetails = (event: DebugEvent): string => {
+  const parts: Array<string> = [];
+  const e: Record<string, unknown> = { ...event };
+
+  if ("element_tag" in e) parts.push(`<${e.element_tag}>`);
+  if ("signal_id" in e) parts.push(`${e.signal_id}`);
+  if ("key" in e) parts.push(`key:${e.key}`);
+  if ("accessed_signals" in e) parts.push(`signals:${e.accessed_signals}`);
+  if ("listener_count" in e) parts.push(`listeners:${e.listener_count}`);
+  if ("from_path" in e && "to_path" in e) parts.push(`${e.from_path} → ${e.to_path}`);
+  else if ("path" in e) parts.push(`${e.path}`);
+  if ("route_pattern" in e) parts.push(`${e.route_pattern}`);
+  if ("trigger" in e) parts.push(`trigger:${e.trigger}`);
+  if ("reason" in e) parts.push(`${e.reason}`);
+  if ("value" in e) parts.push(`val:${JSON.stringify(e.value)}`);
+
+  return parts.length > 0 ? parts.join("  ") : "";
+};
+
+const formatEvent = (event: DebugEvent): void => {
+  const dotIdx = event.event.indexOf(".");
+  const category = dotIdx > 0 ? event.event.slice(0, dotIdx) : event.event;
+  const subtype = dotIdx > 0 ? event.event.slice(dotIdx + 1) : "";
+
+  const colors = categoryColors[category] ?? { bg: "#6b7280", fg: "#ffffff" };
+  const details = formatDetails(event);
+  const duration = event.duration_ms !== undefined ? `${event.duration_ms.toFixed(2)}ms` : "";
+
+  const parts = [`%c${category}%c ${subtype}`];
+  const styles: Array<string> = [badgeStyle(colors.bg, colors.fg), subtypeStyle];
+
+  if (details) {
+    parts.push(`%c${details}`);
+    styles.push(dimStyle);
+  }
+  if (duration) {
+    parts.push(`%c${duration}`);
+    styles.push(durationStyle);
+  }
+  // Reset at end
+  parts.push("%c");
+  styles.push(resetStyle);
+
+  // Pass DOM element as trailing arg so browsers show it on hover
+  const e: Record<string, unknown> = { ...event };
+  if (e.element instanceof Element) {
+    console.log(parts.join(" "), ...styles, e.element);
+  } else {
+    console.log(parts.join(" "), ...styles);
+  }
 };
 
 // --- Built-in Plugins ---
 
 /**
- * Console plugin - outputs events to browser console with color coding.
+ * Console plugin - outputs events with color-coded category badges.
+ * Uses %c CSS styling for compact, readable output.
  * This is the default plugin used when no custom plugins are registered.
  * @since 1.0.0
  */
-export const consolePlugin: DebugPlugin = createPlugin("console", (event: DebugEvent) => {
-  const color = getColor(event.event);
-  // eslint-disable-next-line no-console
-  console.log(
-    `%c[effectui]%c ${event.event}`,
-    `color: ${color}; font-weight: bold`,
-    "color: inherit",
-    event,
-  );
-});
+export const consolePlugin: DebugPlugin = createPlugin("console", formatEvent);
 
 /**
  * Create a custom plugin that collects events into an array.
@@ -1125,8 +1173,7 @@ const dispatchToPlugins = (fullEvent: DebugEvent): void => {
         plugin.handle(fullEvent);
       } catch (error) {
         // Isolate plugin errors - one failing plugin shouldn't break others
-        // eslint-disable-next-line no-console
-        console.error(`[effectui] Plugin "${plugin.name}" error:`, error);
+        console.error(`[effect-ui] Plugin "${plugin.name}" error:`, error);
       }
     }
   } else {

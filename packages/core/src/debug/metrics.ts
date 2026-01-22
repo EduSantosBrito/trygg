@@ -21,7 +21,10 @@
  * )
  * ```
  */
+import { createConsola } from "consola";
 import { Effect, Metric, MetricBoundaries, MetricState } from "effect";
+
+const metricsLogger = createConsola({ defaults: { tag: "effectui" } });
 
 // --- Naming Convention ---
 // All metrics use `effectui.` prefix
@@ -273,8 +276,7 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
     yield* sink.export(currentSnapshot).pipe(
       Effect.catchAllCause((cause) =>
         Effect.sync(() => {
-          // eslint-disable-next-line no-console
-          console.error(`[effectui] Metrics sink "${sink.name}" error:`, cause);
+          metricsLogger.error(`Metrics sink "${sink.name}" error:`, cause);
         }),
       ),
     );
@@ -290,8 +292,7 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
  */
 export const consoleSink: MetricsSink = createSink("console", (s) =>
   Effect.sync(() => {
-    // eslint-disable-next-line no-console
-    console.log("[effectui metrics]", {
+    metricsLogger.withTag("metrics").log({
       navigation: s.navigationCount,
       errors: s.routeErrorCount,
       signals: s.signalUpdateCount,

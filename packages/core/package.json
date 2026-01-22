@@ -23,6 +23,7 @@
     "@effect-atom/atom": "^0.4.13",
     "@effect/platform": "^0.94.1",
     "@effect/platform-browser": "^0.74.0",
+    "consola": "^3.4.2",
     "effect": "^3.19.14"
   },
   "devDependencies": {

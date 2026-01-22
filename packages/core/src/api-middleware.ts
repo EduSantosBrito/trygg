@@ -1,95 +1,70 @@
 /**
  * API Middleware for Vite Dev Server
  *
- * Converts Node.js HTTP to Web APIs and routes to Effect HttpApi handlers.
- * Supports streaming request/response bodies for SSR and partial rendering.
+ * Routes `/api/*` requests to Effect HttpApi handlers using Effect's
+ * native Node.js HTTP server utilities.
+ *
+ * Effect-native implementation:
+ * - Data.TaggedError for yieldable errors
+ * - NodeHttpServer.makeHandler for Node-native request handling
+ * - Ref for mutable state
+ * - Scope for resource management
  *
  * @since 1.0.0
  */
-import { HttpApiBuilder, HttpServer } from "@effect/platform";
-import { Layer } from "effect";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { Readable } from "node:stream";
-import type { Connect } from "vite";
+import { HttpApi, HttpApiBuilder, HttpServer } from "@effect/platform"
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import { Data, Effect, Either, Exit, Layer, Option, Ref, Runtime, Schema, Scope } from "effect"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import type { Connect } from "vite"
 
 // =============================================================================
-// Node → Web Request Conversion
+// Error Types - Yieldable via Data.TaggedError
 // =============================================================================
 
 /**
- * Convert Node.js IncomingMessage to Web API Request.
- * Supports streaming request bodies for large payloads.
- *
+ * API middleware initialization error.
+ * Thrown when the API module fails to load or initialize.
  * @since 1.0.0
  */
-export function nodeToWebRequest(req: IncomingMessage, baseUrl: string): Request {
-  const url = new URL(req.url ?? "/", baseUrl);
-
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value !== undefined) {
-      headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-    }
-  }
-
-  // Stream body for non-GET/HEAD requests
-  const method = req.method ?? "GET";
-  const hasBody = !["GET", "HEAD"].includes(method);
-
-  let body: ReadableStream<Uint8Array> | undefined;
-  if (hasBody) {
-    // Convert Node Readable stream to Web ReadableStream
-    body = Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>;
-  }
-
-  return new Request(url, {
-    method,
-    headers,
-    body,
-    // @ts-expect-error - duplex required for streaming request body in Node
-    duplex: hasBody ? "half" : undefined,
-  });
-}
+export class ApiInitError extends Data.TaggedError("ApiInitError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
 // =============================================================================
-// Web Response → Node Conversion
+// Schema for Dynamic Module Validation
 // =============================================================================
 
 /**
- * Stream Web API Response to Node.js ServerResponse.
- * Preserves streaming for efficient large response handling.
- *
- * @since 1.0.0
+ * Schema for validating that a dynamic import's ApiLive export is a Layer.
+ * Uses Layer.isLayer for runtime validation and declares the expected type
+ * (Layer<never>) at compile time. If the user exports a Layer with
+ * unsatisfied requirements, it will fail at runtime when building the runtime.
+ * @internal
  */
-export async function webResponseToNode(webRes: Response, nodeRes: ServerResponse): Promise<void> {
-  nodeRes.statusCode = webRes.status;
-  nodeRes.statusMessage = webRes.statusText;
+const ApiLiveSchema = Schema.declare(
+  (u: unknown): u is Layer.Layer<HttpApi.Api> => Layer.isLayer(u),
+  { identifier: "ApiLive", description: "A Layer providing HttpApi.Api" }
+)
 
-  webRes.headers.forEach((value, key) => {
-    // Skip pseudo-headers that can't be set
-    if (!key.startsWith(":")) {
-      nodeRes.setHeader(key, value);
-    }
-  });
+// =============================================================================
+// Internal State Type
+// =============================================================================
 
-  if (webRes.body) {
-    const reader = webRes.body.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        nodeRes.write(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  nodeRes.end();
+/**
+ * Internal state for API middleware.
+ * Uses Option for nullable fields to avoid null checks.
+ * @internal
+ */
+interface MiddlewareState {
+  readonly handler: Option.Option<(req: IncomingMessage, res: ServerResponse) => void>
+  readonly dispose: Option.Option<Effect.Effect<void>>
+  readonly lastError: Option.Option<unknown>
 }
 
 // =============================================================================
-// API Middleware Factory
+// Public Types
 // =============================================================================
 
 /**
@@ -97,12 +72,10 @@ export async function webResponseToNode(webRes: Response, nodeRes: ServerRespons
  * @since 1.0.0
  */
 export interface ApiMiddlewareOptions {
-  /** Load the API module (called on init and reload) */
-  readonly loadApiModule: () => Promise<{ ApiLive: Layer.Layer<unknown, unknown, unknown> }>;
-  /** Called when handler errors occur */
-  readonly onError: (error: unknown) => void;
-  /** Base URL for request construction (default: http://localhost:5173) */
-  readonly baseUrl?: string;
+  /** Load the API module (called on init and reload). Returns the module record with ApiLive. */
+  readonly loadApiModule: () => Effect.Effect<Record<string, unknown>, ApiInitError>
+  /** Called when handler errors occur (for logging/observation) */
+  readonly onError: (error: unknown) => Effect.Effect<void>
 }
 
 /**
@@ -110,13 +83,162 @@ export interface ApiMiddlewareOptions {
  * @since 1.0.0
  */
 export interface ApiMiddleware {
-  /** Connect middleware function */
-  readonly middleware: Connect.NextHandleFunction;
+  /** Connect middleware function (Vite boundary - must be callback) */
+  readonly middleware: Connect.NextHandleFunction
   /** Reload handlers (call after api.ts changes) */
-  readonly reload: () => Promise<void>;
+  readonly reload: Effect.Effect<void, ApiInitError>
   /** Cleanup resources */
-  readonly dispose: () => Promise<void>;
+  readonly dispose: Effect.Effect<void>
 }
+
+// =============================================================================
+// Internal Helper Effects
+// =============================================================================
+
+/**
+ * Send JSON error response.
+ * @internal
+ */
+const sendErrorResponse = (
+  res: ServerResponse,
+  statusCode: number,
+  error: string,
+  message: string
+): Effect.Effect<void> =>
+  Effect.try({
+    try: () => {
+      res.statusCode = statusCode
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({ error, message }))
+    },
+    catch: () => {
+      // Fallback if JSON.stringify throws (e.g. circular references in message)
+      res.statusCode = statusCode
+      res.setHeader("Content-Type", "text/plain")
+      res.end(error)
+    },
+  }).pipe(Effect.ignore)
+
+/**
+ * Initialize or reinitialize the API handler.
+ * Uses Effect's NodeHttpServer.makeHandler for native Node.js request handling.
+ * @internal
+ */
+const initHandler = (
+  state: Ref.Ref<MiddlewareState>,
+  options: ApiMiddlewareOptions
+): Effect.Effect<void, ApiInitError> =>
+  Effect.gen(function* () {
+    // Dispose previous handler if exists
+    const currentState = yield* Ref.get(state)
+    if (Option.isSome(currentState.dispose)) {
+      yield* currentState.dispose.value.pipe(Effect.ignore)
+    }
+
+    // Load API module
+    const loadResult = yield* options.loadApiModule().pipe(Effect.either)
+
+    // Module failed to load - record error and bail out
+    if (Either.isLeft(loadResult)) {
+      yield* Ref.set(state, {
+        handler: Option.none(),
+        dispose: Option.none(),
+        lastError: Option.some(loadResult.left),
+      })
+      yield* options.onError(loadResult.left)
+      return
+    }
+
+    // Validate ApiLive export exists and is a Layer using Schema
+    const apiLiveResult = yield* Schema.decodeUnknown(ApiLiveSchema)(loadResult.right.ApiLive).pipe(
+      Effect.mapError((cause) => new ApiInitError({
+        message: "API module must export ApiLive as a Layer",
+        cause,
+      })),
+      Effect.either
+    )
+
+    if (Either.isLeft(apiLiveResult)) {
+      yield* Ref.set(state, {
+        handler: Option.none(),
+        dispose: Option.none(),
+        lastError: Option.some(apiLiveResult.left),
+      })
+      yield* options.onError(apiLiveResult.left)
+      return
+    }
+
+    // Build the full layer with API handlers and required services
+    const apiLayer = Layer.mergeAll(
+      apiLiveResult.right,
+      HttpApiBuilder.Router.Live,
+      HttpApiBuilder.Middleware.layer,
+      HttpServer.layerContext
+    )
+
+    // Create a scope for this handler's lifecycle
+    const handlerScope = yield* Scope.make()
+
+    // Build runtime from layer and create handler
+    const handlerResult = yield* Effect.gen(function* () {
+      const runtime = yield* Layer.toRuntime(apiLayer)
+      const httpApp = yield* Effect.provide(HttpApiBuilder.httpApp, runtime)
+      return yield* NodeHttpServer.makeHandler(httpApp).pipe(
+        Effect.provide(runtime)
+      )
+    }).pipe(
+      Scope.extend(handlerScope),
+      Effect.either
+    )
+
+    if (Either.isLeft(handlerResult)) {
+      yield* Scope.close(handlerScope, Exit.fail(handlerResult.left))
+      const error = new ApiInitError({
+        message: "Failed to initialize API handler",
+        cause: handlerResult.left,
+      })
+      yield* Ref.set(state, {
+        handler: Option.none(),
+        dispose: Option.none(),
+        lastError: Option.some(error),
+      })
+      yield* options.onError(error)
+      return
+    }
+
+    yield* Ref.set(state, {
+      handler: Option.some(handlerResult.right),
+      dispose: Option.some(
+        Scope.close(handlerScope, Exit.void).pipe(Effect.ignore)
+      ),
+      lastError: Option.none(),
+    })
+    return
+  })
+
+/**
+ * Dispose middleware resources.
+ * @internal
+ */
+const disposeEffect = (
+  state: Ref.Ref<MiddlewareState>
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const currentState = yield* Ref.get(state)
+    yield* Option.match(currentState.dispose, {
+      onNone: () => Effect.void,
+      onSome: (dispose) => dispose,
+    })
+    yield* Ref.set(state, {
+      handler: Option.none(),
+      dispose: Option.none(),
+      lastError: Option.none(),
+    })
+  })
+
+// =============================================================================
+// Middleware Factory (Effect-native)
+// =============================================================================
 
 /**
  * Create API middleware for Vite dev server.
@@ -124,85 +246,65 @@ export interface ApiMiddleware {
  * Intercepts `/api/*` requests and routes them to Effect HttpApi handlers.
  * Supports hot reloading when api.ts changes.
  *
+ * Uses Effect's NodeHttpServer.makeHandler for native Node.js request handling,
+ * eliminating manual Node.js ↔ Web API conversions.
+ *
  * @since 1.0.0
  */
-export async function createApiMiddleware(options: ApiMiddlewareOptions): Promise<ApiMiddleware> {
-  const { loadApiModule, onError, baseUrl = "http://localhost:5173" } = options;
+export const createApiMiddleware = (
+  options: ApiMiddlewareOptions
+): Effect.Effect<ApiMiddleware, ApiInitError, Scope.Scope> =>
+  Effect.gen(function* () {
+    // Capture runtime for use in middleware callback (Vite boundary)
+    const runtime = yield* Effect.runtime<never>()
 
-  let handler: ((req: Request) => Promise<Response>) | null = null;
-  let disposeHandler: (() => Promise<void>) | null = null;
-  let lastError: unknown = null;
+    // Create state ref
+    const state = yield* Ref.make<MiddlewareState>({
+      handler: Option.none(),
+      dispose: Option.none(),
+      lastError: Option.none(),
+    })
 
-  const initHandler = async (): Promise<void> => {
-    try {
-      const apiModule = await loadApiModule();
+    // Initialize handler
+    yield* initHandler(state, options)
 
-      // Provide HttpServer.layerContext to ApiLive since it needs DefaultServices
-      // Cast to never since we can't know the exact Layer type at compile time
-      const apiLayer = Layer.provide(apiModule.ApiLive, HttpServer.layerContext) as never;
+    // Register cleanup finalizer - Effect executes the returned effect when Scope closes.
+    // No need to yield disposeEffect here; addFinalizer defers execution to scope teardown.
+    yield* Effect.addFinalizer(() => disposeEffect(state))
 
-      const result = HttpApiBuilder.toWebHandler(apiLayer);
+    /**
+     * Connect middleware function.
+     * This is the Vite/Connect boundary where Effect meets non-Effect.
+     * The inner logic is wrapped in an Effect for consistency.
+     */
+    const middleware: Connect.NextHandleFunction = (req, res, next) => {
+      if (!req.url?.startsWith("/api/")) {
+        return next()
+      }
 
-      handler = result.handler;
-      disposeHandler = result.dispose;
-      lastError = null;
-    } catch (error) {
-      handler = null;
-      disposeHandler = null;
-      lastError = error;
-      onError(error);
+      const effect = Effect.gen(function* () {
+        const currentState = yield* Ref.get(state)
+
+        if (Option.isNone(currentState.handler)) {
+          const errorMessage = Option.match(currentState.lastError, {
+            onNone: () => "Check console for errors",
+            onSome: (e) => (e instanceof Error ? e.message : String(e)),
+          })
+          yield* options.onError(new ApiInitError({ message: "Handler not available" }))
+          yield* sendErrorResponse(res, 500, "API handler not available", errorMessage)
+          return
+        }
+
+        // Effect's NodeHttpServer.makeHandler handles all request/response streaming
+        currentState.handler.value(req, res)
+      })
+
+      Runtime.runSync(runtime)(effect)
     }
-  };
 
-  // Initialize on creation
-  await initHandler();
-
-  const middleware: Connect.NextHandleFunction = async (req, res, next) => {
-    // Only handle /api/* requests
-    if (!req.url?.startsWith("/api/")) {
-      return next();
+    return {
+      middleware,
+      reload: initHandler(state, options),
+      dispose: disposeEffect(state),
     }
-
-    // Handler not loaded (error during init)
-    if (!handler) {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          error: "API handler not available",
-          message: lastError instanceof Error ? lastError.message : "Check console for errors",
-        }),
-      );
-      return;
-    }
-
-    try {
-      const webRequest = nodeToWebRequest(req, baseUrl);
-      const webResponse = await handler(webRequest);
-      await webResponseToNode(webResponse, res);
-    } catch (error) {
-      onError(error);
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          error: "Internal Server Error",
-          message: error instanceof Error ? error.message : "Unknown error",
-        }),
-      );
-    }
-  };
-
-  return {
-    middleware,
-    reload: async () => {
-      await disposeHandler?.();
-      await initHandler();
-    },
-    dispose: async () => {
-      await disposeHandler?.();
-      handler = null;
-      disposeHandler = null;
-    },
-  };
-}
+  })

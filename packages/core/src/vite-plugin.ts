@@ -2,8 +2,12 @@
  * @since 1.0.0
  * Vite plugin for effect-ui
  *
- * Configures Vite for effect-ui's JSX runtime and provides
- * file-based routing with automatic layout support.
+ * Fully Effect-native implementation using:
+ * - Data.TaggedError for yieldable errors
+ * - FileSystem service from @effect/platform-node
+ * - Match for exhaustive pattern matching
+ * - Schema for dynamic validation
+ * - Effect.forEach with concurrency for parallel operations
  *
  * @example
  * ```ts
@@ -15,463 +19,747 @@
  *   plugins: [effectUI()]
  * })
  * ```
- *
- * ## App Structure
- *
- * ```
- * app/
- *   api.ts              ← Single API file (exports Api, ApiLive)
- *   layout.tsx          ← Root layout (includes <html>, wraps all routes)
- *   routes/
- *     index.tsx         ← /
- *     users/
- *       index.tsx       ← /users
- *       [id].tsx        ← /users/:id
- *       layout.tsx      ← Nested layout for /users/*
- *     _loading.tsx      ← Loading fallback
- *     _error.tsx        ← Error boundary
- * .effect-ui/           ← Generated (add to .gitignore)
- *   client.ts           ← API client + Resources
- *   routes.d.ts         ← Route type declarations
- *   api.d.ts            ← API type declarations
- *   entry.tsx           ← Auto-generated entry point
- * ```
  */
-import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
-import * as fs from "fs";
-import * as path from "path";
-import { type ApiMiddleware, createApiMiddleware } from "./api-middleware.js";
+import type { Plugin, ResolvedConfig, ViteDevServer } from "vite"
+import { FileSystem } from "@effect/platform"
+import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem"
+import { Array, Data, Effect, Exit, HashMap, Layer, Logger, LogLevel, Match, Option, Runtime, Schema, Scope } from "effect"
+import * as nodePath from "node:path"
+import { ApiInitError, type ApiMiddleware, createApiMiddleware } from "./api-middleware.js"
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const APP_DIR = "app";
-const GENERATED_DIR = ".effect-ui";
+const APP_DIR = "app"
+const GENERATED_DIR = ".effect-ui"
+const SCAN_CONCURRENCY = 10
 
-// Virtual module IDs
-const VIRTUAL_ROUTES_ID = "virtual:effect-ui/routes";
-const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID;
-const VIRTUAL_CLIENT_ID = "virtual:effect-ui/client";
-const RESOLVED_VIRTUAL_CLIENT_ID = "\0" + VIRTUAL_CLIENT_ID;
+const VIRTUAL_ROUTES_ID = "virtual:effect-ui/routes"
+const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID
+const VIRTUAL_CLIENT_ID = "virtual:effect-ui/client"
+const RESOLVED_VIRTUAL_CLIENT_ID = "\0" + VIRTUAL_CLIENT_ID
 
 // =============================================================================
 // Types
 // =============================================================================
 
 /**
+ * Route file type
+ * @since 1.0.0
+ */
+export type RouteFileType = "page" | "layout" | "loading" | "error"
+
+/**
  * Route file info extracted from the file system
- * @internal
+ * @since 1.0.0
  */
 export interface RouteFile {
-  /** Absolute file path */
-  readonly filePath: string;
-  /** Route path pattern (e.g., "/users/:id") */
-  readonly routePath: string;
-  /** Type of route file */
-  readonly type: "page" | "layout" | "loading" | "error";
-  /** Depth in route hierarchy (for sorting) */
-  readonly depth: number;
-}
-
-/**
- * Validation error
- * @internal
- */
-export interface ValidationError {
-  readonly type: "missing_file" | "missing_export" | "route_conflict" | "invalid_structure";
-  readonly message: string;
-  readonly file?: string;
-  readonly details?: string;
+  readonly filePath: string
+  readonly routePath: string
+  readonly type: RouteFileType
+  readonly depth: number
 }
 
 // =============================================================================
-// Logging
-// =============================================================================
-
-const colors = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  yellow: "\x1b[33m",
-  cyan: "\x1b[36m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  dim: "\x1b[2m",
-};
-
-const log = {
-  info: (message: string): void => {
-    console.log(`${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${message}`);
-  },
-  success: (message: string): void => {
-    console.log(
-      `${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${colors.green}${message}${colors.reset}`,
-    );
-  },
-  warn: (message: string): void => {
-    console.warn(
-      `${colors.yellow}${colors.bold}[effect-ui]${colors.reset} ${colors.yellow}${message}${colors.reset}`,
-    );
-  },
-  error: (message: string): void => {
-    console.error(
-      `${colors.red}${colors.bold}[effect-ui]${colors.reset} ${colors.red}${message}${colors.reset}`,
-    );
-  },
-  dim: (message: string): void => {
-    console.log(
-      `${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${colors.dim}${message}${colors.reset}`,
-    );
-  },
-};
-
-// =============================================================================
-// File System Scanning
+// Error Types - Yieldable via Data.TaggedError
 // =============================================================================
 
 /**
- * Scan routes directory and extract route files
+ * Plugin validation error.
+ * @since 1.0.0
+ */
+export class PluginValidationError extends Data.TaggedError("PluginValidationError")<{
+  readonly reason: "MissingFile" | "MissingExport" | "RouteConflict" | "InvalidStructure"
+  readonly message: string
+  readonly file?: string | undefined
+  readonly details?: string | undefined
+}> {
+  static missingFile(file: string, details?: string): PluginValidationError {
+    return new PluginValidationError({
+      reason: "MissingFile",
+      message: `Required file missing: ${file}`,
+      file,
+      details,
+    })
+  }
+
+  static missingExport(file: string, exportName: string): PluginValidationError {
+    return new PluginValidationError({
+      reason: "MissingExport",
+      message: `${file} must export '${exportName}'`,
+      file,
+    })
+  }
+
+  static routeConflict(routePath: string, file: string): PluginValidationError {
+    return new PluginValidationError({
+      reason: "RouteConflict",
+      message: `Route conflict: ${routePath}`,
+      file,
+      details: "Path defined both as page route and API endpoint",
+    })
+  }
+
+  static invalidStructure(message: string, file?: string): PluginValidationError {
+    return new PluginValidationError({
+      reason: "InvalidStructure",
+      message,
+      file,
+    })
+  }
+}
+
+/**
+ * Multiple plugin validation errors.
+ * @since 1.0.0
+ */
+export class PluginValidationErrors extends Data.TaggedError("PluginValidationErrors")<{
+  readonly errors: Array.NonEmptyArray<PluginValidationError>
+}> {
+  override get message(): string {
+    return this.errors.map((e) => {
+      const loc = e.file ? ` (${e.file})` : ""
+      const detail = e.details ? `: ${e.details}` : ""
+      return `${e.message}${loc}${detail}`
+    }).join("\n")
+  }
+}
+
+/**
+ * Plugin file system error.
+ * @since 1.0.0
+ */
+export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemError")<{
+  readonly operation: "read" | "write" | "mkdir" | "exists" | "readdir" | "stat"
+  readonly path: string
+  readonly cause: unknown
+}> {}
+
+/**
+ * Plugin parse error.
+ * @since 1.0.0
+ */
+export class PluginParseError extends Data.TaggedError("PluginParseError")<{
+  readonly message: string
+  readonly input: unknown
+}> {}
+
+// =============================================================================
+// Logging (consola - async reporters, non-blocking I/O)
+// =============================================================================
+
+import { createConsola } from "consola"
+
+const logger = createConsola({ defaults: { tag: "effect-ui" } })
+
+/**
+ * Plugin logger backed by consola.
+ * Consola uses async reporters with buffered process.stdout.write,
+ * so it won't block I/O like raw console.log calls.
  * @internal
  */
-export const scanRoutes = (routesDir: string): RouteFile[] => {
-  const routes: RouteFile[] = [];
+const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
+  const text = String(message)
+  const style = HashMap.get(annotations, "style").pipe(Option.getOrUndefined)
 
-  const scanDir = (dir: string, parentPath: string = "", depth: number = 0): void => {
-    if (!fs.existsSync(dir)) {
-      return;
-    }
+  if (LogLevel.greaterThanEqual(logLevel, LogLevel.Error)) {
+    logger.error(text)
+  } else if (LogLevel.greaterThanEqual(logLevel, LogLevel.Warning)) {
+    logger.warn(text)
+  } else if (style === "success") {
+    logger.success(text)
+  } else if (LogLevel.lessThanEqual(logLevel, LogLevel.Debug)) {
+    logger.debug(text)
+  } else {
+    logger.info(text)
+  }
+})
 
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+/**
+ * Plugin layer combining FileSystem, consola logger, and debug-level minimum.
+ * @internal
+ */
+const PluginLayer = Layer.mergeAll(
+  NodeFileSystemLayer,
+  Logger.replace(Logger.defaultLogger, PluginLogger),
+  Logger.minimumLogLevel(LogLevel.Debug)
+)
 
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-
-      if (entry.isDirectory()) {
-        // Convert [param] syntax in directory names to :param
-        const dirName = entry.name
-          .replace(/^\[\.\.\.(.+)\]$/, "*") // [...rest] -> *
-          .replace(/^\[(.+)\]$/, ":$1"); // [param] -> :param
-        const dirPath = parentPath + "/" + dirName;
-        scanDir(fullPath, dirPath, depth + 1);
-      } else if (entry.isFile() && /\.(tsx|ts|jsx|js)$/.test(entry.name)) {
-        const basename = entry.name.replace(/\.(tsx|ts|jsx|js)$/, "");
-
-        // Determine file type
-        let type: RouteFile["type"];
-        let routePath: string;
-
-        if (basename === "layout" || basename === "_layout") {
-          type = "layout";
-          routePath = parentPath || "/";
-        } else if (basename === "_loading") {
-          type = "loading";
-          routePath = parentPath || "/";
-        } else if (basename === "_error") {
-          type = "error";
-          routePath = parentPath || "/";
-        } else if (basename === "index") {
-          type = "page";
-          routePath = parentPath || "/";
-        } else if (basename.startsWith("_")) {
-          // Skip other underscore-prefixed files
-          continue;
-        } else {
-          type = "page";
-          // Convert [param] to :param and [...rest] to *
-          const segment = basename.replace(/^\[\.\.\.(.+)\]$/, "*").replace(/^\[(.+)\]$/, ":$1");
-          routePath = (parentPath || "") + "/" + segment;
-        }
-
-        routes.push({
-          filePath: fullPath,
-          routePath,
-          type,
-          depth,
-        });
+/**
+ * Log validation errors with details.
+ * @internal
+ */
+const logValidationErrors = (e: PluginValidationErrors): Effect.Effect<void> =>
+  Effect.forEach(e.errors, (error) =>
+    Effect.gen(function* () {
+      yield* Effect.logError(error.message)
+      if (error.details) {
+        yield* Effect.logDebug(`  ${error.details}`)
       }
-    }
-  };
-
-  scanDir(routesDir);
-  return routes;
-};
+    })
+  ).pipe(Effect.asVoid)
 
 /**
- * Extract param names from a route path
+ * Log parse error.
  * @internal
  */
-export const extractParamNames = (routePath: string): string[] => {
-  const params: string[] = [];
-  const segments = routePath.split("/").filter(Boolean);
-
-  for (const segment of segments) {
-    if (segment.startsWith(":")) {
-      params.push(segment.slice(1));
-    }
-  }
-
-  return params;
-};
+const logParseError = (e: PluginParseError): Effect.Effect<void> =>
+  Effect.logError(`Failed to parse module: ${e.message}`)
 
 /**
- * Generate TypeScript type for route params
+ * Log API validation errors (handles both validation and parse errors).
  * @internal
  */
-export const generateParamType = (routePath: string): string => {
-  const params = extractParamNames(routePath);
-  if (params.length === 0) {
-    return "{}";
-  }
-  return `{ ${params.map((p) => `readonly ${p}: string`).join("; ")} }`;
-};
+const logApiValidationError = (e: PluginValidationErrors | PluginParseError): Effect.Effect<void> =>
+  Match.value(e).pipe(
+    Match.tag("PluginValidationErrors", logValidationErrors),
+    Match.tag("PluginParseError", logParseError),
+    Match.exhaustive
+  )
+
+// =============================================================================
+// Schema for API Module Validation
+// =============================================================================
+
+const ApiModuleSchema = Schema.Struct({
+  Api: Schema.optional(Schema.Unknown),
+  api: Schema.optional(Schema.Unknown),
+  ApiLive: Schema.optional(Schema.Unknown),
+})
+
+const ApiGroupsSchema = Schema.Struct({
+  groups: Schema.optional(
+    Schema.Record({
+      key: Schema.String,
+      value: Schema.Struct({
+        endpoints: Schema.optional(
+          Schema.Record({
+            key: Schema.String,
+            value: Schema.Struct({
+              path: Schema.optional(Schema.String),
+            }),
+          })
+        ),
+      }),
+    })
+  ),
+})
+
+// =============================================================================
+// Pure Helper Effects
+// =============================================================================
+
+/**
+ * Convert backslashes to forward slashes for import paths.
+ * @internal
+ */
+const generateImportPath = (filePath: string): Effect.Effect<string> =>
+  Effect.succeed(filePath.replace(/\\/g, "/"))
+
+/**
+ * Extract param names from a route path.
+ * @since 1.0.0
+ */
+export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.gen(function* () {
+    const segments = routePath.split("/").filter(Boolean)
+    return Array.filterMap(segments, (segment) =>
+      segment.startsWith(":") ? Option.some(segment.slice(1)) : Option.none()
+    )
+  })
+
+/**
+ * Generate TypeScript type for route params.
+ * @since 1.0.0
+ */
+export const generateParamType = (routePath: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const params = yield* extractParamNames(routePath)
+    if (params.length === 0) {
+      return "{}"
+    }
+    const fields = params.map((p) => `readonly ${p}: string`)
+    return `{ ${fields.join("; ")} }`
+  })
+
+/**
+ * Convert directory/file name param syntax.
+ * [param] -> :param, [...rest] -> *
+ * @internal
+ */
+const convertParamSyntax = (name: string): Effect.Effect<string> =>
+  Effect.succeed(
+    name.replace(/^\[\.\.\.(.+)\]$/, "*").replace(/^\[(.+)\]$/, ":$1")
+  )
+
+// =============================================================================
+// File System Operations
+// =============================================================================
+
+/**
+ * Check if path exists.
+ * @internal
+ */
+const pathExists = (filePath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    return yield* fs.exists(filePath).pipe(Effect.orElseSucceed(() => false))
+  })
+
+/**
+ * Write file with directory creation.
+ * @internal
+ */
+const writeFileSafe = (
+  filePath: string,
+  content: string
+): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const dir = nodePath.dirname(filePath)
+
+    yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+      Effect.catchTag("SystemError", (e) =>
+        e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e)
+      ),
+      Effect.mapError(
+        (cause) =>
+          new PluginFileSystemError({
+            operation: "mkdir",
+            path: dir,
+            cause,
+          })
+      )
+    )
+
+    yield* fs.writeFileString(filePath, content).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginFileSystemError({
+            operation: "write",
+            path: filePath,
+            cause,
+          })
+      )
+    )
+  })
+
+// =============================================================================
+// Route File Processing
+// =============================================================================
+
+/**
+ * Determine route file type from basename using Match.
+ * @internal
+ */
+const determineRouteType = (
+  basename: string
+): Effect.Effect<Option.Option<{ type: RouteFileType; isIndex: boolean }>> =>
+  Effect.succeed(
+    Match.value(basename).pipe(
+      Match.when(
+        (b) => b === "layout" || b === "_layout",
+        () => Option.some({ type: "layout" as const, isIndex: false })
+      ),
+      Match.when(
+        (b) => b === "_loading",
+        () => Option.some({ type: "loading" as const, isIndex: false })
+      ),
+      Match.when(
+        (b) => b === "_error",
+        () => Option.some({ type: "error" as const, isIndex: false })
+      ),
+      Match.when(
+        (b) => b === "index",
+        () => Option.some({ type: "page" as const, isIndex: true })
+      ),
+      Match.when(
+        (b) => b.startsWith("_"),
+        () => Option.none()
+      ),
+      Match.orElse(() => Option.some({ type: "page" as const, isIndex: false }))
+    )
+  )
+
+/**
+ * Process a single route file and extract route info.
+ * @internal
+ */
+const processRouteFile = (
+  fullPath: string,
+  fileName: string,
+  parentPath: string,
+  depth: number
+): Effect.Effect<Option.Option<RouteFile>> =>
+  Effect.gen(function* () {
+    const basename = fileName.replace(/\.(tsx|ts|jsx|js)$/, "")
+    const typeInfo = yield* determineRouteType(basename)
+
+    if (Option.isNone(typeInfo)) {
+      return Option.none()
+    }
+
+    const { type, isIndex } = typeInfo.value
+
+    const routePath = yield* Effect.gen(function* () {
+      if (type === "layout" || type === "loading" || type === "error" || isIndex) {
+        return parentPath || "/"
+      }
+      const segment = yield* convertParamSyntax(basename)
+      return (parentPath || "") + "/" + segment
+    })
+
+    return Option.some({
+      filePath: fullPath,
+      routePath,
+      type,
+      depth,
+    })
+  })
+
+/**
+ * Recursively scan a directory for route files.
+ * Entry processing is inlined with Match for file type dispatch.
+ * @internal
+ */
+const scanDir = (
+  dir: string,
+  parentPath: string,
+  depth: number
+): Effect.Effect<ReadonlyArray<RouteFile>, PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const entries = yield* fs.readDirectory(dir).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginFileSystemError({
+            operation: "readdir",
+            path: dir,
+            cause,
+          })
+      )
+    )
+
+    const results = yield* Effect.forEach(
+      entries,
+      (entryName) =>
+        Effect.gen(function* () {
+          const fullPath = nodePath.join(dir, entryName)
+          const stat = yield* fs.stat(fullPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PluginFileSystemError({
+                  operation: "stat",
+                  path: fullPath,
+                  cause,
+                })
+            )
+          )
+
+          return yield* Match.value(stat.type).pipe(
+            Match.when("Directory", () =>
+              Effect.gen(function* () {
+                const dirName = yield* convertParamSyntax(entryName)
+                return yield* scanDir(fullPath, parentPath + "/" + dirName, depth + 1)
+              })
+            ),
+            Match.when("File", () =>
+              /\.(tsx|ts|jsx|js)$/.test(entryName)
+                ? processRouteFile(fullPath, entryName, parentPath, depth).pipe(
+                    Effect.map((opt) => Option.isSome(opt) ? [opt.value] : [] as ReadonlyArray<RouteFile>)
+                  )
+                : Effect.succeed([] as ReadonlyArray<RouteFile>)
+            ),
+            Match.orElse(() => Effect.succeed([] as ReadonlyArray<RouteFile>))
+          )
+        }),
+      { concurrency: SCAN_CONCURRENCY }
+    )
+
+    return Array.flatten(results)
+  })
+
+/**
+ * Scan routes directory and extract route files.
+ * Uses Effect.forEach with bounded concurrency for parallel scanning.
+ * @since 1.0.0
+ */
+export const scanRoutes = (
+  routesDir: string
+): Effect.Effect<ReadonlyArray<RouteFile>, PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const exists = yield* pathExists(routesDir)
+    if (!exists) {
+      return []
+    }
+    return yield* scanDir(routesDir, "", 0)
+  })
 
 // =============================================================================
 // Validation
 // =============================================================================
 
 /**
- * Validate app structure
- * @internal
+ * Validate app structure.
+ * @since 1.0.0
  */
-export const validateAppStructure = (appDir: string): ValidationError[] => {
-  const errors: ValidationError[] = [];
+export const validateAppStructure = (
+  appDir: string
+): Effect.Effect<void, PluginValidationErrors, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
 
-  // Check app/layout.tsx exists
-  const layoutPath = path.join(appDir, "layout.tsx");
-  const layoutPathTs = path.join(appDir, "layout.ts");
-  if (!fs.existsSync(layoutPath) && !fs.existsSync(layoutPathTs)) {
-    errors.push({
-      type: "missing_file",
-      message: "Root layout is required",
-      file: layoutPath,
-      details:
-        "Create app/layout.tsx with your root layout component (including <html> and <body>)",
-    });
-  }
+    const layoutPathTsx = nodePath.join(appDir, "layout.tsx")
+    const layoutPathTs = nodePath.join(appDir, "layout.ts")
+    const routesDir = nodePath.join(appDir, "routes")
 
-  // Check app/routes exists
-  const routesDir = path.join(appDir, "routes");
-  if (!fs.existsSync(routesDir)) {
-    errors.push({
-      type: "missing_file",
-      message: "Routes directory is required",
-      file: routesDir,
-      details: "Create app/routes/ directory with your page components",
-    });
-  }
+    const [hasLayoutTsx, hasLayoutTs, hasRoutesDir] = yield* Effect.all([
+      fs.exists(layoutPathTsx).pipe(Effect.orElseSucceed(() => false)),
+      fs.exists(layoutPathTs).pipe(Effect.orElseSucceed(() => false)),
+      fs.exists(routesDir).pipe(Effect.orElseSucceed(() => false)),
+    ])
 
-  return errors;
-};
+    const errors: Array<PluginValidationError> = []
+
+    if (!hasLayoutTsx && !hasLayoutTs) {
+      errors.push(
+        PluginValidationError.missingFile(
+          layoutPathTsx,
+          "Create app/layout.tsx with your root layout component (including <html> and <body>)"
+        )
+      )
+    }
+
+    if (!hasRoutesDir) {
+      errors.push(
+        PluginValidationError.missingFile(
+          routesDir,
+          "Create app/routes/ directory with your page components"
+        )
+      )
+    }
+
+    if (Array.isNonEmptyArray(errors)) {
+      return yield* new PluginValidationErrors({ errors })
+    }
+  })
 
 /**
- * Validate API exports
- * @internal
+ * Validate API exports using Schema.
+ * @since 1.0.0
  */
-export const validateApiExports = async (
+export const validateApiExports = (
   apiPath: string,
-  loadModule: (path: string) => Promise<Record<string, unknown>>,
-): Promise<ValidationError[]> => {
-  const errors: ValidationError[] = [];
-
-  if (!fs.existsSync(apiPath)) {
-    // API is optional
-    return errors;
-  }
-
-  try {
-    const module = await loadModule(apiPath);
-
-    if (!module.Api && !module.api) {
-      errors.push({
-        type: "missing_export",
-        message: "app/api.ts must export 'Api' (HttpApi class)",
-        file: apiPath,
-        details: "Add: export class Api extends HttpApi.make('app').add(...) {}",
-      });
+  loadModule: (path: string) => Effect.Effect<Record<string, unknown>, PluginParseError>
+): Effect.Effect<void, PluginValidationErrors | PluginParseError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const hasApi = yield* pathExists(apiPath)
+    if (!hasApi) {
+      return
     }
 
-    if (!module.ApiLive) {
-      errors.push({
-        type: "missing_export",
-        message: "app/api.ts must export 'ApiLive' (combined handler layer)",
-        file: apiPath,
-        details:
-          "Add: export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide([...handlers]))",
-      });
+    const mod = yield* loadModule(apiPath)
+    const decoded = Schema.decodeUnknownOption(ApiModuleSchema)(mod)
+    if (Option.isNone(decoded)) {
+      return
     }
-  } catch (err) {
-    errors.push({
-      type: "invalid_structure",
-      message: `Failed to load API module: ${err instanceof Error ? err.message : String(err)}`,
-      file: apiPath,
-    });
-  }
 
-  return errors;
-};
+    const errors: Array<PluginValidationError> = []
+    const { Api, api, ApiLive } = decoded.value
+
+    if (Api === undefined && api === undefined) {
+      errors.push(
+        PluginValidationError.missingExport(apiPath, "Api")
+      )
+    }
+
+    if (ApiLive === undefined) {
+      errors.push(
+        PluginValidationError.missingExport(apiPath, "ApiLive")
+      )
+    }
+
+    if (Array.isNonEmptyArray(errors)) {
+      return yield* new PluginValidationErrors({ errors })
+    }
+  })
 
 /**
- * Check for route/API conflicts
- * @internal
+ * Check for route/API conflicts.
+ * @since 1.0.0
  */
-export const checkRouteApiConflicts = async (
-  routes: RouteFile[],
+export const checkRouteApiConflicts = (
+  routes: ReadonlyArray<RouteFile>,
   apiPath: string,
-  loadModule: (path: string) => Promise<Record<string, unknown>>,
-): Promise<ValidationError[]> => {
-  const errors: ValidationError[] = [];
-
-  if (!fs.existsSync(apiPath)) {
-    return errors;
-  }
-
-  try {
-    const module = await loadModule(apiPath);
-    const api = module.Api || module.api;
-
-    if (!api || typeof api !== "function") {
-      return errors;
+  loadModule: (path: string) => Effect.Effect<Record<string, unknown>, PluginParseError>
+): Effect.Effect<void, PluginValidationErrors | PluginParseError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const hasApi = yield* pathExists(apiPath)
+    if (!hasApi) {
+      return
     }
 
-    // Extract API paths from the HttpApi
-    // This is a simplified check - we look at the groups and their prefixes
-    const apiInstance = api as {
-      groups?: Record<string, { endpoints?: Record<string, { path?: string }> }>;
-    };
+    const mod = yield* loadModule(apiPath)
+    const api = mod.Api ?? mod.api
+    if (api === undefined) return
 
-    if (apiInstance.groups) {
-      const apiPaths = new Set<string>();
+    // Schema validates structure; returns None for non-matching shapes
+    const decoded = Schema.decodeUnknownOption(ApiGroupsSchema)(api)
+    if (Option.isNone(decoded)) return
+    const { groups } = decoded.value
+    if (groups === undefined) return
 
-      for (const group of Object.values(apiInstance.groups)) {
-        if (group.endpoints) {
-          for (const endpoint of Object.values(group.endpoints)) {
-            if (endpoint.path) {
-              // Normalize path for comparison
-              const normalizedPath = endpoint.path.replace(/:\w+/g, ":param");
-              apiPaths.add(normalizedPath);
-            }
-          }
-        }
+    // Collect all API endpoint paths (normalized) using declarative operations
+    const apiPaths = new Set(
+      Object.values(groups).flatMap((group) =>
+        group.endpoints
+          ? Array.filterMap(Object.values(group.endpoints), (ep) =>
+              ep.path !== undefined
+                ? Option.some(ep.path.replace(/:\w+/g, ":param"))
+                : Option.none()
+            )
+          : []
+      )
+    )
+
+    const errors = Array.filterMap(
+      Array.filter(routes, (r) => r.type === "page"),
+      (route) => {
+        const normalized = route.routePath.replace(/:\w+/g, ":param")
+        return apiPaths.has(normalized)
+          ? Option.some(PluginValidationError.routeConflict(route.routePath, route.filePath))
+          : Option.none()
       }
+    )
 
-      // Check for conflicts with page routes
-      for (const route of routes) {
-        if (route.type !== "page") continue;
-
-        const normalizedRoutePath = route.routePath.replace(/:\w+/g, ":param");
-        if (apiPaths.has(normalizedRoutePath)) {
-          errors.push({
-            type: "route_conflict",
-            message: `Route conflict: ${route.routePath}`,
-            file: route.filePath,
-            details: `This path is defined both as a page route and an API endpoint`,
-          });
-        }
-      }
+    if (Array.isNonEmptyArray(errors)) {
+      return yield* new PluginValidationErrors({ errors })
     }
-  } catch {
-    // Ignore errors here - API validation handles them
-  }
-
-  return errors;
-};
+  })
 
 // =============================================================================
 // Code Generation
 // =============================================================================
 
 /**
- * Generate import path for a file
+ * Find the most specific special file for a route.
  * @internal
  */
-const generateImportPath = (filePath: string): string => {
-  return filePath.replace(/\\/g, "/");
-};
+const findSpecialFile = (
+  routePath: string,
+  specialRoutes: ReadonlyArray<RouteFile>
+): Effect.Effect<Option.Option<RouteFile>> =>
+  Effect.gen(function* () {
+    // Sort by depth descending to find most specific first
+    const sorted = [...specialRoutes].sort((a, b) => b.depth - a.depth)
+
+    return Array.findFirst(sorted, (special) => {
+      if (special.routePath === "/") {
+        return true
+      }
+      return routePath === special.routePath || routePath.startsWith(special.routePath + "/")
+    })
+  })
 
 /**
- * Generate routes module
+ * Generate a single route entry.
  * @internal
  */
-export const generateRoutesModule = (routes: RouteFile[], routesDir: string): string => {
-  const pageRoutes = routes.filter((r) => r.type === "page");
-  const layoutRoutes = routes.filter((r) => r.type === "layout");
-  const loadingRoutes = routes.filter((r) => r.type === "loading");
-  const errorRoutes = routes.filter((r) => r.type === "error");
+const generateRouteEntry = (
+  route: RouteFile,
+  layoutRoutes: ReadonlyArray<RouteFile>,
+  loadingRoutes: ReadonlyArray<RouteFile>,
+  errorRoutes: ReadonlyArray<RouteFile>
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const importPath = yield* generateImportPath(route.filePath)
+    const layout = yield* findSpecialFile(route.routePath, layoutRoutes)
+    const loading = yield* findSpecialFile(route.routePath, loadingRoutes)
+    const error = yield* findSpecialFile(route.routePath, errorRoutes)
 
-  // Find the most specific special file for a route
-  const findSpecialFile = (
-    routePath: string,
-    specialRoutes: RouteFile[],
-  ): RouteFile | undefined => {
-    // Sort by depth descending to find most specific first
-    const sorted = [...specialRoutes].sort((a, b) => b.depth - a.depth);
+    const parts: string[] = [
+      `  {`,
+      `    path: "${route.routePath}",`,
+      `    component: () => import("${importPath}")`,
+    ]
 
-    for (const special of sorted) {
-      // Root layout/loading/error matches all routes
-      if (special.routePath === "/") {
-        return special;
-      }
-      if (routePath === special.routePath || routePath.startsWith(special.routePath + "/")) {
-        return special;
-      }
-    }
-    return undefined;
-  };
+    // Guard uses the same module as the component - runtime checks for guard export
+    parts.push(`,\n    guard: () => import("${importPath}")`)
 
-  const routeEntries = pageRoutes.map((route) => {
-    const importPath = generateImportPath(route.filePath);
-    const layout = findSpecialFile(route.routePath, layoutRoutes);
-    const loading = findSpecialFile(route.routePath, loadingRoutes);
-    const error = findSpecialFile(route.routePath, errorRoutes);
-
-    let entry = `  {
-    path: "${route.routePath}",
-    component: () => import("${importPath}")`;
-
-    if (layout) {
-      entry += `,
-    layout: () => import("${generateImportPath(layout.filePath)}")`;
+    if (Option.isSome(layout)) {
+      const layoutPath = yield* generateImportPath(layout.value.filePath)
+      parts.push(`,\n    layout: () => import("${layoutPath}")`)
     }
 
-    if (loading) {
-      entry += `,
-    loadingComponent: () => import("${generateImportPath(loading.filePath)}")`;
+    if (Option.isSome(loading)) {
+      const loadingPath = yield* generateImportPath(loading.value.filePath)
+      parts.push(`,\n    loadingComponent: () => import("${loadingPath}")`)
     }
 
-    if (error) {
-      entry += `,
-    errorComponent: () => import("${generateImportPath(error.filePath)}")`;
+    if (Option.isSome(error)) {
+      const errorPath = yield* generateImportPath(error.value.filePath)
+      parts.push(`,\n    errorComponent: () => import("${errorPath}")`)
     }
 
-    entry += `
-  }`;
-    return entry;
-  });
+    parts.push(`\n  }`)
+    return parts.join("")
+  })
 
-  return `// Auto-generated by effect-ui
+/**
+ * Generate routes module.
+ * @since 1.0.0
+ */
+export const generateRoutesModule = (
+  routes: ReadonlyArray<RouteFile>,
+  routesDir: string
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const pageRoutes = Array.filter(routes, (r) => r.type === "page")
+    const layoutRoutes = Array.filter(routes, (r) => r.type === "layout")
+    const loadingRoutes = Array.filter(routes, (r) => r.type === "loading")
+    const errorRoutes = Array.filter(routes, (r) => r.type === "error")
+
+    const routeEntries = yield* Effect.forEach(
+      pageRoutes,
+      (route) => generateRouteEntry(route, layoutRoutes, loadingRoutes, errorRoutes),
+      { concurrency: SCAN_CONCURRENCY }
+    )
+
+    // Template literals are the standard approach for code generation in the Effect ecosystem
+    // (see @effect/cli shell completions, effect/scripts for precedent)
+    return `// Auto-generated by effect-ui
 // Routes from: ${routesDir}
 
 export const routes = [
-${routeEntries.join(",\n")}
+${Array.join(routeEntries, ",\n")}
 ];
 
 export default routes;
-`;
-};
+`
+  })
 
 /**
- * Generate route type declarations
- * @internal
+ * Generate route type declarations.
+ * @since 1.0.0
  */
-export const generateRouteTypes = (routes: RouteFile[]): string => {
-  const pageRoutes = routes.filter((r) => r.type === "page");
+export const generateRouteTypes = (
+  routes: ReadonlyArray<RouteFile>
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const pageRoutes = Array.filter(routes, (r) => r.type === "page")
 
-  const mapEntries = pageRoutes.map((route) => {
-    const paramType = generateParamType(route.routePath);
-    return `    readonly "${route.routePath}": ${paramType}`;
-  });
+    const mapEntries = yield* Effect.forEach(
+      pageRoutes,
+      (route) =>
+        Effect.gen(function* () {
+          const paramType = yield* generateParamType(route.routePath)
+          return `    readonly "${route.routePath}": ${paramType}`
+        }),
+      { concurrency: SCAN_CONCURRENCY }
+    )
 
-  return `// Auto-generated by effect-ui
+    return `// Auto-generated by effect-ui
 // DO NOT EDIT - This file is regenerated when routes change
 
 declare module "virtual:effect-ui/routes" {
@@ -487,24 +775,27 @@ declare module "virtual:effect-ui/routes" {
 
 declare module "effect-ui/router" {
   interface RouteMap {
-${mapEntries.join("\n")}
+${Array.join(mapEntries, "\n")}
   }
 }
 
 export {}
-`;
-};
+`
+  })
 
 /**
- * Generate API type declarations
- * @internal
+ * Generate API type declarations.
+ * @since 1.0.0
  */
-export const generateApiTypes = (appDir: string): string => {
-  const apiPath = path.join(appDir, "api.ts");
-  const hasApi = fs.existsSync(apiPath);
+export const generateApiTypes = (
+  appDir: string
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const apiPath = nodePath.join(appDir, "api.ts")
+    const hasApi = yield* pathExists(apiPath)
 
-  if (!hasApi) {
-    return `// Auto-generated by effect-ui
+    if (!hasApi) {
+      return `// Auto-generated by effect-ui
 // No API file found at app/api.ts
 
 declare module "virtual:effect-ui/client" {
@@ -513,49 +804,56 @@ declare module "virtual:effect-ui/client" {
 }
 
 export {}
-`;
-  }
+`
+    }
 
-  const relativePath =
-    "./" + path.relative(path.dirname(apiPath), apiPath).replace(/\\/g, "/").replace(/\.ts$/, "");
+    const relativePath =
+      "./" +
+      nodePath
+        .relative(nodePath.dirname(apiPath), apiPath)
+        .replace(/\\/g, "/")
+        .replace(/\.ts$/, "")
 
-  return `// Auto-generated by effect-ui
+    return `// Auto-generated by effect-ui
 // DO NOT EDIT - This file is regenerated when API changes
 
 declare module "virtual:effect-ui/client" {
   import type { HttpApiClient } from "@effect/platform"
   import type { Api } from "${relativePath}"
-  
+
   export const client: ReturnType<typeof HttpApiClient.make<typeof Api>>
-  
+
   // TODO: Generate typed resources
   export const resources: Record<string, unknown>
 }
 
 export {}
-`;
-};
+`
+  })
 
 /**
- * Generate client module
- * @internal
+ * Generate client module.
+ * @since 1.0.0
  */
-export const generateClientModule = (appDir: string): string => {
-  const apiPath = path.join(appDir, "api.ts");
-  const hasApi = fs.existsSync(apiPath);
+export const generateClientModule = (
+  appDir: string
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const apiPath = nodePath.join(appDir, "api.ts")
+    const hasApi = yield* pathExists(apiPath)
 
-  if (!hasApi) {
-    return `// Auto-generated by effect-ui
+    if (!hasApi) {
+      return `// Auto-generated by effect-ui
 // No API file found
 
 export const client = undefined;
 export const resources = {};
-`;
-  }
+`
+    }
 
-  const importPath = generateImportPath(apiPath);
+    const importPath = yield* generateImportPath(apiPath)
 
-  return `// Auto-generated by effect-ui
+    return `// Auto-generated by effect-ui
 import { HttpApiClient } from "@effect/platform";
 import { Api } from "${importPath}";
 
@@ -563,18 +861,21 @@ export const client = HttpApiClient.make(Api, { baseUrl: "" });
 
 // TODO: Generate typed resources with cache keys
 export const resources = {};
-`;
-};
+`
+  })
 
 /**
- * Generate entry module (physical file)
- * @internal
+ * Generate entry module.
+ * @since 1.0.0
  */
-export const generateEntryModule = (appDir: string, generatedDir: string): string => {
-  // Use relative path from .effect-ui/ to app/
-  const relativeAppDir = path.relative(generatedDir, appDir).replace(/\\/g, "/");
+export const generateEntryModule = (
+  appDir: string,
+  generatedDir: string
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const relativeAppDir = nodePath.relative(generatedDir, appDir).replace(/\\/g, "/")
 
-  return `// Auto-generated by effect-ui - DO NOT EDIT
+    return `// Auto-generated by effect-ui - DO NOT EDIT
 import { mount, Component } from "effect-ui"
 import * as Router from "effect-ui/router"
 import { routes } from "virtual:effect-ui/routes"
@@ -589,18 +890,20 @@ const container = document.getElementById("root")
 if (container) {
   mount(container, <App />)
 }
-`;
-};
+`
+  })
 
 /**
- * Generate HTML template (replaces index.html)
- * @internal
+ * Generate HTML template.
+ * @since 1.0.0
  */
-export const generateHtmlTemplate = (generatedDir: string): string => {
-  const entryPath = path
-    .relative(process.cwd(), path.join(generatedDir, "entry.tsx"))
-    .replace(/\\/g, "/");
-  return `<!DOCTYPE html>
+export const generateHtmlTemplate = (generatedDir: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const entryPath = nodePath
+      .relative(process.cwd(), nodePath.join(generatedDir, "entry.tsx"))
+      .replace(/\\/g, "/")
+
+    return `<!DOCTYPE html>
 <html>
   <head>
     <meta charset="UTF-8" />
@@ -611,8 +914,8 @@ export const generateHtmlTemplate = (generatedDir: string): string => {
     <div id="root"></div>
     <script type="module" src="/${entryPath}"></script>
   </body>
-</html>`;
-};
+</html>`
+  })
 
 // =============================================================================
 // Plugin
@@ -628,13 +931,53 @@ export const generateHtmlTemplate = (generatedDir: string): string => {
  * - API handling from app/api.ts
  * - Auto-generated entry point
  *
+ * --- Effect Service Design (future refactor) ---
+ *
+ * The plugin could be modeled as an Effect Service for better testability
+ * and composition. The mutable `let` bindings would become Ref state inside
+ * a service scope:
+ *
+ * ```ts
+ * class PluginConfig extends Context.Tag("PluginConfig")<PluginConfig, {
+ *   readonly appDir: string
+ *   readonly routesDir: string
+ *   readonly generatedDir: string
+ *   readonly viteConfig: ResolvedConfig
+ * }>() {}
+ *
+ * class PluginService extends Context.Tag("PluginService")<PluginService, {
+ *   readonly scanAndGenerate: Effect.Effect<void, PluginFileSystemError>
+ *   readonly reload: Effect.Effect<void, ApiInitError>
+ * }>() {}
+ *
+ * const PluginServiceLive = Layer.effect(PluginService,
+ *   Effect.gen(function* () {
+ *     const config = yield* PluginConfig
+ *     const fs = yield* FileSystem.FileSystem
+ *     // ... build service methods using config and fs
+ *     return { scanAndGenerate: ..., reload: ... }
+ *   })
+ * )
+ *
+ * // Plugin factory becomes a thin wrapper:
+ * export const effectUI = (): Plugin => {
+ *   const runtime = Effect.runSync(
+ *     Layer.toRuntime(Layer.mergeAll(PluginServiceLive, PluginLayer))
+ *   )
+ *   return { name: "effect-ui", configureServer: (server) => ... }
+ * }
+ * ```
+ *
+ * Benefits: testable without Vite, composable layers, no mutable state.
+ * Deferred until plugin API stabilizes.
+ *
  * @since 1.0.0
  */
 export const effectUI = (): Plugin => {
-  let config: ResolvedConfig;
-  let appDir: string;
-  let routesDir: string;
-  let generatedDir: string;
+  let config: ResolvedConfig
+  let appDir: string
+  let routesDir: string
+  let generatedDir: string
 
   return {
     name: "effect-ui",
@@ -653,191 +996,236 @@ export const effectUI = (): Plugin => {
             jsxImportSource: "effect-ui",
           },
         },
-      };
+      }
     },
 
-    configResolved(resolvedConfig) {
-      config = resolvedConfig;
-      appDir = path.resolve(config.root, APP_DIR);
-      routesDir = path.join(appDir, "routes");
-      generatedDir = path.resolve(config.root, GENERATED_DIR);
+    async configResolved(resolvedConfig) {
+      config = resolvedConfig
+      appDir = nodePath.resolve(config.root, APP_DIR)
+      routesDir = nodePath.join(appDir, "routes")
+      generatedDir = nodePath.resolve(config.root, GENERATED_DIR)
 
-      // Ensure generated directory exists
-      if (!fs.existsSync(generatedDir)) {
-        fs.mkdirSync(generatedDir, { recursive: true });
-      }
-
-      // Log configuration
-      log.info("effect-ui configured");
-      log.dim(`  App directory: ${appDir}`);
-      log.dim(`  Routes directory: ${routesDir}`);
-      log.dim(`  Generated directory: ${generatedDir}`);
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          yield* fs.makeDirectory(generatedDir, { recursive: true }).pipe(
+            Effect.catchTag("SystemError", (e) =>
+              e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e)
+            ),
+            Effect.mapError(
+              (cause) =>
+                new PluginFileSystemError({
+                  operation: "mkdir",
+                  path: generatedDir,
+                  cause,
+                })
+            )
+          )
+          yield* Effect.logInfo("effect-ui configured")
+          yield* Effect.logDebug(`  App directory: ${appDir}`)
+          yield* Effect.logDebug(`  Routes directory: ${routesDir}`)
+          yield* Effect.logDebug(`  Generated directory: ${generatedDir}`)
+        }).pipe(Effect.provide(PluginLayer))
+      )
     },
 
     async configureServer(server: ViteDevServer) {
-      // Validate app structure on startup
-      const structureErrors = validateAppStructure(appDir);
-      for (const error of structureErrors) {
-        log.error(`${error.message}`);
-        if (error.details) {
-          log.dim(`  ${error.details}`);
+      const effect = Effect.gen(function* () {
+        // Extract runtime for use in non-Effect callbacks (Vite boundary)
+        const runtime = yield* Effect.runtime<FileSystem.FileSystem>()
+        const runPromise = Runtime.runPromise(runtime)
+
+        const routeTypesPath = nodePath.join(generatedDir, "routes.d.ts")
+        const apiTypesPath = nodePath.join(generatedDir, "api.d.ts")
+        const entryPath = nodePath.join(generatedDir, "entry.tsx")
+        const apiPath = nodePath.join(appDir, "api.ts")
+
+        // Effect-based module loader for validation
+        const loadModule = (path: string) =>
+          Effect.tryPromise({
+            try: () => server.ssrLoadModule(path),
+            catch: (err) => new PluginParseError({ message: String(err), input: path }),
+          })
+
+        yield* validateAppStructure(appDir).pipe(
+          Effect.tapError(logValidationErrors)
+        )
+
+        const routes = yield* scanRoutes(routesDir)
+
+        // Validate API exports and check for route conflicts
+        yield* validateApiExports(apiPath, loadModule).pipe(
+          Effect.tapError(logApiValidationError)
+        )
+
+        yield* checkRouteApiConflicts(routes, apiPath, loadModule).pipe(
+          Effect.tapError(logApiValidationError)
+        )
+
+        const routeTypesContent = yield* generateRouteTypes(routes)
+        yield* writeFileSafe(routeTypesPath, routeTypesContent)
+
+        const apiTypesContent = yield* generateApiTypes(appDir)
+        yield* writeFileSafe(apiTypesPath, apiTypesContent)
+
+        const entryContent = yield* generateEntryModule(appDir, generatedDir)
+        yield* writeFileSafe(entryPath, entryContent)
+
+        yield* Effect.logInfo(`Generated files in ${GENERATED_DIR}/`).pipe(Effect.annotateLogs("style", "success"))
+
+
+        let apiMiddleware: Option.Option<ApiMiddleware> = Option.none()
+        let apiScope: Option.Option<Scope.CloseableScope> = Option.none()
+        const hasApi = yield* pathExists(apiPath)
+
+        if (hasApi) {
+          // Create scope for middleware lifecycle
+          const scope = yield* Scope.make()
+
+          // Create middleware with scope - use Scope.extend to bind finalizers to scope
+          const mw = yield* Scope.extend(
+            createApiMiddleware({
+              // Use Effect-based loadModule with error mapping
+              loadApiModule: () =>
+                loadModule(apiPath).pipe(
+                  Effect.mapError((err) =>
+                    new ApiInitError({
+                      message: "Failed to load API module",
+                      cause: err,
+                    })
+                  )
+                ),
+              onError: (error) =>
+                Effect.logError(`API handler error: ${error}`),
+            }),
+            scope
+          )
+
+          apiMiddleware = Option.some(mw)
+          apiScope = Option.some(scope)
+
+          yield* Effect.logInfo("API handlers loaded").pipe(Effect.annotateLogs("style", "success"))
         }
-      }
 
-      if (structureErrors.length > 0) {
-        log.warn("Fix the above errors to continue");
-      }
-
-      // Generate type files and entry
-      const routes = fs.existsSync(routesDir) ? scanRoutes(routesDir) : [];
-
-      // Write routes.d.ts
-      const routeTypesPath = path.join(generatedDir, "routes.d.ts");
-      fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
-
-      // Write api.d.ts
-      const apiTypesPath = path.join(generatedDir, "api.d.ts");
-      fs.writeFileSync(apiTypesPath, generateApiTypes(appDir));
-
-      // Write entry.tsx (auto-generated app entry point)
-      const entryPath = path.join(generatedDir, "entry.tsx");
-      fs.writeFileSync(entryPath, generateEntryModule(appDir, generatedDir));
-
-      log.success(`Generated files in ${GENERATED_DIR}/`);
-
-      // Initialize API middleware if api.ts exists
-      const apiPath = path.join(appDir, "api.ts");
-      let apiMiddleware: ApiMiddleware | null = null;
-
-      if (fs.existsSync(apiPath)) {
-        const serverPort = server.config.server.port ?? 5173;
-        apiMiddleware = await createApiMiddleware({
-          loadApiModule: async () => {
-            // Use Vite's SSR module loader for HMR support
-            const mod = await server.ssrLoadModule(apiPath);
-            if (!mod.ApiLive) {
-              throw new Error("api.ts must export ApiLive");
+        // Vite boundary: file watcher callbacks use extracted runtime
+        server.watcher.on("change", async (file) => {
+          await runPromise(Effect.gen(function* () {
+            if (file.startsWith(routesDir)) {
+              const routes = yield* scanRoutes(routesDir)
+              const content = yield* generateRouteTypes(routes)
+              yield* writeFileSafe(routeTypesPath, content)
+              yield* Effect.logDebug("Regenerated routes.d.ts")
             }
-            return mod as { ApiLive: never };
-          },
-          onError: (error) => {
-            log.error("API handler error:");
-            console.error(error);
-          },
-          baseUrl: `http://localhost:${serverPort}`,
-        });
-        log.success("API handlers loaded");
-      }
 
-      // Watch for changes
-      server.watcher.on("change", async (file) => {
-        if (file.startsWith(routesDir)) {
-          const routes = scanRoutes(routesDir);
-          fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
-          log.dim("Regenerated routes.d.ts");
-        }
-        if (file.endsWith("api.ts")) {
-          fs.writeFileSync(apiTypesPath, generateApiTypes(appDir));
-          log.dim("Regenerated api.d.ts");
+            if (file.endsWith("api.ts")) {
+              const content = yield* generateApiTypes(appDir)
+              yield* writeFileSafe(apiTypesPath, content)
+              yield* Effect.logDebug("Regenerated api.d.ts")
 
-          // Reload API handlers
-          if (apiMiddleware) {
-            await apiMiddleware.reload();
-            log.dim("Reloaded API handlers");
+              if (Option.isSome(apiMiddleware)) {
+                yield* apiMiddleware.value.reload
+                yield* Effect.logDebug("Reloaded API handlers")
+              }
+            }
+          }))
+        })
+
+        server.watcher.on("add", async (file) => {
+          await runPromise(Effect.gen(function* () {
+            if (!file.startsWith(routesDir)) {
+              return
+            }
+            const routes = yield* scanRoutes(routesDir)
+            const content = yield* generateRouteTypes(routes)
+            yield* writeFileSafe(routeTypesPath, content)
+            yield* Effect.logDebug("Regenerated routes.d.ts")
+          }))
+        })
+
+        // Vite boundary: close scope when server closes (triggers finalizer)
+        server.httpServer?.on("close", () => {
+          if (Option.isSome(apiScope)) {
+            runPromise(Scope.close(apiScope.value, Exit.void))
           }
+        })
+
+        if (Option.isSome(apiMiddleware)) {
+          server.middlewares.use(apiMiddleware.value.middleware)
         }
-      });
 
-      // Add file creation handler
-      server.watcher.on("add", (file) => {
-        if (file.startsWith(routesDir)) {
-          const routes = scanRoutes(routesDir);
-          fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
-          log.dim("Regenerated routes.d.ts");
+        return () => {
+          server.middlewares.use((req, res, next) => {
+            if (req.url && !req.url.includes(".") && req.method === "GET") {
+              req.url = "/index.html"
+            }
+            next()
+          })
         }
-      });
+      }).pipe(Effect.provide(PluginLayer))
 
-      // Cleanup on server close
-      server.httpServer?.on("close", () => {
-        apiMiddleware?.dispose();
-      });
-
-      // Add API middleware BEFORE Vite's internal middleware
-      // This ensures /api/* requests are handled before Vite serves HTML
-      if (apiMiddleware) {
-        server.middlewares.use(apiMiddleware.middleware);
-      }
-
-      // Return post hook - runs after Vite's internal middleware
-      return () => {
-        // SPA fallback - serve HTML for all non-asset routes
-        server.middlewares.use((req, res, next) => {
-          if (req.url && !req.url.includes(".") && req.method === "GET") {
-            // Let Vite handle transforming our virtual HTML
-            req.url = "/index.html";
-          }
-          next();
-        });
-      };
+      return await Effect.runPromise(effect)
     },
 
     resolveId(id) {
-      if (id === VIRTUAL_ROUTES_ID) {
-        return RESOLVED_VIRTUAL_ROUTES_ID;
-      }
-      if (id === VIRTUAL_CLIENT_ID) {
-        return RESOLVED_VIRTUAL_CLIENT_ID;
-      }
-      // Handle jsx-runtime
-      if (id === "effect-ui/jsx-runtime" || id === "effect-ui/jsx-dev-runtime") {
-        return null; // Let Vite resolve from node_modules
-      }
-      return null;
-    },
-
-    load(id) {
-      if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
-        const routes = fs.existsSync(routesDir) ? scanRoutes(routesDir) : [];
-        return generateRoutesModule(routes, routesDir);
-      }
-      if (id === RESOLVED_VIRTUAL_CLIENT_ID) {
-        return generateClientModule(appDir);
-      }
-      return null;
-    },
-
-    // Provide fallback index.html
-    buildStart() {
-      // Generate entry.tsx if needed
-      const entryPath = path.join(generatedDir, "entry.tsx");
-      if (!fs.existsSync(entryPath)) {
-        fs.writeFileSync(entryPath, generateEntryModule(appDir, generatedDir));
-      }
-
-      // Generate index.html if it doesn't exist
-      const indexPath = path.join(config.root, "index.html");
-      if (!fs.existsSync(indexPath)) {
-        fs.writeFileSync(indexPath, generateHtmlTemplate(generatedDir));
-        log.success("Generated index.html");
-      }
-    },
-
-    // Validate on build
-    async buildEnd() {
-      // Validate app structure
-      const structureErrors = validateAppStructure(appDir);
-      if (structureErrors.length > 0) {
-        for (const error of structureErrors) {
-          log.error(`${error.message}`);
-          if (error.details) {
-            log.dim(`  ${error.details}`);
-          }
+      const effect = Effect.gen(function* () {
+        if (id === VIRTUAL_ROUTES_ID) {
+          return RESOLVED_VIRTUAL_ROUTES_ID
         }
-        throw new Error("Build failed due to app structure errors");
-      }
-    },
-  };
-};
+        if (id === VIRTUAL_CLIENT_ID) {
+          return RESOLVED_VIRTUAL_CLIENT_ID
+        }
+        if (id === "effect-ui/jsx-runtime" || id === "effect-ui/jsx-dev-runtime") {
+          return null
+        }
+        return null
+      });
 
-// Default export
-export default effectUI;
+      return Effect.runSync(effect);
+    },
+
+    async load(id) {
+      const effect = Effect.gen(function* () {
+        if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
+          const routes = yield* scanRoutes(routesDir)
+          return yield* generateRoutesModule(routes, routesDir)
+        }
+        if (id === RESOLVED_VIRTUAL_CLIENT_ID) {
+          return yield* generateClientModule(appDir)
+        }
+        return null
+      }).pipe(Effect.provide(PluginLayer))
+
+      return Effect.runPromise(effect)
+    },
+
+    async buildStart() {
+      const effect = Effect.gen(function* () {
+      const entryPath = nodePath.join(generatedDir, "entry.tsx")
+      const indexPath = nodePath.join(config.root, "index.html")
+      const hasEntry = yield* pathExists(entryPath)
+      if (!hasEntry) {
+        const content = yield* generateEntryModule(appDir, generatedDir)
+        yield* writeFileSafe(entryPath, content)
+      }
+
+      const hasIndex = yield* pathExists(indexPath)
+        if (!hasIndex) {
+          const content = yield* generateHtmlTemplate(generatedDir)
+          yield* writeFileSafe(indexPath, content)
+          yield* Effect.logInfo("Generated index.html").pipe(Effect.annotateLogs("style", "success"))
+        }
+      }).pipe(Effect.provide(PluginLayer))
+
+      await Effect.runPromise(effect)
+    },
+
+    async buildEnd() {
+      const effect = validateAppStructure(appDir).pipe(
+        Effect.provide(PluginLayer)
+      )
+      return Effect.runPromise(effect)
+    },
+  }
+}
+
+export default effectUI

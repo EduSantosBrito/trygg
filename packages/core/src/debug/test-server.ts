@@ -57,7 +57,10 @@ interface BunSqliteDatabase {
   close(): void;
 }
 
+import { createConsola } from "consola";
 import { Schema, Effect, Context, Scope, Runtime } from "effect";
+
+const serverLogger = createConsola({ defaults: { tag: "effect-ui" } });
 import type { DebugEvent, EventType } from "./debug.js";
 
 // =============================================================================
@@ -459,8 +462,7 @@ export const startInternal: (
       shutdownCalled = true;
       httpServer.stop();
       db.close();
-      // eslint-disable-next-line no-console
-      console.log(`[effect-ui] TestServer stopped`);
+      serverLogger.info("TestServer stopped");
     };
 
     // Start HTTP server using Bun.serve
@@ -545,11 +547,9 @@ export const startInternal: (
       );
     }).pipe(Effect.catchAll(() => Effect.void));
 
-    // eslint-disable-next-line no-console
-    console.log(`[effect-ui] TestServer running at ${server.url}`);
+    serverLogger.info(`TestServer running at ${server.url}`);
     if (cfg.keepAlive) {
-      // eslint-disable-next-line no-console
-      console.log(`[effect-ui] Server will stay alive until POST /shutdown is called`);
+      serverLogger.info("Server will stay alive until POST /shutdown is called");
     }
 
     // Register finalizer for cleanup (skipped if keepAlive)
