@@ -9,7 +9,8 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Scope, Exit } from "effect";
+import { Data, Effect, Scope, Exit, TestClock } from "effect";
+import * as Signal from "../src/signal.js";
 
 // Tagged error for testing error boundaries
 class TestError extends Data.TaggedError("TestError")<{ message: string }> {}
@@ -168,6 +169,142 @@ describe("ErrorBoundary", () => {
       // Inner boundary should catch, outer should not be triggered
       assert.isDefined(getByText("Inner fallback"));
       assert.isNull(queryByText("Outer fallback"));
+    }),
+  );
+
+  // Re-render error handling tests
+  it.scoped("should catch error when child component throws on re-render", () =>
+    Effect.gen(function* () {
+      const shouldThrow = Signal.unsafeMake(false);
+      let onErrorCalled = false;
+
+      const ChildComponent = Effect.gen(function* () {
+        const throwNow = yield* Signal.get(shouldThrow);
+        if (throwNow) {
+          return yield* new TestError({ message: "Re-render error" });
+        }
+        return <div data-testid="child">Child content</div>;
+      });
+
+      const element = (
+        <ErrorBoundary
+          fallback={<div data-testid="fallback">Error caught!</div>}
+          onError={() =>
+            Effect.sync(() => {
+              onErrorCalled = true;
+            })
+          }
+        >
+          {ChildComponent}
+        </ErrorBoundary>
+      );
+
+      const { getByTestId, queryByTestId } = yield* render(element);
+
+      // Initial render should show child
+      assert.isDefined(getByTestId("child"));
+      assert.isNull(queryByTestId("fallback"));
+
+      // Trigger re-render that throws
+      yield* Signal.set(shouldThrow, true);
+      yield* TestClock.adjust(20);
+
+      // Should show fallback, child should be gone
+      assert.isDefined(getByTestId("fallback"));
+      assert.isNull(queryByTestId("child"));
+      assert.isTrue(onErrorCalled);
+    }),
+  );
+
+  it.scoped("should support static Element children (not just Effect)", () =>
+    Effect.gen(function* () {
+      // ErrorBoundary should also wrap static elements for re-render error catching
+      const staticChild = <div data-testid="static-child">Static content</div>;
+
+      const element = (
+        <ErrorBoundary fallback={<div>Error fallback</div>}>{staticChild}</ErrorBoundary>
+      );
+
+      const { getByTestId } = yield* render(element);
+
+      assert.isDefined(getByTestId("static-child"));
+    }),
+  );
+
+  it.scoped("should call onError with squashed cause from re-render errors", () =>
+    Effect.gen(function* () {
+      const shouldThrow = Signal.unsafeMake(false);
+      let capturedError: unknown = null;
+
+      const ChildComponent = Effect.gen(function* () {
+        const throwNow = yield* Signal.get(shouldThrow);
+        if (throwNow) {
+          return yield* Effect.fail({ code: "RERENDER_ERROR", message: "Failed during rerender" });
+        }
+        return <div>OK</div>;
+      });
+
+      const element = (
+        <ErrorBoundary
+          fallback={<div data-testid="fallback">Error</div>}
+          onError={(error) =>
+            Effect.sync(() => {
+              capturedError = error;
+            })
+          }
+        >
+          {ChildComponent}
+        </ErrorBoundary>
+      );
+
+      yield* render(element);
+
+      // Trigger error
+      yield* Signal.set(shouldThrow, true);
+      yield* TestClock.adjust(20);
+
+      // onError should have been called with the squashed cause (the actual error value)
+      assert.isNotNull(capturedError);
+      assert.deepStrictEqual(capturedError, {
+        code: "RERENDER_ERROR",
+        message: "Failed during rerender",
+      });
+    }),
+  );
+
+  it.scoped("should catch error from SignalElement swap", () =>
+    Effect.gen(function* () {
+      const contentSignal = Signal.unsafeMake<"ok" | "error">("ok");
+
+      // Component that reads signal and conditionally throws during re-render
+      // The error happens inside the Component's re-render, which propagates to ErrorBoundary
+      const ChildComponent = Effect.gen(function* () {
+        const value = yield* Signal.get(contentSignal);
+        if (value === "error") {
+          return yield* new TestError({ message: "Component threw on rerender" });
+        }
+        return <div data-testid="content">Good content</div>;
+      });
+
+      const element = (
+        <ErrorBoundary fallback={<div data-testid="fallback">Signal error caught</div>}>
+          {ChildComponent}
+        </ErrorBoundary>
+      );
+
+      const { getByTestId, queryByTestId } = yield* render(element);
+
+      // Initial render
+      assert.isDefined(getByTestId("content"));
+      assert.isNull(queryByTestId("fallback"));
+
+      // Trigger error via signal change - component will re-render and throw
+      yield* Signal.set(contentSignal, "error");
+      yield* TestClock.adjust(20);
+
+      // Should catch error and show fallback
+      assert.isDefined(getByTestId("fallback"));
+      assert.isNull(queryByTestId("content"));
     }),
   );
 });

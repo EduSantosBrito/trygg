@@ -2,7 +2,7 @@
  * @since 1.0.0
  * Router service for effect-ui
  */
-import { Context, Effect, FiberRef, Layer, Option, Runtime } from "effect";
+import { Context, Effect, FiberRef, GlobalValue, Layer, Option, Runtime } from "effect";
 import * as Signal from "../signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -160,10 +160,12 @@ export class Router extends Context.Tag("@effect-ui/Router")<Router, RouterServi
 /**
  * FiberRef to store current route params for the active route
  * Used by Router.params() to provide type-safe access
+ * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
  * @internal
  */
-export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = FiberRef.unsafeMake<RouteParams>(
-  {},
+export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Router/CurrentRouteParams"),
+  () => FiberRef.unsafeMake<RouteParams>({}),
 );
 
 /**
@@ -171,19 +173,24 @@ export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = FiberRef.unsaf
  * Set during layer building and propagated via ManagedRuntime to all forked fibers.
  * This replaces the module-level variable approach - FiberRefs set during layer
  * building are captured in the Runtime and copied to forked fibers.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> = FiberRef.unsafeMake<
-  Option.Option<RouterService>
->(Option.none());
+export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
+  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentRouter"), () =>
+    FiberRef.unsafeMake<Option.Option<RouterService>>(Option.none()),
+  );
 
 /**
  * FiberRef to store route error info for _error.tsx components.
  * Set by Outlet when a route errors, read by error components via currentError.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
 export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>> =
-  FiberRef.unsafeMake<Option.Option<RouteErrorInfo>>(Option.none());
+  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentRouteError"), () =>
+    FiberRef.unsafeMake<Option.Option<RouteErrorInfo>>(Option.none()),
+  );
 
 /**
  * FiberRef to store child content passed from parent outlet to nested outlet.
@@ -191,41 +198,32 @@ export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>>
  * and the nested outlet inside the layout reads it.
  * Using FiberRef instead of module-level variable ensures isolation between
  * multiple router instances and proper cleanup on unmount.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentOutletChild: FiberRef.FiberRef<Option.Option<Element>> = FiberRef.unsafeMake<
-  Option.Option<Element>
->(Option.none());
+export const CurrentOutletChild: FiberRef.FiberRef<Option.Option<Element>> =
+  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentOutletChild"), () =>
+    FiberRef.unsafeMake<Option.Option<Element>>(Option.none()),
+  );
 
 /**
  * FiberRef to store the routes manifest for prefetching.
  * Set by Outlet when routes are provided, read by prefetch.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRoutes: FiberRef.FiberRef<RoutesManifest> = FiberRef.unsafeMake<RoutesManifest>(
-  [],
+export const CurrentRoutes: FiberRef.FiberRef<RoutesManifest> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Router/CurrentRoutes"),
+  () => FiberRef.unsafeMake<RoutesManifest>([]),
 );
 
 /**
- * Get the current router service from FiberRef.
- * Works in forked fibers when running through ManagedRuntime because
- * FiberRefs set during layer building are propagated to child fibers.
+ * Get the current router service.
+ * Uses the Router Context.Tag which is provided to all components
+ * via the render context in browserLayer.
  * @internal
  */
-export const getRouter: Effect.Effect<RouterService> = Effect.flatMap(
-  FiberRef.get(CurrentRouter),
-  (maybeRouter) => {
-    if (Option.isNone(maybeRouter)) {
-      return Effect.die(
-        new Error(
-          "Router not found. Make sure your app is wrapped with Router.browserLayer.\n" +
-            "Example: mount(container, App.pipe(Effect.provide(Router.browserLayer)))",
-        ),
-      );
-    }
-    return Effect.succeed(maybeRouter.value);
-  },
-);
+export const getRouter: Effect.Effect<RouterService, never, Router> = Router;
 
 /**
  * Get the current route signal

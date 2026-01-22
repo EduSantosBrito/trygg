@@ -620,3 +620,360 @@ const UserLink = Effect.gen(function* (props: { url: string }) {
   )
 )
 ```
+
+---
+
+## 13. API Routes
+
+effect-ui provides file-based API route discovery with Effect HttpApi integration.
+
+### 13.1 Overview
+
+API routes use the `app/api/` directory convention (like Next.js). Two file types are supported:
+
+| File | Export | Contains | When to Use |
+|------|--------|----------|-------------|
+| `route.ts` | `endpoint` + `handler` | Single `HttpApiEndpoint` | One HTTP method on this path |
+| `group.ts` | `group` + `handlers` | `HttpApiGroup` | Multiple HTTP methods on this path |
+
+### 13.2 Configuration
+
+Enable API routes by specifying the `app` option:
+
+```typescript
+// vite.config.ts
+import { defineConfig } from "vite"
+import effectUI from "effect-ui/vite-plugin"
+
+export default defineConfig({
+  plugins: [effectUI({ app: "./app" })]
+})
+```
+
+The plugin generates:
+- `virtual:effect-ui-api` - Composed HttpApi and handler layers
+- `api-routes.d.ts` - Type declarations for the virtual module
+
+### 13.3 Type Utilities
+
+The `Api` namespace provides type utilities for compile-time validation:
+
+```typescript
+import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
+import type { Api } from "effect-ui"
+
+// Single endpoint
+export const endpoint = HttpApiEndpoint.get("getUser", "/api/users/:id")
+  .setPath(Schema.Struct({ id: Schema.String }))
+  .addSuccess(UserSchema)
+
+export const handler: Api.Handler<typeof endpoint> = ({ path }) =>
+  UserService.findById(path.id)
+
+// Group with multiple endpoints
+export const group = HttpApiGroup.make("users")
+  .add(HttpApiEndpoint.get("listUsers", "/api/users"))
+  .add(HttpApiEndpoint.post("createUser", "/api/users").setPayload(CreateUser))
+
+export const handlers: Api.GroupHandlers<typeof group> = {
+  listUsers: () => UserService.list(),
+  createUser: ({ payload }) => UserService.create(payload)
+}
+```
+
+### 13.4 File Convention
+
+**Single endpoint (`app/api/users/[id]/route.ts`):**
+```typescript
+import { HttpApiEndpoint } from "@effect/platform"
+import { Schema } from "effect"
+import type { Api } from "effect-ui"
+
+// Path must match filesystem: app/api/users/[id] -> /api/users/:id
+export const endpoint = HttpApiEndpoint.get("getUser", "/api/users/:id")
+  .setPath(Schema.Struct({ id: Schema.String }))
+  .addSuccess(UserSchema)
+
+export const handler: Api.Handler<typeof endpoint> = ({ path }) =>
+  UserService.findById(path.id)
+```
+
+**Multiple methods (`app/api/users/group.ts`):**
+```typescript
+import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
+import type { Api } from "effect-ui"
+
+const list = HttpApiEndpoint.get("listUsers", "/api/users")
+  .addSuccess(Schema.Array(UserSchema))
+
+const create = HttpApiEndpoint.post("createUser", "/api/users")
+  .setPayload(CreateUserSchema)
+  .addSuccess(UserSchema)
+
+export const group = HttpApiGroup.make("users")
+  .add(list)
+  .add(create)
+
+export const handlers: Api.GroupHandlers<typeof group> = {
+  listUsers: () => UserService.list(),
+  createUser: ({ payload }) => UserService.create(payload)
+}
+```
+
+### 13.5 Services Layer
+
+Provide service implementations via `app/services.ts`:
+
+```typescript
+// app/services.ts
+import { Layer } from "effect"
+import { UserRepositoryLive, AuthServiceLive } from "@/lib/services/index.js"
+
+export const services = Layer.mergeAll(
+  UserRepositoryLive,
+  AuthServiceLive
+)
+```
+
+### 13.6 Build-Time Validation
+
+The plugin validates API routes at build time:
+
+1. **Conflict detection**: Same path cannot have both `route.ts` and `group.ts`
+2. **Export validation**: Files must export expected types
+3. **Path matching**: Endpoint paths must match filesystem location
+
+### 13.7 Client Usage
+
+Use Effect's `HttpApiClient` with the generated api:
+
+```typescript
+import { api } from "virtual:effect-ui-api"
+import { HttpApiClient } from "@effect/platform"
+
+const client = yield* HttpApiClient.make(api, { baseUrl: "/api" })
+const user = yield* client.users.getUser({ path: { id: "123" } })
+```
+
+### 13.8 Path Parameter Rules
+
+| Filesystem | Derived Path | Schema Requirement |
+|------------|--------------|-------------------|
+| `[id]/route.ts` | `/:id` | `{ id: Schema.String }` |
+| `[...rest]/route.ts` | `/*` | `{ rest: Schema.String }` |
+| `users/route.ts` | `/users` | (none) |
+
+---
+
+## 14. Resource (Data Fetching)
+
+The `Resource` module provides cached, deduplicated data fetching with stale-while-revalidate support.
+
+### 14.1 ResourceState
+
+A tagged enum representing the state of a resource fetch:
+
+```typescript
+type ResourceState<A, E> =
+  | { _tag: "Pending" }
+  | { _tag: "Success"; value: A; stale: boolean }
+  | { _tag: "Failure"; error: E; staleValue: Option<A> }
+```
+
+**State constructors:**
+- `Resource.Pending<A, E>()` - Initial/loading state
+- `Resource.Success<A, E>(value, stale)` - Fetch succeeded
+- `Resource.Failure<A, E>(error, staleValue)` - Fetch failed (may include previous value)
+
+**Type guards:**
+- `Resource.isPending(state)` / `Resource.isSuccess(state)` / `Resource.isFailure(state)`
+
+### 14.2 Resource.make
+
+Create a resource descriptor:
+
+```typescript
+const userResource = Resource.make({
+  key: "user:123",           // Unique cache key
+  fetch: fetchUser("123")    // Effect<User, UserNotFound, never>
+})
+```
+
+**Key rules:**
+- Keys must be unique across the app
+- Use descriptive keys: `"user:123"`, `"posts:page:2"`, `"search:react"`
+- Resources with the same key share state
+
+### 14.3 Resource.fetch
+
+Fetch a resource, returning a reactive `Signal<ResourceState<A, E>>`:
+
+```typescript
+const UserProfile = Effect.gen(function* () {
+  const state = yield* Resource.fetch(userResource)
+  // state: Signal<ResourceState<User, UserNotFound>>
+  
+  return yield* Resource.match(state, {
+    Pending: () => <Spinner />,
+    Success: (user, stale) => <UserCard user={user} />,
+    Failure: (error, staleValue) => <ErrorView error={error} />
+  })
+})
+```
+
+**Behavior:**
+- Returns cached state if available
+- Deduplicates concurrent fetches (same key = same signal)
+- Forked execution - returns immediately with Pending state
+
+### 14.4 Resource.match
+
+Pattern match on resource state with fine-grained reactivity:
+
+```typescript
+return yield* Resource.match(state, {
+  Pending: () => <Spinner />,
+  Success: (user, stale) => (
+    <div style={{ opacity: stale ? 0.5 : 1 }}>
+      <h1>{user.name}</h1>
+    </div>
+  ),
+  Failure: (error, staleValue) =>
+    Option.match(staleValue, {
+      onNone: () => <ErrorView error={error} />,
+      onSome: (user) => (
+        <>
+          <ErrorBanner error={error} />
+          <StaleUserCard user={user} />
+        </>
+      )
+    })
+})
+```
+
+**How it works:**
+- Uses `Signal.derive` internally for fine-grained updates
+- Returns `Element.SignalElement` - component renders once, DOM updates when state changes
+
+### 14.5 Resource.invalidate
+
+Trigger background refetch with stale-while-revalidate:
+
+```typescript
+<button onClick={() => Resource.invalidate(userResource)}>
+  Refresh
+</button>
+```
+
+**Behavior:**
+1. Marks current Success state as `stale: true`
+2. Shows stale UI immediately (no loading spinner)
+3. Triggers background refetch
+4. Updates to fresh data when complete
+5. On failure, preserves stale value in `Failure.staleValue`
+
+### 14.6 Resource.refresh
+
+Force immediate refetch with loading state:
+
+```typescript
+<button onClick={() => Resource.refresh(userResource)}>
+  Reload
+</button>
+```
+
+**Behavior:**
+1. Transitions to `Pending` immediately
+2. Shows loading UI
+3. Triggers new fetch
+4. Updates to Success or Failure
+
+### 14.7 Resource.clear
+
+Remove resource from cache:
+
+```typescript
+yield* Resource.clear(userResource)
+// Next fetch will start fresh
+```
+
+### 14.8 State Transitions
+
+```
+Initial fetch:
+  (no entry) → Pending → Success | Failure(staleValue: None)
+
+invalidate (stale-while-revalidate):
+  Success(value) → Success(value, stale=true) → Success(newValue) | Failure(staleValue: Some(value))
+
+refresh (hard reload):
+  Success | Failure → Pending → Success | Failure(staleValue: None)
+```
+
+### 14.9 ResourceRegistry
+
+Resources are cached in `ResourceRegistry`, provided automatically by `mount()`.
+
+For testing, provide the layer explicitly:
+
+```typescript
+it.scoped("should fetch user", () =>
+  Effect.gen(function* () {
+    const state = yield* Resource.fetch(userResource)
+    yield* TestClock.adjust(0)
+    // ...
+  }).pipe(Effect.provide(Resource.ResourceRegistryLive))
+)
+```
+
+### 14.10 Complete Example
+
+```typescript
+import { Effect, Option } from "effect"
+import { Resource } from "effect-ui"
+import { HttpApiClient } from "@effect/platform"
+import { api } from "virtual:effect-ui-api"
+
+// Define resource
+const userResource = (id: string) => Resource.make({
+  key: `user:${id}`,
+  fetch: Effect.gen(function* () {
+    const client = yield* HttpApiClient.make(api)
+    return yield* client.users.getUser({ path: { id } })
+  })
+})
+
+// Component
+const UserProfile = Effect.gen(function* () {
+  const { id } = yield* params("/users/:id")
+  const state = yield* Resource.fetch(userResource(id))
+
+  return yield* Resource.match(state, {
+    Pending: () => <UserSkeleton />,
+    
+    Success: (user, stale) => (
+      <article style={{ opacity: stale ? 0.7 : 1 }}>
+        <h1>{user.name}</h1>
+        <p>{user.email}</p>
+        <button onClick={() => Resource.invalidate(userResource(id))}>
+          {stale ? "Refreshing..." : "Refresh"}
+        </button>
+      </article>
+    ),
+    
+    Failure: (error, staleUser) => (
+      <div>
+        <ErrorBanner error={error} />
+        {Option.match(staleUser, {
+          onNone: () => (
+            <button onClick={() => Resource.refresh(userResource(id))}>
+              Try Again
+            </button>
+          ),
+          onSome: (user) => <StaleUserCard user={user} />
+        })}
+      </div>
+    )
+  })
+})
+```

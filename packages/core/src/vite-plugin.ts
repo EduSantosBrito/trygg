@@ -3,64 +3,92 @@
  * Vite plugin for effect-ui
  *
  * Configures Vite for effect-ui's JSX runtime and provides
- * an optimal development experience with helpful error messages.
+ * file-based routing with automatic layout support.
  *
  * @example
  * ```ts
  * // vite.config.ts
  * import { defineConfig } from "vite"
- * import effectUI from "effect-ui/vite-plugin"
+ * import { effectUI } from "effect-ui/vite"
  *
  * export default defineConfig({
  *   plugins: [effectUI()]
  * })
  * ```
  *
- * @example
- * ```ts
- * // With file-based routing
- * import { defineConfig } from "vite"
- * import effectUI from "effect-ui/vite-plugin"
+ * ## App Structure
  *
- * export default defineConfig({
- *   plugins: [effectUI({ routes: "./src/routes" })]
- * })
+ * ```
+ * app/
+ *   api.ts              ← Single API file (exports Api, ApiLive)
+ *   layout.tsx          ← Root layout (includes <html>, wraps all routes)
+ *   routes/
+ *     index.tsx         ← /
+ *     users/
+ *       index.tsx       ← /users
+ *       [id].tsx        ← /users/:id
+ *       layout.tsx      ← Nested layout for /users/*
+ *     _loading.tsx      ← Loading fallback
+ *     _error.tsx        ← Error boundary
+ * .effect-ui/           ← Generated (add to .gitignore)
+ *   client.ts           ← API client + Resources
+ *   routes.d.ts         ← Route type declarations
+ *   api.d.ts            ← API type declarations
+ *   entry.tsx           ← Auto-generated entry point
  * ```
  */
-import type { Plugin, ResolvedConfig } from "vite";
+import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import * as fs from "fs";
 import * as path from "path";
+import { type ApiMiddleware, createApiMiddleware } from "./api-middleware.js";
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const APP_DIR = "app";
+const GENERATED_DIR = ".effect-ui";
+
+// Virtual module IDs
+const VIRTUAL_ROUTES_ID = "virtual:effect-ui/routes";
+const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID;
+const VIRTUAL_CLIENT_ID = "virtual:effect-ui/client";
+const RESOLVED_VIRTUAL_CLIENT_ID = "\0" + VIRTUAL_CLIENT_ID;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
- * Plugin options
- * @since 1.0.0
+ * Route file info extracted from the file system
+ * @internal
  */
-export interface EffectUIPluginOptions {
-  /**
-   * Custom JSX import source path.
-   * Defaults to "effect-ui" which uses the bundled jsx-runtime.
-   */
-  readonly jsxImportSource?: string;
-
-  /**
-   * Suppress configuration warnings.
-   * @default false
-   */
-  readonly silent?: boolean;
-
-  /**
-   * Enable file-based routing.
-   * Specify the directory containing route files (e.g., "./src/routes").
-   * When enabled, generates the virtual module "virtual:effect-ui-routes".
-   */
-  readonly routes?: string;
+export interface RouteFile {
+  /** Absolute file path */
+  readonly filePath: string;
+  /** Route path pattern (e.g., "/users/:id") */
+  readonly routePath: string;
+  /** Type of route file */
+  readonly type: "page" | "layout" | "loading" | "error";
+  /** Depth in route hierarchy (for sorting) */
+  readonly depth: number;
 }
 
-// Virtual module ID for routes
-const VIRTUAL_ROUTES_ID = "virtual:effect-ui-routes";
-const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID;
+/**
+ * Validation error
+ * @internal
+ */
+export interface ValidationError {
+  readonly type: "missing_file" | "missing_export" | "route_conflict" | "invalid_structure";
+  readonly message: string;
+  readonly file?: string;
+  readonly details?: string;
+}
 
-// ANSI colors for terminal output
+// =============================================================================
+// Logging
+// =============================================================================
+
 const colors = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -71,49 +99,44 @@ const colors = {
   dim: "\x1b[2m",
 };
 
-/**
- * Log a warning message with effect-ui branding
- */
-const warn = (message: string): void => {
-  console.warn(
-    `${colors.yellow}${colors.bold}[effect-ui]${colors.reset} ${colors.yellow}${message}${colors.reset}`,
-  );
+const log = {
+  info: (message: string): void => {
+    console.log(`${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${message}`);
+  },
+  success: (message: string): void => {
+    console.log(
+      `${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${colors.green}${message}${colors.reset}`,
+    );
+  },
+  warn: (message: string): void => {
+    console.warn(
+      `${colors.yellow}${colors.bold}[effect-ui]${colors.reset} ${colors.yellow}${message}${colors.reset}`,
+    );
+  },
+  error: (message: string): void => {
+    console.error(
+      `${colors.red}${colors.bold}[effect-ui]${colors.reset} ${colors.red}${message}${colors.reset}`,
+    );
+  },
+  dim: (message: string): void => {
+    console.log(
+      `${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${colors.dim}${message}${colors.reset}`,
+    );
+  },
 };
 
-/**
- * Log an info message with effect-ui branding
- */
-const info = (message: string): void => {
-  console.log(`${colors.cyan}${colors.bold}[effect-ui]${colors.reset} ${message}`);
-};
-
-/**
- * Route file info extracted from the file system
- * @internal - exported for testing
- */
-export interface RouteFile {
-  /** Absolute file path */
-  readonly filePath: string;
-  /** Route path pattern (e.g., "/users/:id") */
-  readonly routePath: string;
-  /** Whether this is a layout file */
-  readonly isLayout: boolean;
-  /** Whether this is an index file */
-  readonly isIndex: boolean;
-  /** Whether this is a loading file */
-  readonly isLoading: boolean;
-  /** Whether this is an error file */
-  readonly isError: boolean;
-}
+// =============================================================================
+// File System Scanning
+// =============================================================================
 
 /**
  * Scan routes directory and extract route files
- * @internal - exported for testing
+ * @internal
  */
 export const scanRoutes = (routesDir: string): RouteFile[] => {
   const routes: RouteFile[] = [];
 
-  const scanDir = (dir: string, parentPath: string = ""): void => {
+  const scanDir = (dir: string, parentPath: string = "", depth: number = 0): void => {
     if (!fs.existsSync(dir)) {
       return;
     }
@@ -124,49 +147,46 @@ export const scanRoutes = (routesDir: string): RouteFile[] => {
       const fullPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        // Recurse into subdirectory
         // Convert [param] syntax in directory names to :param
         const dirName = entry.name
           .replace(/^\[\.\.\.(.+)\]$/, "*") // [...rest] -> *
           .replace(/^\[(.+)\]$/, ":$1"); // [param] -> :param
         const dirPath = parentPath + "/" + dirName;
-        scanDir(fullPath, dirPath);
+        scanDir(fullPath, dirPath, depth + 1);
       } else if (entry.isFile() && /\.(tsx|ts|jsx|js)$/.test(entry.name)) {
-        // Process route file
         const basename = entry.name.replace(/\.(tsx|ts|jsx|js)$/, "");
 
-        // Skip non-route special files except known ones
-        const specialFiles = ["_layout", "_loading", "_error"];
-        if (basename.startsWith("_") && !specialFiles.includes(basename)) {
-          continue;
-        }
-
-        const isLayout = basename === "_layout";
-        const isLoading = basename === "_loading";
-        const isError = basename === "_error";
-        const isIndex = basename === "index";
-
-        // Convert filename to route path
+        // Determine file type
+        let type: RouteFile["type"];
         let routePath: string;
-        if (isLayout || isLoading || isError) {
+
+        if (basename === "layout" || basename === "_layout") {
+          type = "layout";
           routePath = parentPath || "/";
-        } else if (isIndex) {
+        } else if (basename === "_loading") {
+          type = "loading";
           routePath = parentPath || "/";
+        } else if (basename === "_error") {
+          type = "error";
+          routePath = parentPath || "/";
+        } else if (basename === "index") {
+          type = "page";
+          routePath = parentPath || "/";
+        } else if (basename.startsWith("_")) {
+          // Skip other underscore-prefixed files
+          continue;
         } else {
+          type = "page";
           // Convert [param] to :param and [...rest] to *
-          let segment = basename
-            .replace(/^\[\.\.\.(.+)\]$/, "*") // [...rest] -> *
-            .replace(/^\[(.+)\]$/, ":$1"); // [param] -> :param
+          const segment = basename.replace(/^\[\.\.\.(.+)\]$/, "*").replace(/^\[(.+)\]$/, ":$1");
           routePath = (parentPath || "") + "/" + segment;
         }
 
         routes.push({
           filePath: fullPath,
           routePath,
-          isLayout,
-          isIndex,
-          isLoading,
-          isError,
+          type,
+          depth,
         });
       }
     }
@@ -177,99 +197,8 @@ export const scanRoutes = (routesDir: string): RouteFile[] => {
 };
 
 /**
- * Generate the virtual module code for routes
- * @internal - exported for testing
- */
-export const generateRoutesModule = (routes: RouteFile[], routesDir: string): string => {
-  // Separate route types
-  const pageRoutes = routes.filter((r) => !r.isLayout && !r.isLoading && !r.isError);
-  const layoutRoutes = routes.filter((r) => r.isLayout);
-  const loadingRoutes = routes.filter((r) => r.isLoading);
-  const errorRoutes = routes.filter((r) => r.isError);
-
-  // Sort routes by specificity (more specific first)
-  pageRoutes.sort((a, b) => {
-    // Static segments before dynamic
-    const aScore = scoreRoutePath(a.routePath);
-    const bScore = scoreRoutePath(b.routePath);
-    return bScore - aScore;
-  });
-
-  // Generate import paths relative to the routes directory
-  const generateImportPath = (filePath: string): string => {
-    // Use relative path from project root
-    const relativePath = path.relative(path.dirname(routesDir), filePath);
-    return "./" + relativePath.replace(/\\/g, "/");
-  };
-
-  // Helper to find matching special file (layout, loading, error)
-  // Matches the most specific one (e.g., /settings/_loading.tsx for /settings/profile)
-  const findSpecialFile = (routePath: string, specialFiles: RouteFile[]): RouteFile | undefined => {
-    // Sort by path length descending to find most specific match first
-    const sorted = [...specialFiles].sort((a, b) => b.routePath.length - a.routePath.length);
-
-    return sorted.find((file) => {
-      // Root (/) matches all routes
-      if (file.routePath === "/") {
-        return true;
-      }
-      // File at /foo matches /foo and /foo/*
-      return routePath === file.routePath || routePath.startsWith(file.routePath + "/");
-    });
-  };
-
-  // Generate the routes array
-  const routeEntries = pageRoutes.map((route) => {
-    const importPath = generateImportPath(route.filePath);
-
-    // Find special files for this route
-    const layout = findSpecialFile(route.routePath, layoutRoutes);
-    const loading = findSpecialFile(route.routePath, loadingRoutes);
-    const error = findSpecialFile(route.routePath, errorRoutes);
-
-    let entry = `  {
-    path: "${route.routePath}",
-    component: () => import("${importPath}"),
-    guard: () => import("${importPath}")`;
-
-    if (layout) {
-      const layoutImportPath = generateImportPath(layout.filePath);
-      entry += `,
-    layout: () => import("${layoutImportPath}")`;
-    }
-
-    if (loading) {
-      const loadingImportPath = generateImportPath(loading.filePath);
-      entry += `,
-    loadingComponent: () => import("${loadingImportPath}")`;
-    }
-
-    if (error) {
-      const errorImportPath = generateImportPath(error.filePath);
-      entry += `,
-    errorComponent: () => import("${errorImportPath}")`;
-    }
-
-    entry += `
-  }`;
-
-    return entry;
-  });
-
-  return `// Auto-generated by effect-ui vite plugin
-// Routes from: ${routesDir}
-
-export const routes = [
-${routeEntries.join(",\n")}
-];
-
-export default routes;
-`;
-};
-
-/**
  * Extract param names from a route path
- * @internal - exported for testing
+ * @internal
  */
 export const extractParamNames = (routePath: string): string[] => {
   const params: string[] = [];
@@ -285,8 +214,8 @@ export const extractParamNames = (routePath: string): string[] => {
 };
 
 /**
- * Generate TypeScript type declaration for route params
- * @internal - exported for testing
+ * Generate TypeScript type for route params
+ * @internal
  */
 export const generateParamType = (routePath: string): string => {
   const params = extractParamNames(routePath);
@@ -296,24 +225,266 @@ export const generateParamType = (routePath: string): string => {
   return `{ ${params.map((p) => `readonly ${p}: string`).join("; ")} }`;
 };
 
+// =============================================================================
+// Validation
+// =============================================================================
+
 /**
- * Generate type declarations file for routes
- * This creates a .d.ts file that augments RouteMap with actual routes
- * @internal - exported for testing
+ * Validate app structure
+ * @internal
+ */
+export const validateAppStructure = (appDir: string): ValidationError[] => {
+  const errors: ValidationError[] = [];
+
+  // Check app/layout.tsx exists
+  const layoutPath = path.join(appDir, "layout.tsx");
+  const layoutPathTs = path.join(appDir, "layout.ts");
+  if (!fs.existsSync(layoutPath) && !fs.existsSync(layoutPathTs)) {
+    errors.push({
+      type: "missing_file",
+      message: "Root layout is required",
+      file: layoutPath,
+      details:
+        "Create app/layout.tsx with your root layout component (including <html> and <body>)",
+    });
+  }
+
+  // Check app/routes exists
+  const routesDir = path.join(appDir, "routes");
+  if (!fs.existsSync(routesDir)) {
+    errors.push({
+      type: "missing_file",
+      message: "Routes directory is required",
+      file: routesDir,
+      details: "Create app/routes/ directory with your page components",
+    });
+  }
+
+  return errors;
+};
+
+/**
+ * Validate API exports
+ * @internal
+ */
+export const validateApiExports = async (
+  apiPath: string,
+  loadModule: (path: string) => Promise<Record<string, unknown>>,
+): Promise<ValidationError[]> => {
+  const errors: ValidationError[] = [];
+
+  if (!fs.existsSync(apiPath)) {
+    // API is optional
+    return errors;
+  }
+
+  try {
+    const module = await loadModule(apiPath);
+
+    if (!module.Api && !module.api) {
+      errors.push({
+        type: "missing_export",
+        message: "app/api.ts must export 'Api' (HttpApi class)",
+        file: apiPath,
+        details: "Add: export class Api extends HttpApi.make('app').add(...) {}",
+      });
+    }
+
+    if (!module.ApiLive) {
+      errors.push({
+        type: "missing_export",
+        message: "app/api.ts must export 'ApiLive' (combined handler layer)",
+        file: apiPath,
+        details:
+          "Add: export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide([...handlers]))",
+      });
+    }
+  } catch (err) {
+    errors.push({
+      type: "invalid_structure",
+      message: `Failed to load API module: ${err instanceof Error ? err.message : String(err)}`,
+      file: apiPath,
+    });
+  }
+
+  return errors;
+};
+
+/**
+ * Check for route/API conflicts
+ * @internal
+ */
+export const checkRouteApiConflicts = async (
+  routes: RouteFile[],
+  apiPath: string,
+  loadModule: (path: string) => Promise<Record<string, unknown>>,
+): Promise<ValidationError[]> => {
+  const errors: ValidationError[] = [];
+
+  if (!fs.existsSync(apiPath)) {
+    return errors;
+  }
+
+  try {
+    const module = await loadModule(apiPath);
+    const api = module.Api || module.api;
+
+    if (!api || typeof api !== "function") {
+      return errors;
+    }
+
+    // Extract API paths from the HttpApi
+    // This is a simplified check - we look at the groups and their prefixes
+    const apiInstance = api as {
+      groups?: Record<string, { endpoints?: Record<string, { path?: string }> }>;
+    };
+
+    if (apiInstance.groups) {
+      const apiPaths = new Set<string>();
+
+      for (const group of Object.values(apiInstance.groups)) {
+        if (group.endpoints) {
+          for (const endpoint of Object.values(group.endpoints)) {
+            if (endpoint.path) {
+              // Normalize path for comparison
+              const normalizedPath = endpoint.path.replace(/:\w+/g, ":param");
+              apiPaths.add(normalizedPath);
+            }
+          }
+        }
+      }
+
+      // Check for conflicts with page routes
+      for (const route of routes) {
+        if (route.type !== "page") continue;
+
+        const normalizedRoutePath = route.routePath.replace(/:\w+/g, ":param");
+        if (apiPaths.has(normalizedRoutePath)) {
+          errors.push({
+            type: "route_conflict",
+            message: `Route conflict: ${route.routePath}`,
+            file: route.filePath,
+            details: `This path is defined both as a page route and an API endpoint`,
+          });
+        }
+      }
+    }
+  } catch {
+    // Ignore errors here - API validation handles them
+  }
+
+  return errors;
+};
+
+// =============================================================================
+// Code Generation
+// =============================================================================
+
+/**
+ * Generate import path for a file
+ * @internal
+ */
+const generateImportPath = (filePath: string): string => {
+  return filePath.replace(/\\/g, "/");
+};
+
+/**
+ * Generate routes module
+ * @internal
+ */
+export const generateRoutesModule = (routes: RouteFile[], routesDir: string): string => {
+  const pageRoutes = routes.filter((r) => r.type === "page");
+  const layoutRoutes = routes.filter((r) => r.type === "layout");
+  const loadingRoutes = routes.filter((r) => r.type === "loading");
+  const errorRoutes = routes.filter((r) => r.type === "error");
+
+  // Find the most specific special file for a route
+  const findSpecialFile = (
+    routePath: string,
+    specialRoutes: RouteFile[],
+  ): RouteFile | undefined => {
+    // Sort by depth descending to find most specific first
+    const sorted = [...specialRoutes].sort((a, b) => b.depth - a.depth);
+
+    for (const special of sorted) {
+      // Root layout/loading/error matches all routes
+      if (special.routePath === "/") {
+        return special;
+      }
+      if (routePath === special.routePath || routePath.startsWith(special.routePath + "/")) {
+        return special;
+      }
+    }
+    return undefined;
+  };
+
+  const routeEntries = pageRoutes.map((route) => {
+    const importPath = generateImportPath(route.filePath);
+    const layout = findSpecialFile(route.routePath, layoutRoutes);
+    const loading = findSpecialFile(route.routePath, loadingRoutes);
+    const error = findSpecialFile(route.routePath, errorRoutes);
+
+    let entry = `  {
+    path: "${route.routePath}",
+    component: () => import("${importPath}")`;
+
+    if (layout) {
+      entry += `,
+    layout: () => import("${generateImportPath(layout.filePath)}")`;
+    }
+
+    if (loading) {
+      entry += `,
+    loadingComponent: () => import("${generateImportPath(loading.filePath)}")`;
+    }
+
+    if (error) {
+      entry += `,
+    errorComponent: () => import("${generateImportPath(error.filePath)}")`;
+    }
+
+    entry += `
+  }`;
+    return entry;
+  });
+
+  return `// Auto-generated by effect-ui
+// Routes from: ${routesDir}
+
+export const routes = [
+${routeEntries.join(",\n")}
+];
+
+export default routes;
+`;
+};
+
+/**
+ * Generate route type declarations
+ * @internal
  */
 export const generateRouteTypes = (routes: RouteFile[]): string => {
-  const pageRoutes = routes.filter((r) => !r.isLayout && !r.isLoading && !r.isError);
+  const pageRoutes = routes.filter((r) => r.type === "page");
 
-  // Generate RouteMap entries
   const mapEntries = pageRoutes.map((route) => {
     const paramType = generateParamType(route.routePath);
     return `    readonly "${route.routePath}": ${paramType}`;
   });
 
-  return `// Auto-generated by effect-ui vite plugin
+  return `// Auto-generated by effect-ui
 // DO NOT EDIT - This file is regenerated when routes change
 
-// Augment the RouteMap interface with actual routes for type-safe navigation
+declare module "virtual:effect-ui/routes" {
+  export const routes: Array<{
+    path: string
+    component: () => Promise<{ default: unknown }>
+    layout?: () => Promise<{ default: unknown }>
+    loadingComponent?: () => Promise<{ default: unknown }>
+    errorComponent?: () => Promise<{ default: unknown }>
+  }>
+  export default routes
+}
+
 declare module "effect-ui/router" {
   interface RouteMap {
 ${mapEntries.join("\n")}
@@ -325,276 +496,348 @@ export {}
 };
 
 /**
- * Score a route path for sorting (higher = more specific)
- * @internal - exported for testing
+ * Generate API type declarations
+ * @internal
  */
-export const scoreRoutePath = (routePath: string): number => {
-  const segments = routePath.split("/").filter(Boolean);
-  let score = 0;
+export const generateApiTypes = (appDir: string): string => {
+  const apiPath = path.join(appDir, "api.ts");
+  const hasApi = fs.existsSync(apiPath);
 
-  for (const segment of segments) {
-    if (segment === "*") {
-      score += 1; // Wildcard least specific
-    } else if (segment.startsWith(":")) {
-      score += 2; // Dynamic param
-    } else {
-      score += 3; // Static segment most specific
-    }
+  if (!hasApi) {
+    return `// Auto-generated by effect-ui
+// No API file found at app/api.ts
+
+declare module "virtual:effect-ui/client" {
+  export const client: never
+  export const resources: never
+}
+
+export {}
+`;
   }
 
-  // Longer routes generally more specific
-  score += segments.length * 0.1;
+  const relativePath =
+    "./" + path.relative(path.dirname(apiPath), apiPath).replace(/\\/g, "/").replace(/\.ts$/, "");
 
-  return score;
+  return `// Auto-generated by effect-ui
+// DO NOT EDIT - This file is regenerated when API changes
+
+declare module "virtual:effect-ui/client" {
+  import type { HttpApiClient } from "@effect/platform"
+  import type { Api } from "${relativePath}"
+  
+  export const client: ReturnType<typeof HttpApiClient.make<typeof Api>>
+  
+  // TODO: Generate typed resources
+  export const resources: Record<string, unknown>
+}
+
+export {}
+`;
 };
 
 /**
- * Vite plugin for effect-ui
+ * Generate client module
+ * @internal
+ */
+export const generateClientModule = (appDir: string): string => {
+  const apiPath = path.join(appDir, "api.ts");
+  const hasApi = fs.existsSync(apiPath);
+
+  if (!hasApi) {
+    return `// Auto-generated by effect-ui
+// No API file found
+
+export const client = undefined;
+export const resources = {};
+`;
+  }
+
+  const importPath = generateImportPath(apiPath);
+
+  return `// Auto-generated by effect-ui
+import { HttpApiClient } from "@effect/platform";
+import { Api } from "${importPath}";
+
+export const client = HttpApiClient.make(Api, { baseUrl: "" });
+
+// TODO: Generate typed resources with cache keys
+export const resources = {};
+`;
+};
+
+/**
+ * Generate entry module (physical file)
+ * @internal
+ */
+export const generateEntryModule = (appDir: string, generatedDir: string): string => {
+  // Use relative path from .effect-ui/ to app/
+  const relativeAppDir = path.relative(generatedDir, appDir).replace(/\\/g, "/");
+
+  return `// Auto-generated by effect-ui - DO NOT EDIT
+import { mount, Component } from "effect-ui"
+import * as Router from "effect-ui/router"
+import { routes } from "virtual:effect-ui/routes"
+import Layout from "${relativeAppDir}/layout"
+
+const App = Component.gen(function* () {
+  // Render Outlet directly - it handles async loading internally
+  return <Layout><Router.Outlet routes={routes} /></Layout>
+})
+
+const container = document.getElementById("root")
+if (container) {
+  mount(container, <App />)
+}
+`;
+};
+
+/**
+ * Generate HTML template (replaces index.html)
+ * @internal
+ */
+export const generateHtmlTemplate = (generatedDir: string): string => {
+  const entryPath = path
+    .relative(process.cwd(), path.join(generatedDir, "entry.tsx"))
+    .replace(/\\/g, "/");
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>effect-ui</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/${entryPath}"></script>
+  </body>
+</html>`;
+};
+
+// =============================================================================
+// Plugin
+// =============================================================================
+
+/**
+ * Effect UI Vite plugin
  *
- * Automatically configures:
- * - JSX runtime to use effect-ui's jsx-runtime
- * - esbuild settings for optimal JSX compilation
- * - TypeScript JSX support
- * - File-based routing (optional)
- *
- * Also provides:
- * - Configuration validation with helpful error messages
- * - Detection of common misconfigurations
- * - Warnings for conflicting JSX settings
- * - Hot reload for route changes
- *
- * @example
- * ```ts
- * // vite.config.ts
- * import { defineConfig } from "vite"
- * import effectUI from "effect-ui/vite-plugin"
- *
- * export default defineConfig({
- *   plugins: [effectUI()]
- * })
- * ```
- *
- * @example
- * ```ts
- * // With file-based routing
- * import { defineConfig } from "vite"
- * import effectUI from "effect-ui/vite-plugin"
- *
- * export default defineConfig({
- *   plugins: [effectUI({ routes: "./src/routes" })]
- * })
- * ```
+ * Provides:
+ * - JSX configuration for effect-ui
+ * - File-based routing from app/routes/
+ * - Root layout from app/layout.tsx
+ * - API handling from app/api.ts
+ * - Auto-generated entry point
  *
  * @since 1.0.0
  */
-export const effectUI = (options: EffectUIPluginOptions = {}): Plugin => {
-  const jsxImportSource = options.jsxImportSource ?? "effect-ui";
-  const silent = options.silent ?? false;
-
-  let resolvedRoutesDir: string | null = null;
-  let projectRoot: string = process.cwd();
+export const effectUI = (): Plugin => {
+  let config: ResolvedConfig;
+  let appDir: string;
+  let routesDir: string;
+  let generatedDir: string;
 
   return {
-    name: "vite-plugin-effect-ui",
+    name: "effect-ui",
+    enforce: "pre",
 
-    config(_config, { command }) {
-      // Only include effect-ui in optimizeDeps for production builds
-      // In dev with aliases (like examples), the user should exclude it themselves
-      const base = {
+    config() {
+      return {
         esbuild: {
-          jsx: "automatic" as const,
-          jsxImportSource,
+          jsx: "automatic",
+          jsxImportSource: "effect-ui",
+        },
+        optimizeDeps: {
+          include: ["effect-ui"],
+          esbuildOptions: {
+            jsx: "automatic",
+            jsxImportSource: "effect-ui",
+          },
         },
       };
+    },
 
-      // For build command, include effect for pre-bundling optimization
-      if (command === "build") {
-        return {
-          ...base,
-          optimizeDeps: {
-            include: ["effect"],
+    configResolved(resolvedConfig) {
+      config = resolvedConfig;
+      appDir = path.resolve(config.root, APP_DIR);
+      routesDir = path.join(appDir, "routes");
+      generatedDir = path.resolve(config.root, GENERATED_DIR);
+
+      // Ensure generated directory exists
+      if (!fs.existsSync(generatedDir)) {
+        fs.mkdirSync(generatedDir, { recursive: true });
+      }
+
+      // Log configuration
+      log.info("effect-ui configured");
+      log.dim(`  App directory: ${appDir}`);
+      log.dim(`  Routes directory: ${routesDir}`);
+      log.dim(`  Generated directory: ${generatedDir}`);
+    },
+
+    async configureServer(server: ViteDevServer) {
+      // Validate app structure on startup
+      const structureErrors = validateAppStructure(appDir);
+      for (const error of structureErrors) {
+        log.error(`${error.message}`);
+        if (error.details) {
+          log.dim(`  ${error.details}`);
+        }
+      }
+
+      if (structureErrors.length > 0) {
+        log.warn("Fix the above errors to continue");
+      }
+
+      // Generate type files and entry
+      const routes = fs.existsSync(routesDir) ? scanRoutes(routesDir) : [];
+
+      // Write routes.d.ts
+      const routeTypesPath = path.join(generatedDir, "routes.d.ts");
+      fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
+
+      // Write api.d.ts
+      const apiTypesPath = path.join(generatedDir, "api.d.ts");
+      fs.writeFileSync(apiTypesPath, generateApiTypes(appDir));
+
+      // Write entry.tsx (auto-generated app entry point)
+      const entryPath = path.join(generatedDir, "entry.tsx");
+      fs.writeFileSync(entryPath, generateEntryModule(appDir, generatedDir));
+
+      log.success(`Generated files in ${GENERATED_DIR}/`);
+
+      // Initialize API middleware if api.ts exists
+      const apiPath = path.join(appDir, "api.ts");
+      let apiMiddleware: ApiMiddleware | null = null;
+
+      if (fs.existsSync(apiPath)) {
+        const serverPort = server.config.server.port ?? 5173;
+        apiMiddleware = await createApiMiddleware({
+          loadApiModule: async () => {
+            // Use Vite's SSR module loader for HMR support
+            const mod = await server.ssrLoadModule(apiPath);
+            if (!mod.ApiLive) {
+              throw new Error("api.ts must export ApiLive");
+            }
+            return mod as { ApiLive: never };
           },
-        };
-      }
-
-      return base;
-    },
-
-    configResolved(config: ResolvedConfig) {
-      projectRoot = config.root;
-
-      // Resolve routes directory if specified
-      if (options.routes) {
-        resolvedRoutesDir = path.resolve(projectRoot, options.routes);
-
-        if (!fs.existsSync(resolvedRoutesDir)) {
-          warn(`Routes directory not found: ${resolvedRoutesDir}`);
-          resolvedRoutesDir = null;
-        } else {
-          const routes = scanRoutes(resolvedRoutesDir);
-
-          // Generate type declarations file
-          const typesContent = generateRouteTypes(routes);
-          const typesPath = path.resolve(projectRoot, "routes.d.ts");
-          fs.writeFileSync(typesPath, typesContent);
-
-          if (!silent) {
-            info(`${colors.green}File-based routing enabled${colors.reset}`);
-            info(`  Routes directory: ${options.routes}`);
-            info(`  Found ${routes.length} route(s)`);
-            info(`  ${colors.green}Generated routes.d.ts${colors.reset}`);
-            routes.forEach((r) => {
-              const type = r.isLayout ? " (layout)" : r.isIndex ? " (index)" : "";
-              info(`    ${colors.dim}${r.routePath}${type}${colors.reset}`);
-            });
-          }
-        }
-      }
-
-      if (silent) return;
-
-      // Check for conflicting React plugins
-      const hasReactPlugin = config.plugins.some(
-        (p) => p.name.includes("react") || p.name.includes("preact"),
-      );
-      if (hasReactPlugin) {
-        warn(
-          "Detected React/Preact plugin alongside effect-ui. " +
-            "This may cause JSX conflicts. If you see errors, remove the React plugin.",
-        );
-      }
-
-      // Check esbuild JSX configuration
-      const esbuildJsx = config.esbuild;
-      if (esbuildJsx && typeof esbuildJsx === "object") {
-        const jsxConfig = esbuildJsx as {
-          jsx?: string;
-          jsxImportSource?: string;
-          jsxFactory?: string;
-        };
-
-        // Warn if using classic JSX mode
-        if (jsxConfig.jsx === "transform" || jsxConfig.jsxFactory) {
-          warn(
-            "Detected classic JSX mode. effect-ui requires automatic JSX runtime. " +
-              "Remove jsxFactory/jsxFragmentFactory from your config.",
-          );
-        }
-
-        // Warn if jsxImportSource is overridden to something unexpected
-        if (
-          jsxConfig.jsxImportSource &&
-          jsxConfig.jsxImportSource !== "effect-ui" &&
-          jsxConfig.jsxImportSource !== jsxImportSource
-        ) {
-          warn(
-            `jsxImportSource is set to "${jsxConfig.jsxImportSource}" but effect-ui expects "effect-ui". ` +
-              `JSX may not work correctly.`,
-          );
-        }
-      }
-
-      // Log successful configuration in dev mode
-      if (config.command === "serve" && !options.routes) {
-        info(`JSX configured with jsxImportSource: "${jsxImportSource}"`);
-      }
-    },
-
-    configureServer(devServer) {
-      // Watch routes directory for changes
-      if (resolvedRoutesDir) {
-        devServer.watcher.add(resolvedRoutesDir);
-
-        const regenerateRoutes = () => {
-          // Regenerate types file
-          const routes = scanRoutes(resolvedRoutesDir!);
-          const typesContent = generateRouteTypes(routes);
-          const typesPath = path.resolve(projectRoot, "routes.d.ts");
-          fs.writeFileSync(typesPath, typesContent);
-
-          // Invalidate virtual module
-          const module = devServer.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ROUTES_ID);
-          if (module) {
-            devServer.moduleGraph.invalidateModule(module);
-            devServer.ws.send({ type: "full-reload" });
-          }
-        };
-
-        devServer.watcher.on("add", (file) => {
-          if (file.startsWith(resolvedRoutesDir!) && /\.(tsx|ts|jsx|js)$/.test(file)) {
-            if (!silent) info(`Route added: ${path.relative(resolvedRoutesDir!, file)}`);
-            regenerateRoutes();
-          }
+          onError: (error) => {
+            log.error("API handler error:");
+            console.error(error);
+          },
+          baseUrl: `http://localhost:${serverPort}`,
         });
-
-        devServer.watcher.on("unlink", (file) => {
-          if (file.startsWith(resolvedRoutesDir!) && /\.(tsx|ts|jsx|js)$/.test(file)) {
-            if (!silent) info(`Route removed: ${path.relative(resolvedRoutesDir!, file)}`);
-            regenerateRoutes();
-          }
-        });
+        log.success("API handlers loaded");
       }
+
+      // Watch for changes
+      server.watcher.on("change", async (file) => {
+        if (file.startsWith(routesDir)) {
+          const routes = scanRoutes(routesDir);
+          fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
+          log.dim("Regenerated routes.d.ts");
+        }
+        if (file.endsWith("api.ts")) {
+          fs.writeFileSync(apiTypesPath, generateApiTypes(appDir));
+          log.dim("Regenerated api.d.ts");
+
+          // Reload API handlers
+          if (apiMiddleware) {
+            await apiMiddleware.reload();
+            log.dim("Reloaded API handlers");
+          }
+        }
+      });
+
+      // Add file creation handler
+      server.watcher.on("add", (file) => {
+        if (file.startsWith(routesDir)) {
+          const routes = scanRoutes(routesDir);
+          fs.writeFileSync(routeTypesPath, generateRouteTypes(routes));
+          log.dim("Regenerated routes.d.ts");
+        }
+      });
+
+      // Cleanup on server close
+      server.httpServer?.on("close", () => {
+        apiMiddleware?.dispose();
+      });
+
+      // Add API middleware BEFORE Vite's internal middleware
+      // This ensures /api/* requests are handled before Vite serves HTML
+      if (apiMiddleware) {
+        server.middlewares.use(apiMiddleware.middleware);
+      }
+
+      // Return post hook - runs after Vite's internal middleware
+      return () => {
+        // SPA fallback - serve HTML for all non-asset routes
+        server.middlewares.use((req, res, next) => {
+          if (req.url && !req.url.includes(".") && req.method === "GET") {
+            // Let Vite handle transforming our virtual HTML
+            req.url = "/index.html";
+          }
+          next();
+        });
+      };
     },
 
     resolveId(id) {
-      // Handle virtual routes module
       if (id === VIRTUAL_ROUTES_ID) {
-        if (!resolvedRoutesDir) {
-          throw new Error(
-            `Cannot import "${VIRTUAL_ROUTES_ID}" - routes option not configured. ` +
-              `Add { routes: "./src/routes" } to the effectUI plugin options.`,
-          );
-        }
         return RESOLVED_VIRTUAL_ROUTES_ID;
       }
-
-      // Handle effect-ui/jsx-runtime and effect-ui/jsx-dev-runtime
+      if (id === VIRTUAL_CLIENT_ID) {
+        return RESOLVED_VIRTUAL_CLIENT_ID;
+      }
+      // Handle jsx-runtime
       if (id === "effect-ui/jsx-runtime" || id === "effect-ui/jsx-dev-runtime") {
-        // Let Vite resolve these normally from node_modules
-        return null;
+        return null; // Let Vite resolve from node_modules
       }
       return null;
     },
 
     load(id) {
-      // Generate routes virtual module
-      if (id === RESOLVED_VIRTUAL_ROUTES_ID && resolvedRoutesDir) {
-        const routes = scanRoutes(resolvedRoutesDir);
-        return generateRoutesModule(routes, resolvedRoutesDir);
+      if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
+        const routes = fs.existsSync(routesDir) ? scanRoutes(routesDir) : [];
+        return generateRoutesModule(routes, routesDir);
+      }
+      if (id === RESOLVED_VIRTUAL_CLIENT_ID) {
+        return generateClientModule(appDir);
       }
       return null;
     },
 
-    // Provide helpful error overlay for common issues
-    transform(code, id) {
-      // Only process TSX/JSX files
-      if (!id.endsWith(".tsx") && !id.endsWith(".jsx")) {
-        return null;
+    // Provide fallback index.html
+    buildStart() {
+      // Generate entry.tsx if needed
+      const entryPath = path.join(generatedDir, "entry.tsx");
+      if (!fs.existsSync(entryPath)) {
+        fs.writeFileSync(entryPath, generateEntryModule(appDir, generatedDir));
       }
 
-      // Check for common mistakes in user code (dev mode only)
-      if (process.env.NODE_ENV !== "production" && !silent) {
-        // Detect React imports that might conflict
-        if (code.includes("from 'react'") || code.includes('from "react"')) {
-          warn(
-            `${id.split("/").pop()}: Detected React import. ` +
-              "effect-ui has its own JSX runtime - React imports are not needed.",
-          );
-        }
-
-        // Detect createElement usage (classic JSX)
-        if (code.includes("React.createElement") || code.includes("createElement(")) {
-          warn(
-            `${id.split("/").pop()}: Detected createElement usage. ` +
-              "effect-ui uses automatic JSX transform - use JSX syntax instead.",
-          );
-        }
+      // Generate index.html if it doesn't exist
+      const indexPath = path.join(config.root, "index.html");
+      if (!fs.existsSync(indexPath)) {
+        fs.writeFileSync(indexPath, generateHtmlTemplate(generatedDir));
+        log.success("Generated index.html");
       }
+    },
 
-      return null;
+    // Validate on build
+    async buildEnd() {
+      // Validate app structure
+      const structureErrors = validateAppStructure(appDir);
+      if (structureErrors.length > 0) {
+        for (const error of structureErrors) {
+          log.error(`${error.message}`);
+          if (error.details) {
+            log.dim(`  ${error.details}`);
+          }
+        }
+        throw new Error("Build failed due to app structure errors");
+      }
     },
   };
 };
 
-// Default export for convenient usage
+// Default export
 export default effectUI;

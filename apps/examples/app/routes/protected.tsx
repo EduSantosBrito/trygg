@@ -85,7 +85,7 @@ const ProtectedPage = Component.gen(function* () {
     return <div>Loading...</div>;
   }
 
-  const handleLogout = (): Effect.Effect<void> =>
+  const handleLogout = () =>
     Effect.gen(function* () {
       yield* setAuth(Option.none());
       // Navigate to login after logout

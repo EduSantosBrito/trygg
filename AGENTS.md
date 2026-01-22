@@ -30,6 +30,8 @@ Effect-native UI framework with JSX support and fine-grained reactivity.
 | Topic | File |
 |-------|------|
 | Architecture & Patterns | [docs/design.md](docs/design.md) |
-| Router | [docs/router.md](docs/router.md) |
+| Router (current) | [docs/router.md](docs/router.md) |
+| Declarative Routing (new) | [docs/declarative-routing.md](docs/declarative-routing.md) |
 | Observability | [docs/observability.md](docs/observability.md) |
 | Implementation Status | [docs/plan.md](docs/plan.md) |
+| Promise → Effect Migration | [docs/migrate-promise.md](docs/migrate-promise.md) |

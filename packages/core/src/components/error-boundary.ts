@@ -4,9 +4,13 @@
  *
  * Catches errors from child components and displays a fallback UI.
  * Uses Effect's error handling for type-safe error recovery.
+ *
+ * This component catches errors from:
+ * 1. Initial render failures (via ErrorBoundaryElement)
+ * 2. Re-render failures (via ErrorBoundaryElement propagation)
  */
 import { Effect } from "effect";
-import { Element, componentElement } from "../element.js";
+import { Element, componentElement, normalizeChild } from "../element.js";
 
 /**
  * Props for the ErrorBoundary component
@@ -14,9 +18,9 @@ import { Element, componentElement } from "../element.js";
  */
 export interface ErrorBoundaryProps<E = unknown> {
   /**
-   * Child element - an Effect that may fail.
+   * Child element - an Effect that may fail, or a static Element.
    */
-  readonly children: Effect.Effect<Element, E, unknown>;
+  readonly children: Effect.Effect<Element, E, unknown> | Element;
   /**
    * Fallback element to show when an error occurs.
    * Can be a static element or a function that receives the error.
@@ -35,6 +39,10 @@ export interface ErrorBoundaryProps<E = unknown> {
  * Provides an error boundary that catches errors from child components
  * and displays a fallback UI. This is similar to React's ErrorBoundary
  * but integrated with Effect's error handling.
+ *
+ * **Catches errors from:**
+ * - Initial render failures (when the child Effect fails)
+ * - Re-render failures (when a child component re-renders due to signal changes and throws)
  *
  * The child effect can rely on services provided by parent context.
  *
@@ -73,27 +81,41 @@ export interface ErrorBoundaryProps<E = unknown> {
 export const ErrorBoundary = <E>(props: ErrorBoundaryProps<E>): Element => {
   const { children, fallback, onError } = props;
 
-  const effect = Effect.gen(function* () {
-    // Try to render children, catching any errors
-    const result = yield* children.pipe(
-      Effect.catchAll((error: E) =>
-        Effect.gen(function* () {
-          // Call onError callback if provided
-          if (onError) {
-            yield* onError(error);
-          }
+  // Check if children is an Effect
+  const isEffect =
+    typeof children === "object" && children !== null && Effect.EffectTypeId in children;
 
-          // Return fallback element
-          if (typeof fallback === "function") {
-            return fallback(error);
-          }
-          return fallback;
-        }),
-      ),
-    );
+  // Normalize fallback and onError for ErrorBoundaryElement
+  const normalizedFallback =
+    typeof fallback === "function" ? (e: unknown) => fallback(e as E) : fallback;
+  const normalizedOnError = onError ? (e: unknown) => onError(e as E) : null;
 
-    return result;
+  // If children is a static Element, wrap it in ErrorBoundaryElement
+  if (!isEffect) {
+    return Element.ErrorBoundaryElement({
+      child: normalizeChild(children),
+      fallback: normalizedFallback,
+      onError: normalizedOnError,
+    });
+  }
+
+  // Children is an Effect - wrap it in a Component element, then wrap that in ErrorBoundaryElement.
+  // This ensures:
+  // 1. The child Effect becomes its own Component with its own signal subscriptions
+  // 2. ErrorBoundaryElement wraps the Component, catching both initial AND re-render errors
+  //
+  // Structure:
+  //   ErrorBoundaryElement
+  //     └── Component (child effect)
+  //           └── rendered Element
+  //
+  // When the child Component re-renders and throws, the error propagates to
+  // ErrorBoundaryElement's error handler via options.errorHandler.
+  const childComponent = componentElement(() => children as Effect.Effect<Element, E, unknown>);
+
+  return Element.ErrorBoundaryElement({
+    child: childComponent,
+    fallback: normalizedFallback,
+    onError: normalizedOnError,
   });
-
-  return componentElement(() => effect);
 };

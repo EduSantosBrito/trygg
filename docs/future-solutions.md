@@ -9,15 +9,15 @@
 ## Solution Index
 | ID | Finding | Category | Priority | Status | Solution Link |
 |----|---------|----------|----------|--------|---------------|
-| FUT-001 | API Routes (Effect HttpApi integration) | Feature/Security | HIGH | ✅ Ready | [Link](#fut-001) |
-| FUT-002 | Resource API (data fetching) | Feature/Performance | HIGH | ✅ Ready | [Link](#fut-002) |
+| FUT-001 | API Routes (Effect HttpApi integration) | Feature/Security | HIGH | ✅ Implemented | [Link](#fut-001) |
+| FUT-002 | Resource API (data fetching) | Feature/Performance | HIGH | ✅ Implemented | [Link](#fut-002) |
 
 ---
 
 ## Detailed Solutions
 
 ### FUT-001: API Routes (effect-first, platform-agnostic)
-**Status:** ✅ Ready
+**Status:** ✅ Implemented (2026-01-21)
 **Category:** Feature / Security / Reliability
 **Priority:** HIGH
 **Files Affected:** `src/vite-plugin.ts`, `src/api.ts` (new), `src/server/*` (new), `src/index.ts`, `docs/design.md`
@@ -388,7 +388,7 @@ ERROR: Missing handler in app/api/users/group.ts
 ---
 
 ### FUT-002: Data Fetching Resource API
-**Status:** ✅ Ready
+**Status:** ✅ Implemented (2026-01-21)
 **Category:** Feature / Performance
 **Priority:** HIGH
 **Files Affected:** `src/Resource.ts` (new), `src/index.ts`, `docs/design.md`
@@ -1213,6 +1213,48 @@ Another component mounts while refreshing:
 ---
 
 ## Session Log
+### 2026-01-21 - FUT-002 Resource API Implementation
+- **FUT-002 Implemented:**
+  - Created `src/Resource.ts` with:
+    - `ResourceState<A, E>` - tagged union (Pending | Success | Failure)
+    - `Resource.make({ key, fetch })` - create resource descriptor
+    - `Resource.fetch(resource)` - returns `Signal<ResourceState<A, E>>`
+    - `Resource.match(state, handlers)` - pattern matching with Signal.derive
+    - `Resource.invalidate(resource)` - stale-while-revalidate
+    - `Resource.refresh(resource)` - hard reload
+    - `Resource.clear(resource)` - remove from cache
+    - `ResourceRegistry` service with in-memory cache
+    - `ResourceRegistryLive` layer
+  - Added `ResourceRegistryLive` to `mount()` in renderer.ts
+  - Exported `Resource` namespace from index.ts
+  - Added Section 14 to `docs/design.md` documenting Resource API
+  - Added 18 tests in `tests/resource.test.ts`
+  - All 542 tests passing
+
+### 2026-01-21 - Dev Server Middleware Implementation
+- **Full HttpApi integration in dev server:**
+  - Uses `HttpApiBuilder.toWebHandler` to create web handler from api + handlers
+  - Converts Node.js IncomingMessage to web Request
+  - Converts web Response back to Node.js ServerResponse
+  - Supports body streaming for requests and responses
+  - Caches compiled handler, invalidates on file changes
+  - Integrates user's `app/services.ts` layer
+  - Added `@effect/platform-node` as peer dependency
+
+### 2026-01-21 - Implementation Session (FUT-001)
+- **FUT-001 Implemented:**
+  - Created `src/api.ts` with type utilities (`Api.Handler`, `Api.GroupHandlers`, etc.)
+  - Extended `vite-plugin.ts` with:
+    - `scanApiRoutes()` for `app/api/` discovery
+    - `generateApiModule()` for `virtual:effect-ui-api`
+    - `generateApiTypes()` for `api-routes.d.ts`
+    - `validateApiRouteConflicts()` for build-time validation
+    - `pathToModuleName()` for module name generation
+    - Full dev server middleware with HttpApi integration
+    - `app/services.ts` convention support
+  - Added comprehensive tests (23 new tests for API routes)
+  - Added Section 13 to `docs/design.md` documenting API routes
+
 ### 2026-01-20 - Revision Session (Round 3)
 - FUT-001: Adopted `app/` directory convention (like Next.js)
   - Zero config: `effectUI()` with no options needed

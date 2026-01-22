@@ -25,7 +25,9 @@ import { render } from "../src/testing.js";
 import { Portal } from "../src/components/portal.js";
 import * as Signal from "../src/signal.js";
 import * as Component from "../src/component.js";
-import { Fragment } from "../src/jsx-runtime.js";
+import type { ComponentProps } from "../src/component.js";
+import * as Router from "../src/router/index.js";
+import { Element, Fragment } from "../src/index.js";
 
 // =============================================================================
 // mount - App entry point
@@ -438,6 +440,89 @@ describe("Component element rendering", () => {
       const exit = yield* Effect.exit(render(<ErrorComponent />));
 
       assert.strictEqual(exit._tag, "Failure");
+    }),
+  );
+
+  it.scoped(
+    "should execute effect when Component element is stored in Signal and passed as children",
+    () =>
+      Effect.gen(function* () {
+        // This reproduces the pattern from generated entry.tsx:
+        // const outlet = yield* Signal.make(<Router.Outlet routes={routes} />)
+        // return <Layout>{outlet}</Layout>
+
+        let innerEffectRan = false;
+
+        // Inner component (like Outlet) - just a Component element
+        const InnerComponent = Component.gen(function* () {
+          innerEffectRan = true;
+          return <span data-testid="inner">Inner content</span>;
+        });
+
+        // Wrapper component (like Layout) that receives children
+        const Wrapper = Component.gen(function* (
+          Props: Component.ComponentProps<{ children: Signal.Signal<Element> }>,
+        ) {
+          const { children } = yield* Props;
+          return <div data-testid="wrapper">{children}</div>;
+        });
+
+        // App pattern: store component in Signal, pass as children
+        const App = Component.gen(function* () {
+          const innerSignal = yield* Signal.make<Element>(<InnerComponent />);
+          return <Wrapper>{innerSignal}</Wrapper>;
+        });
+
+        const { getByTestId } = yield* render(<App />);
+
+        // The inner component's effect should have run
+        assert.isTrue(innerEffectRan, "Inner component effect should run");
+        assert.strictEqual(getByTestId("inner").textContent, "Inner content");
+      }),
+  );
+
+  it.scoped("should re-render inner component when it subscribes to an outer signal", () =>
+    Effect.gen(function* () {
+      // This tests the router pattern: Outlet subscribes to router.current
+      // When router.current changes, Outlet should re-render
+
+      const outerSignal = Signal.unsafeMake(0);
+      let innerRenderCount = 0;
+
+      // Inner component that subscribes to outer signal (like Outlet subscribes to router.current)
+      const InnerComponent = Component.gen(function* () {
+        const value = yield* Signal.get(outerSignal);
+        innerRenderCount++;
+        return <span data-testid="inner">Value: {String(value)}</span>;
+      });
+
+      // Wrapper component (like Layout)
+      const Wrapper = Component.gen(function* (
+        Props: Component.ComponentProps<{ children: Signal.Signal<Element> }>,
+      ) {
+        const { children } = yield* Props;
+        return <div data-testid="wrapper">{children}</div>;
+      });
+
+      // App pattern
+      const App = Component.gen(function* () {
+        const innerSignal = yield* Signal.make<Element>(<InnerComponent />);
+        return <Wrapper>{innerSignal}</Wrapper>;
+      });
+
+      const { getByTestId } = yield* render(<App />);
+
+      // Initial render
+      assert.strictEqual(innerRenderCount, 1, "Inner should render once initially");
+      assert.strictEqual(getByTestId("inner").textContent, "Value: 0");
+
+      // Change outer signal
+      yield* Signal.set(outerSignal, 42);
+      yield* TestClock.adjust(20);
+
+      // Inner should re-render
+      assert.strictEqual(innerRenderCount, 2, "Inner should re-render when signal changes");
+      assert.strictEqual(getByTestId("inner").textContent, "Value: 42");
     }),
   );
 });
@@ -1097,6 +1182,377 @@ describe("Re-render behavior", () => {
       assert.strictEqual(childRenderCount, 2);
     }),
   );
+
+  it.scoped("should clean up old content when SignalElement swaps (navigation pattern)", () =>
+    Effect.gen(function* () {
+      // This simulates the router outlet pattern:
+      // 1. A Signal<Element> holds the current route component
+      // 2. When navigation happens, the signal updates to new component
+      // 3. Old component should be cleaned up before new one renders
+
+      const routeSignal = Signal.unsafeMake<Element>(<div data-testid="route-a">Route A</div>);
+      let cleanupACalled = false;
+
+      // Component A with cleanup tracking
+      const RouteA = Component.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            cleanupACalled = true;
+          }),
+        );
+        return <div data-testid="route-a">Route A Content</div>;
+      });
+
+      // Component B
+      const RouteB = Component.gen(function* () {
+        return <div data-testid="route-b">Route B Content</div>;
+      });
+
+      // Set initial route
+      yield* Signal.set(routeSignal, <RouteA />);
+
+      const { container, getByTestId } = yield* render(
+        <div data-testid="outlet">{routeSignal}</div>,
+      );
+
+      // Initial state: Route A is rendered
+      assert.strictEqual(getByTestId("route-a").textContent, "Route A Content");
+      assert.strictEqual(container.querySelectorAll("[data-testid]").length, 2); // outlet + route-a
+
+      // Navigate to Route B
+      yield* Signal.set(routeSignal, <RouteB />);
+      yield* TestClock.adjust(20);
+
+      // After navigation: Route A should be cleaned up, Route B should be rendered
+      assert.isTrue(cleanupACalled, "Route A cleanup should have been called");
+      assert.isNull(
+        container.querySelector("[data-testid='route-a']"),
+        "Route A should be removed from DOM",
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='route-b']"),
+        "Route B should be in DOM",
+      );
+      assert.strictEqual(getByTestId("route-b").textContent, "Route B Content");
+
+      // Should have exactly 2 test elements: outlet + route-b
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid]").length,
+        2,
+        "Should only have outlet + current route",
+      );
+    }),
+  );
+
+  it.scoped("should not duplicate content on rapid signal changes", () =>
+    Effect.gen(function* () {
+      // Test that rapid navigation doesn't cause duplicate DOM nodes
+      const routeSignal = Signal.unsafeMake<Element>(<span>Initial</span>);
+
+      const { container } = yield* render(<div data-testid="rapid-container">{routeSignal}</div>);
+
+      const getSpanCount = () => container.querySelectorAll("span").length;
+
+      assert.strictEqual(getSpanCount(), 1, "Initial: should have 1 span");
+
+      // Rapid updates
+      yield* Signal.set(routeSignal, <span>Update 1</span>);
+      yield* Signal.set(routeSignal, <span>Update 2</span>);
+      yield* Signal.set(routeSignal, <span>Update 3</span>);
+
+      // Let all updates process
+      yield* TestClock.adjust(50);
+
+      // Should still have only 1 span
+      assert.strictEqual(getSpanCount(), 1, "After rapid updates: should still have only 1 span");
+      assert.strictEqual(container.querySelector("span")?.textContent, "Update 3");
+    }),
+  );
+
+  it.scoped(
+    "should cleanup nested SignalElement on parent component re-render (outlet pattern)",
+    () =>
+      Effect.gen(function* () {
+        // This simulates the router outlet pattern:
+        // - Outlet is a Component that subscribes to router.current
+        // - Outlet returns a SignalElement (tracker.view) that is UPDATED via Signal.set
+        // - When router changes, the view signal is updated with new content
+
+        const routerSignal = Signal.unsafeMake("/page-a");
+        let outletRenderCount = 0;
+
+        // Create a view signal OUTSIDE the component (like async tracker does)
+        const viewSignal = Signal.unsafeMake<Element>(
+          <div data-testid="page-a">Page A Content</div>,
+        );
+
+        // Simulated outlet that re-renders on route change
+        const SimulatedOutlet = Component.gen(function* () {
+          // Subscribe to router signal (causes re-render when it changes)
+          const currentRoute = yield* Signal.get(routerSignal);
+          outletRenderCount++;
+
+          // Update the view signal (like tracker.run does)
+          yield* Signal.set(
+            viewSignal,
+            currentRoute === "/page-a" ? (
+              <div data-testid="page-a">Page A Content</div>
+            ) : (
+              <div data-testid="page-b">Page B Content</div>
+            ),
+          );
+
+          // Return SignalElement (like outlet does)
+          return <div data-testid="outlet-inner">{viewSignal}</div>;
+        });
+
+        const { container } = yield* render(
+          <div data-testid="app">
+            <SimulatedOutlet />
+          </div>,
+        );
+
+        // Initial state
+        assert.strictEqual(outletRenderCount, 1, "Outlet should render once initially");
+        assert.isNotNull(
+          container.querySelector("[data-testid='page-a']"),
+          "Page A should be visible",
+        );
+        assert.isNull(
+          container.querySelector("[data-testid='page-b']"),
+          "Page B should not be visible",
+        );
+
+        // Navigate to page B
+        yield* Signal.set(routerSignal, "/page-b");
+        yield* TestClock.adjust(20);
+
+        // After navigation
+        assert.strictEqual(outletRenderCount, 2, "Outlet should re-render on navigation");
+
+        const pageAElements = container.querySelectorAll("[data-testid='page-a']");
+        const pageBElements = container.querySelectorAll("[data-testid='page-b']");
+        const outletInnerElements = container.querySelectorAll("[data-testid='outlet-inner']");
+
+        // Count elements
+        assert.strictEqual(
+          pageAElements.length,
+          0,
+          `Page A should be removed, found ${pageAElements.length}. DOM: ${container.innerHTML}`,
+        );
+        assert.strictEqual(
+          pageBElements.length,
+          1,
+          `Should have exactly 1 Page B, found ${pageBElements.length}`,
+        );
+        assert.strictEqual(
+          outletInnerElements.length,
+          1,
+          `Should have exactly 1 outlet-inner, found ${outletInnerElements.length}`,
+        );
+      }),
+  );
+
+  it.scoped("should render component only ONCE on initial mount (no double render)", () =>
+    Effect.gen(function* () {
+      // This test verifies that components don't double-render on initial mount
+      // which was a reported issue with the outlet pattern
+      let innerRenderCount = 0;
+
+      const InnerComponent = Component.gen(function* () {
+        innerRenderCount++;
+        return <div data-testid="inner">Rendered {innerRenderCount} times</div>;
+      });
+
+      // Create a signal holding the inner component (like outlet pattern)
+      const contentSignal = Signal.unsafeMake<Element>(<InnerComponent />);
+
+      // Outer component that reads from the signal
+      const OuterComponent = Component.gen(function* () {
+        return <div data-testid="outer">{contentSignal}</div>;
+      });
+
+      const { container } = yield* render(<OuterComponent />);
+
+      // Wait for any potential extra renders
+      yield* TestClock.adjust(50);
+
+      // Should only render once
+      assert.strictEqual(
+        innerRenderCount,
+        1,
+        `Inner component should render exactly once, but rendered ${innerRenderCount} times`,
+      );
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid='inner']").length,
+        1,
+        `Should have exactly 1 inner element in DOM`,
+      );
+    }),
+  );
+
+  it.scoped("should render nested component only ONCE when parent subscribes to signal", () =>
+    Effect.gen(function* () {
+      // More complex case: outer component subscribes to a signal
+      // but inner component should still only render once initially
+      const routeSignal = Signal.unsafeMake("/home");
+      let outerRenderCount = 0;
+      let innerRenderCount = 0;
+
+      const InnerComponent = Component.gen(function* () {
+        innerRenderCount++;
+        return <div data-testid="inner">Inner render #{innerRenderCount}</div>;
+      });
+
+      const OuterComponent = Component.gen(function* () {
+        // Subscribe to route signal (like outlet does)
+        const route = yield* Signal.get(routeSignal);
+        outerRenderCount++;
+        return (
+          <div data-testid="outer" data-route={route}>
+            <InnerComponent />
+          </div>
+        );
+      });
+
+      const { container } = yield* render(<OuterComponent />);
+
+      // Wait for any potential extra renders
+      yield* TestClock.adjust(50);
+
+      // Both should render exactly once on initial mount
+      assert.strictEqual(
+        outerRenderCount,
+        1,
+        `Outer component should render exactly once initially, but rendered ${outerRenderCount} times`,
+      );
+      assert.strictEqual(
+        innerRenderCount,
+        1,
+        `Inner component should render exactly once initially, but rendered ${innerRenderCount} times`,
+      );
+
+      // Verify DOM
+      assert.strictEqual(container.querySelectorAll("[data-testid='outer']").length, 1);
+      assert.strictEqual(container.querySelectorAll("[data-testid='inner']").length, 1);
+    }),
+  );
+
+  it.scoped("should render outlet pattern (Signal<Component>) only ONCE on initial mount", () =>
+    Effect.gen(function* () {
+      // This matches the exact app structure:
+      // App creates Signal containing Outlet Component
+      // Layout receives signal as children prop and renders it
+      // Outlet should only render ONCE
+
+      let outletRenderCount = 0;
+      let layoutRenderCount = 0;
+
+      // Simulated Outlet - a Component that subscribes to a route signal
+      const routeSignal = Signal.unsafeMake("/home");
+      const Outlet = Component.gen(function* () {
+        const route = yield* Signal.get(routeSignal);
+        outletRenderCount++;
+        return (
+          <div data-testid="outlet">
+            Route: {route}, Render #{outletRenderCount}
+          </div>
+        );
+      });
+
+      // Layout receives children as Signal<Element>
+      const Layout = Component.gen(function* (
+        Props: ComponentProps<{ content: Signal.Signal<Element> }>,
+      ) {
+        const { content } = yield* Props;
+        layoutRenderCount++;
+        return (
+          <div data-testid="layout">
+            <header>Layout Header</header>
+            <main>{content}</main>
+          </div>
+        );
+      });
+
+      // App creates outlet signal and passes to Layout (like entry.tsx)
+      const App = Component.gen(function* () {
+        const outlet = yield* Signal.make<Element>(<Outlet />);
+        return <Layout content={outlet} />;
+      });
+
+      const { container } = yield* render(<App />);
+
+      // Wait for any potential extra renders
+      yield* TestClock.adjust(50);
+
+      // All should render exactly once
+      assert.strictEqual(
+        layoutRenderCount,
+        1,
+        `Layout should render exactly once, but rendered ${layoutRenderCount} times`,
+      );
+      assert.strictEqual(
+        outletRenderCount,
+        1,
+        `Outlet should render exactly once, but rendered ${outletRenderCount} times`,
+      );
+
+      // Verify DOM structure
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid='layout']").length,
+        1,
+        "Should have exactly 1 layout",
+      );
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid='outlet']").length,
+        1,
+        "Should have exactly 1 outlet",
+      );
+    }),
+  );
+
+  it.scoped("should render real Router.Outlet only ONCE on initial mount", () =>
+    Effect.gen(function* () {
+      // Test with actual Router.Outlet and router service
+      let homeRenderCount = 0;
+
+      const routes: Array<import("../src/router/types.js").RouteDefinition> = [
+        {
+          path: "/",
+          component: () =>
+            Promise.resolve({
+              default: Component.gen(function* () {
+                homeRenderCount++;
+                return <div data-testid="home">Home Page (render #{homeRenderCount})</div>;
+              }),
+            }),
+        },
+      ];
+
+      const App = Component.gen(function* () {
+        return <Router.Outlet routes={routes} />;
+      });
+
+      const { container } = yield* render(<App />).pipe(Effect.provide(Router.testLayer("/")));
+
+      // Wait for async route loading and any potential extra renders
+      yield* TestClock.adjust(100);
+
+      // Home should render exactly once
+      assert.strictEqual(
+        homeRenderCount,
+        1,
+        `Home component should render exactly once, but rendered ${homeRenderCount} times`,
+      );
+
+      // Verify DOM
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid='home']").length,
+        1,
+        "Should have exactly 1 home element",
+      );
+    }),
+  );
 });
 
 // =============================================================================
@@ -1115,6 +1571,130 @@ describe("Renderer error handling", () => {
       const exit = yield* Effect.exit(render(<ErrorComponent />));
 
       assert.strictEqual(exit._tag, "Failure");
+    }),
+  );
+
+  it.scoped("should preserve old content when component re-render fails", () =>
+    Effect.gen(function* () {
+      const shouldError = Signal.unsafeMake(false);
+
+      const ConditionalErrorComponent = Component.gen(function* () {
+        const willError = yield* Signal.get(shouldError);
+        if (willError) {
+          yield* new ComponentError({ message: "Re-render error" });
+        }
+        return <div data-testid="content">Working content</div>;
+      });
+
+      const { getByTestId } = yield* render(<ConditionalErrorComponent />);
+
+      // Initial render succeeds
+      assert.strictEqual(getByTestId("content").textContent, "Working content");
+
+      // Trigger re-render that will fail
+      yield* Signal.set(shouldError, true);
+      yield* TestClock.adjust(20);
+
+      // Old content should be preserved (not removed)
+      assert.strictEqual(getByTestId("content").textContent, "Working content");
+    }),
+  );
+
+  it.scoped("should preserve old content when SignalElement swap fails", () =>
+    Effect.gen(function* () {
+      const viewSignal = yield* Signal.make<"working" | "error">("working");
+
+      const WorkingView = <div data-testid="view">Working view</div>;
+
+      const ErrorView = Component.gen(function* () {
+        yield* new ComponentError({ message: "View error" });
+        return <div />;
+      });
+
+      const App = Component.gen(function* () {
+        const view = yield* Signal.get(viewSignal);
+        return view === "working" ? WorkingView : <ErrorView />;
+      });
+
+      const { getByTestId } = yield* render(<App />);
+
+      // Initial render shows working view
+      assert.strictEqual(getByTestId("view").textContent, "Working view");
+
+      // Trigger swap to error view
+      yield* Signal.set(viewSignal, "error");
+      yield* TestClock.adjust(20);
+
+      // Old content should be preserved
+      assert.strictEqual(getByTestId("view").textContent, "Working view");
+    }),
+  );
+
+  it.scoped("should maintain signal subscriptions after re-render error for retry", () =>
+    Effect.gen(function* () {
+      const errorCount = Signal.unsafeMake(0);
+      let renderCount = 0;
+
+      const RetryableComponent = Component.gen(function* () {
+        renderCount++;
+        const errors = yield* Signal.get(errorCount);
+        // Fail on first re-render (errors === 1), succeed on second (errors === 2)
+        if (errors === 1) {
+          yield* new ComponentError({ message: "Temporary error" });
+        }
+        return <div data-testid="retry">{String(errors)}</div>;
+      });
+
+      const { getByTestId } = yield* render(<RetryableComponent />);
+
+      // Initial render (errors = 0) succeeds
+      assert.strictEqual(renderCount, 1);
+      assert.strictEqual(getByTestId("retry").textContent, "0");
+
+      // First re-render (errors = 1) fails - old content preserved
+      yield* Signal.set(errorCount, 1);
+      yield* TestClock.adjust(20);
+      assert.strictEqual(renderCount, 2);
+      assert.strictEqual(getByTestId("retry").textContent, "0"); // Old content preserved
+
+      // Second re-render (errors = 2) succeeds - subscription still works
+      yield* Signal.set(errorCount, 2);
+      yield* TestClock.adjust(20);
+      assert.strictEqual(renderCount, 3);
+      assert.strictEqual(getByTestId("retry").textContent, "2"); // New content rendered
+    }),
+  );
+
+  it.scoped("should cleanup properly after re-render error when component unmounts", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const shouldError = Signal.unsafeMake(false);
+
+      const ErrorOnRerenderComponent = Component.gen(function* () {
+        const willError = yield* Signal.get(shouldError);
+        if (willError) {
+          yield* new ComponentError({ message: "Re-render error" });
+        }
+        return <div id="error-cleanup">Content</div>;
+      });
+
+      yield* render(<ErrorOnRerenderComponent />).pipe(Scope.extend(scope));
+
+      // Initial render
+      assert.isNotNull(document.querySelector("#error-cleanup"));
+
+      // Trigger failing re-render
+      yield* Signal.set(shouldError, true);
+      yield* TestClock.adjust(20);
+
+      // Content still present (old content preserved)
+      assert.isNotNull(document.querySelector("#error-cleanup"));
+
+      // Close scope - should cleanup without errors
+      yield* Scope.close(scope, Exit.void);
+
+      // Content removed
+      assert.isNull(document.querySelector("#error-cleanup"));
     }),
   );
 });

@@ -83,7 +83,10 @@ const NestedModal = Component.gen(function* () {
       {firstOpenValue && (
         <Portal target="#portal-root">
           <div className="modal-backdrop" onClick={() => Signal.set(firstOpen, false)}>
-            <div className="modal-content" onClick={(e: Event) => Effect.sync(() => e.stopPropagation())}>
+            <div
+              className="modal-content"
+              onClick={(e: Event) => Effect.sync(() => e.stopPropagation())}
+            >
               <h2>First Modal</h2>
               <p>This is the first modal. Click below to open another modal on top.</p>
               <div className="modal-actions">
@@ -99,8 +102,14 @@ const NestedModal = Component.gen(function* () {
 
       {secondOpenValue && (
         <Portal target="#portal-root">
-          <div className="modal-backdrop modal-backdrop-nested" onClick={() => Signal.set(secondOpen, false)}>
-            <div className="modal-content" onClick={(e: Event) => Effect.sync(() => e.stopPropagation())}>
+          <div
+            className="modal-backdrop modal-backdrop-nested"
+            onClick={() => Signal.set(secondOpen, false)}
+          >
+            <div
+              className="modal-content"
+              onClick={(e: Event) => Effect.sync(() => e.stopPropagation())}
+            >
               <h2>Second Modal</h2>
               <p>This modal stacks on top of the first one!</p>
               <div className="modal-actions">
@@ -134,8 +143,8 @@ const OverflowEscape = Component.gen(function* () {
         <div className="tooltip-trigger-wrapper">
           <button
             className="tooltip-trigger"
-            onMouseenter={() => Signal.set(showTooltip, true)}
-            onMouseleave={() => Signal.set(showTooltip, false)}
+            onMouseEnter={() => Signal.set(showTooltip, true)}
+            onMouseLeave={() => Signal.set(showTooltip, false)}
           >
             Hover me
           </button>

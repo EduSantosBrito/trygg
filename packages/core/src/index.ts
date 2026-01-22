@@ -90,6 +90,12 @@ export {
 // Signal - Effect-native reactive state
 export * as Signal from "./signal.js";
 
+// Api - Type utilities for HttpApi integration
+export * as Api from "./api.js";
+
+// Resource - Data fetching with caching and fine-grained reactivity
+export * as Resource from "./Resource.js";
+
 // Component API for typed props
 import {
   Component as ComponentFn,

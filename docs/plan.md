@@ -459,3 +459,11 @@ None (documentation addition)
 - Processed: F-010
 - Decisions: add llms.txt with rules, commands, skills, docs index
 - Next: continue priority list
+
+### 2026-01-22 - Migration Plan Session
+- Created: [docs/migrate-promise.md](migrate-promise.md)
+- Scope: Full Effect migration of vite-plugin.ts and api-middleware.ts
+- Key findings: Logger.batched for non-blocking I/O; Vite load() hook is async
+- Patterns: Yieldable errors (Data.TaggedError), FileSystem service, Ref for state
+- Estimated effort: ~13 hours across 18 phases
+- Next: Implementation

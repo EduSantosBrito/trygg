@@ -595,14 +595,17 @@ export const Outlet = (props: OutletProps = {}): Element => {
         Effect.gen(function* () {
           // Interrupt any in-flight request (stale-while-revalidate: keep showing old)
           if (trackerState.currentFiber !== null) {
+            yield* Debug.log({ event: "router.tracker.interrupt" });
             yield* Fiber.interrupt(trackerState.currentFiber);
             trackerState.currentFiber = null;
           }
 
           // Set loading or refreshing state
           if (trackerState.lastElement === null) {
+            yield* Debug.log({ event: "router.tracker.loading" });
             yield* Signal.set(state, { _tag: "Loading" });
           } else {
+            yield* Debug.log({ event: "router.tracker.refreshing" });
             yield* Signal.set(state, { _tag: "Refreshing", previous: trackerState.lastElement });
           }
 
@@ -613,9 +616,11 @@ export const Outlet = (props: OutletProps = {}): Element => {
 
               if (Exit.isSuccess(exit)) {
                 trackerState.lastElement = exit.value;
+                yield* Debug.log({ event: "router.tracker.ready" });
                 yield* Signal.set(state, { _tag: "Ready", element: exit.value });
               } else {
                 // On failure, show loading element (error boundary handles actual errors)
+                yield* Debug.log({ event: "router.tracker.error" });
                 yield* Signal.set(state, { _tag: "Loading" });
               }
             }),
@@ -631,18 +636,22 @@ export const Outlet = (props: OutletProps = {}): Element => {
 
   // The outlet is a component that reactively renders based on context
   const outletEffect = Effect.gen(function* () {
+    yield* Debug.log({ event: "router.outlet.start", routes_count: routes.length });
+
     // Check if we're a nested outlet (inside a layout) with pre-set child content
     const childContent = yield* FiberRef.get(CurrentOutletChild);
 
     // If there's child content, we're inside a layout - render the child
     // Clear the content so subsequent Outlet renders don't see stale data
     if (Option.isSome(childContent)) {
+      yield* Debug.log({ event: "router.outlet.nested" });
       yield* FiberRef.set(CurrentOutletChild, Option.none());
       return childContent.value;
     }
 
     // Otherwise, we're a top-level outlet - match routes
     if (routes.length === 0) {
+      yield* Debug.log({ event: "router.outlet.no_routes" });
       // No routes provided and no child content - render fallback
       return fallback ?? text("No routes configured");
     }
@@ -657,6 +666,8 @@ export const Outlet = (props: OutletProps = {}): Element => {
 
     // Get current route (subscribes to changes via Signal.get)
     const route = yield* Signal.get(router.current);
+
+    yield* Debug.log({ event: "router.outlet.matching", path: route.path });
 
     // Subscribe to reset trigger if it exists
     let resetValue: number | null = null;
@@ -725,66 +736,109 @@ export const Outlet = (props: OutletProps = {}): Element => {
     const nearestLoadingComponent = findNearestLoadingComponent(match);
 
     // Apply error boundary if any route in the chain has error component
-    // Use sandbox + catchAllCause to handle both typed failures AND defects (thrown exceptions)
+    // Use ErrorBoundaryElement to catch BOTH initial AND re-render errors
     if (nearestErrorComponent) {
-      const renderWithError = renderWithErrorHandling.pipe(
+      // Helper to create error info and render error component
+      // Used for both initial render errors and re-render errors
+      const renderErrorComponent: (
+        cause: Cause.Cause<unknown>,
+      ) => Effect.Effect<Element, unknown, never> = Effect.fnUntraced(function* (
+        cause: Cause.Cause<unknown>,
+      ) {
+        const isDefect = Cause.isDie(cause);
+
+        yield* Debug.log({
+          event: "router.error",
+          route_pattern: match.route.path,
+          error: String(Cause.squash(cause)),
+          error_boundary: "nearest",
+          is_defect: isDefect,
+        });
+
+        // Record route error metric
+        yield* Metrics.recordRouteError;
+
+        // Initialize reset trigger if needed
+        if (resetTrigger === null) {
+          resetTrigger = yield* Signal.make(0);
+        }
+
+        // Capture the signal for the reset effect
+        const capturedTrigger = resetTrigger;
+
+        // Create error info for the error component
+        const errorInfo: RouteErrorInfo = {
+          cause,
+          path: route.path,
+          // Reset effect - increments trigger to cause re-render
+          reset: Signal.update(capturedTrigger, (n) => n + 1),
+        };
+
+        // Load the error component module
+        const errorModule = yield* Effect.promise(() => nearestErrorComponent());
+        const errorComponent = errorModule.default;
+
+        // Render the error component inside the Effect.locally scope
+        // This ensures the error is available when currentError is called
+        if (isEffectComponent(errorComponent)) {
+          // Component.gen result - call it to get a componentElement
+          const componentEl = errorComponent({});
+
+          // The componentElement wraps the effect in a thunk. We need to extract
+          // and run that effect INSIDE Effect.locally so the FiberRef is set
+          // when the component body executes (including Router.currentError).
+          if (componentEl._tag === "Component") {
+            // Extract the effect from the component element
+            const innerEffect = componentEl.run();
+            // Run the effect inside Effect.locally so FiberRef is available
+            return yield* Effect.locally(
+              innerEffect as Effect.Effect<Element, unknown, never>,
+              CurrentRouteError,
+              Option.some(errorInfo),
+            );
+          }
+          // Fallback for non-Component elements (shouldn't happen for Component.gen)
+          return componentEl;
+        }
+        // Effect-based component - run the effect with locally
+        return yield* Effect.locally(
+          errorComponent as Effect.Effect<Element, unknown, never>,
+          CurrentRouteError,
+          Option.some(errorInfo),
+        );
+      });
+
+      // Create fallback function for ErrorBoundaryElement
+      // This returns a Component element that loads and renders the error component
+      const errorFallback = (squashedError: unknown): Element => {
+        // Wrap the squashed error back into a Cause for consistency with initial errors
+        const cause = Cause.fail(squashedError);
+        return componentElement(() => renderErrorComponent(cause));
+      };
+
+      // Render the route component wrapped in ErrorBoundaryElement
+      // This catches BOTH initial render errors AND re-render errors
+      const renderWithError = Effect.gen(function* () {
+        // Render route component
+        const routeElement = yield* renderWithErrorHandling;
+
+        // Wrap in ErrorBoundaryElement to catch re-render errors
+        // The ErrorBoundaryElement also catches initial render errors from child
+        return Element.ErrorBoundaryElement({
+          child: routeElement,
+          fallback: errorFallback,
+          onError: null, // Debug logging happens in renderErrorComponent
+        });
+      }).pipe(
+        // Also catch initial errors from renderWithErrorHandling itself
+        // (e.g., if loadAndRender fails before returning an element)
         Effect.sandbox,
         Effect.catchAllCause((sandboxedCause) =>
           Effect.gen(function* () {
             // Flatten the nested Cause<Cause<E>> from sandbox into Cause<E>
             const cause = Cause.flatten(sandboxedCause);
-            const isDefect = Cause.isDie(cause);
-
-            yield* Debug.log({
-              event: "router.error",
-              route_pattern: match.route.path,
-              error: String(Cause.squash(cause)),
-              error_boundary: "nearest",
-              is_defect: isDefect,
-            });
-
-            // Record route error metric
-            yield* Metrics.recordRouteError;
-
-            // Initialize reset trigger if needed
-            if (resetTrigger === null) {
-              resetTrigger = yield* Signal.make(0);
-            }
-
-            // Capture the signal for the reset effect
-            const capturedTrigger = resetTrigger;
-
-            // Create error info for the error component
-            const errorInfo: RouteErrorInfo = {
-              cause,
-              path: route.path,
-              // Reset effect - increments trigger to cause re-render
-              reset: Signal.update(capturedTrigger, (n) => n + 1),
-            };
-
-            // Load the error component module
-            const errorModule = yield* Effect.promise(() => nearestErrorComponent());
-            const errorComponent = errorModule.default;
-
-            // Return a componentElement that wraps execution in Effect.locally
-            // This ensures the error is available when currentError is called,
-            // and automatically clears after the error component renders
-            return componentElement(() =>
-              Effect.locally(
-                Effect.gen(function* () {
-                  // Render the error component inside the Effect.locally scope
-                  // If the error component throws, it will propagate to parent boundary
-                  if (isEffectComponent(errorComponent)) {
-                    // Component.gen result - call it to get Element
-                    return errorComponent({});
-                  }
-                  // Effect-based component - run the effect
-                  return yield* errorComponent as Effect.Effect<Element, unknown, never>;
-                }),
-                CurrentRouteError,
-                Option.some(errorInfo),
-              ),
-            );
+            // Render error component directly (not wrapped in ErrorBoundaryElement)
+            return yield* renderErrorComponent(cause);
           }),
         ),
       );
@@ -793,15 +847,15 @@ export const Outlet = (props: OutletProps = {}): Element => {
       if (nearestLoadingComponent) {
         const loadingModule = yield* Effect.promise(() => nearestLoadingComponent());
         const loadingElement = yield* renderComponent(loadingModule.default, {});
-        const scope = yield* Effect.scope;
+        // Use component scope (survives re-renders) instead of render scope
+        // The async tracker's derived Signal needs a long-lived scope to stay subscribed
+        const componentScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+        const scope = componentScope ?? (yield* Effect.scope);
 
         const tracker = yield* getOrCreateAsyncTracker(loadingElement, scope);
         const matchKey = buildMatchKey(match, route.query.toString(), resetValue);
 
-        if (currentMatchKey === null) {
-          currentMatchKey = matchKey;
-          yield* tracker.run(renderWithError);
-        } else if (currentMatchKey !== matchKey) {
+        if (currentMatchKey === null || currentMatchKey !== matchKey) {
           currentMatchKey = matchKey;
           yield* tracker.run(renderWithError);
         }
@@ -816,15 +870,14 @@ export const Outlet = (props: OutletProps = {}): Element => {
     if (nearestLoadingComponent) {
       const loadingModule = yield* Effect.promise(() => nearestLoadingComponent());
       const loadingElement = yield* renderComponent(loadingModule.default, {});
-      const scope = yield* Effect.scope;
+      // Use component scope (survives re-renders) instead of render scope
+      const componentScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+      const scope = componentScope ?? (yield* Effect.scope);
 
       const tracker = yield* getOrCreateAsyncTracker(loadingElement, scope);
       const matchKey = buildMatchKey(match, route.query.toString(), resetValue);
 
-      if (currentMatchKey === null) {
-        currentMatchKey = matchKey;
-        yield* tracker.run(renderWithErrorHandling);
-      } else if (currentMatchKey !== matchKey) {
+      if (currentMatchKey === null || currentMatchKey !== matchKey) {
         currentMatchKey = matchKey;
         yield* tracker.run(renderWithErrorHandling);
       }

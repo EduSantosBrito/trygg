@@ -31,9 +31,61 @@
  * // Run with scope for automatic cleanup
  * Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(Debug.serverLayer({ port: 4567 })))))
  * ```
+ *
+ * @module
+ * @platform bun
  */
+
+// =============================================================================
+// Bun-specific type declarations
+// =============================================================================
+// This file is only executed in Bun environments. These declarations allow
+// typechecking to pass in non-Bun environments (e.g., browser apps that
+// import effect-ui but don't use TestServer).
+
+/** Bun.serve API */
+declare const Bun: {
+  serve(options: { port: number; fetch: (req: Request) => Response | Promise<Response> }): {
+    stop(): void;
+  };
+};
+
+/** bun:sqlite Database class */
+interface BunSqliteDatabase {
+  run(sql: string, params?: unknown[]): void;
+  query<T>(sql: string): { all(...params: unknown[]): T[] };
+  close(): void;
+}
+
 import { Schema, Effect, Context, Scope, Runtime } from "effect";
 import type { DebugEvent, EventType } from "./debug.js";
+
+// =============================================================================
+// Dynamic import helpers (typed wrappers for Bun/Node modules)
+// =============================================================================
+// These modules are only available in Bun/Node environments.
+// @ts-ignore is used because these modules don't exist in browser environments
+// but are dynamically imported only when TestServer.start() is called in Bun.
+
+/** Import bun:sqlite module - only available in Bun runtime */
+const importBunSqlite = (): Promise<{
+  Database: new (path: string, options?: { create?: boolean }) => BunSqliteDatabase;
+  // @ts-ignore - bun:sqlite only exists in Bun
+}> => import("bun:sqlite");
+
+/** Import node:fs/promises module - only available in Node/Bun runtime */
+const importNodeFs = (): Promise<{
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
+  writeFile(path: string, data: string): Promise<void>;
+  rm(path: string, options?: { force?: boolean }): Promise<void>;
+  // @ts-ignore - node:fs/promises only exists in Node/Bun
+}> => import("node:fs/promises");
+
+/** Import node:path module - only available in Node/Bun runtime */
+const importNodePath = (): Promise<{
+  dirname(path: string): string;
+  // @ts-ignore - node:path only exists in Node/Bun
+}> => import("node:path");
 
 // ============================================================================
 // Configuration
@@ -293,7 +345,7 @@ export const startInternal: (
     const cfg: Required<TestServerConfig> = { ...defaultConfig, ...config };
 
     // Dynamic import for Bun-specific module
-    const { Database } = yield* Effect.promise(() => import("bun:sqlite"));
+    const { Database } = yield* Effect.promise(importBunSqlite);
 
     // Create SQLite database
     const db = new Database(cfg.dbPath, { create: true });
@@ -465,8 +517,8 @@ export const startInternal: (
 
     // Write connection info
     yield* Effect.tryPromise(async () => {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
+      const fs = await importNodeFs();
+      const path = await importNodePath();
 
       const dir = path.dirname(cfg.connectionInfoPath);
       await fs.mkdir(dir, { recursive: true });

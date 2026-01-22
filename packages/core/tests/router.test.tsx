@@ -10,19 +10,28 @@
  * - Outlet: Route rendering component
  * - Link: Navigation links
  * - Layers: browserLayer, testLayer
+ * - Error handling: currentError, _error.tsx
  *
  * Goals: Reliability, stability, performance
  * - Verify navigation state updates correctly
  * - Verify route matching handles all patterns
  * - Verify cleanup on navigation
+ * - Verify error boundaries catch re-render errors
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, TestClock } from "effect";
+import { Cause, Data, Effect, Exit, Option, TestClock } from "effect";
 import * as Router from "../src/router/router-service.js";
+import type { RouteErrorInfo, RoutesManifest } from "../src/router/types.js";
+import { Outlet } from "../src/router/outlet.js";
 import { parsePath, buildPath, createMatcher } from "../src/router/matching.js";
 import { cx } from "../src/router/utils.js";
 import * as Signal from "../src/signal.js";
 import { empty } from "../src/element.js";
+import { render } from "../src/testing.js";
+import * as Component from "../src/component.js";
+
+// Tagged error for testing route errors
+class TestRouteError extends Data.TaggedError("TestRouteError")<{ message: string }> {}
 
 // Mock component for route tests - returns a valid RouteComponent (Effect<Element>)
 const mockComponent = () => Promise.resolve({ default: Effect.succeed(empty) });
@@ -514,5 +523,98 @@ describe("cx", () => {
 
       assert.strictEqual(result, "a b");
     }),
+  );
+});
+
+// =============================================================================
+// Router.currentError - Error info in error components
+// =============================================================================
+// Scope: Error boundary FiberRef propagation for Component.gen error components
+
+describe("Router.currentError", () => {
+  it.scoped("should be accessible in Component.gen error component on re-render error", () =>
+    Effect.gen(function* () {
+      // Signal to trigger error on re-render
+      const shouldError = Signal.unsafeMake(false);
+      // Use object ref to capture error info (avoids TypeScript narrowing issues)
+      const captured: { errorInfo: Option.Option<RouteErrorInfo> } = { errorInfo: Option.none() };
+
+      // Route component that throws on re-render
+      const RouteComponent = Component.gen(function* () {
+        const throwNow = yield* Signal.get(shouldError);
+        if (throwNow) {
+          return yield* new TestRouteError({ message: "Re-render error for test" });
+        }
+        return <div data-testid="route-content">Route OK</div>;
+      });
+
+      // Error component using Component.gen that reads currentError
+      // This is the pattern used in _error.tsx files
+      const ErrorComponent = Component.gen(function* () {
+        const errorInfo = yield* Router.currentError;
+        captured.errorInfo = Option.some(errorInfo);
+        return (
+          <div data-testid="error-content">Error: {String(Cause.squash(errorInfo.cause))}</div>
+        );
+      });
+
+      // Create routes manifest with error component
+      const routes: RoutesManifest = [
+        {
+          path: "/test",
+          component: () => Promise.resolve({ default: RouteComponent }),
+          errorComponent: () => Promise.resolve({ default: ErrorComponent }),
+        },
+      ];
+
+      // Render outlet with routes
+      const app = Effect.gen(function* () {
+        return <Outlet routes={routes} />;
+      });
+
+      const { queryByTestId } = yield* render(app).pipe(Effect.provide(Router.testLayer("/test")));
+
+      // Initial render should show route content
+      assert.isNotNull(queryByTestId("route-content"));
+      assert.isNull(queryByTestId("error-content"));
+
+      // Trigger re-render error
+      yield* Signal.set(shouldError, true);
+      yield* TestClock.adjust(20);
+
+      // Error boundary should catch and show error component
+      assert.isNotNull(queryByTestId("error-content"));
+      assert.isNull(queryByTestId("route-content"));
+
+      // Error component should have received error info via Router.currentError
+      // This verifies the FiberRef propagation fix for Component.gen components
+      assert.isTrue(
+        Option.isSome(captured.errorInfo),
+        "Error component should have captured error info",
+      );
+      if (Option.isNone(captured.errorInfo)) return; // TypeScript guard
+      assert.strictEqual(captured.errorInfo.value.path, "/test");
+      // Verify cause contains a failure (Cause.failureOption returns Some if there's a Fail)
+      assert.isTrue(Option.isSome(Cause.failureOption(captured.errorInfo.value.cause)));
+    }),
+  );
+
+  it.scoped("should die when called outside error boundary context", () =>
+    Effect.gen(function* () {
+      // currentError uses Effect.die (defect) when FiberRef is empty,
+      // so we need Effect.exit to catch it (Effect.either only catches failures)
+      const exit = yield* Effect.exit(Router.currentError);
+
+      // Use Exit.match to handle both cases without conditional testing
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          // Should be a Die (defect), not a Fail
+          assert.isTrue(Cause.isDie(cause));
+        },
+        onSuccess: () => {
+          assert.fail("Expected currentError to die outside error boundary context");
+        },
+      });
+    }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });

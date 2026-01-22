@@ -5,6 +5,7 @@
  * Handles mounting Element trees to the DOM.
  */
 import {
+  Cause,
   Context,
   Data,
   Effect,
@@ -75,6 +76,24 @@ export interface RenderResult {
   readonly node: Node;
   readonly cleanup: Effect.Effect<void>;
 }
+
+/**
+ * Error boundary handler type.
+ * Called when a component or signal element encounters an error during re-render.
+ * @since 1.0.0
+ */
+export type ErrorBoundaryHandler = (cause: Cause.Cause<unknown>) => void;
+
+/**
+ * Render options passed through the element tree.
+ * @internal
+ */
+interface RenderOptions {
+  readonly errorHandler: ErrorBoundaryHandler | null;
+}
+
+/** Default render options with no error handler */
+const defaultRenderOptions: RenderOptions = { errorHandler: null };
 
 /**
  * Renderer service interface
@@ -249,6 +268,7 @@ const renderElement = (
   parent: Node,
   runtime: Runtime.Runtime<never>,
   context: Context.Context<unknown> | null,
+  options: RenderOptions = defaultRenderOptions,
 ): Effect.Effect<RenderResult, unknown, Scope.Scope> =>
   Match.value(element).pipe(
     Match.tag("Text", ({ content }) =>
@@ -332,7 +352,7 @@ const renderElement = (
           Effect.fnUntraced(function* (value: unknown) {
             const scope = yield* Scope.make();
             const element = renderValue(value);
-            const result = yield* renderElement(element, parent, runtime, context).pipe(
+            const result = yield* renderElement(element, parent, runtime, context, options).pipe(
               Effect.provideService(Scope.Scope, scope),
               Effect.onError(() => Scope.close(scope, Exit.void)),
             );
@@ -362,11 +382,12 @@ const renderElement = (
               Effect.gen(function* () {
                 const newValue = yield* Signal.get(signal);
 
-                // Cleanup old content + scope
+                // Render new content FIRST (before cleanup) so we can keep old on error
+                const nextRender = yield* renderWithScope(newValue);
+
+                // Cleanup old content + scope AFTER successful render
                 yield* cleanupCurrent;
 
-                // Render new content in a long-lived scope
-                const nextRender = yield* renderWithScope(newValue);
                 currentResult = nextRender.result;
                 currentScope = nextRender.scope;
                 parent.insertBefore(currentResult.node, anchor);
@@ -375,7 +396,25 @@ const renderElement = (
                   event: "render.signalelement.swap",
                   signal_id: signal._debugId,
                 });
-              }),
+              }).pipe(
+                Effect.catchAllCause((cause) =>
+                  Effect.gen(function* () {
+                    yield* Debug.log({
+                      event: "render.signalelement.swap",
+                      trigger: "error",
+                      signal_id: signal._debugId,
+                      reason: String(cause),
+                    });
+
+                    // Check for parent error boundary handler
+                    if (options.errorHandler !== null) {
+                      // Propagate error to error boundary
+                      options.errorHandler(cause);
+                    }
+                    // Keep old content if no error boundary
+                  }),
+                ),
+              ),
             );
           }),
         );
@@ -393,7 +432,7 @@ const renderElement = (
     ),
 
     Match.tag("Provide", ({ context: providedContext, child }) =>
-      renderElement(child, parent, runtime, providedContext),
+      renderElement(child, parent, runtime, providedContext, options),
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children }) =>
@@ -411,7 +450,7 @@ const renderElement = (
         // Render children
         const childResults: Array<RenderResult> = [];
         for (const child of children) {
-          const result = yield* renderElement(child, node, runtime, context);
+          const result = yield* renderElement(child, node, runtime, context, options);
           childResults.push(result);
         }
 
@@ -504,7 +543,13 @@ const renderElement = (
           if (actualParent === null) {
             throw new Error("Component anchor has no parent - component may have been unmounted");
           }
-          const result = yield* renderElement(childElement, actualParent, runtime, context);
+          const result = yield* renderElement(
+            childElement,
+            actualParent,
+            runtime,
+            context,
+            options,
+          );
           // Move rendered content before the anchor
           actualParent.insertBefore(result.node, anchor);
           return result;
@@ -530,17 +575,19 @@ const renderElement = (
             // Track re-render duration
             const rerenderStart = performance.now();
 
-            // Clean up old render + scope
-            yield* cleanupCurrent;
-
             // Reset render phase for re-render
             yield* Signal.resetRenderPhase(renderPhase);
 
             // Re-execute the component effect with render phase context
+            // NOTE: Render BEFORE cleanup so we can keep old content on error
             const nextRender = yield* runComponentEffect();
             const nextResult = yield* renderAndPosition(normalizeChild(nextRender.element)).pipe(
               Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
             );
+
+            // Clean up old render + scope AFTER successful render
+            yield* cleanupCurrent;
+
             currentRenderScope = nextRender.scope;
             currentResult = nextResult;
             const rerenderDuration = performance.now() - rerenderStart;
@@ -562,13 +609,23 @@ const renderElement = (
               scheduleRerender();
             }
           }).pipe(
-            Effect.tapErrorCause((cause) =>
+            Effect.catchAllCause((cause) =>
               Effect.gen(function* () {
                 yield* Debug.log({
                   event: "render.component.rerender",
                   trigger: "error",
                   reason: String(cause),
                 });
+
+                // Check for parent error boundary handler
+                if (options.errorHandler !== null) {
+                  // Propagate error to error boundary - it will render fallback
+                  options.errorHandler(cause);
+                } else {
+                  // No error boundary - keep old content and re-subscribe for retry
+                  yield* subscribeToSignals(renderPhase.accessed);
+                }
+
                 isRerendering = false;
                 pendingRerender = false;
               }),
@@ -667,7 +724,7 @@ const renderElement = (
         const childResults: Array<RenderResult> = [];
 
         for (const child of children) {
-          const result = yield* renderElement(child, fragment, runtime, context);
+          const result = yield* renderElement(child, fragment, runtime, context, options);
           childResults.push(result);
         }
 
@@ -710,7 +767,7 @@ const renderElement = (
         // Render children into target
         const childResults: Array<RenderResult> = [];
         for (const child of children) {
-          const result = yield* renderElement(child, targetElement, runtime, context);
+          const result = yield* renderElement(child, targetElement, runtime, context, options);
           childResults.push(result);
         }
 
@@ -829,6 +886,7 @@ const renderElement = (
             listParent,
             runtime,
             context,
+            options,
           );
 
           return { renderPhase, result };
@@ -1121,6 +1179,177 @@ const renderElement = (
               yield* state.result.cleanup;
             }
             itemStates.clear();
+            anchor.remove();
+          }),
+        };
+      }),
+    ),
+
+    Match.tag("ErrorBoundaryElement", ({ child, fallback, onError }) =>
+      Effect.gen(function* () {
+        // Create anchor comment for positioning
+        const anchor = document.createComment("error-boundary");
+        parent.appendChild(anchor);
+
+        // State to track current rendered content
+        let currentResult: RenderResult | null = null;
+        let currentScope: Scope.CloseableScope | null = null;
+        let isUnmounted = false;
+        let hasErrored = false;
+
+        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+          if (currentResult !== null) {
+            yield* currentResult.cleanup;
+            currentResult = null;
+          }
+          if (currentScope !== null) {
+            const scope = currentScope;
+            currentScope = null;
+            yield* Scope.close(scope, Exit.void);
+          }
+        });
+
+        // Error handler that swaps to fallback
+        const errorHandler: ErrorBoundaryHandler = (cause) => {
+          if (isUnmounted || hasErrored) return;
+          hasErrored = true;
+
+          Runtime.runFork(runtime)(
+            Effect.gen(function* () {
+              yield* Debug.log({
+                event: "render.errorboundary.caught",
+                reason: String(cause),
+              });
+
+              // Call onError callback if provided
+              if (onError !== null) {
+                yield* Effect.provide(onError(Cause.squash(cause)), context ?? emptyContext);
+              }
+
+              // Compute fallback element
+              const fallbackElement =
+                typeof fallback === "function" ? fallback(Cause.squash(cause)) : fallback;
+
+              // Render fallback with a new scope (no error handler - don't catch fallback errors)
+              const fallbackScope = yield* Scope.make();
+              const fallbackResult = yield* renderElement(
+                fallbackElement,
+                parent,
+                runtime,
+                context,
+                defaultRenderOptions,
+              ).pipe(
+                Effect.provideService(Scope.Scope, fallbackScope),
+                Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
+              );
+
+              // Clean up old content
+              yield* cleanupCurrent;
+
+              // Install fallback
+              currentResult = fallbackResult;
+              currentScope = fallbackScope;
+              parent.insertBefore(currentResult.node, anchor);
+
+              yield* Debug.log({
+                event: "render.errorboundary.fallback",
+              });
+            }).pipe(
+              // Log any errors during fallback rendering
+              Effect.tapErrorCause((fallbackCause) =>
+                Effect.sync(() => {
+                  // eslint-disable-next-line no-console
+                  console.error(
+                    "[effect-ui] ErrorBoundary fallback rendering failed:",
+                    Cause.pretty(fallbackCause),
+                  );
+                }),
+              ),
+            ),
+          );
+        };
+
+        // Create options with our error handler
+        const childOptions: RenderOptions = { errorHandler };
+
+        // Helper to render fallback (for initial render errors)
+        // Returns Effect<void, unknown> because fallback rendering could theoretically fail
+        const renderFallbackForError = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
+          hasErrored = true;
+
+          yield* Debug.log({
+            event: "render.errorboundary.caught",
+            reason: String(cause),
+          });
+
+          // Call onError callback if provided
+          if (onError !== null) {
+            yield* Effect.provide(onError(Cause.squash(cause)), context ?? emptyContext);
+          }
+
+          // Compute fallback element
+          const fallbackElement =
+            typeof fallback === "function" ? fallback(Cause.squash(cause)) : fallback;
+
+          // Render fallback with a new scope (no error handler - don't catch fallback errors)
+          const fallbackScope = yield* Scope.make();
+          const fallbackResult = yield* renderElement(
+            fallbackElement,
+            parent,
+            runtime,
+            context,
+            defaultRenderOptions,
+          ).pipe(
+            Effect.provideService(Scope.Scope, fallbackScope),
+            Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
+          );
+
+          // Clean up old content (should be nothing on initial render)
+          yield* cleanupCurrent;
+
+          // Install fallback
+          currentResult = fallbackResult;
+          currentScope = fallbackScope;
+          parent.insertBefore(currentResult.node, anchor);
+
+          yield* Debug.log({
+            event: "render.errorboundary.fallback",
+          });
+        });
+
+        // Render child with error handler in options - catch BOTH initial and re-render errors
+        const childScope = yield* Scope.make();
+        const childRenderResult = yield* renderElement(
+          child,
+          parent,
+          runtime,
+          context,
+          childOptions,
+        ).pipe(
+          Effect.provideService(Scope.Scope, childScope),
+          Effect.onError(() => Scope.close(childScope, Exit.void)),
+          Effect.map((result) => ({ success: true as const, result, scope: childScope })),
+          Effect.catchAllCause((cause) =>
+            renderFallbackForError(cause).pipe(Effect.map(() => ({ success: false as const }))),
+          ),
+        );
+
+        if (childRenderResult.success) {
+          currentResult = childRenderResult.result;
+          currentScope = childRenderResult.scope;
+          parent.insertBefore(currentResult.node, anchor);
+
+          yield* Debug.log({
+            event: "render.errorboundary.initial",
+          });
+        }
+        // If not success, fallback was already rendered by renderFallbackSync
+
+        return {
+          node: anchor,
+          cleanup: Effect.gen(function* () {
+            isUnmounted = true;
+            yield* cleanupCurrent;
             anchor.remove();
           }),
         };

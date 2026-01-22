@@ -11,14 +11,12 @@ export default defineConfig({
       // Allow serving files from the core src directory
       allow: [__dirname, src],
     },
+    // Force full reload when core package files change
+    watch: {
+      ignored: ["!**/packages/core/src/**"],
+    },
   },
-  plugins: [
-    effectUI({
-      // Enable file-based routing - routes directory at apps/examples/routes
-      routes: "./routes",
-      // Remove silent mode to see routing output
-    }),
-  ],
+  plugins: [effectUI()],
   resolve: {
     alias: [
       // JSX runtime aliases - must come before effect-ui
@@ -30,17 +28,12 @@ export default defineConfig({
       { find: "effect-ui", replacement: path.join(src, "index.ts") },
     ],
   },
+  optimizeDeps: {
+    // Force re-optimization on every server start to pick up changes
+    force: true,
+  },
   esbuild: {
     jsx: "automatic",
     jsxImportSource: "effect-ui",
-  },
-  optimizeDeps: {
-    // Don't try to optimize our local source files
-    exclude: [
-      "effect-ui",
-      "effect-ui/router",
-      "effect-ui/jsx-runtime",
-      "effect-ui/jsx-dev-runtime",
-    ],
   },
 });

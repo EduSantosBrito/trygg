@@ -3,7 +3,7 @@
  * @module
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Scope, TestClock } from "effect";
+import { Effect, Exit, Fiber, Scope, TestClock } from "effect";
 import {
   click,
   ElementNotFoundError,
@@ -908,23 +908,32 @@ describe("Testing Utilities", () => {
 
     it.scoped("should wait for condition to become true", () =>
       Effect.gen(function* () {
-        let value = false;
-        setTimeout(() => {
-          value = true;
-        }, 50);
+        let attempts = 0;
 
-        const result = yield* waitFor(() => {
-          if (!value) throw new Error("Not ready");
-          return "done";
-        });
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
+          waitFor(
+            () => {
+              attempts++;
+              if (attempts < 3) throw new Error("Not ready");
+              return "done";
+            },
+            { interval: 20 },
+          ),
+        );
 
+        // Advance time to allow retries
+        yield* TestClock.adjust(100);
+
+        const result = yield* Fiber.join(fiber);
         assert.strictEqual(result, "done");
       }),
     );
 
     it.scoped("should fail with WaitForTimeoutError on timeout", () =>
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
           waitFor(
             () => {
               throw new Error("Always fails");
@@ -933,47 +942,61 @@ describe("Testing Utilities", () => {
           ),
         );
 
+        // Advance time past timeout
+        yield* TestClock.adjust(200);
+
+        const exit = yield* Fiber.await(fiber);
         assert.isTrue(exit._tag === "Failure");
       }),
     );
 
-    it.scoped("should respect custom timeout option", () =>
+    it.scoped("should respect custom timeout by retrying appropriate number of times", () =>
       Effect.gen(function* () {
-        const start = Date.now();
+        let checkCount = 0;
 
-        yield* Effect.exit(
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
           waitFor(
             () => {
+              checkCount++;
               throw new Error("Fails");
             },
-            { timeout: 200 },
+            { timeout: 200, interval: 50 },
           ),
         );
 
-        const elapsed = Date.now() - start;
-        assert.isAtLeast(elapsed, 150);
+        // Advance time past timeout
+        yield* TestClock.adjust(300);
+
+        yield* Fiber.await(fiber);
+
+        // With timeout=200 and interval=50, should retry ~4 times (200/50)
+        assert.isAtLeast(checkCount, 3);
+        assert.isAtMost(checkCount, 6);
       }),
     );
 
     it.scoped("should check at custom interval", () =>
       Effect.gen(function* () {
         let checkCount = 0;
-        let ready = false;
 
-        setTimeout(() => {
-          ready = true;
-        }, 100);
-
-        yield* waitFor(
-          () => {
-            checkCount++;
-            if (!ready) throw new Error("Not ready");
-            return true;
-          },
-          { interval: 20 },
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
+          waitFor(
+            () => {
+              checkCount++;
+              if (checkCount < 5) throw new Error("Not ready");
+              return true;
+            },
+            { interval: 20 },
+          ),
         );
 
-        assert.isAtLeast(checkCount, 2);
+        // Advance time to allow retries
+        yield* TestClock.adjust(200);
+
+        yield* Fiber.join(fiber);
+        assert.isAtLeast(checkCount, 5);
       }),
     );
 
@@ -981,12 +1004,19 @@ describe("Testing Utilities", () => {
       Effect.gen(function* () {
         let attempts = 0;
 
-        const result = yield* waitFor(() => {
-          attempts++;
-          if (attempts < 3) throw new Error("Not ready");
-          return "success";
-        });
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
+          waitFor(() => {
+            attempts++;
+            if (attempts < 3) throw new Error("Not ready");
+            return "success";
+          }),
+        );
 
+        // Advance time to allow retries
+        yield* TestClock.adjust(200);
+
+        const result = yield* Fiber.join(fiber);
         assert.strictEqual(result, "success");
         assert.strictEqual(attempts, 3);
       }),
@@ -1002,7 +1032,8 @@ describe("Testing Utilities", () => {
 
     it.scoped("should include last error in timeout error", () =>
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(
+        // Fork waitFor so we can advance time
+        const fiber = yield* Effect.fork(
           waitFor(
             () => {
               throw new Error("Custom error message");
@@ -1010,6 +1041,11 @@ describe("Testing Utilities", () => {
             { timeout: 100 },
           ),
         );
+
+        // Advance time past timeout
+        yield* TestClock.adjust(200);
+
+        const exit = yield* Fiber.await(fiber);
 
         if (exit._tag === "Failure") {
           const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
@@ -1137,17 +1173,26 @@ describe("Testing Utilities", () => {
         );
 
         const status = result.getByTestId("status");
+        let checkCount = 0;
 
-        setTimeout(() => {
-          status.textContent = "ready";
-        }, 50);
+        // Fork waitFor and a delayed update
+        const fiber = yield* Effect.fork(
+          waitFor(() => {
+            checkCount++;
+            // Simulate: status becomes ready after a few checks
+            if (checkCount >= 3) {
+              status.textContent = "ready";
+            }
+            if (status.textContent !== "ready") throw new Error("Not ready");
+            return status.textContent;
+          }),
+        );
 
-        yield* waitFor(() => {
-          if (status.textContent !== "ready") throw new Error("Not ready");
-          return status.textContent;
-        });
+        // Advance time to allow retries
+        yield* TestClock.adjust(200);
 
-        assert.strictEqual(status.textContent, "ready");
+        const text = yield* Fiber.join(fiber);
+        assert.strictEqual(text, "ready");
       }),
     );
 

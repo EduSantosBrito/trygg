@@ -5,9 +5,10 @@
  * Provides helpers for rendering and querying components in tests.
  * Works with @effect/vitest for Effect-based testing.
  */
-import { Effect, Layer, Scope } from "effect";
+import { Duration, Effect, Layer, Option, Schedule, Scope } from "effect";
 import { Element, isElement } from "./element.js";
 import { browserLayer, Renderer } from "./renderer.js";
+import * as Router from "./router/index.js";
 
 /**
  * Result of rendering an element for testing
@@ -269,7 +270,7 @@ export const renderElement = Effect.fn("renderElement")(function* (element: Elem
  *
  * @since 1.0.0
  */
-export const testLayer: Layer.Layer<Renderer> = browserLayer;
+export const testLayer: Layer.Layer<Renderer> = Layer.provide(browserLayer, Router.testLayer());
 
 /**
  * Simulate a click event on an element
@@ -312,9 +313,17 @@ export class WaitForTimeoutError extends Error {
 }
 
 /**
- * Wait for an element to appear in the DOM
+ * Wait for a condition to become true.
  *
- * Useful for testing async rendering or state updates.
+ * Uses Effect primitives (Schedule) so it works with TestClock.
+ * Call `TestClock.adjust` to advance time in tests.
+ *
+ * @example
+ * ```ts
+ * // In a test with TestClock:
+ * const result = yield* waitFor(() => getByTestId("element"))
+ * yield* TestClock.adjust(100) // Advance time to allow retries
+ * ```
  *
  * @since 1.0.0
  */
@@ -323,24 +332,47 @@ export const waitFor = <T>(
   options: { timeout?: number; interval?: number } = {},
 ): Effect.Effect<T, WaitForTimeoutError> => {
   const { timeout = 1000, interval = 50 } = options;
+  const maxRetries = Math.ceil(timeout / interval);
 
-  return Effect.async<T, WaitForTimeoutError>((resume) => {
-    const start = Date.now();
+  // Track the last error for the timeout message
+  let lastError: unknown = new Error("Condition never checked");
+  let result: Option.Option<T> = Option.none();
 
-    const check = () => {
-      try {
-        const result = fn();
-        resume(Effect.succeed(result));
-      } catch (error) {
-        if (Date.now() - start >= timeout) {
-          resume(Effect.fail(new WaitForTimeoutError(timeout, error)));
-        } else {
-          setTimeout(check, interval);
-        }
-      }
-    };
+  // Try the function, storing result/error
+  const attempt = Effect.sync(() => {
+    try {
+      const value = fn();
+      result = Option.some(value);
+      return true; // success
+    } catch (e) {
+      lastError = e;
+      result = Option.none();
+      return false; // keep retrying
+    }
+  });
 
-    check();
+  // Schedule: retry at interval, max retries based on timeout
+  const schedule = Schedule.intersect(
+    Schedule.spaced(Duration.millis(interval)),
+    Schedule.recurs(maxRetries),
+  );
+
+  return Effect.gen(function* () {
+    // Run with retries until success or schedule exhausted
+    yield* attempt.pipe(
+      Effect.repeat({
+        schedule,
+        until: (success) => success,
+      }),
+      Effect.ignore,
+    );
+
+    // Check final result
+    if (Option.isSome(result)) {
+      return result.value;
+    }
+
+    return yield* Effect.fail(new WaitForTimeoutError(timeout, lastError));
   });
 };
 

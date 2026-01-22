@@ -120,16 +120,47 @@ export function Component<P extends object = {}>(): <E, R>(
  * Use this instead of Effect.provide() when the returned JSX should
  * make the provided services available to child components.
  *
+ * Accepts a single layer or an array of layers.
+ *
+ * @example
+ * ```tsx
+ * // Single layer
+ * Component.provide(ThemeLive)
+ *
+ * // Multiple layers
+ * Component.provide([ThemeLive, AuthLive, HttpClientLive])
+ * ```
+ *
  * @since 1.0.0
  */
-export const provide =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <E, R>(
+export const provide: {
+  <ROut, E2, RIn>(
+    layer: Layer.Layer<ROut, E2, RIn>,
+  ): <E, R>(
     self: Effect.Effect<Element, E, R>,
-  ): Effect.Effect<Element, E | E2, RIn | Exclude<R, ROut>> =>
+  ) => Effect.Effect<Element, E | E2, RIn | Exclude<R, ROut>>;
+  <Layers extends ReadonlyArray<Layer.Layer.Any>>(
+    layers: Layers,
+  ): <E, R>(
+    self: Effect.Effect<Element, E, R>,
+  ) => Effect.Effect<
+    Element,
+    E | { [K in keyof Layers]: Layer.Layer.Error<Layers[K]> }[number],
+    | { [K in keyof Layers]: Layer.Layer.Context<Layers[K]> }[number]
+    | Exclude<R, { [K in keyof Layers]: Layer.Layer.Success<Layers[K]> }[number]>
+  >;
+} = <ROut, E2, RIn>(layerOrLayers: Layer.Layer<ROut, E2, RIn> | ReadonlyArray<Layer.Layer.Any>) => {
+  const layer = Array.isArray(layerOrLayers)
+    ? (Layer.mergeAll as (...layers: ReadonlyArray<Layer.Layer.Any>) => Layer.Layer.Any)(
+        ...layerOrLayers,
+      )
+    : layerOrLayers;
+
+  return <E, R>(self: Effect.Effect<Element, E, R>) =>
     Effect.contextWithEffect((context: Context.Context<R | ROut>) =>
       Effect.map(self, (element) => provideElement(Context.merge(emptyContext, context), element)),
-    ).pipe(Effect.provide(layer));
+    ).pipe(Effect.provide(layer as Layer.Layer<ROut, E2, RIn>));
+};
 
 // =============================================================================
 // Type Guards

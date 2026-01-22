@@ -8,7 +8,17 @@
  * - Passed to JSX for fine-grained DOM updates
  * - Composed with derive for computed values
  */
-import { Cause, Effect, Equal, Exit, FiberRef, Ref, Scope, SubscriptionRef } from "effect";
+import {
+  Cause,
+  Effect,
+  Equal,
+  Exit,
+  FiberRef,
+  GlobalValue,
+  Ref,
+  Scope,
+  SubscriptionRef,
+} from "effect";
 import * as Debug from "./debug/debug.js";
 import * as Metrics from "./debug/metrics.js";
 import type { Element } from "./element.js";
@@ -64,26 +74,41 @@ export interface RenderPhase {
 /**
  * FiberRef to track current render phase.
  * Set by Renderer before executing component effects.
+ * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
  * @internal
  */
-export const CurrentRenderPhase: FiberRef.FiberRef<RenderPhase | null> =
-  FiberRef.unsafeMake<RenderPhase | null>(null);
+export const CurrentRenderPhase: FiberRef.FiberRef<RenderPhase | null> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Signal/CurrentRenderPhase"),
+  () => FiberRef.unsafeMake<RenderPhase | null>(null),
+);
+
+// Debug: unique ID to detect module duplication
+export const _currentRenderPhaseId = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Signal/_currentRenderPhaseId"),
+  () => `fiberref_${Math.random().toString(36).slice(2, 8)}`,
+);
 
 /**
  * FiberRef to track the current component lifetime scope.
  * Set by Renderer before executing component effects.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
 export const CurrentComponentScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  FiberRef.unsafeMake<Scope.CloseableScope | null>(null);
+  GlobalValue.globalValue(Symbol.for("effect-ui/Signal/CurrentComponentScope"), () =>
+    FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
+  );
 
 /**
  * FiberRef to track the current render scope (cleared on re-render).
  * Set by Renderer before executing component effects.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
 export const CurrentRenderScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  FiberRef.unsafeMake<Scope.CloseableScope | null>(null);
+  GlobalValue.globalValue(Symbol.for("effect-ui/Signal/CurrentRenderScope"), () =>
+    FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
+  );
 
 /**
  * Create a new RenderPhase for a component.
@@ -446,6 +471,133 @@ export function derive<A, B>(
     return derivedSignal;
   }).pipe(Effect.withSpan("Signal.derive"));
 }
+
+/**
+ * Chain a signal through an Effect-producing function.
+ *
+ * When the source signal changes, executes the function to get a new inner signal,
+ * then switches to that inner signal's values. Previous inner subscriptions are
+ * automatically cleaned up.
+ *
+ * Useful for reactive data fetching where the fetch depends on a signal value:
+ * - When the source changes, the previous inner subscription is cleaned up
+ * - The new inner signal's value is forwarded to the output signal
+ *
+ * @example
+ * ```tsx
+ * // Reactively fetch user data when userId changes
+ * const userState = yield* Signal.chain(
+ *   userId,
+ *   (id) => Resource.fetch(userResource(id))
+ * )
+ *
+ * // userState updates when:
+ * // 1. userId changes (triggers new fetch)
+ * // 2. The current resource's state changes (Pending -> Success/Failure)
+ * ```
+ *
+ * @since 1.0.0
+ */
+export const chain = <A, B, R>(
+  source: Signal<A>,
+  f: (a: A) => Effect.Effect<Signal<B>, never, R>,
+): Effect.Effect<Signal<B>, never, Scope.Scope | R> =>
+  Effect.gen(function* () {
+    const renderScope = yield* FiberRef.get(CurrentRenderScope);
+    const scope = renderScope ?? (yield* Effect.scope);
+
+    // Capture the current runtime to use in callbacks (handles R requirements)
+    const runtime = yield* Effect.runtime<R>();
+
+    // Get initial value and create first inner signal
+    const initialValue = yield* SubscriptionRef.get(source._ref);
+    const firstInner = yield* f(initialValue);
+    const firstInnerValue = yield* SubscriptionRef.get(firstInner._ref);
+
+    // Create the output signal
+    const outputRef = yield* SubscriptionRef.make(firstInnerValue);
+    const debugId = Debug.nextSignalId();
+    const outputSignal: Signal<B> = {
+      _tag: "Signal",
+      _ref: outputRef,
+      _listeners: new Set(),
+      _debugId: debugId,
+    };
+
+    yield* Debug.log({
+      event: "signal.chain.create",
+      signal_id: debugId,
+      source_id: source._debugId,
+      initial_inner_id: firstInner._debugId,
+    });
+
+    // Track current inner subscription for cleanup
+    const currentInnerUnsub = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+
+    // Helper to sync inner signal changes to output
+    const syncInnerToOutput = (inner: Signal<B>): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const current = yield* SubscriptionRef.get(inner._ref);
+        const prev = yield* SubscriptionRef.get(outputRef);
+        if (!Equal.equals(prev, current)) {
+          yield* SubscriptionRef.set(outputRef, current);
+          yield* notifyListeners(outputSignal);
+        }
+      });
+
+    // Helper to switch to a new inner signal (runs f with captured runtime)
+    const switchToInner = (a: A): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        // Unsubscribe from previous inner
+        const prevUnsub = yield* Ref.get(currentInnerUnsub);
+        yield* prevUnsub;
+
+        // Run f with the captured runtime context
+        const newInner = yield* Effect.provide(f(a), runtime.context);
+
+        yield* Debug.log({
+          event: "signal.chain.switch",
+          signal_id: debugId,
+          inner_id: newInner._debugId,
+        });
+
+        // Subscribe to new inner signal changes
+        const unsub = yield* subscribe(newInner, () => syncInnerToOutput(newInner));
+        yield* Ref.set(currentInnerUnsub, unsub);
+
+        // Immediately sync current value
+        yield* syncInnerToOutput(newInner);
+      });
+
+    // Initial subscription to first inner signal
+    const firstInnerUnsub = yield* subscribe(firstInner, () => syncInnerToOutput(firstInner));
+    yield* Ref.set(currentInnerUnsub, firstInnerUnsub);
+
+    // Subscribe to source changes - callback uses captured runtime
+    const sourceUnsub = yield* subscribe(source, () =>
+      Effect.gen(function* () {
+        const current = yield* SubscriptionRef.get(source._ref);
+        yield* switchToInner(current);
+      }),
+    );
+
+    // Cleanup on scope finalization
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.gen(function* () {
+        yield* sourceUnsub;
+        const innerUnsub = yield* Ref.get(currentInnerUnsub);
+        yield* innerUnsub;
+        yield* Debug.log({
+          event: "signal.chain.cleanup",
+          signal_id: debugId,
+          source_id: source._debugId,
+        });
+      }),
+    );
+
+    return outputSignal;
+  }).pipe(Effect.withSpan("Signal.chain"));
 
 /**
  * Check if a value is a Signal.

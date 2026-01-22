@@ -41,7 +41,9 @@ export type EventHandler<A = void, E = never, R = never> =
   | Effect.Effect<A, E, R>;
 
 /**
- * A Signal of any type (for JSX children)
+ * A Signal of any type (for JSX children).
+ * Uses `any` to work around Signal's type invariance - Signal<T> is not
+ * assignable to Signal<unknown> because the type parameter is invariant.
  * @internal
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,28 +93,37 @@ export interface BaseProps {
 }
 
 /**
- * Event props that can be attached to intrinsic elements
+ * Event handler that accepts any service requirements.
+ * Services are provided by the ManagedRuntime at mount time.
+ * @internal
+ */
+type AnyEventHandler = EventHandler<void, never, unknown>;
+
+/**
+ * Event props that can be attached to intrinsic elements.
+ * Event handlers can have any service requirements (R) since
+ * services are provided by the ManagedRuntime at mount time.
  * @since 1.0.0
  */
 export interface EventProps {
-  readonly onClick?: EventHandler;
-  readonly onDblclick?: EventHandler;
-  readonly onInput?: EventHandler;
-  readonly onChange?: EventHandler;
-  readonly onSubmit?: EventHandler;
-  readonly onKeyDown?: EventHandler;
-  readonly onKeyUp?: EventHandler;
-  readonly onKeyPress?: EventHandler;
-  readonly onFocus?: EventHandler;
-  readonly onBlur?: EventHandler;
-  readonly onMouseEnter?: EventHandler;
-  readonly onMouseLeave?: EventHandler;
-  readonly onMouseDown?: EventHandler;
-  readonly onMouseUp?: EventHandler;
-  readonly onMouseMove?: EventHandler;
-  readonly onScroll?: EventHandler;
-  readonly onLoad?: EventHandler;
-  readonly onError?: EventHandler;
+  readonly onClick?: AnyEventHandler;
+  readonly onDblclick?: AnyEventHandler;
+  readonly onInput?: AnyEventHandler;
+  readonly onChange?: AnyEventHandler;
+  readonly onSubmit?: AnyEventHandler;
+  readonly onKeyDown?: AnyEventHandler;
+  readonly onKeyUp?: AnyEventHandler;
+  readonly onKeyPress?: AnyEventHandler;
+  readonly onFocus?: AnyEventHandler;
+  readonly onBlur?: AnyEventHandler;
+  readonly onMouseEnter?: AnyEventHandler;
+  readonly onMouseLeave?: AnyEventHandler;
+  readonly onMouseDown?: AnyEventHandler;
+  readonly onMouseUp?: AnyEventHandler;
+  readonly onMouseMove?: AnyEventHandler;
+  readonly onScroll?: AnyEventHandler;
+  readonly onLoad?: AnyEventHandler;
+  readonly onError?: AnyEventHandler;
 }
 
 /**
@@ -251,6 +262,16 @@ export type Element = Data.TaggedEnum<{
     readonly renderFn: (item: unknown, index: number) => Effect.Effect<Element, unknown, unknown>;
     readonly keyFn: (item: unknown, index: number) => string | number;
   };
+  /**
+   * ErrorBoundary - catches errors from child rendering and shows fallback
+   * When a child component fails during re-render, swaps to fallback element
+   * @internal
+   */
+  readonly ErrorBoundaryElement: {
+    readonly child: Element;
+    readonly fallback: Element | ((cause: unknown) => Element);
+    readonly onError: ((cause: unknown) => Effect.Effect<void, never, unknown>) | null;
+  };
 }>;
 
 /**
@@ -377,6 +398,7 @@ export const isElement = (value: unknown): value is Element =>
     "Fragment",
     "Portal",
     "KeyedList",
+    "ErrorBoundaryElement",
   ].includes((value as { _tag: string })._tag);
 
 /**

@@ -15,7 +15,11 @@
  * </>)
  * ```
  */
-import { Effect, FiberRef, Layer, Runtime } from "effect";
+
+// Ambient declaration for Node.js process (allows typechecking in browser environments)
+declare const process: { env: Record<string, string | undefined> } | undefined;
+
+import { Effect, FiberRef, GlobalValue, Layer, Runtime } from "effect";
 import type { TestServerConfig } from "./test-server.js";
 import { TestServer } from "./test-server.js";
 
@@ -120,6 +124,25 @@ type SignalDeriveCleanupEvent = BaseEvent & {
   readonly source_id: string;
 };
 
+type SignalChainCreateEvent = BaseEvent & {
+  readonly event: "signal.chain.create";
+  readonly signal_id: string;
+  readonly source_id: string;
+  readonly initial_inner_id: string;
+};
+
+type SignalChainSwitchEvent = BaseEvent & {
+  readonly event: "signal.chain.switch";
+  readonly signal_id: string;
+  readonly inner_id: string;
+};
+
+type SignalChainCleanupEvent = BaseEvent & {
+  readonly event: "signal.chain.cleanup";
+  readonly signal_id: string;
+  readonly source_id: string;
+};
+
 /** Render events */
 type RenderComponentInitialEvent = BaseEvent & {
   readonly event: "render.component.initial";
@@ -134,6 +157,16 @@ type RenderComponentRerenderEvent = BaseEvent & {
 
 type RenderComponentCleanupEvent = BaseEvent & {
   readonly event: "render.component.cleanup";
+};
+
+type RenderComponentErrorEvent = BaseEvent & {
+  readonly event: "render.component.error";
+  readonly reason: string;
+};
+
+type RenderComponentRerenderErrorEvent = BaseEvent & {
+  readonly event: "render.component.rerender.error";
+  readonly reason: string;
 };
 
 type RenderSignalTextInitialEvent = BaseEvent & {
@@ -158,9 +191,71 @@ type RenderSignalElementSwapEvent = BaseEvent & {
   readonly signal_id: string;
 };
 
+type RenderSignalElementSwapStartEvent = BaseEvent & {
+  readonly event: "render.signalelement.swap.start";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementSwapCleanupEvent = BaseEvent & {
+  readonly event: "render.signalelement.swap.cleanup";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementSwapRenderEvent = BaseEvent & {
+  readonly event: "render.signalelement.swap.render";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementSwapErrorEvent = BaseEvent & {
+  readonly event: "render.signalelement.swap.error";
+  readonly signal_id: string;
+  readonly error: string;
+};
+
+type RenderSignalElementScopeStartEvent = BaseEvent & {
+  readonly event: "render.signalelement.scope.start";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementScopeRenderEvent = BaseEvent & {
+  readonly event: "render.signalelement.scope.render";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementScopeRenderedEvent = BaseEvent & {
+  readonly event: "render.signalelement.scope.rendered";
+  readonly signal_id: string;
+  readonly fragment_children: number;
+};
+
+type RenderSignalElementInsertEvent = BaseEvent & {
+  readonly event: "render.signalelement.insert";
+  readonly signal_id: string;
+  readonly inserted_children: number;
+  readonly anchor_in_dom: boolean;
+  readonly parent_in_dom: boolean;
+};
+
+type RenderSignalElementCleanupEvent = BaseEvent & {
+  readonly event: "render.signalelement.cleanup";
+  readonly signal_id: string;
+};
+
 type RenderIntrinsicEvent = BaseEvent & {
   readonly event: "render.intrinsic";
   readonly element_tag: string;
+};
+
+type RenderIntrinsicCleanupStartEvent = BaseEvent & {
+  readonly event: "render.intrinsic.cleanup.start";
+  readonly element_tag: string;
+  readonly child_count: number;
+};
+
+type RenderIntrinsicCleanupRemoveEvent = BaseEvent & {
+  readonly event: "render.intrinsic.cleanup.remove";
+  readonly element_tag: string;
+  readonly in_dom: boolean;
 };
 
 type RenderScheduleEvent = BaseEvent & {
@@ -206,6 +301,104 @@ type RenderKeyedListReorderEvent = BaseEvent & {
   readonly total_items: number;
   readonly moves: number;
   readonly stable_nodes: number;
+};
+
+/** Error boundary events */
+type RenderErrorBoundaryInitialEvent = BaseEvent & {
+  readonly event: "render.errorboundary.initial";
+};
+
+type RenderErrorBoundaryCaughtEvent = BaseEvent & {
+  readonly event: "render.errorboundary.caught";
+  readonly reason: string;
+};
+
+type RenderErrorBoundaryFallbackEvent = BaseEvent & {
+  readonly event: "render.errorboundary.fallback";
+};
+
+/** Resource events */
+type ResourceRegistryGetExistingEvent = BaseEvent & {
+  readonly event: "resource.registry.get_existing";
+  readonly key: string;
+};
+
+type ResourceRegistryCreateEntryEvent = BaseEvent & {
+  readonly event: "resource.registry.create_entry";
+  readonly key: string;
+};
+
+type ResourceFetchCalledEvent = BaseEvent & {
+  readonly event: "resource.fetch.called";
+  readonly key: string;
+};
+
+type ResourceFetchDedupeWaitEvent = BaseEvent & {
+  readonly event: "resource.fetch.dedupe_wait";
+  readonly key: string;
+};
+
+type ResourceFetchCachedEvent = BaseEvent & {
+  readonly event: "resource.fetch.cached";
+  readonly key: string;
+  readonly state: string;
+};
+
+type ResourceFetchStartingEvent = BaseEvent & {
+  readonly event: "resource.fetch.starting";
+  readonly key: string;
+};
+
+type ResourceFetchStartEvent = BaseEvent & {
+  readonly event: "resource.fetch.start";
+  readonly key: string;
+};
+
+type ResourceFetchForkRunningEvent = BaseEvent & {
+  readonly event: "resource.fetch.fork_running";
+  readonly key: string;
+};
+
+type ResourceFetchSuccessEvent = BaseEvent & {
+  readonly event: "resource.fetch.success";
+  readonly key: string;
+  readonly value_type: string;
+  readonly is_array: boolean;
+  readonly length?: number;
+};
+
+type ResourceFetchErrorEvent = BaseEvent & {
+  readonly event: "resource.fetch.error";
+  readonly key: string;
+  readonly cause: string;
+};
+
+type ResourceFetchSetSuccessEvent = BaseEvent & {
+  readonly event: "resource.fetch.set_success";
+  readonly key: string;
+};
+
+type ResourceFetchSetFailureEvent = BaseEvent & {
+  readonly event: "resource.fetch.set_failure";
+  readonly key: string;
+  readonly error: string;
+};
+
+type ResourceFetchCompleteEvent = BaseEvent & {
+  readonly event: "resource.fetch.complete";
+  readonly key: string;
+};
+
+type ResourceFetchDefectEvent = BaseEvent & {
+  readonly event: "resource.fetch.defect";
+  readonly key: string;
+  readonly defect: string;
+};
+
+type ResourceFetchUnhandledEvent = BaseEvent & {
+  readonly event: "resource.fetch.unhandled";
+  readonly key: string;
+  readonly cause: string;
 };
 
 /** Router events */
@@ -387,6 +580,45 @@ type RouterViewportObserverRemovedEvent = BaseEvent & {
   readonly event: "router.viewport.observer.removed";
 };
 
+type RouterOutletStartEvent = BaseEvent & {
+  readonly event: "router.outlet.start";
+  readonly routes_count: number;
+};
+
+type RouterOutletNestedEvent = BaseEvent & {
+  readonly event: "router.outlet.nested";
+};
+
+type RouterOutletNoRoutesEvent = BaseEvent & {
+  readonly event: "router.outlet.no_routes";
+};
+
+type RouterOutletMatchingEvent = BaseEvent & {
+  readonly event: "router.outlet.matching";
+  readonly path: string;
+};
+
+/** Router async tracker events for debugging navigation */
+type RouterTrackerInterruptEvent = BaseEvent & {
+  readonly event: "router.tracker.interrupt";
+};
+
+type RouterTrackerLoadingEvent = BaseEvent & {
+  readonly event: "router.tracker.loading";
+};
+
+type RouterTrackerRefreshingEvent = BaseEvent & {
+  readonly event: "router.tracker.refreshing";
+};
+
+type RouterTrackerReadyEvent = BaseEvent & {
+  readonly event: "router.tracker.ready";
+};
+
+type RouterTrackerErrorEvent = BaseEvent & {
+  readonly event: "router.tracker.error";
+};
+
 /** Trace events for correlation and span tracking */
 type TraceSpanStartEvent = BaseEvent & {
   readonly event: "trace.span.start";
@@ -417,15 +649,31 @@ export type DebugEvent =
   | SignalListenerErrorEvent
   | SignalDeriveCreateEvent
   | SignalDeriveCleanupEvent
+  | SignalChainCreateEvent
+  | SignalChainSwitchEvent
+  | SignalChainCleanupEvent
   // Render events
   | RenderComponentInitialEvent
   | RenderComponentRerenderEvent
   | RenderComponentCleanupEvent
+  | RenderComponentErrorEvent
+  | RenderComponentRerenderErrorEvent
   | RenderSignalTextInitialEvent
   | RenderSignalTextUpdateEvent
   | RenderSignalElementInitialEvent
   | RenderSignalElementSwapEvent
+  | RenderSignalElementSwapStartEvent
+  | RenderSignalElementSwapCleanupEvent
+  | RenderSignalElementSwapRenderEvent
+  | RenderSignalElementSwapErrorEvent
+  | RenderSignalElementScopeStartEvent
+  | RenderSignalElementScopeRenderEvent
+  | RenderSignalElementScopeRenderedEvent
+  | RenderSignalElementInsertEvent
+  | RenderSignalElementCleanupEvent
   | RenderIntrinsicEvent
+  | RenderIntrinsicCleanupStartEvent
+  | RenderIntrinsicCleanupRemoveEvent
   | RenderScheduleEvent
   | RenderKeyedListUpdateEvent
   | RenderKeyedListItemAddEvent
@@ -434,6 +682,26 @@ export type DebugEvent =
   | RenderKeyedListSubscriptionAddEvent
   | RenderKeyedListSubscriptionRemoveEvent
   | RenderKeyedListReorderEvent
+  // Error boundary events
+  | RenderErrorBoundaryInitialEvent
+  | RenderErrorBoundaryCaughtEvent
+  | RenderErrorBoundaryFallbackEvent
+  // Resource events
+  | ResourceRegistryGetExistingEvent
+  | ResourceRegistryCreateEntryEvent
+  | ResourceFetchCalledEvent
+  | ResourceFetchDedupeWaitEvent
+  | ResourceFetchCachedEvent
+  | ResourceFetchStartingEvent
+  | ResourceFetchStartEvent
+  | ResourceFetchForkRunningEvent
+  | ResourceFetchSuccessEvent
+  | ResourceFetchErrorEvent
+  | ResourceFetchSetSuccessEvent
+  | ResourceFetchSetFailureEvent
+  | ResourceFetchCompleteEvent
+  | ResourceFetchDefectEvent
+  | ResourceFetchUnhandledEvent
   // Router events
   | RouterNavigateEvent
   | RouterNavigateCompleteEvent
@@ -464,6 +732,15 @@ export type DebugEvent =
   | RouterPrefetchViewportEvent
   | RouterViewportObserverAddedEvent
   | RouterViewportObserverRemovedEvent
+  | RouterTrackerInterruptEvent
+  | RouterTrackerLoadingEvent
+  | RouterTrackerRefreshingEvent
+  | RouterTrackerReadyEvent
+  | RouterTrackerErrorEvent
+  | RouterOutletStartEvent
+  | RouterOutletNestedEvent
+  | RouterOutletNoRoutesEvent
+  | RouterOutletMatchingEvent
   // Trace events
   | TraceSpanStartEvent
   | TraceSpanEndEvent;
@@ -559,29 +836,35 @@ export const nextSpanId = (): string => `span_${++spanCounter}`;
 /**
  * FiberRef for current trace ID.
  * Set by router on navigate, propagated through Effect context.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentTraceId: FiberRef.FiberRef<string | undefined> = FiberRef.unsafeMake<
-  string | undefined
->(undefined);
+export const CurrentTraceId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Debug/CurrentTraceId"),
+  () => FiberRef.unsafeMake<string | undefined>(undefined),
+);
 
 /**
  * FiberRef for current span ID.
  * Set by startSpan, propagated through Effect context.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentSpanId: FiberRef.FiberRef<string | undefined> = FiberRef.unsafeMake<
-  string | undefined
->(undefined);
+export const CurrentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Debug/CurrentSpanId"),
+  () => FiberRef.unsafeMake<string | undefined>(undefined),
+);
 
 /**
  * FiberRef for parent span ID.
  * Used for building span hierarchies.
+ * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentParentSpanId: FiberRef.FiberRef<string | undefined> = FiberRef.unsafeMake<
-  string | undefined
->(undefined);
+export const CurrentParentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
+  Symbol.for("effect-ui/Debug/CurrentParentSpanId"),
+  () => FiberRef.unsafeMake<string | undefined>(undefined),
+);
 
 /**
  * Get current trace context from FiberRefs.

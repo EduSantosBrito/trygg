@@ -16,7 +16,7 @@ const LoginPage = Component.gen(function* () {
   // Check if already logged in
   const user = yield* Signal.get(authSignal);
 
-  const handleLogin = (e: Event): Effect.Effect<void> =>
+  const handleLogin = (e: Event) =>
     Effect.gen(function* () {
       e.preventDefault();
       const name = yield* Signal.get(username);

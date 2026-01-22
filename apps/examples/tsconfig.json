@@ -19,11 +19,6 @@
       "effect-ui/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
     }
   },
-  "include": [
-    "./**/*.ts",
-    "./**/*.tsx",
-    "../../packages/core/src/**/*.ts",
-    "../../packages/core/src/**/*.d.ts"
-  ],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts"],
   "exclude": ["vite.config.ts"]
 }

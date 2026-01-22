@@ -1,5 +1,8 @@
 # Effect UI Router
 
+> **Note:** This documents the current file-based routing system. 
+> See [declarative-routing.md](declarative-routing.md) for the new declarative routing design that will replace file-based routing.
+
 Client-side SPA router with file-based routing, designed for @effect/rpc integration.
 
 ## Core Principles
