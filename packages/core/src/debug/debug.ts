@@ -124,23 +124,17 @@ type SignalDeriveCleanupEvent = BaseEvent & {
   readonly source_id: string;
 };
 
-type SignalChainCreateEvent = BaseEvent & {
-  readonly event: "signal.chain.create";
+type SignalDeriveAllCreateEvent = BaseEvent & {
+  readonly event: "signal.deriveAll.create";
   readonly signal_id: string;
-  readonly source_id: string;
-  readonly initial_inner_id: string;
+  readonly source_count: number;
+  readonly value: unknown;
 };
 
-type SignalChainSwitchEvent = BaseEvent & {
-  readonly event: "signal.chain.switch";
+type SignalDeriveAllCleanupEvent = BaseEvent & {
+  readonly event: "signal.deriveAll.cleanup";
   readonly signal_id: string;
-  readonly inner_id: string;
-};
-
-type SignalChainCleanupEvent = BaseEvent & {
-  readonly event: "signal.chain.cleanup";
-  readonly signal_id: string;
-  readonly source_id: string;
+  readonly source_count: number;
 };
 
 /** Render events */
@@ -256,6 +250,12 @@ type RenderIntrinsicCleanupRemoveEvent = BaseEvent & {
   readonly event: "render.intrinsic.cleanup.remove";
   readonly element_tag: string;
   readonly in_dom: boolean;
+};
+
+type RenderDocumentEvent = BaseEvent & {
+  readonly event: "render.document";
+  readonly element_tag: string;
+  readonly target: string;
 };
 
 type RenderScheduleEvent = BaseEvent & {
@@ -649,9 +649,8 @@ export type DebugEvent =
   | SignalListenerErrorEvent
   | SignalDeriveCreateEvent
   | SignalDeriveCleanupEvent
-  | SignalChainCreateEvent
-  | SignalChainSwitchEvent
-  | SignalChainCleanupEvent
+  | SignalDeriveAllCreateEvent
+  | SignalDeriveAllCleanupEvent
   // Render events
   | RenderComponentInitialEvent
   | RenderComponentRerenderEvent
@@ -674,6 +673,7 @@ export type DebugEvent =
   | RenderIntrinsicEvent
   | RenderIntrinsicCleanupStartEvent
   | RenderIntrinsicCleanupRemoveEvent
+  | RenderDocumentEvent
   | RenderScheduleEvent
   | RenderKeyedListUpdateEvent
   | RenderKeyedListItemAddEvent

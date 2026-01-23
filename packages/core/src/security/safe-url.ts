@@ -5,13 +5,21 @@
  * Uses WHATWG URL parsing and a scheme allowlist to prevent
  * dangerous URLs like `javascript:` from being rendered.
  *
+ * Config functions (getConfig, resetConfig, allowSchemes) are sync
+ * since they only read/write module-level state with no failure modes.
+ *
+ * Validation functions (validate, validateOption, isSafe) return Effects
+ * for composability in Effect pipelines.
+ *
+ * validateSync is provided for the renderer's sync DOM attribute path.
+ *
  * @see https://url.spec.whatwg.org/ - WHATWG URL Standard
  * @see https://www.iana.org/assignments/uri-schemes/ - IANA URI Schemes
  */
 import { Data, Effect, Option } from "effect";
 
 /**
- * Error thrown when a URL fails validation
+ * Error produced when a URL fails validation.
  * @since 1.0.0
  */
 export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
@@ -74,8 +82,12 @@ let _config: SafeUrlConfig = {
   allowedSchemes: DEFAULT_ALLOWED_SCHEMES,
 };
 
+// =============================================================================
+// Config (sync — trivial state read/write, no failure modes)
+// =============================================================================
+
 /**
- * Get the current SafeUrl configuration
+ * Get the current SafeUrl configuration.
  * @since 1.0.0
  */
 export const getConfig = (): SafeUrlConfig => _config;
@@ -83,19 +95,9 @@ export const getConfig = (): SafeUrlConfig => _config;
 /**
  * Add custom schemes to the allowlist.
  *
- * Use this for:
- * - App-specific deep links (e.g., "myapp://")
- * - Browser extension protocols (e.g., "chrome-extension://")
- * - Custom protocols registered with the OS
- *
  * @example
  * ```ts
- * // Add custom deep link scheme
  * SafeUrl.allowSchemes(["myapp", "web+myapp"])
- *
- * // Now these URLs are valid:
- * // href="myapp://settings"
- * // href="web+myapp://page"
  * ```
  *
  * @since 1.0.0
@@ -116,12 +118,16 @@ export const resetConfig = (): void => {
   _config = { allowedSchemes: DEFAULT_ALLOWED_SCHEMES };
 };
 
+// =============================================================================
+// Internal helpers (pure sync)
+// =============================================================================
+
 /**
  * Parse a URL and extract its scheme.
- * Handles both absolute and relative URLs.
+ * Returns None for relative URLs (no scheme).
  * @internal
  */
-const parseUrlScheme = (url: string): Option.Option<string> => {
+const extractScheme = (url: string): Option.Option<string> => {
   // Try parsing as absolute URL first
   try {
     const parsed = new URL(url);
@@ -138,32 +144,59 @@ const parseUrlScheme = (url: string): Option.Option<string> => {
   }
 };
 
+// =============================================================================
+// Sync validation (for renderer's DOM attribute path)
+// =============================================================================
+
 /**
- * Check if a URL has an allowed scheme.
- * @internal
+ * Validate a URL synchronously, returning Option.some(url) for valid
+ * or Option.none() for invalid.
+ *
+ * Used by the renderer in the sync DOM attribute-setting path.
+ *
+ * @since 1.0.0
  */
-const isSchemeAllowed = (scheme: string, allowedSchemes: ReadonlyArray<string>): boolean => {
-  return allowedSchemes.includes(scheme.toLowerCase());
+export const validateSync = (url: string): Option.Option<string> => {
+  if (url.trim() === "") {
+    return Option.none();
+  }
+
+  const schemeOption = extractScheme(url);
+
+  if (Option.isNone(schemeOption)) {
+    // Relative URL - always allowed
+    return Option.some(url);
+  }
+
+  const scheme = schemeOption.value;
+  if (_config.allowedSchemes.includes(scheme.toLowerCase())) {
+    return Option.some(url);
+  }
+
+  return Option.none();
 };
+
+// =============================================================================
+// Effect-based validation (for Effect pipelines)
+// =============================================================================
 
 /**
  * Validate a URL string against the current configuration.
  *
- * - Empty URLs are rejected
+ * - Empty URLs are rejected with UnsafeUrlError
  * - Relative URLs (no scheme) are allowed
  * - Absolute URLs must use an allowed scheme
  * - javascript: and other dangerous schemes are blocked by default
  *
  * @example
  * ```ts
- * // These are valid:
- * SafeUrl.validate("/page")                    // relative
- * SafeUrl.validate("https://example.com")      // https
- * SafeUrl.validate("mailto:me@example.com")    // mailto
+ * // These succeed:
+ * yield* SafeUrl.validate("/page")
+ * yield* SafeUrl.validate("https://example.com")
  *
  * // These fail with UnsafeUrlError:
- * SafeUrl.validate("javascript:alert(1)")      // unsafe scheme
- * SafeUrl.validate("")                         // empty
+ * yield* SafeUrl.validate("javascript:alert(1)")
+ * yield* SafeUrl.validate("")
  * ```
  *
  * @since 1.0.0
@@ -183,7 +216,7 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = 
   }
 
   // Parse and check scheme
-  const schemeOption = parseUrlScheme(url);
+  const schemeOption = extractScheme(url);
 
   if (Option.isNone(schemeOption)) {
     // Relative URL - always allowed
@@ -191,8 +224,7 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = 
   }
 
   const scheme = schemeOption.value;
-
-  if (!isSchemeAllowed(scheme, config.allowedSchemes)) {
+  if (!config.allowedSchemes.includes(scheme.toLowerCase())) {
     return yield* new UnsafeUrlError({
       url,
       reason: "unsafe_scheme",
@@ -205,83 +237,30 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = 
 });
 
 /**
- * Validate a URL synchronously.
- * Returns Option.none() for invalid URLs, Option.some(url) for valid.
- * Use this when you need sync validation (e.g., in render paths).
+ * Validate a URL, returning Option.some(url) for valid or Option.none() for invalid.
+ * Does not fail — useful when you want to skip invalid URLs without error handling.
+ *
+ * @example
+ * ```ts
+ * const result = yield* SafeUrl.validateOption("javascript:alert(1)")
+ * // Option.none()
+ * ```
  *
  * @since 1.0.0
  */
-export const validateSync = (url: string): Option.Option<string> => {
-  const config = getConfig();
-
-  // Empty URL check
-  if (url.trim() === "") {
-    return Option.none();
-  }
-
-  // Parse and check scheme
-  const schemeOption = parseUrlScheme(url);
-
-  if (Option.isNone(schemeOption)) {
-    // Relative URL - always allowed
-    return Option.some(url);
-  }
-
-  const scheme = schemeOption.value;
-
-  if (!isSchemeAllowed(scheme, config.allowedSchemes)) {
-    return Option.none();
-  }
-
-  return Option.some(url);
-};
+export const validateOption = (url: string): Effect.Effect<Option.Option<string>> =>
+  Effect.sync(() => validateSync(url));
 
 /**
- * Validate a URL synchronously and throw UnsafeUrlError on failure.
- * Use validateOrWarn for graceful degradation with logging.
+ * Check if a URL is safe.
+ *
+ * @example
+ * ```ts
+ * const safe = yield* SafeUrl.isSafe("https://example.com")
+ * // true
+ * ```
  *
  * @since 1.0.0
  */
-export const validateOrThrow = (url: string): string => {
-  const config = getConfig();
-
-  // Empty URL check
-  if (url.trim() === "") {
-    throw new UnsafeUrlError({
-      url,
-      reason: "empty_url",
-      allowedSchemes: config.allowedSchemes,
-    });
-  }
-
-  // Parse and check scheme
-  const schemeOption = parseUrlScheme(url);
-
-  if (Option.isNone(schemeOption)) {
-    // Relative URL - always allowed
-    return url;
-  }
-
-  const scheme = schemeOption.value;
-
-  if (!isSchemeAllowed(scheme, config.allowedSchemes)) {
-    throw new UnsafeUrlError({
-      url,
-      reason: "unsafe_scheme",
-      scheme,
-      allowedSchemes: config.allowedSchemes,
-    });
-  }
-
-  return url;
-};
-
-/**
- * Check if a URL is safe without throwing.
- * Use for conditional rendering or logging.
- *
- * @since 1.0.0
- */
-export const isSafe = (url: string): boolean => {
-  return Option.isSome(validateSync(url));
-};
+export const isSafe = (url: string): Effect.Effect<boolean> =>
+  Effect.sync(() => Option.isSome(validateSync(url)));

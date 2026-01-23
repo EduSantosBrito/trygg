@@ -4,7 +4,7 @@
  * Single file defining all API endpoints and handlers.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 // =============================================================================
 // Schemas
@@ -102,8 +102,5 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
     ),
 );
 
-// =============================================================================
-// Combined Layer
-// =============================================================================
-
-export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+// Framework auto-detects Api + handler Layers and composes them.
+// No need to export a combined ApiLive layer.

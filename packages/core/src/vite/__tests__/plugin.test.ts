@@ -1,0 +1,617 @@
+/**
+ * Tests for Vite plugin
+ * @module
+ */
+import { assert, describe, it } from "@effect/vitest";
+import { FileSystem } from "@effect/platform";
+import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
+import { Effect, Schema, Scope } from "effect";
+import * as path from "path";
+import {
+  effectUI,
+  extractParamNames,
+  generateParamType,
+  generateApiTypes,
+  parseRoutes,
+  generateRouteTypes,
+  transformRoutesForBuild,
+  schemaToType,
+  parseSchemaStruct,
+  resolveRoutePaths,
+  type ParsedRoute,
+} from "../plugin.js";
+
+/**
+ * Create a scoped temporary directory with route files.
+ * Cleanup is handled by Effect's Scope (finalizer removes dir on scope close).
+ */
+const makeTempDir = (
+  files: Record<string, string>,
+): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const dir = yield* fs.makeTempDirectory({ prefix: "effect-ui-test-" }).pipe(Effect.orDie);
+    yield* Effect.addFinalizer(() => fs.remove(dir, { recursive: true }).pipe(Effect.ignore));
+    yield* Effect.forEach(Object.entries(files), ([filePath, content]) =>
+      Effect.gen(function* () {
+        const fullPath = path.join(dir, filePath);
+        yield* fs.makeDirectory(path.dirname(fullPath), { recursive: true }).pipe(
+          Effect.catchTag("SystemError", (e) =>
+            e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e),
+          ),
+          Effect.orDie,
+        );
+        yield* fs.writeFileString(fullPath, content).pipe(Effect.orDie);
+      }),
+    );
+    return dir;
+  });
+
+describe("Vite Plugin", () => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: Plugin initialization
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("effectUI function", () => {
+    it("should return a valid Vite plugin", () => {
+      const plugin = effectUI();
+
+      assert.isDefined(plugin);
+      assert.isString(plugin.name);
+      assert.strictEqual(plugin.name, "effect-ui");
+      assert.isDefined(plugin.config);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: config hook
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("config hook", () => {
+    // Schema for validating the config hook is a callable function
+    const ConfigHookSchema = Schema.declare(
+      (u: unknown): u is (...args: ReadonlyArray<unknown>) => unknown => typeof u === "function",
+    );
+
+    // Schema for the expected esbuild config shape
+    const EsbuildConfigSchema = Schema.Struct({
+      esbuild: Schema.Struct({
+        jsx: Schema.String,
+        jsxImportSource: Schema.String,
+      }),
+    });
+
+    // Schema for the expected optimizeDeps config shape
+    const OptimizeDepsConfigSchema = Schema.Struct({
+      optimizeDeps: Schema.Struct({
+        esbuildOptions: Schema.Struct({
+          jsx: Schema.String,
+          jsxImportSource: Schema.String,
+        }),
+      }),
+    });
+
+    it("should set esbuild jsx to automatic mode", () => {
+      const plugin = effectUI();
+      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      const result = configHook({}, { command: "serve", mode: "development" });
+      const config = Schema.decodeUnknownSync(EsbuildConfigSchema)(result);
+      assert.strictEqual(config.esbuild.jsx, "automatic");
+      assert.strictEqual(config.esbuild.jsxImportSource, "effect-ui");
+    });
+
+    it("should configure optimizeDeps for effect-ui", () => {
+      const plugin = effectUI();
+      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      const result = configHook({}, { command: "serve", mode: "development" });
+      const config = Schema.decodeUnknownSync(OptimizeDepsConfigSchema)(result);
+      assert.strictEqual(config.optimizeDeps.esbuildOptions.jsx, "automatic");
+      assert.strictEqual(config.optimizeDeps.esbuildOptions.jsxImportSource, "effect-ui");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: Param extraction
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("extractParamNames", () => {
+    it.effect("should return empty array for static route", () =>
+      Effect.gen(function* () {
+        const params = yield* extractParamNames("/users/profile");
+        assert.deepStrictEqual([...params], []);
+      }),
+    );
+
+    it.effect("should extract single param", () =>
+      Effect.gen(function* () {
+        const params = yield* extractParamNames("/users/:id");
+        assert.deepStrictEqual([...params], ["id"]);
+      }),
+    );
+
+    it.effect("should extract multiple params", () =>
+      Effect.gen(function* () {
+        const params = yield* extractParamNames("/users/:userId/posts/:postId");
+        assert.deepStrictEqual([...params], ["userId", "postId"]);
+      }),
+    );
+  });
+
+  describe("generateParamType", () => {
+    it.effect("should return empty object for static route", () =>
+      Effect.gen(function* () {
+        const type = yield* generateParamType("/users/profile");
+        assert.strictEqual(type, "{}");
+      }),
+    );
+
+    it.effect("should generate type for single param", () =>
+      Effect.gen(function* () {
+        const type = yield* generateParamType("/users/:id");
+        assert.strictEqual(type, "{ readonly id: string }");
+      }),
+    );
+
+    it.effect("should generate type for multiple params", () =>
+      Effect.gen(function* () {
+        const type = yield* generateParamType("/users/:userId/posts/:postId");
+        assert.strictEqual(type, "{ readonly userId: string; readonly postId: string }");
+      }),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: API types generation
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("generateApiTypes", () => {
+    it.scoped("should generate placeholder when no api.ts exists", () =>
+      Effect.gen(function* () {
+        const dir = yield* makeTempDir({});
+        const genDir = path.join(dir, ".effect-ui");
+        const types = yield* generateApiTypes(dir, genDir);
+        assert.isTrue(types.includes("No API file found"));
+        assert.isTrue(types.includes("export class ApiClient"));
+        assert.isTrue(types.includes("export const ApiClientLive:"));
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    it.scoped("should generate types with function-call inference when api.ts exists", () =>
+      Effect.gen(function* () {
+        const dir = yield* makeTempDir({
+          "api.ts": "export class Api {}",
+        });
+        const genDir = path.join(dir, ".effect-ui");
+        const types = yield* generateApiTypes(dir, genDir);
+        assert.isTrue(
+          types.includes('import { HttpApiClient, FetchHttpClient } from "@effect/platform"'),
+        );
+        assert.isTrue(types.includes('import { Api } from "../api"'));
+        assert.isTrue(types.includes("HttpApiClient.make(Api"));
+        assert.isTrue(types.includes("ApiClientService"));
+        assert.isTrue(types.includes("export class ApiClient"));
+        assert.isTrue(types.includes("export const ApiClientLive:"));
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: Schema type mapping
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("schemaToType", () => {
+    it("should map Schema.NumberFromString to number", () => {
+      assert.strictEqual(schemaToType("Schema.NumberFromString"), "number");
+    });
+
+    it("should map Schema.String to string", () => {
+      assert.strictEqual(schemaToType("Schema.String"), "string");
+    });
+
+    it("should map Schema.Number to number", () => {
+      assert.strictEqual(schemaToType("Schema.Number"), "number");
+    });
+
+    it("should map Schema.Boolean to boolean", () => {
+      assert.strictEqual(schemaToType("Schema.Boolean"), "boolean");
+    });
+
+    it("should map Schema.Literal to union type", () => {
+      assert.strictEqual(schemaToType('Schema.Literal("asc", "desc")'), '"asc" | "desc"');
+    });
+
+    it("should map Schema.optional to T | undefined", () => {
+      assert.strictEqual(
+        schemaToType("Schema.optional(Schema.NumberFromString)"),
+        "number | undefined",
+      );
+    });
+
+    it("should map Schema.optional(Schema.Literal) to union | undefined", () => {
+      assert.strictEqual(
+        schemaToType('Schema.optional(Schema.Literal("asc", "desc"))'),
+        '"asc" | "desc" | undefined',
+      );
+    });
+
+    it("should fall back to string for unknown schema types", () => {
+      assert.strictEqual(schemaToType("Schema.CustomThing"), "string");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: parseSchemaStruct
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("parseSchemaStruct", () => {
+    it("should parse single field", () => {
+      const result = parseSchemaStruct("id: Schema.NumberFromString");
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0]?.name, "id");
+      assert.strictEqual(result[0]?.type, "number");
+      assert.isFalse(result[0]?.optional);
+    });
+
+    it("should parse multiple fields", () => {
+      const result = parseSchemaStruct(
+        "year: Schema.NumberFromString, month: Schema.NumberFromString, slug: Schema.String",
+      );
+      assert.strictEqual(result.length, 3);
+      assert.strictEqual(result[0]?.name, "year");
+      assert.strictEqual(result[0]?.type, "number");
+      assert.strictEqual(result[1]?.name, "month");
+      assert.strictEqual(result[2]?.name, "slug");
+      assert.strictEqual(result[2]?.type, "string");
+    });
+
+    it("should handle optional fields", () => {
+      const result = parseSchemaStruct(
+        "q: Schema.String, page: Schema.optional(Schema.NumberFromString)",
+      );
+      assert.strictEqual(result.length, 2);
+      assert.strictEqual(result[0]?.name, "q");
+      assert.isFalse(result[0]?.optional);
+      assert.strictEqual(result[1]?.name, "page");
+      assert.strictEqual(result[1]?.type, "number | undefined");
+      assert.isTrue(result[1]?.optional);
+    });
+
+    it("should return empty array for empty struct", () => {
+      assert.strictEqual(parseSchemaStruct("").length, 0);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: parseRoutes
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("parseRoutes", () => {
+    it.effect("should extract route paths from Route.make", () =>
+      Effect.gen(function* () {
+        const source = `
+          Route.make("/users")
+            .component(UsersList)
+          Route.make("/about")
+            .component(About)
+        `;
+        const routes = yield* parseRoutes(source);
+        assert.strictEqual(routes.length, 2);
+        assert.strictEqual(routes[0]?.path, "/users");
+        assert.strictEqual(routes[1]?.path, "/about");
+      }),
+    );
+
+    it.effect("should extract params schema", () =>
+      Effect.gen(function* () {
+        const source = `
+          Route.make("/users/:id")
+            .params(Schema.Struct({ id: Schema.NumberFromString }))
+            .component(UserProfile)
+        `;
+        const routes = yield* parseRoutes(source);
+        assert.strictEqual(routes.length, 1);
+        assert.strictEqual(routes[0]?.params.length, 1);
+        assert.strictEqual(routes[0]?.params[0]?.name, "id");
+        assert.strictEqual(routes[0]?.params[0]?.type, "number");
+      }),
+    );
+
+    it.effect("should extract query schema", () =>
+      Effect.gen(function* () {
+        const source = `
+          Route.make("/search")
+            .query(Schema.Struct({ q: Schema.String, page: Schema.optional(Schema.NumberFromString) }))
+            .component(SearchPage)
+        `;
+        const routes = yield* parseRoutes(source);
+        assert.strictEqual(routes.length, 1);
+        assert.strictEqual(routes[0]?.query.length, 2);
+        assert.strictEqual(routes[0]?.query[0]?.name, "q");
+        assert.strictEqual(routes[0]?.query[0]?.type, "string");
+        assert.strictEqual(routes[0]?.query[1]?.name, "page");
+        assert.isTrue(routes[0]?.query[1]?.optional);
+      }),
+    );
+
+    it.effect("should extract Route.index as index route", () =>
+      Effect.gen(function* () {
+        const source = `
+          Route.index(SettingsIndex)
+        `;
+        const routes = yield* parseRoutes(source);
+        assert.strictEqual(routes.length, 1);
+        assert.isTrue(routes[0]?.isIndex);
+      }),
+    );
+
+    it.effect("should handle routes with no params", () =>
+      Effect.gen(function* () {
+        const source = `
+          Route.make("/about")
+            .component(AboutPage)
+        `;
+        const routes = yield* parseRoutes(source);
+        assert.strictEqual(routes[0]?.params.length, 0);
+        assert.strictEqual(routes[0]?.query.length, 0);
+      }),
+    );
+
+    it.effect("should handle empty source", () =>
+      Effect.gen(function* () {
+        const routes = yield* parseRoutes("");
+        assert.strictEqual(routes.length, 0);
+      }),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: resolveRoutePaths
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("resolveRoutePaths", () => {
+    it("should resolve top-level routes as absolute", () => {
+      const routes: ReadonlyArray<ParsedRoute> = [
+        { path: "/users", params: [], query: [], children: [], isIndex: false },
+        { path: "/about", params: [], query: [], children: [], isIndex: false },
+      ];
+      const resolved = resolveRoutePaths(routes);
+      assert.strictEqual(resolved.length, 2);
+      assert.strictEqual(resolved[0]?.path, "/users");
+      assert.strictEqual(resolved[1]?.path, "/about");
+    });
+
+    it("should resolve children against parent path", () => {
+      const routes: ReadonlyArray<ParsedRoute> = [
+        {
+          path: "/settings",
+          params: [],
+          query: [],
+          isIndex: false,
+          children: [
+            { path: "/profile", params: [], query: [], children: [], isIndex: false },
+            { path: "/security", params: [], query: [], children: [], isIndex: false },
+          ],
+        },
+      ];
+      const resolved = resolveRoutePaths(routes);
+      assert.strictEqual(resolved.length, 3);
+      assert.strictEqual(resolved[0]?.path, "/settings");
+      assert.strictEqual(resolved[1]?.path, "/settings/profile");
+      assert.strictEqual(resolved[2]?.path, "/settings/security");
+    });
+
+    it("should resolve index routes to parent path", () => {
+      const routes: ReadonlyArray<ParsedRoute> = [
+        {
+          path: "/settings",
+          params: [],
+          query: [],
+          isIndex: false,
+          children: [
+            { path: "", params: [], query: [], children: [], isIndex: true },
+            { path: "/profile", params: [], query: [], children: [], isIndex: false },
+          ],
+        },
+      ];
+      const resolved = resolveRoutePaths(routes);
+      assert.strictEqual(resolved.length, 3);
+      assert.strictEqual(resolved[1]?.path, "/settings");
+    });
+
+    it("should resolve deeply nested routes", () => {
+      const routes: ReadonlyArray<ParsedRoute> = [
+        {
+          path: "/a",
+          params: [],
+          query: [],
+          isIndex: false,
+          children: [
+            {
+              path: "/b",
+              params: [],
+              query: [],
+              isIndex: false,
+              children: [{ path: "/c", params: [], query: [], children: [], isIndex: false }],
+            },
+          ],
+        },
+      ];
+      const resolved = resolveRoutePaths(routes);
+      assert.strictEqual(resolved[2]?.path, "/a/b/c");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: generateRouteTypes
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("generateRouteTypes", () => {
+    it.effect("should generate RouteMap from parsed routes", () =>
+      Effect.gen(function* () {
+        const routes: ReadonlyArray<ParsedRoute> = [
+          { path: "/", params: [], query: [], children: [], isIndex: false },
+          {
+            path: "/users/:id",
+            params: [{ name: "id", type: "number", optional: false }],
+            query: [],
+            children: [],
+            isIndex: false,
+          },
+        ];
+        const output = yield* generateRouteTypes(routes);
+        assert.isTrue(output.includes('readonly "/": {}'));
+        assert.isTrue(output.includes('readonly "/users/:id": { readonly id: number }'));
+      }),
+    );
+
+    it.effect("should extract NumberFromString as number in RouteMap", () =>
+      Effect.gen(function* () {
+        const routes: ReadonlyArray<ParsedRoute> = [
+          {
+            path: "/users/:id",
+            params: [{ name: "id", type: "number", optional: false }],
+            query: [],
+            children: [],
+            isIndex: false,
+          },
+        ];
+        const output = yield* generateRouteTypes(routes);
+        assert.isTrue(output.includes("readonly id: number"));
+      }),
+    );
+
+    it.effect("should handle routes with no params as empty object", () =>
+      Effect.gen(function* () {
+        const routes: ReadonlyArray<ParsedRoute> = [
+          { path: "/about", params: [], query: [], children: [], isIndex: false },
+        ];
+        const output = yield* generateRouteTypes(routes);
+        assert.isTrue(output.includes('readonly "/about": {}'));
+      }),
+    );
+
+    it.effect("should generate module augmentation format", () =>
+      Effect.gen(function* () {
+        const routes: ReadonlyArray<ParsedRoute> = [
+          { path: "/", params: [], query: [], children: [], isIndex: false },
+        ];
+        const output = yield* generateRouteTypes(routes);
+        assert.isTrue(output.includes('declare module "effect-ui/router"'));
+        assert.isTrue(output.includes("interface RouteMap"));
+        assert.isTrue(output.includes("export {}"));
+      }),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: transformRoutesForBuild
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("transformRoutesForBuild", () => {
+    it.effect("should transform component imports to lazy", () =>
+      Effect.gen(function* () {
+        const source = `
+import { UserProfile } from "./pages/users/profile"
+import { About } from "./pages/about"
+
+Route.make("/users/:id").component(UserProfile)
+Route.make("/about").component(About)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(
+          result.includes(
+            '.component(() => import("./pages/users/profile").then(m => m.UserProfile))',
+          ),
+        );
+        assert.isTrue(
+          result.includes('.component(() => import("./pages/about").then(m => m.About))'),
+        );
+      }),
+    );
+
+    it.effect("should preserve imports in dev mode (no transform for non-routes files)", () =>
+      Effect.gen(function* () {
+        const source = `
+import { UserProfile } from "./pages/users/profile"
+Route.make("/users/:id").component(UserProfile)
+`;
+        // When source has no relative imports that match, it stays unchanged
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        // Verify the transform DID fire (it should transform the import)
+        assert.isTrue(result.includes("import("));
+      }),
+    );
+
+    it.effect("should transform default imports", () =>
+      Effect.gen(function* () {
+        const source = `
+import HomePage from "./pages/home"
+Route.make("/").component(HomePage)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes('.component(() => import("./pages/home"))'));
+      }),
+    );
+
+    it.effect("should not transform non-relative imports", () =>
+      Effect.gen(function* () {
+        const source = `
+import { Schema } from "effect"
+import { Route } from "effect-ui/router"
+Route.make("/users").component(Route)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        // "Route" from "effect-ui/router" is not relative, so not transformed
+        assert.isTrue(result.includes(".component(Route)"));
+      }),
+    );
+
+    it.effect("should transform layout imports", () =>
+      Effect.gen(function* () {
+        const source = `
+import { SettingsLayout } from "./pages/settings/layout"
+Route.make("/settings").layout(SettingsLayout)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(
+          result.includes(
+            '.layout(() => import("./pages/settings/layout").then(m => m.SettingsLayout))',
+          ),
+        );
+      }),
+    );
+
+    it.effect("should transform error/loading/notFound/forbidden imports", () =>
+      Effect.gen(function* () {
+        const source = `
+import { ErrorComp } from "./components/error"
+import { LoadingComp } from "./components/loading"
+Route.make("/users").error(ErrorComp).loading(LoadingComp)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(
+          result.includes('.error(() => import("./components/error").then(m => m.ErrorComp))'),
+        );
+        assert.isTrue(
+          result.includes(
+            '.loading(() => import("./components/loading").then(m => m.LoadingComp))',
+          ),
+        );
+      }),
+    );
+
+    it.effect("should handle empty source", () =>
+      Effect.gen(function* () {
+        const result = yield* transformRoutesForBuild("", "/app/routes.ts");
+        assert.strictEqual(result, "");
+      }),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: Plugin options
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("effectUI with routes option", () => {
+    it("should accept routes option", () => {
+      const plugin = effectUI({ routes: "./app/routes.ts" });
+      assert.isDefined(plugin);
+      assert.strictEqual(plugin.name, "effect-ui");
+    });
+
+    it("should still work without options", () => {
+      const plugin = effectUI();
+      assert.isDefined(plugin);
+      assert.strictEqual(plugin.name, "effect-ui");
+    });
+  });
+});

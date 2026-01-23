@@ -31,17 +31,17 @@
  * })
  * ```
  */
-import { Effect, Runtime } from "effect";
+import { Duration, Effect, Fiber } from "effect";
 import {
   Element,
   intrinsic,
   componentElement,
   normalizeChildren,
   type ElementProps,
-} from "../element.js";
+} from "../primitives/element.js";
 import * as Debug from "../debug/debug.js";
-import { getRouter } from "./router-service.js";
-import { buildPath } from "./matching.js";
+import { get as getRouter } from "./service.js";
+import { buildPath } from "./utils.js";
 import type { RouteParamsFor, RoutePath } from "./types.js";
 import { buildPathWithParams } from "./types.js";
 
@@ -167,20 +167,19 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
     prefetch = "intent",
   } = props;
 
-  // Build resolved path (substitute params if provided)
-  const resolvedPath = params ? buildPathWithParams(to, params) : to;
-
-  // Build full href with query string
-  const href = buildPath(resolvedPath, queryParams);
-
   // Link needs router for click handler, but does NOT subscribe to route changes
   const linkEffect = Effect.gen(function* () {
+    // Build resolved path (substitute params if provided)
+    const resolvedPath = params ? yield* buildPathWithParams(to, params) : to;
+
+    // Build full href with query string
+    const href = yield* buildPath(resolvedPath, queryParams);
+
     const router = yield* getRouter;
-    const runtime = yield* Effect.runtime<never>();
 
     // F-001: Prefetch state and handlers
     let prefetchTriggered = false;
-    let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
+    let hoverFiber: Fiber.RuntimeFiber<void> | null = null;
 
     // Trigger prefetch once (guarded by flag)
     const triggerPrefetch = Effect.gen(function* () {
@@ -189,24 +188,27 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
       yield* router.prefetch(resolvedPath);
     });
 
-    // Mouse enter handler - 50ms debounce before prefetch
+    // Mouse enter handler - 50ms debounce via forked fiber
     const handleMouseEnter =
       prefetch === "intent"
         ? Effect.fnUntraced(function* () {
             if (prefetchTriggered) return;
-            hoverTimeout = setTimeout(() => {
-              Runtime.runFork(runtime)(triggerPrefetch);
-            }, PREFETCH_HOVER_DELAY_MS);
+            const fiber = yield* Effect.fork(
+              Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
+                Effect.flatMap(() => triggerPrefetch),
+              ),
+            );
+            hoverFiber = fiber;
           })
         : undefined;
 
-    // Mouse leave handler - cancel pending prefetch
+    // Mouse leave handler - interrupt pending prefetch fiber
     const handleMouseLeave =
       prefetch === "intent"
         ? Effect.fnUntraced(function* () {
-            if (hoverTimeout !== null) {
-              clearTimeout(hoverTimeout);
-              hoverTimeout = null;
+            if (hoverFiber !== null) {
+              yield* Fiber.interrupt(hoverFiber);
+              hoverFiber = null;
             }
           })
         : undefined;
@@ -247,7 +249,9 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
         ...(replace !== undefined ? { replace } : {}),
         ...(queryParams !== undefined ? { query: queryParams } : {}),
       };
-      yield* router.navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined);
+      yield* router
+        .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
+        .pipe(Effect.ignore);
     });
 
     // F-001: Trigger prefetch immediately for "render" strategy

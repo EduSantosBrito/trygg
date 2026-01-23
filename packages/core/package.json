@@ -3,17 +3,36 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "module": "./src/index.ts",
+  "module": "./dist/index.js",
   "exports": {
-    ".": "./src/index.ts",
-    "./api": "./src/api.ts",
-    "./router": "./src/router/index.ts",
-    "./vite-plugin": "./src/vite-plugin.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./dist/api/types.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./router": {
+      "types": "./dist/router/index.d.ts",
+      "import": "./dist/router.js"
+    },
+    "./vite-plugin": {
+      "types": "./dist/vite/plugin.d.ts",
+      "import": "./dist/vite-plugin.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "import": "./dist/jsx-dev-runtime.js"
+    }
   },
   "scripts": {
     "prepare": "effect-language-service patch",
+    "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "effect:check": "effect-language-service diagnostics --project tsconfig.json",
     "test": "npx vitest run",
@@ -35,6 +54,7 @@
     "@effect/vitest": "^0.27.0",
     "@types/bun": "latest",
     "happy-dom": "^20.3.1",
+    "rolldown": "^1.0.0-rc.1",
     "vite": "^6.0.0",
     "vitest": "^3.2.0"
   },

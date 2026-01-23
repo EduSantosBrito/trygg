@@ -14,11 +14,26 @@
  * <Link to="/users/:id">User</Link>
  * ```
  */
-import { Data } from "effect";
-import type { Cause, Effect } from "effect";
-import type { ComponentType } from "../component.js";
-import type { Element } from "../element.js";
-import type { Signal } from "../signal.js";
+import { Data, Effect, type Cause, type Ref } from "effect";
+import { Component } from "../primitives/component.js";
+import type { Element } from "../primitives/element.js";
+import type { Signal } from "../primitives/signal.js";
+
+// ==========================================
+// Errors
+// ==========================================
+
+/**
+ * Error representing a failed navigation operation.
+ * Wraps underlying platform errors (HistoryError, LocationError, etc.)
+ * so consumers can handle navigation failures explicitly.
+ *
+ * @since 1.0.0
+ */
+export class NavigationError extends Data.TaggedError("NavigationError")<{
+  readonly operation: string;
+  readonly cause: unknown;
+}> {}
 
 // ==========================================
 // Route Map (augmented by vite plugin)
@@ -53,7 +68,7 @@ export interface RouteMap {
  * @since 1.0.0
  */
 export type RouteComponent =
-  | ComponentType<Record<string, never>, unknown>
+  | Component.Type<never, unknown, unknown>
   | Effect.Effect<Element, unknown, unknown>;
 
 /**
@@ -182,16 +197,44 @@ export type TypeSafeLinkProps<Path extends string> =
 export const buildPathWithParams = <Path extends string>(
   path: Path,
   params: RouteParamsFor<Path>,
-): string => {
-  let result: string = path;
-  for (const key of Object.keys(params)) {
-    const value = (params as Record<string, string>)[key];
-    if (value !== undefined) {
-      result = result.replace(`:${key}`, value);
+): Effect.Effect<string> =>
+  Effect.sync(() => {
+    let result: string = path;
+    for (const key of Object.keys(params)) {
+      const value = (params as Record<string, string | number>)[key];
+      if (value !== undefined) {
+        result = result.replace(`:${key}`, String(value));
+      }
     }
-  }
-  return result;
-};
+    return result;
+  });
+
+/**
+ * Interpolate params into a path pattern using NavigateOptions.params.
+ * Handles both string and number values (numbers are converted via String()).
+ *
+ * @example
+ * ```ts
+ * interpolateParams("/users/:id", { id: 123 })
+ * // "/users/123"
+ * ```
+ *
+ * @internal
+ */
+export const interpolateParams = (
+  path: string,
+  params: Record<string, string | number>,
+): Effect.Effect<string> =>
+  Effect.sync(() => {
+    let result = path;
+    for (const key of Object.keys(params)) {
+      const value = params[key];
+      if (value !== undefined) {
+        result = result.replace(`:${key}`, String(value));
+      }
+    }
+    return result;
+  });
 
 // ==========================================
 // Basic Types
@@ -225,141 +268,23 @@ export interface NavigateOptions {
   readonly replace?: boolean;
   /** Query parameters to set */
   readonly query?: Record<string, string>;
+  /** Path params to interpolate into path pattern (e.g., { id: 123 } for "/users/:id") */
+  readonly params?: Record<string, string | number>;
 }
 
 /**
- * Route definition - maps path pattern to component loader
+ * Options for Router.isActive check.
  * @since 1.0.0
  */
-export interface RouteDefinition {
-  /** Path pattern (e.g., "/users/:id") */
-  readonly path: string;
-  /** Component loader - returns Component.gen result or Effect<Element> */
-  readonly component: () => Promise<{ default: RouteComponent }>;
-  /** Optional guard effect */
-  readonly guard?: () => Promise<{ guard?: Effect.Effect<void, unknown, never> }>;
-  /** Optional loading component - displayed while route is loading */
-  readonly loadingComponent?: () => Promise<{ default: RouteComponent }>;
-  /** Optional error component - displayed when route errors, receives error via RouteError service */
-  readonly errorComponent?: () => Promise<{ default: RouteComponent }>;
-  /** Child routes (for nested layouts) */
-  readonly children?: ReadonlyArray<RouteDefinition>;
-  /** Layout component for children */
-  readonly layout?: () => Promise<{ default: RouteComponent }>;
+export interface IsActiveOptions {
+  /** Path params to interpolate before comparison (e.g., { id: 123 } for "/users/:id") */
+  readonly params?: Record<string, string | number>;
+  /** If true, path must match exactly. If false (default), prefix matching is used. */
+  readonly exact?: boolean;
 }
 
 /**
- * Route match result
- * @since 1.0.0
- */
-export interface RouteMatch {
-  /** The matched route definition */
-  readonly route: RouteDefinition;
-  /** Extracted parameters */
-  readonly params: RouteParams;
-  /** Parent matches (for nested routes) */
-  readonly parents: ReadonlyArray<RouteMatch>;
-}
-
-/**
- * Router redirect result - returned from guards to redirect
- * @since 1.0.0
- */
-export interface RouterRedirect {
-  readonly _tag: "RouterRedirect";
-  readonly path: string;
-  readonly options?: NavigateOptions;
-}
-
-/**
- * Create a redirect result for use in guards.
- *
- * Use this in guard effects to redirect to another route.
- * The guard should yield* this effect to trigger the redirect.
- *
- * @example
- * ```tsx
- * // routes/dashboard/index.tsx
- * import { Effect, Option } from "effect"
- * import { Router } from "effect-ui/router"
- *
- * export const guard = Effect.gen(function* () {
- *   const user = yield* AuthService.getCurrentUser
- *   if (Option.isNone(user)) {
- *     yield* Router.redirect("/login")
- *   }
- * })
- *
- * export default Effect.gen(function* () {
- *   return <div>Protected Dashboard</div>
- * })
- * ```
- *
- * @since 1.0.0
- */
-export const redirect = (path: string, options?: NavigateOptions): RouterRedirect => {
-  const result: RouterRedirect = { _tag: "RouterRedirect", path };
-  if (options !== undefined) {
-    return { ...result, options };
-  }
-  return result;
-};
-
-/**
- * Check if a value is a RouterRedirect
- * @since 1.0.0
- */
-export const isRedirect = (value: unknown): value is RouterRedirect =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { _tag: unknown })._tag === "RouterRedirect";
-
-/**
- * Guard blocked error - thrown when a guard blocks navigation
- * @since 1.0.0
- */
-export class GuardBlocked {
-  readonly _tag = "GuardBlocked";
-  constructor(readonly redirect: RouterRedirect) {}
-}
-
-/**
- * Route render error - wraps errors (including defects) from route component rendering.
- * Used by error boundaries to normalize both typed failures and thrown exceptions.
- * @since 1.0.0
- */
-export class RouteRenderError {
-  readonly _tag = "RouteRenderError";
-  constructor(
-    /** The original error or defect */
-    readonly cause: unknown,
-    /** The route path where the error occurred */
-    readonly path: string,
-  ) {}
-}
-
-/**
- * Error thrown when a route module load times out.
- * Used by the module loader for timeout/retry handling.
- * @since 1.0.0
- */
-export class RouteLoadTimeoutError extends Data.TaggedError("RouteLoadTimeoutError")<{
-  readonly path: string;
-  readonly kind: "component" | "layout" | "guard" | "loading" | "error" | "not_found";
-  readonly timeout_ms: number;
-  readonly attempt: number;
-  readonly is_prefetch: boolean;
-}> {}
-
-/**
- * Routes manifest - generated by vite plugin
- * @since 1.0.0
- */
-export type RoutesManifest = ReadonlyArray<RouteDefinition>;
-
-/**
- * Route error info - available to _error.tsx components via RouteError FiberRef
+ * Route error info - available to .error() boundary components via RouteError FiberRef
  * @since 1.0.0
  */
 export interface RouteErrorInfo {
@@ -372,6 +297,18 @@ export interface RouteErrorInfo {
 }
 
 /**
+ * Navigation context set by the router before each route signal update.
+ * Read by the outlet to determine scroll behavior after route matching.
+ * @since 1.0.0
+ * @internal
+ */
+export interface NavigationContext {
+  readonly isPopstate: boolean;
+  readonly hash: string;
+  readonly scrollKey: string;
+}
+
+/**
  * Router service interface
  * @since 1.0.0
  */
@@ -379,8 +316,11 @@ export interface RouterService {
   /** Signal containing current route state */
   readonly current: Signal<Route>;
 
-  /** Navigate to a path */
-  readonly navigate: (path: string, options?: NavigateOptions) => Effect.Effect<void>;
+  /** Navigate to a path. Fails with NavigationError if history/location operations fail. */
+  readonly navigate: (
+    path: string,
+    options?: NavigateOptions,
+  ) => Effect.Effect<void, NavigationError>;
 
   /** Go back in history */
   readonly back: () => Effect.Effect<void>;
@@ -394,8 +334,8 @@ export interface RouterService {
   /** Get query params signal */
   readonly query: Signal<URLSearchParams>;
 
-  /** Check if a path matches current route */
-  readonly isActive: (path: string, exact?: boolean) => Effect.Effect<boolean>;
+  /** Check if a path matches current route. Supports param interpolation. */
+  readonly isActive: (path: string, options?: IsActiveOptions) => Effect.Effect<boolean>;
 
   /**
    * Prefetch route modules for a path.
@@ -404,4 +344,25 @@ export interface RouterService {
    * @since 1.0.0
    */
   readonly prefetch: (path: string) => Effect.Effect<void>;
+
+  /**
+   * Navigation context Ref — set before each route signal update.
+   * Read by the outlet to determine scroll behavior.
+   * @internal
+   */
+  readonly _navigationContext: Ref.Ref<NavigationContext>;
+
+  /**
+   * Apply scroll behavior using captured platform services.
+   * Called by the outlet after matching a route and determining the strategy.
+   * @internal
+   */
+  readonly _applyScroll: (options: { readonly strategyKey: string }) => Effect.Effect<void>;
+
+  /**
+   * Save current scroll position (best-effort, errors ignored).
+   * Called by the outlet before route transitions if needed.
+   * @internal
+   */
+  readonly _saveScroll: Effect.Effect<void>;
 }

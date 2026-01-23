@@ -5,7 +5,13 @@
  * This module provides TypeScript type definitions for JSX elements.
  */
 import type { Effect } from "effect";
-import type { Element, ElementProps, EventHandler, ElementKey, MaybeSignal } from "./element.js";
+import type {
+  Element,
+  ElementProps,
+  EventHandler,
+  ElementKey,
+  MaybeSignal,
+} from "./primitives/element.js";
 
 export namespace JSX {
   /**

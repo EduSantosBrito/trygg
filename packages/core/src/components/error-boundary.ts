@@ -10,7 +10,7 @@
  * 2. Re-render failures (via ErrorBoundaryElement propagation)
  */
 import { Effect } from "effect";
-import { Element, componentElement, normalizeChild } from "../element.js";
+import { Element, componentElement, normalizeChild } from "../primitives/element.js";
 
 /**
  * Props for the ErrorBoundary component

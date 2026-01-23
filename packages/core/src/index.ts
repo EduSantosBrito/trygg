@@ -63,7 +63,7 @@ export {
   normalizeChildren,
   getKey,
   keyed,
-} from "./element.js";
+} from "./primitives/element.js";
 
 // JSX Runtime
 export {
@@ -80,21 +80,25 @@ export {
   Renderer,
   browserLayer,
   mount,
+  mountDocument,
+  renderDocument,
   type RendererService,
   type RenderContext,
   type RenderResult,
   CurrentRenderContext,
-  PortalTargetNotFoundError,
-} from "./renderer.js";
+} from "./primitives/renderer.js";
 
 // Signal - Effect-native reactive state
-export * as Signal from "./signal.js";
+export * as Signal from "./primitives/signal.js";
+
+// cx - Class name composition with fine-grained reactivity
+export { cx, type ClassInput, type ClassValue } from "./primitives/cx.js";
 
 // Api - Type utilities for HttpApi integration
-export * as Api from "./api.js";
+export * as Api from "./api/types.js";
 
 // Resource - Data fetching with caching and fine-grained reactivity
-export * as Resource from "./Resource.js";
+export * as Resource from "./primitives/resource.js";
 
 // Component API for typed props
 import {
@@ -102,10 +106,9 @@ import {
   gen as componentGen,
   provide as componentProvide,
   isEffectComponent,
-  type ComponentType,
   type ComponentProps,
   type PropsMarker,
-} from "./component.js";
+} from "./primitives/component.js";
 
 /**
  * Component API for creating JSX components with typed props.
@@ -143,12 +146,37 @@ export const Component: ComponentApi = Object.assign(ComponentFn, {
   provide: componentProvide,
 });
 
-export { isEffectComponent, type ComponentType, type ComponentProps, type PropsMarker };
+export declare namespace Component {
+  /**
+   * Component type - tracks Props, Error, and Requirements.
+   *
+   * @example
+   * ```typescript
+   * const Card: Component.Type<{ title: string }, never, Theme>
+   * const Pure: Component.Type<never, never, never>
+   * ```
+   *
+   * @since 1.0.0
+   */
+  export interface Type<Props = never, _E = never, _R = never> {
+    readonly _tag: "EffectComponent";
+    (props: [Props] extends [never] ? {} : Props): import("./primitives/element.js").Element;
+  }
+}
+
+export { isEffectComponent, type ComponentProps, type PropsMarker };
 
 // Components
 export { ErrorBoundary, type ErrorBoundaryProps } from "./components/error-boundary.js";
-export { Portal, type PortalProps } from "./components/portal.js";
 export { DevMode, type DevModeProps } from "./components/dev-mode.js";
+
+// Portal
+export * as Portal from "./primitives/portal.js";
+export {
+  type PortalProps,
+  type PortalOptions,
+  PortalTargetNotFoundError,
+} from "./primitives/portal.js";
 
 // Testing utilities (re-export for convenience)
 export {
@@ -162,7 +190,7 @@ export {
   type RenderInput,
   ElementNotFoundError,
   WaitForTimeoutError,
-} from "./testing.js";
+} from "./testing/index.js";
 
 // Debug utilities
 // Enable by adding <DevMode /> to your app, or see OBSERVABILITY.md
@@ -171,6 +199,9 @@ export * as Debug from "./debug/debug.js";
 // Metrics for observability
 // Counters and histograms for navigation, rendering, and signal updates
 export * as Metrics from "./debug/metrics.js";
+
+// Head management — head element hoisting and dedup
+export * as Head from "./primitives/head.js";
 
 // SafeUrl validation for secure href/src attributes
 // Validates URLs against a configurable scheme allowlist

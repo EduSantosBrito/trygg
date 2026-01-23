@@ -3,9 +3,7 @@ import { resolve } from "path";
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    // Exclude tests that use bun:test (run with `bun test` instead)
-    exclude: ["tests/test-server.test.ts"],
+    include: ["src/**/__tests__/**/*.test.{ts,tsx}"],
     environment: "happy-dom",
     testTimeout: 5000,
     hookTimeout: 5000,

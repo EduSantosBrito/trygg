@@ -16,7 +16,7 @@
  */
 import { Effect } from "effect";
 import * as Debug from "../debug/debug.js";
-import { Element, empty, componentElement } from "../element.js";
+import { Element, empty, componentElement } from "../primitives/element.js";
 
 /**
  * Props for the DevMode component

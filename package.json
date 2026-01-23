@@ -7,10 +7,11 @@
     "apps/*"
   ],
   "scripts": {
+    "build": "bun run --cwd packages/core build",
     "typecheck": "bun run --cwd packages/core typecheck",
     "test": "bun run --cwd packages/core test",
     "test:watch": "bun run --cwd packages/core test:watch",
-    "examples": "bun run --cwd apps/examples dev",
+    "examples": "bun run build && bun run --cwd apps/examples dev",
     "examples:install": "bun install --cwd apps/examples",
     "lint": "oxlint packages apps",
     "lint:fix": "oxlint packages apps --fix",

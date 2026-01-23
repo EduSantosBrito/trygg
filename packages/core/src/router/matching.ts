@@ -1,90 +1,208 @@
 /**
  * @since 1.0.0
- * Route matching logic for effect-ui router
+ * Route matching
  *
- * Uses a segment trie for O(path-depth) matching instead of O(routes) linear scan.
- * Precedence: static segments > params > wildcards
+ * Resolves relative child paths to absolute paths and builds a trie-based
+ * matcher for the route format. All public functions return Effects.
+ * RouteMatcher is a Context.Tag with Layer factories for production and test.
  */
-import { Option } from "effect";
-import type { RouteDefinition, RouteMatch, RouteParams } from "./types.js";
+import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
+import type { RouteDefinition } from "./route.js";
+import {
+  IndexMarker,
+  runMiddlewareChain,
+  type MiddlewareResult,
+  ParamsDecodeError,
+  QueryDecodeError,
+} from "./route.js";
+import type { RoutesManifest } from "./routes.js";
+import type { RouteComponent, RouteParams } from "./types.js";
+
+// =============================================================================
+// Resolved Route
+// =============================================================================
 
 /**
- * Parsed path segment
+ * A route definition with its path resolved to an absolute pattern.
+ * Produced by resolving the route tree.
+ * @since 1.0.0
+ */
+export interface ResolvedRoute {
+  /** Absolute path pattern (e.g., "/settings/profile") */
+  readonly path: string;
+  /** Original route definition */
+  readonly definition: RouteDefinition;
+  /** Ancestor resolved routes (root first, parent last) */
+  readonly ancestors: ReadonlyArray<ResolvedRoute>;
+}
+
+// =============================================================================
+// Route Match
+// =============================================================================
+
+/**
+ * Match result for routes.
+ * @since 1.0.0
+ */
+export interface RouteMatch {
+  /** The matched resolved route */
+  readonly route: ResolvedRoute;
+  /** Extracted path params (raw strings, not schema-decoded) */
+  readonly params: RouteParams;
+}
+
+// =============================================================================
+// RouteMatcher Service
+// =============================================================================
+
+/**
+ * RouteMatcher service interface.
+ * @since 1.0.0
+ */
+export interface RouteMatcherShape {
+  /** Find matching route for a path */
+  readonly match: (path: string) => Effect.Effect<Option.Option<RouteMatch>>;
+  /** All resolved routes */
+  readonly routes: Effect.Effect<ReadonlyArray<ResolvedRoute>>;
+}
+
+/**
+ * RouteMatcher — route matching logic as a testable service.
+ *
+ * - `RouteMatcher.make(manifest)`: trie-based matching (production)
+ * - `RouteMatcher.test(routes)`: linear scan (testing)
+ *
+ * @since 1.0.0
+ */
+export class RouteMatcher extends Context.Tag("effect-ui/RouteMatcher")<
+  RouteMatcher,
+  RouteMatcherShape
+>() {
+  /** Create a RouteMatcher Layer from a RoutesManifest using trie-based matching. */
+  static readonly make = (manifest: RoutesManifest): Layer.Layer<RouteMatcher> =>
+    Layer.effect(
+      RouteMatcher,
+      Effect.gen(function* () {
+        const resolved = yield* resolveRoutes(manifest);
+        const matcher = buildTrieMatcher(resolved);
+        return {
+          match: (path: string) => Effect.succeed(matcher(path)),
+          routes: Effect.succeed(resolved),
+        };
+      }),
+    );
+
+  /** Create a RouteMatcher Layer from resolved routes using linear scan (for testing). */
+  static readonly test = (routes: ReadonlyArray<ResolvedRoute>): Layer.Layer<RouteMatcher> =>
+    Layer.succeed(RouteMatcher, {
+      match: (path: string) => Effect.succeed(linearMatch(routes, path)),
+      routes: Effect.succeed(routes),
+    });
+}
+
+// =============================================================================
+// Path Resolution
+// =============================================================================
+
+/**
+ * Resolve the route tree into a flat list of resolved routes
+ * with absolute paths. Uses Ref for collection and Effect.forEach for traversal.
+ *
+ * @since 1.0.0
+ */
+export const resolveRoutes = (
+  manifest: RoutesManifest,
+): Effect.Effect<ReadonlyArray<ResolvedRoute>> =>
+  Effect.gen(function* () {
+    const resultRef = yield* Ref.make<ReadonlyArray<ResolvedRoute>>([]);
+    yield* Effect.forEach(manifest.routes, (route) => resolveRoute(route, "", [], resultRef), {
+      concurrency: "unbounded",
+    });
+    return yield* Ref.get(resultRef);
+  });
+
+/**
+ * Recursively resolve a route and its children.
  * @internal
  */
+const resolveRoute = (
+  definition: RouteDefinition,
+  parentPath: string,
+  ancestors: ReadonlyArray<ResolvedRoute>,
+  resultRef: Ref.Ref<ReadonlyArray<ResolvedRoute>>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const resolvedPath = resolvePath(definition.path, parentPath);
+
+    const resolved: ResolvedRoute = {
+      path: resolvedPath,
+      definition,
+      ancestors,
+    };
+
+    // Only add to flat list if this route has a component (leaf) or is an index route
+    if (definition.component !== undefined || definition.path === IndexMarker) {
+      yield* Ref.update(resultRef, (arr) => [...arr, resolved]);
+    }
+
+    // Recursively resolve children
+    yield* Effect.forEach(
+      definition.children,
+      (child) => resolveRoute(child, resolvedPath, [...ancestors, resolved], resultRef),
+      { concurrency: "unbounded" },
+    );
+  });
+
+/**
+ * Resolve a route path against its parent path.
+ * @internal
+ */
+const resolvePath = (path: string | typeof IndexMarker, parentPath: string): string => {
+  if (path === IndexMarker) {
+    return parentPath || "/";
+  }
+
+  if (parentPath === "") {
+    return path;
+  }
+
+  return parentPath + path;
+};
+
+// =============================================================================
+// Segment Parsing
+// =============================================================================
+
+/** @internal */
 interface PathSegment {
-  readonly type: "static" | "param" | "wildcard";
+  readonly type: "static" | "param" | "wildcard" | "catchAllRequired";
   readonly value: string;
 }
 
-/**
- * Compiled route pattern for efficient matching
- * @internal
- */
-interface CompiledRoute {
-  readonly definition: RouteDefinition;
-  readonly segments: ReadonlyArray<PathSegment>;
-  readonly paramNames: ReadonlyArray<string>;
-}
-
-/**
- * Trie node for segment-based route matching
- * @internal
- */
-interface TrieNode {
-  /** Static segment children keyed by segment value */
-  readonly staticChildren: Map<string, TrieNode>;
-  /** Single child for param segments (:id, [id]) */
-  paramChild: { node: TrieNode; name: string } | undefined;
-  /** Single child for wildcard segments (*, [...rest]) */
-  wildcardChild: { node: TrieNode; name: string } | undefined;
-  /** Routes that terminate at this node, ordered by precedence (most specific first) */
-  routes: CompiledRouteWithAncestry[];
-}
-
-/**
- * Parse a path pattern into segments
- *
- * Examples:
- * - "/users" → [{ type: "static", value: "users" }]
- * - "/users/:id" → [{ type: "static", value: "users" }, { type: "param", value: "id" }]
- * - "/files/*" → [{ type: "static", value: "files" }, { type: "wildcard", value: "*" }]
- * - "/files/[...path]" → [{ type: "static", value: "files" }, { type: "wildcard", value: "path" }]
- *
- * @internal
- */
+/** @internal */
 const parsePattern = (pattern: string): { segments: PathSegment[]; paramNames: string[] } => {
   const segments: PathSegment[] = [];
   const paramNames: string[] = [];
 
-  // Remove leading/trailing slashes and split
   const parts = pattern
     .replace(/^\/|\/$/g, "")
     .split("/")
     .filter(Boolean);
 
   for (const part of parts) {
-    if (part.startsWith(":")) {
-      // Named parameter: :id
+    if (part.startsWith(":") && part.endsWith("*")) {
+      const name = part.slice(1, -1);
+      segments.push({ type: "wildcard", value: name });
+      paramNames.push(name);
+    } else if (part.startsWith(":") && part.endsWith("+")) {
+      const name = part.slice(1, -1);
+      segments.push({ type: "catchAllRequired", value: name });
+      paramNames.push(name);
+    } else if (part.startsWith(":")) {
       const name = part.slice(1);
       segments.push({ type: "param", value: name });
       paramNames.push(name);
-    } else if (part.startsWith("[...") && part.endsWith("]")) {
-      // Catch-all: [...path]
-      const name = part.slice(4, -1);
-      segments.push({ type: "wildcard", value: name });
-      paramNames.push(name);
-    } else if (part.startsWith("[") && part.endsWith("]")) {
-      // Dynamic segment: [id]
-      const name = part.slice(1, -1);
-      segments.push({ type: "param", value: name });
-      paramNames.push(name);
-    } else if (part === "*") {
-      // Simple wildcard
-      segments.push({ type: "wildcard", value: "*" });
-      paramNames.push("*");
     } else {
-      // Static segment
       segments.push({ type: "static", value: part });
     }
   }
@@ -92,98 +210,26 @@ const parsePattern = (pattern: string): { segments: PathSegment[]; paramNames: s
   return { segments, paramNames };
 };
 
-/**
- * Compile a route definition for efficient matching
- * @internal
- */
-const compileRoute = (definition: RouteDefinition): CompiledRoute => {
-  const { segments, paramNames } = parsePattern(definition.path);
-  return { definition, segments, paramNames };
-};
+// =============================================================================
+// Trie-Based Matching
+// =============================================================================
 
-/**
- * Try to match a path against a compiled route
- * Returns Option.some(params) if matched, Option.none() otherwise
- * @internal
- */
-const matchRoute = (
-  compiled: CompiledRoute,
-  pathParts: ReadonlyArray<string>,
-): Option.Option<RouteParams> => {
-  const params: Record<string, string> = {};
-  const { segments } = compiled;
+/** @internal */
+interface CompiledRoute {
+  readonly resolved: ResolvedRoute;
+  readonly segments: ReadonlyArray<PathSegment>;
+  readonly score: number;
+}
 
-  let pathIndex = 0;
+/** @internal */
+interface TrieNode {
+  readonly staticChildren: Map<string, TrieNode>;
+  paramChild: { node: TrieNode; name: string } | undefined;
+  wildcardChild: { node: TrieNode; name: string } | undefined;
+  routes: CompiledRoute[];
+}
 
-  for (let segIndex = 0; segIndex < segments.length; segIndex++) {
-    const segment = segments[segIndex];
-    if (segment === undefined) continue;
-
-    if (segment.type === "wildcard") {
-      // Wildcard consumes rest of path
-      const rest = pathParts.slice(pathIndex).join("/");
-      params[segment.value] = rest;
-      return Option.some(params);
-    }
-
-    if (pathIndex >= pathParts.length) {
-      // Path is shorter than pattern
-      return Option.none();
-    }
-
-    const pathPart = pathParts[pathIndex];
-    if (pathPart === undefined) return Option.none();
-
-    if (segment.type === "static") {
-      // Must match exactly
-      if (pathPart !== segment.value) {
-        return Option.none();
-      }
-    } else if (segment.type === "param") {
-      // Capture parameter
-      params[segment.value] = pathPart;
-    }
-
-    pathIndex++;
-  }
-
-  // Check if entire path was consumed (unless last segment was wildcard)
-  const lastSegment = segments[segments.length - 1];
-  if (lastSegment?.type !== "wildcard" && pathIndex !== pathParts.length) {
-    return Option.none();
-  }
-
-  return Option.some(params);
-};
-
-/**
- * Score a route match for priority sorting
- * Higher score = more specific = higher priority
- * @internal
- */
-const scoreRoute = (compiled: CompiledRoute): number => {
-  let score = 0;
-
-  for (const segment of compiled.segments) {
-    if (segment.type === "static") {
-      score += 3; // Static segments are most specific
-    } else if (segment.type === "param") {
-      score += 2; // Params are medium specificity
-    } else if (segment.type === "wildcard") {
-      score += 1; // Wildcards are least specific
-    }
-  }
-
-  // Longer routes generally more specific
-  score += compiled.segments.length * 0.1;
-
-  return score;
-};
-
-/**
- * Create an empty trie node
- * @internal
- */
+/** @internal */
 const createTrieNode = (): TrieNode => ({
   staticChildren: new Map(),
   paramChild: undefined,
@@ -191,16 +237,30 @@ const createTrieNode = (): TrieNode => ({
   routes: [],
 });
 
-/**
- * Insert a compiled route into the trie
- * @internal
- */
-const insertIntoTrie = (root: TrieNode, route: CompiledRouteWithAncestry): void => {
+/** @internal */
+const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
+  let score = 0;
+  for (const segment of segments) {
+    if (segment.type === "static") {
+      score += 3;
+    } else if (segment.type === "param") {
+      score += 2;
+    } else if (segment.type === "catchAllRequired") {
+      score += 1.5;
+    } else if (segment.type === "wildcard") {
+      score += 1;
+    }
+  }
+  score += segments.length * 0.1;
+  return score;
+};
+
+/** @internal */
+const insertIntoTrie = (root: TrieNode, route: CompiledRoute): void => {
   let current = root;
 
   for (const segment of route.segments) {
     if (segment.type === "static") {
-      // Static segment: get or create child node
       let child = current.staticChildren.get(segment.value);
       if (child === undefined) {
         child = createTrieNode();
@@ -208,53 +268,29 @@ const insertIntoTrie = (root: TrieNode, route: CompiledRouteWithAncestry): void 
       }
       current = child;
     } else if (segment.type === "param") {
-      // Param segment: single param child
       if (current.paramChild === undefined) {
         current.paramChild = { node: createTrieNode(), name: segment.value };
       }
       current = current.paramChild.node;
-    } else if (segment.type === "wildcard") {
-      // Wildcard segment: single wildcard child, terminates matching
+    } else if (segment.type === "wildcard" || segment.type === "catchAllRequired") {
       if (current.wildcardChild === undefined) {
         current.wildcardChild = { node: createTrieNode(), name: segment.value };
       }
       current = current.wildcardChild.node;
-      // Wildcard consumes rest, so we terminate here
-      break;
+      break; // Wildcard terminates
     }
   }
 
-  // Add route to this node
   current.routes.push(route);
 };
 
-/**
- * Build a trie from compiled routes
- * @internal
- */
-const buildTrie = (routes: ReadonlyArray<CompiledRouteWithAncestry>): TrieNode => {
-  const root = createTrieNode();
-  for (const route of routes) {
-    insertIntoTrie(root, route);
-  }
-  return root;
-};
-
-/**
- * Match result from trie traversal (internal)
- * @internal
- */
+/** @internal */
 interface TrieMatchResult {
-  readonly route: CompiledRouteWithAncestry;
+  readonly route: CompiledRoute;
   readonly params: RouteParams;
 }
 
-/**
- * Walk the trie to find matching routes for a path
- * Prioritizes: static > param > wildcard
- * Returns all matching routes with their params (best matches first)
- * @internal
- */
+/** @internal */
 const walkTrie = (
   node: TrieNode,
   pathParts: ReadonlyArray<string>,
@@ -263,13 +299,25 @@ const walkTrie = (
 ): TrieMatchResult[] => {
   const results: TrieMatchResult[] = [];
 
-  // If we've consumed all path parts, check for routes at this node
   if (pathIndex >= pathParts.length) {
     for (const route of node.routes) {
-      // Verify the route pattern length matches (no wildcards)
       const lastSegment = route.segments[route.segments.length - 1];
-      if (lastSegment?.type !== "wildcard" && route.segments.length === pathIndex) {
+      if (
+        lastSegment?.type !== "wildcard" &&
+        lastSegment?.type !== "catchAllRequired" &&
+        route.segments.length === pathIndex
+      ) {
         results.push({ route, params: { ...params } });
+      }
+    }
+    // Check wildcard child for zero-segment matches
+    if (node.wildcardChild !== undefined) {
+      const newParams = { ...params, [node.wildcardChild.name]: "" };
+      for (const route of node.wildcardChild.node.routes) {
+        const lastSeg = route.segments[route.segments.length - 1];
+        if (lastSeg?.type === "wildcard") {
+          results.push({ route, params: { ...newParams } });
+        }
       }
     }
     return results;
@@ -278,24 +326,27 @@ const walkTrie = (
   const currentPart = pathParts[pathIndex];
   if (currentPart === undefined) return results;
 
-  // Priority 1: Try static match first (most specific)
+  // Priority 1: Static match
   const staticChild = node.staticChildren.get(currentPart);
   if (staticChild !== undefined) {
     results.push(...walkTrie(staticChild, pathParts, pathIndex + 1, params));
   }
 
-  // Priority 2: Try param match (medium specificity)
+  // Priority 2: Param match
   if (node.paramChild !== undefined) {
     const newParams = { ...params, [node.paramChild.name]: currentPart };
     results.push(...walkTrie(node.paramChild.node, pathParts, pathIndex + 1, newParams));
   }
 
-  // Priority 3: Try wildcard match (least specific, consumes rest)
+  // Priority 3: Wildcard match
   if (node.wildcardChild !== undefined) {
     const rest = pathParts.slice(pathIndex).join("/");
     const newParams = { ...params, [node.wildcardChild.name]: rest };
-    // Wildcards terminate at this node
     for (const route of node.wildcardChild.node.routes) {
+      const lastSeg = route.segments[route.segments.length - 1];
+      if (lastSeg?.type === "catchAllRequired" && rest === "") {
+        continue;
+      }
       results.push({ route, params: { ...newParams } });
     }
   }
@@ -304,177 +355,346 @@ const walkTrie = (
 };
 
 /**
- * Route matcher - compiles routes and matches paths
- * @since 1.0.0
- */
-export interface RouteMatcher {
-  /** Find matching route for a path, returns Option.some(match) or Option.none() */
-  readonly match: (path: string) => Option.Option<RouteMatch>;
-}
-
-/**
- * Compile routes recursively, flattening nested routes with parent references.
- * For each child route, we store its ancestry for building the parent chain.
+ * Build a trie-based match function from resolved routes.
  * @internal
  */
-interface CompiledRouteWithAncestry extends CompiledRoute {
-  /** Ancestor route definitions (root first) */
-  readonly ancestors: ReadonlyArray<RouteDefinition>;
-  /** Precomputed total depth (own segments + all ancestor segments) */
-  readonly totalDepth: number;
-  /** Precomputed specificity score */
-  readonly score: number;
-}
-
-/**
- * Recursively compile routes with ancestry tracking
- * Precomputes totalDepth and score to avoid repeated parsing during navigation
- * @internal
- */
-const compileRoutesWithAncestry = (
-  routes: ReadonlyArray<RouteDefinition>,
-  ancestors: ReadonlyArray<RouteDefinition> = [],
-  ancestorDepth: number = 0,
-): CompiledRouteWithAncestry[] => {
-  const result: CompiledRouteWithAncestry[] = [];
-
-  for (const route of routes) {
-    // Compile this route
-    const compiled = compileRoute(route);
-
-    // Precompute depth and score once (eliminates parsePattern calls during navigation)
-    const totalDepth = ancestorDepth + compiled.segments.length;
-    const score = scoreRoute(compiled);
-
-    result.push({ ...compiled, ancestors, totalDepth, score });
-
-    // Recursively compile children with this route added to ancestry
-    if (route.children && route.children.length > 0) {
-      const childAncestry = [...ancestors, route];
-      const childAncestorDepth = ancestorDepth + compiled.segments.length;
-      const compiledChildren = compileRoutesWithAncestry(
-        route.children,
-        childAncestry,
-        childAncestorDepth,
-      );
-      result.push(...compiledChildren);
-    }
+const buildTrieMatcher = (
+  resolved: ReadonlyArray<ResolvedRoute>,
+): ((path: string) => Option.Option<RouteMatch>) => {
+  const compiled: CompiledRoute[] = [];
+  for (const route of resolved) {
+    const { segments } = parsePattern(route.path);
+    compiled.push({
+      resolved: route,
+      segments,
+      score: scoreRoute(segments),
+    });
   }
 
-  return result;
-};
-
-/**
- * Create a route matcher from route definitions
- * Uses a segment trie for O(path-depth) matching
- * @since 1.0.0
- */
-export const createMatcher = (routes: ReadonlyArray<RouteDefinition>): RouteMatcher => {
-  // Compile all routes recursively with ancestry tracking
-  const compiled = compileRoutesWithAncestry(routes);
-
-  // Sort by specificity (most specific first) - uses precomputed depth and score
   const sorted = [...compiled].sort((a, b) => {
-    // First, compare by total depth (precomputed: route segments + ancestor segments)
-    if (a.totalDepth !== b.totalDepth) return b.totalDepth - a.totalDepth;
-
-    // Then by route specificity (precomputed)
+    if (a.segments.length !== b.segments.length) {
+      return b.segments.length - a.segments.length;
+    }
     return b.score - a.score;
   });
 
-  // Build trie from sorted routes (preserves precedence within each node)
-  const trie = buildTrie(sorted);
+  const root = createTrieNode();
+  for (const route of sorted) {
+    insertIntoTrie(root, route);
+  }
 
-  return {
-    match: (path: string): Option.Option<RouteMatch> => {
-      // Normalize path
-      const normalizedPath = path.split("?")[0] ?? path; // Remove query string
-      const pathParts = normalizedPath
-        .replace(/^\/|\/$/g, "")
-        .split("/")
-        .filter(Boolean);
+  return (path: string): Option.Option<RouteMatch> => {
+    const normalizedPath = path.split("?")[0] ?? path;
+    const pathParts = normalizedPath
+      .replace(/^\/|\/$/g, "")
+      .split("/")
+      .filter(Boolean);
 
-      // Walk trie to find matches (already in priority order: static > param > wildcard)
-      const matches = walkTrie(trie, pathParts, 0, {});
-
-      if (matches.length === 0) {
-        return Option.none();
-      }
-
-      // Sort results by precedence (uses precomputed depth + specificity)
-      const sortedMatches = matches.sort((a, b) => {
-        // Compare by precomputed total depth
-        if (a.route.totalDepth !== b.route.totalDepth) {
-          return b.route.totalDepth - a.route.totalDepth;
+    if (pathParts.length === 0) {
+      const rootMatches = walkTrie(root, [], 0, {});
+      if (rootMatches.length > 0) {
+        const best = rootMatches[0];
+        if (best !== undefined) {
+          return Option.some({ route: best.route.resolved, params: best.params });
         }
-        // Then by precomputed specificity score
-        return b.route.score - a.route.score;
-      });
+      }
+      return Option.none();
+    }
 
-      // Build full RouteMatch with parents for the best match
-      const best = sortedMatches[0];
-      if (best === undefined) return Option.none();
+    const matches = walkTrie(root, pathParts, 0, {});
+    if (matches.length === 0) return Option.none();
 
-      return buildRouteMatch(best.route, pathParts, best.params);
-    },
+    const sortedMatches = matches.sort((a, b) => {
+      if (a.route.segments.length !== b.route.segments.length) {
+        return b.route.segments.length - a.route.segments.length;
+      }
+      return b.route.score - a.route.score;
+    });
+
+    const best = sortedMatches[0];
+    if (best === undefined) return Option.none();
+
+    return Option.some({ route: best.route.resolved, params: best.params });
   };
 };
 
 /**
- * Build a full RouteMatch with parent chain
+ * Linear scan match function for testing.
  * @internal
  */
-const buildRouteMatch = (
-  route: CompiledRouteWithAncestry,
-  pathParts: ReadonlyArray<string>,
-  params: RouteParams,
+const linearMatch = (
+  routes: ReadonlyArray<ResolvedRoute>,
+  path: string,
 ): Option.Option<RouteMatch> => {
-  // Build the parent chain
-  const parents: RouteMatch[] = [];
+  const normalizedPath = path.split("?")[0] ?? path;
+  const pathParts = normalizedPath
+    .replace(/^\/|\/$/g, "")
+    .split("/")
+    .filter(Boolean);
 
-  for (const ancestor of route.ancestors) {
-    const ancestorCompiled = compileRoute(ancestor);
-    const prefixLength = ancestorCompiled.segments.length;
-    const ancestorParamsOption = matchRoute(ancestorCompiled, pathParts.slice(0, prefixLength));
+  for (const route of routes) {
+    const { segments } = parsePattern(route.path);
+    const params: RouteParams = {};
+    let matched = true;
 
-    if (Option.isSome(ancestorParamsOption)) {
-      parents.push({
-        route: ancestor,
-        params: ancestorParamsOption.value,
-        parents: [],
-      });
+    if (segments.length === 0 && pathParts.length === 0) {
+      return Option.some({ route, params });
+    }
+
+    let pathIdx = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      if (seg === undefined) {
+        matched = false;
+        break;
+      }
+
+      if (seg.type === "static") {
+        if (pathParts[pathIdx] !== seg.value) {
+          matched = false;
+          break;
+        }
+        pathIdx++;
+      } else if (seg.type === "param") {
+        const part = pathParts[pathIdx];
+        if (part === undefined) {
+          matched = false;
+          break;
+        }
+        params[seg.value] = part;
+        pathIdx++;
+      } else if (seg.type === "wildcard") {
+        params[seg.value] = pathParts.slice(pathIdx).join("/");
+        pathIdx = pathParts.length;
+      } else if (seg.type === "catchAllRequired") {
+        const rest = pathParts.slice(pathIdx).join("/");
+        if (rest === "") {
+          matched = false;
+          break;
+        }
+        params[seg.value] = rest;
+        pathIdx = pathParts.length;
+      }
+    }
+
+    if (matched && pathIdx === pathParts.length) {
+      return Option.some({ route, params });
     }
   }
 
-  return Option.some({
-    route: route.definition,
-    params,
-    parents,
-  });
+  return Option.none();
 };
 
-/**
- * Parse path and query from a full URL path
- * @since 1.0.0
- */
-export const parsePath = (fullPath: string): { path: string; query: URLSearchParams } => {
-  // Remove hash fragment before parsing query
-  const [pathWithQuery] = fullPath.split("#");
-  const [path, queryString] = (pathWithQuery ?? fullPath).split("?");
-  return {
-    path: path ?? "/",
-    query: new URLSearchParams(queryString ?? ""),
-  };
-};
+// =============================================================================
+// Middleware Collection & Execution
+// =============================================================================
 
 /**
- * Build a full path from path and query
+ * Collect the full middleware chain for a resolved route.
+ * Order: parent middleware (root-to-leaf), then route's own middleware (left-to-right).
+ *
  * @since 1.0.0
  */
-export const buildPath = (path: string, query?: Record<string, string>): string => {
-  if (!query || Object.keys(query).length === 0) {
-    return path;
+export const collectRouteMiddleware = (
+  route: ResolvedRoute,
+): ReadonlyArray<Effect.Effect<void, unknown, unknown>> => {
+  const chain: Array<Effect.Effect<void, unknown, unknown>> = [];
+
+  for (const ancestor of route.ancestors) {
+    for (const m of ancestor.definition.middleware) {
+      chain.push(m);
+    }
   }
-  const params = new URLSearchParams(query);
-  return `${path}?${params.toString()}`;
+
+  for (const m of route.definition.middleware) {
+    chain.push(m);
+  }
+
+  return chain;
 };
+
+/**
+ * Run the full middleware chain for a resolved route.
+ *
+ * @since 1.0.0
+ */
+export const runRouteMiddleware = (
+  route: ResolvedRoute,
+): Effect.Effect<MiddlewareResult, never, never> => {
+  const chain = collectRouteMiddleware(route);
+  return runMiddlewareChain(chain);
+};
+
+// =============================================================================
+// Boundary Resolution (Nearest-Wins)
+// =============================================================================
+
+/**
+ * Resolve the nearest error boundary component.
+ * Walks from route → ancestors → root.
+ *
+ * @since 1.0.0
+ */
+export const resolveErrorBoundary = (
+  route: ResolvedRoute,
+  rootError: RouteComponent | undefined,
+): Option.Option<RouteComponent> => {
+  if (route.definition.error !== undefined) {
+    return Option.some(route.definition.error);
+  }
+
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.error !== undefined) {
+      return Option.some(ancestor.definition.error);
+    }
+  }
+
+  return Option.fromNullable(rootError);
+};
+
+/**
+ * Resolve the nearest notFound boundary component.
+ * Walks from route → ancestors → root.
+ *
+ * @since 1.0.0
+ */
+export const resolveNotFoundBoundary = (
+  route: ResolvedRoute,
+  rootNotFound: RouteComponent | undefined,
+): Option.Option<RouteComponent> => {
+  if (route.definition.notFound !== undefined) {
+    return Option.some(route.definition.notFound);
+  }
+
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.notFound !== undefined) {
+      return Option.some(ancestor.definition.notFound);
+    }
+  }
+
+  return Option.fromNullable(rootNotFound);
+};
+
+/**
+ * Resolve the nearest forbidden boundary component.
+ * Walks from route → ancestors → root.
+ *
+ * @since 1.0.0
+ */
+export const resolveForbiddenBoundary = (
+  route: ResolvedRoute,
+  rootForbidden: RouteComponent | undefined,
+): Option.Option<RouteComponent> => {
+  if (route.definition.forbidden !== undefined) {
+    return Option.some(route.definition.forbidden);
+  }
+
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.forbidden !== undefined) {
+      return Option.some(ancestor.definition.forbidden);
+    }
+  }
+
+  return Option.fromNullable(rootForbidden);
+};
+
+/**
+ * Resolve the nearest loading component.
+ * Walks from route → ancestors.
+ *
+ * @since 1.0.0
+ */
+export const resolveLoadingBoundary = (route: ResolvedRoute): Option.Option<RouteComponent> => {
+  if (route.definition.loading !== undefined) {
+    return Option.some(route.definition.loading);
+  }
+
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.loading !== undefined) {
+      return Option.some(ancestor.definition.loading);
+    }
+  }
+
+  return Option.none();
+};
+
+// =============================================================================
+// Params & Query Decode at Match Time
+// =============================================================================
+
+/**
+ * Decode path params using the route's params schema.
+ * If no schema is defined, returns raw params unchanged.
+ *
+ * @since 1.0.0
+ */
+export const decodeRouteParams = (
+  route: ResolvedRoute,
+  rawParams: RouteParams,
+): Effect.Effect<Record<string, unknown>, ParamsDecodeError> => {
+  const schema = route.definition.paramsSchema;
+
+  if (schema === undefined) {
+    return Effect.succeed(rawParams as Record<string, unknown>);
+  }
+
+  return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
+    rawParams as unknown,
+  ).pipe(Effect.mapError((cause) => new ParamsDecodeError(route.path, rawParams, cause)));
+};
+
+/**
+ * Decode query params using the route's query schema.
+ * If no schema is defined, returns empty object.
+ *
+ * @since 1.0.0
+ */
+export const decodeRouteQuery = (
+  route: ResolvedRoute,
+  searchParams: URLSearchParams,
+): Effect.Effect<Record<string, unknown>, QueryDecodeError> => {
+  const schema = route.definition.querySchema;
+
+  if (schema === undefined) {
+    return Effect.succeed({} as Record<string, unknown>);
+  }
+
+  const raw: Record<string, string> = {};
+  searchParams.forEach((value, key) => {
+    raw[key] = value;
+  });
+
+  return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
+    raw as unknown,
+  ).pipe(Effect.mapError((cause) => new QueryDecodeError(route.path, raw, cause)));
+};
+
+// =============================================================================
+// Sync Matcher (Test Utility)
+// =============================================================================
+
+/**
+ * Synchronous matcher interface for tests.
+ * @since 1.0.0
+ */
+export interface SyncMatcher {
+  readonly match: (path: string) => Option.Option<RouteMatch>;
+  readonly routes: ReadonlyArray<ResolvedRoute>;
+}
+
+/**
+ * Create a trie-based matcher from a manifest.
+ * Resolves the route tree and builds a sync match function.
+ * Intended for unit tests that don't need the RouteMatcher service Layer.
+ *
+ * @since 1.0.0
+ */
+export const createMatcher = (manifest: RoutesManifest): Effect.Effect<SyncMatcher> =>
+  Effect.map(resolveRoutes(manifest), (resolved) => ({
+    match: buildTrieMatcher(resolved),
+    routes: resolved,
+  }));

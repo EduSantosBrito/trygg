@@ -13,12 +13,13 @@
     "baseUrl": ".",
     "paths": {
       "effect-ui": ["../../packages/core/src/index.ts"],
+      "effect-ui/api": ["./.effect-ui/api-types.ts"],
       "effect-ui/router": ["../../packages/core/src/router/index.ts"],
       "effect-ui/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
       "effect-ui/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],
       "effect-ui/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
     }
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts"],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", ".effect-ui/**/*.ts"],
   "exclude": ["vite.config.ts"]
 }

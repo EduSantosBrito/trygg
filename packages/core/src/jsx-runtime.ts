@@ -14,7 +14,7 @@ import {
   componentElement,
   isElement,
   empty,
-} from "./element.js";
+} from "./primitives/element.js";
 
 /**
  * Props passed to JSX elements
@@ -136,7 +136,7 @@ export type { ElementProps, ElementKey };
 
 // JSX namespace for TypeScript - required for jsxImportSource
 export namespace JSX {
-  export type Element = import("./element.js").Element;
+  export type Element = import("./primitives/element.js").Element;
 
   export interface IntrinsicAttributes {
     readonly key?: ElementKey;

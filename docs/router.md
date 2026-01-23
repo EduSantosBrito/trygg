@@ -1,253 +1,192 @@
 # Effect UI Router
 
-> **Note:** This documents the current file-based routing system. 
-> See [declarative-routing.md](declarative-routing.md) for the new declarative routing design that will replace file-based routing.
-
-Client-side SPA router with file-based routing, designed for @effect/rpc integration.
+Declarative routing with Schema-validated params, middleware composition, and Layer-based rendering strategies.
 
 ## Core Principles
 
-1. **File-based routes** - Routes defined by file structure, automatic code splitting
-2. **Signal-based** - Current route is a Signal for reactive updates
-3. **Effect-native** - Navigation returns Effects, guards are Effects
-4. **Type-safe** - Route params extracted at type level
-5. **Composable** - Routes can be nested with layouts
+1. **Explicit route definitions** - All routes in `app/routes.ts`
+2. **Schema-validated params** - Params decoded at match time using Effect Schema
+3. **Middleware composition** - Chained execution with error propagation
+4. **Layer-based rendering** - Lazy/eager rendering via `RenderStrategy` Layer
+5. **Type-safe navigation** - `RouteMap` augmented by vite plugin
+6. **Trie-based matching** - Priority: static > param > wildcard
 
-## File-Based Routing
+---
 
-### Directory Structure
+## Route Builder
 
-```
-src/
-├── routes/
-│   ├── index.tsx           → /
-│   ├── about.tsx           → /about
-│   ├── users/
-│   │   ├── index.tsx       → /users
-│   │   └── [id].tsx        → /users/:id
-│   ├── posts/
-│   │   ├── index.tsx       → /posts
-│   │   └── [postId]/
-│   │       ├── index.tsx   → /posts/:postId
-│   │       └── comments/
-│   │           └── [commentId].tsx  → /posts/:postId/comments/:commentId
-│   └── settings/
-│       ├── _layout.tsx     → Layout wrapper for /settings/*
-│       ├── index.tsx       → /settings
-│       ├── profile.tsx     → /settings/profile
-│       └── security.tsx    → /settings/security
-├── main.tsx
-└── vite.config.ts
-```
-
-### Conventions
-
-| Pattern | Meaning |
-|---------|---------|
-| `index.tsx` | Index route for directory |
-| `[param].tsx` | Dynamic parameter segment |
-| `[...rest].tsx` | Catch-all/wildcard segment |
-| `_layout.tsx` | Layout wrapper for sibling routes |
-| `_error.tsx` | Error boundary for sibling routes |
-| `_loading.tsx` | Loading fallback for sibling routes |
-| `_404.tsx` | Not found fallback |
-
-### Route File Format
+### Basic Route
 
 ```tsx
-// routes/users/[id].tsx
-import { Effect } from "effect"
-import { Router } from "effect-ui"
+import { Route, Routes, RenderStrategy } from "effect-ui/router"
+import { Schema } from "effect"
 
-// Route component - default export
-export default Effect.gen(function* () {
-  // Path-based type safety: params are inferred from the path pattern
+Route.make("/users/:id")
+  .params(Schema.Struct({ id: Schema.NumberFromString }))
+  .component(UserProfile)
+  .middleware(requireAuth)
+  .loading(UserSkeleton)
+  .error(UserError)
+  .pipe(Route.provide(RenderStrategy.Lazy))
+```
+
+### Builder Methods
+
+| Method | Description |
+|--------|-------------|
+| `Route.make(path)` | Create route with path pattern (`:param`, `:param*`, `:param+`) |
+| `Route.index(Component)` | Create index route (matches parent path exactly) |
+| `.params(schema)` | Schema for path params - keys must match path params |
+| `.query(schema)` | Schema for query params |
+| `.component(Component)` | Component to render |
+| `.middleware(effect)` | Add middleware (chained, left-to-right) |
+| `.prefetch(fn)` | Prefetch Resource on navigation (parallel execution) |
+| `.loading(Component)` | Loading fallback while route loads |
+| `.error(Component)` | Error boundary (nearest wins) |
+| `.notFound(Component)` | 404 fallback for unmatched children |
+| `.forbidden(Component)` | 403 fallback for unauthorized access |
+| `.layout(Component)` | Layout wrapper (renders `<Router.Outlet />` for children) |
+| `.children(...)` | Nested routes with relative paths |
+| `.pipe(Route.provide(...))` | Apply Layers (render strategy, scroll strategy) |
+
+### Constraints
+
+- `.component()` and `.children()` are mutually exclusive
+- `.params()` only available when path has param segments
+- Schema keys must exactly match path params (type-enforced)
+
+---
+
+## Routes Collection
+
+```tsx
+export const routes = Routes.make()
+  .add(HomeRoute)
+  .add(UsersRoute)
+  .add(SettingsRoutes)
+  .notFound(NotFoundComponent)
+  .forbidden(ForbiddenComponent)
+```
+
+`.add()` enforces `R = never` at the type level - all service requirements must be satisfied via `Route.provide` before adding.
+
+---
+
+## Path Params
+
+### Schema Validation
+
+```tsx
+// Schema keys must match path params exactly
+Route.make("/users/:id")
+  .params(Schema.Struct({ id: Schema.NumberFromString }))
+
+// Multiple params
+Route.make("/blog/:year/:slug")
+  .params(Schema.Struct({
+    year: Schema.NumberFromString,
+    slug: Schema.String
+  }))
+
+// Catch-all (zero or more segments)
+Route.make("/docs/:path*")
+  .params(Schema.Struct({ path: Schema.String }))
+// /docs -> path = "", /docs/api/users -> path = "api/users"
+
+// Required catch-all (one or more segments)
+Route.make("/files/:filepath+")
+  .params(Schema.Struct({ filepath: Schema.String }))
+// /files/a/b -> filepath = "a/b", /files -> 404
+```
+
+### Usage in Components
+
+```tsx
+const UserProfile = Component.gen(function* () {
   const { id } = yield* Router.params("/users/:id")
-  
+  // id: number (decoded via Schema.NumberFromString)
+  return <div>User {id}</div>
+})
+```
+
+---
+
+## Query Params
+
+```tsx
+Route.make("/search")
+  .query(Schema.Struct({
+    q: Schema.String,
+    page: Schema.optional(Schema.NumberFromString),
+  }))
+  .component(SearchPage)
+
+// In component:
+const { q, page } = yield* Router.query("/search")
+// q: string, page: number | undefined
+```
+
+---
+
+## Middleware
+
+Middleware runs before component rendering. Left-to-right ordering.
+
+### Definition
+
+```tsx
+const requireAuth = Effect.gen(function* () {
+  const session = yield* FiberRef.get(CurrentSession)
+  if (Option.isNone(session)) {
+    return yield* Route.redirect("/login")
+  }
+})
+
+const requireAdmin = Effect.gen(function* () {
+  const user = yield* FiberRef.get(CurrentUser)
+  if (!user.isAdmin) {
+    return yield* Route.forbidden()
+  }
+})
+```
+
+### Results
+
+| Effect Result | Behavior |
+|---------------|----------|
+| Succeeds with `void` | Continue to next middleware or component |
+| Fails with `RouterRedirectError` | Redirect to another route |
+| Fails with `RouterForbiddenError` | Render nearest `.forbidden()` component |
+| Fails with other error | Render nearest `.error()` component |
+
+### With Service Requirements
+
+```tsx
+Route.make("/admin")
+  .middleware(requireAuth)      // R = AuthService
+  .component(AdminDashboard)
+  .pipe(Route.provide(AuthLive))  // R = never
+```
+
+---
+
+## Boundary Components
+
+All boundaries use **nearest-wins** resolution (walks up from route to ancestors).
+
+### Error Boundary
+
+```tsx
+Route.make("/dashboard")
+  .middleware(requireAuth)
+  .component(Dashboard)
+  .error(DashboardError)
+
+// Error component:
+const DashboardError = Component.gen(function* () {
+  const { cause, path, reset } = yield* Router.currentError
   return (
     <div>
-      <h1>User Profile</h1>
-      <p>User ID: {id}</p>
-    </div>
-  )
-})
-
-// Optional: Route guard
-export const guard = Effect.gen(function* () {
-  const auth = yield* AuthService
-  const user = yield* auth.getCurrentUser
-  if (Option.isNone(user)) {
-    return yield* Router.redirect("/login")
-  }
-})
-
-// Optional: Loading component
-export const loading = <div>Loading user...</div>
-
-// Optional: Error component  
-export const error = (err: unknown) => <div>Error: {String(err)}</div>
-```
-
-### Layout Files
-
-```tsx
-// routes/settings/_layout.tsx
-import { Effect } from "effect"
-import { Router } from "effect-ui"
-
-export default Effect.gen(function* () {
-  return (
-    <div className="settings-layout">
-      <aside>
-        <nav>
-          <Router.Link to="/settings">Overview</Router.Link>
-          <Router.Link to="/settings/profile">Profile</Router.Link>
-          <Router.Link to="/settings/security">Security</Router.Link>
-        </nav>
-      </aside>
-      <main>
-        <Router.Outlet />  {/* Child route renders here */}
-      </main>
-    </div>
-  )
-})
-```
-
-### Nested Route Stacking Rules
-
-When routes are nested (via `children` property or directory structure), the following rules apply:
-
-#### Layout Stacking Order
-
-Layouts stack from **root to leaf**. The root layout wraps outer, and child layouts nest inside:
-
-```
-/admin/_layout.tsx         → Outermost wrapper
-  /admin/users/_layout.tsx   → Wraps inside admin layout
-    /admin/users/[id].tsx      → Leaf component, innermost
-```
-
-For path `/admin/users/123`:
-```tsx
-<AdminLayout>           {/* /admin/_layout.tsx */}
-  <UsersLayout>         {/* /admin/users/_layout.tsx */}
-    <UserProfile />     {/* /admin/users/[id].tsx */}
-  </UsersLayout>
-</AdminLayout>
-```
-
-#### Error Boundary Resolution (Nearest Wins)
-
-When a route component throws or fails, the **nearest** `_error.tsx` catches it:
-
-1. If the leaf route has `_error.tsx`, it handles the error
-2. Otherwise, walk up to parent routes until one has `_error.tsx`
-3. If no `_error.tsx` found, error propagates to app-level boundary
-
-```
-/dashboard/_error.tsx        → Catches errors from dashboard/* if child has none
-  /dashboard/reports/_error.tsx  → Catches errors from reports/*
-    /dashboard/reports/[id].tsx    → If this throws, reports/_error.tsx catches
-```
-
-**Error Handling Features:**
-- Both typed failures (`Effect.fail`) and defects (thrown exceptions) are caught
-- Error info is available via `Router.currentError` in the error component
-- Error is automatically scoped to the error component's render (no stale errors)
-- If the error component itself throws, the error propagates to the parent boundary
-
-#### Error Component Example
-
-```tsx
-// routes/dashboard/_error.tsx
-import { Cause, Effect } from "effect"
-import * as Router from "effect-ui/router"
-
-export default Effect.gen(function* () {
-  // Access error info - only available inside _error.tsx components
-  const { cause, path, reset } = yield* Router.currentError
-  
-  return (
-    <div className="error-boundary">
-      <h1>Something went wrong</h1>
-      <p>Error on route: {path}</p>
-      <pre>{String(Cause.squash(cause))}</pre>
-      <button onClick={reset}>Try Again</button>
-    </div>
-  )
-})
-```
-
-**RouteErrorInfo properties:**
-- `cause` - The `Cause<unknown>` of the error. Use `Cause.squash(cause)` for display, `Cause.match` for pattern matching
-- `path` - The route path where the error occurred
-- `reset` - An Effect that triggers a re-render to retry the failed route
-
-#### Pattern Matching on Cause
-
-For more sophisticated error handling, use `Cause.match` to handle different error types:
-
-```tsx
-// routes/api/_error.tsx
-import { Cause, Effect, Option } from "effect"
-import * as Router from "effect-ui/router"
-
-// Custom error types
-class NotFoundError {
-  readonly _tag = "NotFoundError"
-  constructor(readonly resource: string) {}
-}
-
-class UnauthorizedError {
-  readonly _tag = "UnauthorizedError"
-}
-
-export default Effect.gen(function* () {
-  const { cause, path, reset } = yield* Router.currentError
-  
-  // Extract typed failure if present
-  const failure = Cause.failureOption(cause)
-  
-  if (Option.isSome(failure)) {
-    const error = failure.value
-    
-    // Pattern match on error type
-    if (error instanceof NotFoundError) {
-      return (
-        <div className="not-found">
-          <h1>Not Found</h1>
-          <p>{error.resource} could not be found</p>
-          <Router.Link to="/">Go Home</Router.Link>
-        </div>
-      )
-    }
-    
-    if (error instanceof UnauthorizedError) {
-      return (
-        <div className="unauthorized">
-          <h1>Unauthorized</h1>
-          <p>Please log in to access this page</p>
-          <Router.Link to="/login">Log In</Router.Link>
-        </div>
-      )
-    }
-  }
-  
-  // Check for defects (thrown exceptions)
-  const defect = Cause.dieOption(cause)
-  if (Option.isSome(defect)) {
-    return (
-      <div className="crash">
-        <h1>Unexpected Error</h1>
-        <pre>{String(defect.value)}</pre>
-        <button onClick={reset}>Reload</button>
-      </div>
-    )
-  }
-  
-  // Fallback for other causes
-  return (
-    <div className="error">
       <h1>Error on {path}</h1>
       <pre>{String(Cause.squash(cause))}</pre>
       <button onClick={reset}>Try Again</button>
@@ -256,326 +195,350 @@ export default Effect.gen(function* () {
 })
 ```
 
-#### Loading Component Resolution (Nearest Wins)
-
-Same as error boundaries - the nearest `_loading.tsx` displays while the route loads:
-
-```
-/shop/_loading.tsx           → Shows while any /shop/* route loads (if child has none)
-  /shop/products/_loading.tsx  → Shows while /shop/products/* routes load
-```
-
-#### Parameter Propagation
-
-Route params are merged across all matched routes. Child params override parent params if they have the same name:
+### Not Found
 
 ```tsx
-// For path: /orgs/acme/projects/123/tasks/456
-// With routes: /orgs/:orgId/projects/:projectId/tasks/:taskId
-
-// In any layout or component:
-const { orgId, projectId, taskId } = yield* Router.params("/orgs/:orgId/projects/:projectId/tasks/:taskId")
-// orgId = "acme", projectId = "123", taskId = "456"
+Route.make("/admin")
+  .layout(AdminLayout)
+  .notFound(AdminNotFound)  // Handles /admin/unknown
+  .children(
+    Route.make("/users").component(AdminUsers),
+  )
 ```
 
-All params are available at every level of the route tree.
-
-## Vite Plugin
-
-```ts
-// vite.config.ts
-import { defineConfig } from "vite"
-import effectUI from "effect-ui/vite-plugin"
-
-export default defineConfig({
-  plugins: [
-    effectUI({
-      routes: "./src/routes"  // Enable file-based routing
-    })
-  ]
-})
-```
-
-## API
-
-### App Entry Point
+### Forbidden
 
 ```tsx
-// main.tsx
-import { Effect } from "effect"
-import { mount, Router } from "effect-ui"
-import { routes } from "virtual:effect-ui-routes"
+Route.make("/admin")
+  .middleware(requireAdmin)
+  .forbidden(AdminForbidden)
+  .children(...)
+```
 
-const App = Effect.gen(function* () {
+---
+
+## Render Strategy
+
+Controls how route components are loaded. Applied as a Layer via `Route.provide`.
+
+```tsx
+// Lazy (default) - dynamic import at render time
+Route.make("/users").component(UsersList)
+
+// Eager - component bundled in same chunk, renders immediately
+Route.make("/").component(HomePage).pipe(Route.provide(RenderStrategy.Eager))
+```
+
+The vite plugin transforms `.component(X)` to `.component(() => import("./X"))` for Lazy routes. Eager routes keep direct references.
+
+### RenderStrategy Service
+
+```typescript
+interface RenderStrategyService {
+  readonly _tag: "RenderStrategy"
+  readonly isEager: boolean
+  readonly load: <A>(loader: () => Promise<{ default: A }>) => Effect<A, RenderLoadError>
+}
+```
+
+---
+
+## Scroll Strategy
+
+Controls scroll position management on navigation.
+
+```tsx
+// Auto (default) - scroll to top on new nav, restore on back/forward
+Route.make("/users").component(UsersList)
+
+// None - don't touch scroll (tabs, modals)
+Route.make("/settings")
+  .layout(SettingsLayout)
+  .children(...)
+  .pipe(Route.provide(ScrollStrategy.None))
+```
+
+Storage uses `sessionStorage` keyed by `history.state.key`. Survives page refresh.
+
+---
+
+## Layouts
+
+```tsx
+Route.make("/settings")
+  .layout(SettingsLayout)
+  .children(
+    Route.index(SettingsIndex),
+    Route.make("/profile").component(SettingsProfile),
+  )
+
+// Layout component:
+const SettingsLayout = Component.gen(function* () {
   return (
     <div>
-      <header>
-        <nav>
-          <Router.Link to="/">Home</Router.Link>
-          <Router.Link to="/users">Users</Router.Link>
-          <Router.Link to="/settings">Settings</Router.Link>
-        </nav>
-      </header>
-      <main>
-        <Router.Outlet routes={routes} />
-      </main>
+      <nav>...</nav>
+      <Router.Outlet />  {/* Child routes render here */}
     </div>
   )
 })
-
-mount(document.getElementById("root")!, App)
 ```
 
-### Navigation
+Layouts stack from root to leaf. Parent layouts persist during child navigation.
+
+---
+
+## Children Routes
+
+Children use relative paths resolved against the parent:
 
 ```tsx
-// Declarative - Link component
-<Router.Link to="/users/123">View User</Router.Link>
-<Router.Link to="/users/123" replace>Replace History</Router.Link>
-
-// With query params
-<Router.Link to="/search" query={{ q: "effect", page: "1" }}>Search</Router.Link>
-
-// Prefetch control
-<Router.Link to="/users" prefetch="intent">Users</Router.Link>  // Default: hover/focus prefetch
-<Router.Link to="/users" prefetch="render">Users</Router.Link>  // Prefetch immediately on render
-<Router.Link to="/users" prefetch={false}>Users</Router.Link>   // No prefetch
-
-// Programmatic - in Effects
-yield* Router.navigate("/users/123")
-yield* Router.navigate("/users/123", { replace: true })
-yield* Router.back()
-yield* Router.forward()
-
-// With query params
-yield* Router.navigate("/search", { query: { q: "effect" } })
-```
-
-### Route Parameters
-
-```tsx
-// Type-safe params from path pattern
-const UserProfile = Effect.gen(function* () {
-  const { id } = yield* Router.params("/users/:id")
-  
-  return <div>User: {id}</div>
-})
-
-// Multiple params
-const Comment = Effect.gen(function* () {
-  const { postId, commentId } = yield* Router.params("/posts/:postId/comments/:commentId")
-  
-  return <div>Post {postId}, Comment {commentId}</div>
-})
-
-// Catch-all params - /files/[...path] becomes /files/*
-const FileExplorer = Effect.gen(function* () {
-  const { path } = yield* Router.params("/files/*")
-  // path = "docs/api/router" for /files/docs/api/router
-  
-  return <div>File: {path}</div>
-})
-```
-
-### Query Parameters
-
-```tsx
-const SearchResults = Effect.gen(function* () {
-  // Get query signal
-  const query = yield* Router.query  // Signal<URLSearchParams>
-  const params = yield* Signal.get(query)
-  
-  const searchTerm = params.get("q") ?? ""
-  const page = parseInt(params.get("page") ?? "1")
-  
-  return <div>Searching for: {searchTerm}, Page: {page}</div>
-})
-
-// Update query params (effect-first) by navigating
-yield* Router.navigate("/search", { query: { q: "new search", page: "2" } })
-
-// Update query for the current path
-const current = yield* Router.current
-const route = yield* Signal.get(current)
-yield* Router.navigate(route.path, {
-  query: { ...Object.fromEntries(route.query), page: "3" }
-})
-```
-
-> **Note:** Query updates use `Router.navigate` exclusively. This keeps all navigation effect-first and composable—no separate `setQuery`/`updateQuery` helpers exist.
-
-### Active Link Styling
-
-Use `Router.isActive()` to compute active state and set attributes:
-
-```tsx
-// Recommended: Link + Router.isActive
-const NavItem = Effect.gen(function* () {
-  const isActive = yield* Router.isActive("/users")
-  return (
-    <Router.Link 
-      to="/users" 
-      className={isActive ? "nav-link active" : "nav-link"}
-      aria-current={isActive ? "page" : undefined}
-      data-active={isActive ? "true" : undefined}
-    >
-      Users
-    </Router.Link>
+Route.make("/settings")           // /settings
+  .children(
+    Route.index(SettingsIndex),                        // /settings (exact)
+    Route.make("/profile").component(Profile),         // /settings/profile
+    Route.make("/billing")                             // /settings/billing
+      .children(
+        Route.index(BillingIndex),                     // /settings/billing
+        Route.make("/invoices").component(Invoices),   // /settings/billing/invoices
+      )
   )
-})
-
-// CSS - target both class and data attribute
-.nav-link.active,
-.nav-link[data-active="true"] {
-  font-weight: bold;
-  color: var(--primary);
-}
-
-// For exact matching (only /settings, not /settings/profile)
-const SettingsLink = Effect.gen(function* () {
-  const isActive = yield* Router.isActive("/settings", true) // exact=true
-  return (
-    <Router.Link 
-      to="/settings"
-      className={isActive ? "nav-link active" : "nav-link"}
-      aria-current={isActive ? "page" : undefined}
-    >
-      Settings
-    </Router.Link>
-  )
-})
-
-// Using the cx utility for cleaner class composition
-import { cx } from "effect-ui/router"
-
-const NavItem = Effect.gen(function* () {
-  const isActive = yield* Router.isActive("/users")
-  const className = yield* cx("nav-link", isActive && "active")
-  return (
-    <Router.Link to="/users" className={className} aria-current={isActive ? "page" : undefined}>
-      Users
-    </Router.Link>
-  )
-})
 ```
 
-**Accessibility Note:** Use `aria-current="page"` for screen readers when the link points to the current page.
+All paths must start with `/`. Use `Route.index(Component)` for index routes.
 
-**Security Note:** `Link` and anchor `href` values are validated at render time. Dangerous schemes like `javascript:` are blocked. See [design.md Section 12](design.md#12-security) for details on URL validation and adding custom schemes.
+---
 
-### Link Prefetching
+## Navigation
 
-Links can prefetch route modules before navigation to make transitions instant:
+### Router.Link
 
 ```tsx
-// "intent" (default) - prefetch on hover (50ms debounce) or focus
 <Router.Link to="/users">Users</Router.Link>
+<Router.Link to="/users/:id" params={{ id: 123 }}>View User</Router.Link>
+<Router.Link to="/search" query={{ q: "effect" }}>Search</Router.Link>
+<Router.Link to="/login" replace>Login</Router.Link>
+```
+
+Type-safe: if `RouteMap[path]` has params, the `params` prop is required.
+
+### Programmatic
+
+```tsx
+const router = yield* Router.get
+yield* router.navigate("/users")
+yield* router.navigate("/users/:id", { params: { id: 123 } })
+yield* router.navigate("/search", { query: { q: "effect" } })
+yield* router.navigate("/login", { replace: true })
+yield* router.back()
+yield* router.forward()
+```
+
+### Active Link Detection
+
+```tsx
+const isActive = yield* Router.isActive("/users")
+// true if current path starts with "/users"
+
+const isExact = yield* Router.isActive("/settings", { exact: true })
+// true only if current path is exactly "/settings"
+```
+
+---
+
+## Link Prefetching
+
+```tsx
+// "intent" (default) - hover (50ms debounce) or focus
 <Router.Link to="/users" prefetch="intent">Users</Router.Link>
 
-// "render" - prefetch immediately when Link mounts
-<Router.Link to="/dashboard" prefetch="render">Dashboard</Router.Link>
+// "viewport" - IntersectionObserver (10% visible + idle callback)
+<Router.Link to="/dashboard" prefetch="viewport">Dashboard</Router.Link>
 
-// false - disable prefetch (for rarely-visited links)
+// "render" - immediately on mount
+<Router.Link to="/critical" prefetch="render">Critical</Router.Link>
+
+// Disable
 <Router.Link to="/admin" prefetch={false}>Admin</Router.Link>
 ```
 
-| Strategy | When Prefetch Triggers | Use Case |
-|----------|----------------------|----------|
-| `"intent"` (default) | Hover (50ms delay) or focus | Most links - balances performance and bandwidth |
-| `"render"` | Immediately on mount | Critical paths, likely destinations |
-| `false` | Never | Rarely-visited links, bandwidth-sensitive |
-
-**How it works:**
-- Prefetch loads route modules (component, layouts) into cache
-- Modules are cached for 30 seconds
-- Navigation to prefetched routes is instant (no loading state)
-- Prefetch failures are silently ignored (best-effort)
+Modules are cached for 30 seconds. Navigation to prefetched routes skips loading state.
 
 ### Programmatic Prefetch
 
 ```tsx
-// Prefetch a route programmatically
 yield* Router.prefetch("/users/123")
+```
 
-// Useful for prefetching based on predictions
-const SearchResults = Effect.gen(function* () {
-  const results = yield* fetchResults(query)
-  
-  // Prefetch the first result's detail page
-  if (results.length > 0) {
-    yield* Router.prefetch(`/items/${results[0].id}`)
-  }
-  
-  return <ResultsList results={results} />
-})
+---
 
-## Route Guards
+## Data Prefetching
 
-Guards are Effects that run before a route renders:
+Prefetch Resources when navigating to a route:
 
 ```tsx
-// routes/dashboard/index.tsx
-import { Effect, Option } from "effect"
-import { Router } from "effect-ui"
+Route.make("/users/:id")
+  .params(Schema.Struct({ id: Schema.NumberFromString }))
+  .prefetch(({ params }) => Effect.succeed(userResource({ id: params.id })))
+  .prefetch(({ params }) => Effect.succeed(postsResource({ userId: params.id })))
+  .component(UserProfile)
+```
 
-// Guard runs before component
-export const guard = Effect.gen(function* () {
-  const auth = yield* AuthService
-  const user = yield* auth.getCurrentUser
-  
-  if (Option.isNone(user)) {
-    // Redirect to login, preserving intended destination
-    const current = yield* Router.current
-    const returnTo = yield* Signal.get(current)
-    return yield* Router.redirect("/login", { 
-      query: { returnTo: returnTo.path } 
-    })
-  }
-  
-  // Guard passes - continue to render component
-})
+Multiple `.prefetch()` calls run in parallel. Errors are logged but don't block navigation.
 
-// Component only renders if guard passes
-export default Effect.gen(function* () {
-  return <div>Dashboard (protected)</div>
+---
+
+## Outlet Component
+
+The `Outlet` renders the matched route:
+
+```tsx
+// With explicit manifest
+<Router.Outlet routes={routes.manifest} />
+
+// Implicit (reads from CurrentRoutesManifest FiberRef)
+<Router.Outlet />
+```
+
+Outlet behavior:
+1. Matches current path via trie matcher
+2. Runs middleware chain
+3. Decodes params/query via Schema
+4. Runs prefetch effects
+5. Resolves component (handles lazy loading)
+6. Stacks layouts (root-to-leaf)
+7. Wraps with error boundary
+8. Shows loading state during async loads
+9. Updates via `SignalElement` (no parent re-render)
+
+---
+
+## Route Matching
+
+Trie-based matching with priority ordering:
+
+1. **Static segments** score 3 (highest priority)
+2. **Param segments** (`:id`) score 2
+3. **Required catch-all** (`:path+`) score 1.5
+4. **Optional catch-all** (`:path*`) score 1
+
+Longer paths win ties. Multiple matches at same specificity: highest total score wins.
+
+---
+
+## Head Element Hoisting
+
+Route components can render head elements directly:
+
+```tsx
+const BlogPost = Component.gen(function* () {
+  const { slug } = yield* Router.params("/blog/:slug")
+  return <>
+    <title>My Blog Post</title>
+    <meta property="og:title" content="My Blog Post" />
+    <article>...</article>
+  </>
 })
 ```
 
-### Layout-Level Guards
+On route navigation, old route's head elements are removed and new route's elements are added. Layout head elements persist.
 
-Guards in `_layout.tsx` apply to all child routes:
+---
+
+## Type Generation
+
+The vite plugin generates `.effect-ui/routes.d.ts`:
+
+```typescript
+declare module "effect-ui/router" {
+  interface RouteMap {
+    "/": {}
+    "/users": {}
+    "/users/:id": { readonly id: number }
+    "/settings": {}
+    "/settings/profile": {}
+  }
+}
+```
+
+This provides autocomplete for `Router.Link`, `Router.params`, `Router.navigate`, etc.
+
+---
+
+## Testing
 
 ```tsx
-// routes/admin/_layout.tsx
-export const guard = Effect.gen(function* () {
-  const auth = yield* AuthService
-  const user = yield* auth.getCurrentUser
-  
-  if (Option.isNone(user) || !user.value.isAdmin) {
-    return yield* Router.redirect("/unauthorized")
-  }
-})
+import { Router } from "effect-ui/router"
 
-export default Effect.gen(function* () {
-  return (
-    <div className="admin-layout">
-      <AdminSidebar />
-      <Router.Outlet />
-    </div>
+// testLayer provides in-memory router (no DOM)
+const layer = Router.testLayer("/initial/path")
+
+it.scoped("navigates", () =>
+  Effect.gen(function* () {
+    const router = yield* Router.get
+    yield* router.navigate("/users")
+    const route = yield* Router.currentRoute
+    expect(route.path).toBe("/users")
+  }).pipe(Effect.provide(layer))
+)
+```
+
+---
+
+## Full Example
+
+```tsx
+// app/routes.ts
+import { Route, Routes, RenderStrategy, ScrollStrategy } from "effect-ui/router"
+import { Schema } from "effect"
+
+export const routes = Routes.make()
+  .add(
+    Route.make("/")
+      .component(HomePage)
+      .pipe(Route.provide(RenderStrategy.Eager))
   )
-})
+  .add(
+    Route.make("/users/:id")
+      .params(Schema.Struct({ id: Schema.String }))
+      .component(UserProfile)
+      .loading(UserSkeleton)
+      .error(ErrorBoundary)
+  )
+  .add(
+    Route.make("/settings")
+      .layout(SettingsLayout)
+      .middleware(requireAuth)
+      .forbidden(SettingsForbidden)
+      .children(
+        Route.index(SettingsIndex),
+        Route.make("/profile").component(SettingsProfile),
+        Route.make("/security")
+          .middleware(requireSecurityAccess)
+          .component(SettingsSecurity),
+      )
+      .pipe(Route.provide(AuthLive, ScrollStrategy.None))
+  )
+  .notFound(NotFound)
+  .forbidden(Forbidden)
 ```
+
+---
 
 ## File Structure
 
 ```
 src/router/
-├── index.ts           # Main exports
-├── RouterService.ts   # Service + browserLayer + prefetch
-├── Outlet.ts          # Outlet component with parallel loading
-├── Link.ts            # Link component with prefetch prop
-├── moduleLoader.ts    # Memoized module loader with timeout/retry
-├── matching.ts        # Path matching logic
-├── types.ts           # Route types + type-safe utilities
-└── utils.ts           # cx() utility for class names
+  index.ts             # Exports + Route/Routes namespace objects
+  route.ts             # Route builder, middleware helpers, param decode
+  routes.ts            # Routes collection, RoutesManifest
+  matching.ts          # Trie-based matcher, boundary resolution
+  outlet.ts            # Outlet component
+  outlet-services.ts   # OutletRenderer, BoundaryResolver, AsyncLoader
+  router-service.ts    # Router tag, browserLayer, testLayer
+  link.ts              # Link component with prefetch
+  render-strategy.ts   # RenderStrategy (Lazy, Eager)
+  scroll-strategy.ts   # ScrollStrategy (Auto, None)
+  prefetch.ts          # Prefetch runner
+  types.ts             # Core types, RouteMap, TypeSafeLinkProps
+  utils.ts             # parsePath, buildPath
 ```
