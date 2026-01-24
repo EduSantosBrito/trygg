@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { DashboardTheme, Analytics, Logger } from "../services/dashboard";
 import { StatCard } from "../components/dashboard/stat-card";
 import { ActivityItem } from "../components/dashboard/activity-item";

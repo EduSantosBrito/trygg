@@ -1,5 +1,5 @@
 {
-  "name": "my-effect-ui-app",
+  "name": "my-trygg-app",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
   "dependencies": {
     "@effect/platform": "^0.94.1",
     "@effect/platform-browser": "^0.74.0",
-    "effect": "^3.19.14",
-    "effect-ui": "^0.1.0"
+    "effect": "^3.19.15",
+    "trygg": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

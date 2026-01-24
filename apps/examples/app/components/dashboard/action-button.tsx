@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { DashboardTheme, Analytics } from "../../services/dashboard";
 
 export const ActionButton = Component.gen(function* (

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 
 export const ErrorView = Component.gen(function* (
   Props: ComponentProps<{ error: Error; onRetry: Effect.Effect<void, never, unknown> }>,

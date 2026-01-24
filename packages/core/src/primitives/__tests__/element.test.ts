@@ -1,7 +1,7 @@
 /**
  * Element Unit Tests
  *
- * Element is the virtual DOM representation for effect-ui.
+ * Element is the virtual DOM representation for trygg.
  * Tagged enum with: Intrinsic, Text, SignalText, SignalElement, Component, Fragment, Portal, KeyedList
  *
  * Test Categories:

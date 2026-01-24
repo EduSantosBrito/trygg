@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { Resource, Signal, Component, type ComponentProps } from "effect-ui";
+import { Resource, Signal, Component, type ComponentProps } from "trygg";
 import { userResource } from "../../resources/users";
 import { UserCard } from "../user-card";
 import { Skeleton } from "../skeleton";

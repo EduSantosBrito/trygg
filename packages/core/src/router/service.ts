@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Router service for effect-ui
+ * Router service for trygg
  */
 import { Context, Effect, FiberRef, GlobalValue, Layer, Option, Ref, Schema, Scope } from "effect";
 import { CurrentRouteQuery } from "./route.js";
@@ -145,7 +145,7 @@ const setupViewportPrefetch = (
  * Router service tag
  * @since 1.0.0
  */
-export class Router extends Context.Tag("@effect-ui/Router")<Router, RouterService>() {}
+export class Router extends Context.Tag("@trygg/Router")<Router, RouterService>() {}
 
 /**
  * FiberRef to store current route params for the active route
@@ -154,7 +154,7 @@ export class Router extends Context.Tag("@effect-ui/Router")<Router, RouterServi
  * @internal
  */
 export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Router/CurrentRouteParams"),
+  Symbol.for("trygg/Router/CurrentRouteParams"),
   () => FiberRef.unsafeMake<RouteParams>({}),
 );
 
@@ -167,7 +167,7 @@ export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = GlobalValue.gl
  * @internal
  */
 export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
-  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentRouter"), () =>
+  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentRouter"), () =>
     FiberRef.unsafeMake<Option.Option<RouterService>>(Option.none()),
   );
 
@@ -178,7 +178,7 @@ export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
  * @internal
  */
 export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>> =
-  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentRouteError"), () =>
+  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentRouteError"), () =>
     FiberRef.unsafeMake<Option.Option<RouteErrorInfo>>(Option.none()),
   );
 
@@ -192,7 +192,7 @@ export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>>
  * @internal
  */
 export const CurrentOutletChild: FiberRef.FiberRef<Option.Option<Element>> =
-  GlobalValue.globalValue(Symbol.for("effect-ui/Router/CurrentOutletChild"), () =>
+  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentOutletChild"), () =>
     FiberRef.unsafeMake<Option.Option<Element>>(Option.none()),
   );
 
@@ -481,7 +481,7 @@ export const browserLayer: Layer.Layer<
       Effect.gen(function* () {
         const pos = yield* scroll.getPosition;
         const encoded = yield* Schema.encode(ScrollPositionJson)(pos);
-        yield* storage.set(`effect-ui:scroll:${currentNavKey}`, encoded);
+        yield* storage.set(`trygg:scroll:${currentNavKey}`, encoded);
       }).pipe(Effect.ignore);
 
     // Apply scroll behavior using captured services (best-effort)
@@ -506,7 +506,7 @@ export const browserLayer: Layer.Layer<
 
         // Popstate: restore saved position
         if (opts.isPopstate) {
-          const stored = yield* storage.get(`effect-ui:scroll:${opts.key}`);
+          const stored = yield* storage.get(`trygg:scroll:${opts.key}`);
           if (stored !== null) {
             const pos = yield* Schema.decode(ScrollPositionJson)(stored);
             yield* scroll.scrollTo(pos.x, pos.y);

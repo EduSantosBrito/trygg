@@ -1,5 +1,5 @@
 import { Effect, Fiber, Option, Ref } from "effect";
-import { Signal, Component, Portal } from "effect-ui";
+import { Signal, Component, Portal } from "trygg";
 
 export const OverflowEscape = Component.gen(function* () {
   const showTooltip = yield* Signal.make(false);

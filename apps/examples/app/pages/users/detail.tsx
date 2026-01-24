@@ -1,5 +1,5 @@
-import { Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 const users: Record<string, { name: string; email: string; role: string; joined: string }> = {
   "1": {

@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Component API for effect-ui
+ * Component API for trygg
  *
  * Enables JSX components with typed props and explicit dependency injection.
  * Services are provided by parent effects via Component.provide.
@@ -8,7 +8,7 @@
  * @example
  * ```tsx
  * import { Context, Effect, Layer } from "effect"
- * import { Component, mount } from "effect-ui"
+ * import { Component, mount } from "trygg"
  *
  * class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
  *
@@ -45,7 +45,7 @@ const emptyContext = Context.unsafeMake<unknown>(new Map());
  * @since 1.0.0
  */
 export interface PropsMarker<P> {
-  readonly _brand: "@effect-ui/Props";
+  readonly _brand: "@trygg/Props";
   readonly _P: P;
 }
 
@@ -89,7 +89,7 @@ export function Component<P extends object = {}>(): <E, R>(
   return <E, R>(
     effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
   ): Component.Type<P, E, Exclude<R, PropsMarker<P>>> => {
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props");
+    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@trygg/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, R> => {
@@ -248,7 +248,7 @@ function genWithProps<P extends object>(): <
     ) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> => {
     type E = ExtractError<Eff>;
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@effect-ui/Props");
+    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@trygg/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, unknown> => {

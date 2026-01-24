@@ -1,4 +1,4 @@
-import { Component } from "effect-ui";
+import { Component } from "trygg";
 import { Modal } from "../components/modal";
 import { NestedModal } from "../components/portal/nested-modal";
 import { OverflowEscape } from "../components/portal/overflow-escape";

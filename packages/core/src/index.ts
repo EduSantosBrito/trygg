@@ -1,11 +1,11 @@
 /**
  * @since 1.0.0
- * effect-ui - An Effect-native UI framework with JSX support
+ * trygg - An Effect-native UI framework with JSX support
  *
  * ## Quick Start
  *
  * ```tsx
- * import { mount, Signal, Component } from "effect-ui"
+ * import { mount, Signal, Component } from "trygg"
  *
  * const Counter = Component.gen(function* () {
  *   const count = yield* Signal.make(0)
@@ -37,7 +37,7 @@
  * @see DESIGN.md for architecture details
  * @see OBSERVABILITY.md for debugging guide
  *
- * @module effect-ui
+ * @module trygg
  */
 
 // Core Element types and utilities

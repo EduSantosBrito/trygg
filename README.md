@@ -1,4 +1,4 @@
-# effect-ui
+# trygg
 
 An Effect-native UI framework with JSX support.
 
@@ -18,7 +18,7 @@ Build composable, type-safe UIs using [Effect](https://effect.website) with fine
 Create a new project with the CLI:
 
 ```bash
-bunx create-effect-ui my-app
+bunx create-trygg my-app
 cd my-app
 bun install
 bun run dev
@@ -31,7 +31,7 @@ Open http://localhost:5173 in your browser.
 ### 1. Install dependencies
 
 ```bash
-bun add effect-ui effect @effect/platform-browser
+bun add trygg effect @effect/platform-browser
 ```
 
 ### 2. Configure Vite
@@ -39,7 +39,7 @@ bun add effect-ui effect @effect/platform-browser
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite"
-import effectUI from "effect-ui/vite-plugin"
+import effectUI from "trygg/vite-plugin"
 
 export default defineConfig({
   plugins: [effectUI()]
@@ -53,7 +53,7 @@ export default defineConfig({
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "effect-ui",
+    "jsxImportSource": "trygg",
     "moduleResolution": "bundler",
     "strict": true
   }
@@ -65,7 +65,7 @@ export default defineConfig({
 ```tsx
 // src/main.tsx
 import { Effect } from "effect"
-import { mount, Signal } from "effect-ui"
+import { mount, Signal } from "trygg"
 
 const Counter = Effect.gen(function* () {
   const count = yield* Signal.make(0)
@@ -141,7 +141,7 @@ Use Effect's built-in context system. Provide layers in parent effects:
 
 ```tsx
 import { Context, Effect, Layer } from "effect"
-import { Component } from "effect-ui"
+import { Component } from "trygg"
 
 // Define a service
 class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
@@ -165,7 +165,7 @@ For typed props and explicit DI, use `Component.gen`:
 
 ```tsx
 import { Effect } from "effect"
-import { Component, type ComponentProps } from "effect-ui"
+import { Component, type ComponentProps } from "trygg"
 
 // Without props
 const ThemedCard = Component.gen(function* () {
@@ -191,7 +191,7 @@ Effect.gen(function* () {
 Add `<DevMode />` to see debug events in your console:
 
 ```tsx
-import { DevMode } from "effect-ui"
+import { DevMode } from "trygg"
 
 mount(container, <>
   {App}
@@ -209,12 +209,12 @@ See [OBSERVABILITY.md](./OBSERVABILITY.md) for the full event reference.
 
 ## Agent Skills
 
-effect-ui provides [Agent Skills](https://agentskills.io/) for LLM agents:
+trygg provides [Agent Skills](https://agentskills.io/) for LLM agents:
 
-- **effect-ui-core** - Components, Signals, reactivity
-- **effect-ui-router** - File-based routing, navigation
-- **effect-ui-testing** - Testing with Effect Vitest
-- **effect-ui-observability** - Debug events, tracing, metrics
+- **trygg-core** - Components, Signals, reactivity
+- **trygg-router** - File-based routing, navigation
+- **trygg-testing** - Testing with Effect Vitest
+- **trygg-observability** - Debug events, tracing, metrics
 
 Skills are discovered automatically by compatible agents. See [skills/README.md](./skills/README.md) for details.
 
@@ -237,13 +237,13 @@ Examples include:
 
 ## Routing
 
-effect-ui includes file-based routing out of the box:
+trygg includes file-based routing out of the box:
 
 ```tsx
 import { Effect } from "effect"
-import { mount } from "effect-ui"
-import * as Router from "effect-ui/router"
-import { routes } from "virtual:effect-ui-routes"
+import { mount } from "trygg"
+import * as Router from "trygg/router"
+import { routes } from "virtual:trygg-routes"
 
 const App = Effect.gen(function* () {
   return (

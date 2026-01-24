@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * JSX Development Runtime for effect-ui
+ * JSX Development Runtime for trygg
  *
  * This module is used in development mode and provides additional debugging
  * information for better error messages and stack traces.

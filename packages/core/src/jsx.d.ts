@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * JSX Type Definitions for effect-ui
+ * JSX Type Definitions for trygg
  *
  * This module provides TypeScript type definitions for JSX elements.
  */

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Signal, Component, Portal } from "effect-ui";
+import { Signal, Component, Portal } from "trygg";
 
 export const Modal = Component.gen(function* () {
   const isOpen = yield* Signal.make(false);

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { Signal, Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Signal, Component } from "trygg";
+import * as Router from "trygg/router";
 
 const ErrorDemoPage = Component.gen(function* () {
   const shouldError = yield* Signal.make(false);

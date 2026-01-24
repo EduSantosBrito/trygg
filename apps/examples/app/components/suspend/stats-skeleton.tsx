@@ -1,4 +1,4 @@
-import { Component } from "effect-ui";
+import { Component } from "trygg";
 
 export const StatsSkeleton = Component.gen(function* () {
   return (

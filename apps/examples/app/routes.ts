@@ -4,7 +4,7 @@
  * All routes for the examples app defined in one file using Route.make().
  */
 import { Schema } from "effect";
-import { Route, Routes } from "effect-ui/router";
+import { Route, Routes } from "trygg/router";
 
 // Pages
 import HomePage from "./pages/home";

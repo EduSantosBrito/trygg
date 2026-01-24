@@ -29,7 +29,7 @@ export interface ScrollService {
 // Tag
 // =============================================================================
 
-export class Scroll extends Context.Tag("effect-ui/platform/Scroll")<Scroll, ScrollService>() {}
+export class Scroll extends Context.Tag("trygg/platform/Scroll")<Scroll, ScrollService>() {}
 
 // =============================================================================
 // Browser layer

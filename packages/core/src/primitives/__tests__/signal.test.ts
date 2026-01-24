@@ -1,7 +1,7 @@
 /**
  * Signal Unit Tests
  *
- * Signal is the core reactive primitive of effect-ui.
+ * Signal is the core reactive primitive of trygg.
  * Built on SubscriptionRef with sync callbacks for fine-grained reactivity.
  *
  * Test Categories:

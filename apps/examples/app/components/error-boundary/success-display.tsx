@@ -1,4 +1,4 @@
-import { Component } from "effect-ui";
+import { Component } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
 export const SuccessDisplay = Component.gen(function* () {

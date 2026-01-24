@@ -6,15 +6,15 @@
  */
 import "../styles.css";
 import { Effect } from "effect";
-import { Component, DevMode } from "effect-ui";
-import * as Router from "effect-ui/router";
-import { ApiClientLive } from "effect-ui/api";
+import { Component, DevMode } from "trygg";
+import * as Router from "trygg/router";
+import { ApiClientLive } from "trygg/api";
 
 export default Component.gen(function* () {
   return Effect.succeed(
     <html lang="en">
       <head>
-        <title>effect-ui examples</title>
+        <title>trygg examples</title>
         <meta name="description" content="Effect-native UI framework examples" />
         <link rel="icon" href="/favicon.svg" />
       </head>
@@ -27,7 +27,7 @@ export default Component.gen(function* () {
               to="/"
               className="text-lg font-semibold text-gray-900 no-underline hover:text-blue-600"
             >
-              effect-ui
+              trygg
             </Router.Link>
             <p className="m-0 mt-1 text-xs text-gray-400">Examples</p>
           </div>

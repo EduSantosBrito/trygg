@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 
 export const Skeleton = Component.gen(function* (Props: ComponentProps<{ lines?: number }>) {
   const { lines = 3 } = yield* Props;

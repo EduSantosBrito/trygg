@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { FormTheme } from "../../services/form";
 
 export const SuccessMessage = Component.gen(function* (

@@ -6,7 +6,7 @@
  *
  * @example
  * ```tsx
- * import { mount, DevMode } from "effect-ui"
+ * import { mount, DevMode } from "trygg"
  *
  * mount(container, <>
  *   <App />
@@ -81,7 +81,7 @@ export interface DevModeProps {
  *
  * @example
  * ```tsx
- * import { mount, DevMode } from "effect-ui"
+ * import { mount, DevMode } from "trygg"
  *
  * const App = Effect.gen(function* () {
  *   return <div>Hello</div>

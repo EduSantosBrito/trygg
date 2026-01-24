@@ -1,4 +1,4 @@
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { UserProfileAsync } from "../components/suspend/user-profile-async";
 import { StatsAsync } from "../components/suspend/stats-async";
 import { PostsAsync } from "../components/suspend/posts-async";

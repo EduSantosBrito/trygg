@@ -1,5 +1,5 @@
 import { Effect, Layer, Option } from "effect";
-import { Signal, Component, cx } from "effect-ui";
+import { Signal, Component, cx } from "trygg";
 import { TodoTheme } from "../services/todo";
 import { TodoInput } from "../components/todo/todo-input";
 import { FilterButton } from "../components/todo/filter-button";

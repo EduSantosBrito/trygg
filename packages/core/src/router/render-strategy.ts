@@ -7,7 +7,7 @@
  *
  * @example
  * ```tsx
- * import { Route, RenderStrategy } from "effect-ui/router"
+ * import { Route, RenderStrategy } from "trygg/router"
  *
  * // Lazy (default) - vite transforms to dynamic import
  * Route.make("/users").component(UsersList)
@@ -49,7 +49,7 @@ export class RenderLoadError extends Data.TaggedError("RenderLoadError")<{
  * RenderStrategy Context.Tag.
  * @since 1.0.0
  */
-export class RenderStrategy extends Context.Tag("effect-ui/RenderStrategy")<
+export class RenderStrategy extends Context.Tag("trygg/RenderStrategy")<
   RenderStrategy,
   RenderStrategyService
 >() {

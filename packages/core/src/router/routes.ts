@@ -6,7 +6,7 @@
  *
  * @example
  * ```tsx
- * import { Routes, Route } from "effect-ui/router"
+ * import { Routes, Route } from "trygg/router"
  *
  * export const routes = Routes.make()
  *   .add(Route.make("/").component(HomePage))

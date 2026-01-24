@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { CounterTheme } from "../../services/counter";
 
 export const CounterButton = Component.gen(function* (

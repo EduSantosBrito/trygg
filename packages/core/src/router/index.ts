@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Router module for effect-ui
+ * Router module for trygg
  *
  * Routing with Schema-validated params, middleware composition,
  * and Layer-based rendering strategies.
@@ -9,7 +9,7 @@
  *
  * ```tsx
  * // app/routes.ts
- * import { Route, Routes } from "effect-ui/router"
+ * import { Route, Routes } from "trygg/router"
  *
  * export const routes = Routes.make()
  *   .add(Route.make("/").component(HomePage))
@@ -20,8 +20,8 @@
  *
  * ```tsx
  * // app/main.tsx
- * import { mount, Component } from "effect-ui"
- * import * as Router from "effect-ui/router"
+ * import { mount, Component } from "trygg"
+ * import * as Router from "trygg/router"
  * import { routes } from "./routes"
  *
  * const App = Component.gen(function* () {
@@ -39,7 +39,7 @@
  * mount(document.getElementById("root")!, App)
  * ```
  *
- * @module effect-ui/router
+ * @module trygg/router
  */
 
 // Types (shared)
@@ -169,7 +169,7 @@ export { parsePath, buildPath } from "./utils.js";
 export { cx, type ClassValue, type ClassInput } from "../primitives/cx.js";
 
 // =============================================================================
-// Namespace Objects (for import { Route, Routes } from "effect-ui/router")
+// Namespace Objects (for import { Route, Routes } from "trygg/router")
 // =============================================================================
 
 import { make as _routeMake, index as _routeIndex, provide as _routeProvide } from "./route.js";
@@ -184,7 +184,7 @@ import { currentRoute as _currentRoute } from "./service.js";
  *
  * @example
  * ```tsx
- * import { Route, RenderStrategy } from "effect-ui/router"
+ * import { Route, RenderStrategy } from "trygg/router"
  *
  * Route.make("/users/:id")
  *   .component(UserProfile)
@@ -207,7 +207,7 @@ export const Route = {
  *
  * @example
  * ```tsx
- * import { Routes } from "effect-ui/router"
+ * import { Routes } from "trygg/router"
  *
  * export const routes = Routes.make()
  *   .add(Route.make("/").component(HomePage))

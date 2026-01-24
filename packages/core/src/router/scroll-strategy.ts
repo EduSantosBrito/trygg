@@ -7,7 +7,7 @@
  *
  * @example
  * ```tsx
- * import { ScrollStrategy } from "effect-ui/router"
+ * import { ScrollStrategy } from "trygg/router"
  *
  * Route.make("/settings")
  *   .layout(SettingsLayout)
@@ -52,7 +52,7 @@ export interface ScrollStrategyService {
  * ScrollStrategy Context.Tag.
  * @since 1.0.0
  */
-export class ScrollStrategy extends Context.Tag("effect-ui/ScrollStrategy")<
+export class ScrollStrategy extends Context.Tag("trygg/ScrollStrategy")<
   ScrollStrategy,
   ScrollStrategyService
 >() {
@@ -82,7 +82,7 @@ export class ScrollStrategy extends Context.Tag("effect-ui/ScrollStrategy")<
 // =============================================================================
 
 /** Storage key prefix for scroll positions in sessionStorage */
-const SCROLL_STORAGE_PREFIX = "effect-ui:scroll:";
+const SCROLL_STORAGE_PREFIX = "trygg:scroll:";
 
 /**
  * Save current scroll position to sessionStorage keyed by navigation entry.

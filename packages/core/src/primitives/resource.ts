@@ -7,8 +7,8 @@
  *
  * @example
  * ```tsx
- * import { Resource } from "effect-ui"
- * import { ApiClient } from "effect-ui/api"
+ * import { Resource } from "trygg"
+ * import { ApiClient } from "trygg/api"
  * import { Effect } from "effect"
  *
  * // Define a no-params resource
@@ -276,7 +276,7 @@ export interface ResourceRegistry {
  * ResourceRegistry service tag.
  * @since 1.0.0
  */
-export class ResourceRegistryTag extends Context.Tag("effect-ui/ResourceRegistry")<
+export class ResourceRegistryTag extends Context.Tag("trygg/ResourceRegistry")<
   ResourceRegistryTag,
   ResourceRegistry
 >() {}

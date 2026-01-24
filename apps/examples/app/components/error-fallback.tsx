@@ -1,6 +1,6 @@
 import { Cause } from "effect";
-import { Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 export const ErrorFallback = Component.gen(function* () {
   const { cause, path, reset } = yield* Router.currentError;

@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * JSX Runtime for effect-ui
+ * JSX Runtime for trygg
  *
  * This module provides the JSX transformation functions used by TypeScript/Babel
  * when compiling JSX syntax. It implements the "automatic" JSX runtime.

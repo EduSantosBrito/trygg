@@ -31,7 +31,7 @@ export interface LocationService {
 // Tag
 // =============================================================================
 
-export class Location extends Context.Tag("effect-ui/platform/Location")<
+export class Location extends Context.Tag("trygg/platform/Location")<
   Location,
   LocationService
 >() {}

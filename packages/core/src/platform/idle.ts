@@ -30,7 +30,7 @@ export interface IdleService {
 // Tag
 // =============================================================================
 
-export class Idle extends Context.Tag("effect-ui/platform/Idle")<Idle, IdleService>() {}
+export class Idle extends Context.Tag("trygg/platform/Idle")<Idle, IdleService>() {}
 
 // =============================================================================
 // Browser layer

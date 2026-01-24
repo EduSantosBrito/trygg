@@ -1,5 +1,5 @@
 import { Effect, Layer, Match } from "effect";
-import { Signal, ErrorBoundary, Component } from "effect-ui";
+import { Signal, ErrorBoundary, Component } from "trygg";
 import { ErrorTheme } from "../services/error-boundary";
 import { NetworkErrorDisplay } from "../components/error-boundary/network-error-display";
 import { ValidationErrorDisplay } from "../components/error-boundary/validation-error-display";

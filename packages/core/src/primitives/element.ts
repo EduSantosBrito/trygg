@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Virtual DOM Element representation for effect-ui
+ * Virtual DOM Element representation for trygg
  */
 import { Context, Data, Effect, Scope } from "effect";
 import type { Signal, EachOptions } from "./signal.js";
@@ -198,7 +198,7 @@ export interface ElementProps extends BaseProps, EventProps {
 }
 
 /**
- * Virtual DOM Element - the core type of effect-ui
+ * Virtual DOM Element - the core type of trygg
  * Modeled as a tagged enum for pattern matching
  * @since 1.0.0
  */
@@ -316,7 +316,7 @@ export const text = (content: string) => Element.Text({ content });
  * Create a component element from a thunk that produces an Effect.
  *
  * This is the low-level function for creating Component elements.
- * For defining JSX-compatible components, use `Component()` from effect-ui instead.
+ * For defining JSX-compatible components, use `Component()` from trygg instead.
  *
  * If the effect has unsatisfied requirements, it will fail
  * at runtime with "service not found".

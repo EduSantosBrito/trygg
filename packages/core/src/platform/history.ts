@@ -31,7 +31,7 @@ export interface HistoryService {
 // Tag
 // =============================================================================
 
-export class History extends Context.Tag("effect-ui/platform/History")<History, HistoryService>() {}
+export class History extends Context.Tag("trygg/platform/History")<History, HistoryService>() {}
 
 // =============================================================================
 // Browser layer

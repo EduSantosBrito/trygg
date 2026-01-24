@@ -5,7 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "effect-ui",
+    "jsxImportSource": "trygg",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,

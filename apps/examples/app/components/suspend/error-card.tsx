@@ -1,5 +1,5 @@
 import { Cause } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 
 export const ErrorCard = Component.gen(function* (
   Props: ComponentProps<{ label: string; cause: Cause.Cause<unknown> }>,

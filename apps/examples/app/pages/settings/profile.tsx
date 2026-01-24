@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 
 const ProfileSettings = Component.gen(function* () {
   const name = yield* Signal.make("Jane Doe");

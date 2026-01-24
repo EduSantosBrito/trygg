@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { DashboardTheme } from "../../services/dashboard";
 
 export const SectionTitle = Component.gen(function* (Props: ComponentProps<{ title: string }>) {

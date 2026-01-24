@@ -41,7 +41,7 @@ export interface TestEventTargetService extends EventTargetService {
 // Tag
 // =============================================================================
 
-export class PlatformEventTarget extends Context.Tag("effect-ui/platform/EventTarget")<
+export class PlatformEventTarget extends Context.Tag("trygg/platform/EventTarget")<
   PlatformEventTarget,
   EventTargetService
 >() {}

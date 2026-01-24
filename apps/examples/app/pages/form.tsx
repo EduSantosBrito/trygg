@@ -1,5 +1,5 @@
 import { Data, Effect, Either, Layer, Match, Option } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { FormTheme } from "../services/form";
 import { FormField } from "../components/form-field";
 import { SuccessMessage } from "../components/form/success-message";

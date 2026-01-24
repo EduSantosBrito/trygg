@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Head management for effect-ui
+ * Head management for trygg
  *
  * Provides head element hoisting (title, meta, link, style, script, base)
  * from component JSX into document.head with stack-based deduplication.
@@ -61,7 +61,7 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  * Can be explicitly overridden per-route.
  * @since 1.0.0
  */
-export class HeadStrategy extends Context.Tag("effect-ui/HeadStrategy")<
+export class HeadStrategy extends Context.Tag("trygg/HeadStrategy")<
   HeadStrategy,
   HeadStrategyService
 >() {
@@ -189,7 +189,7 @@ export interface HeadService {
  * Components never provide this manually.
  * @since 1.0.0
  */
-export class Head extends Context.Tag("effect-ui/Head")<Head, HeadService>() {}
+export class Head extends Context.Tag("trygg/Head")<Head, HeadService>() {}
 
 // =============================================================================
 // Dedup Stack — Stack-based deduplication for keyed head elements

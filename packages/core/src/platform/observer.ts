@@ -63,7 +63,7 @@ export interface TestObserverService extends ObserverService {
 // Tag
 // =============================================================================
 
-export class Observer extends Context.Tag("effect-ui/platform/Observer")<
+export class Observer extends Context.Tag("trygg/platform/Observer")<
   Observer,
   ObserverService
 >() {}

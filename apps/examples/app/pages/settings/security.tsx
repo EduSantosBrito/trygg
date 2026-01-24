@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 
 const SecuritySettings = Component.gen(function* () {
   const twoFactorEnabled = yield* Signal.make(false);

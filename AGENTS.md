@@ -1,4 +1,4 @@
-# effect-ui
+# trygg
 
 Effect-native UI framework with JSX support and fine-grained reactivity.
 

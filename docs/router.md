@@ -18,7 +18,7 @@ Declarative routing with Schema-validated params, middleware composition, and La
 ### Basic Route
 
 ```tsx
-import { Route, Routes, RenderStrategy } from "effect-ui/router"
+import { Route, Routes, RenderStrategy } from "trygg/router"
 import { Schema } from "effect"
 
 Route.make("/users/:id")
@@ -446,10 +446,10 @@ On route navigation, old route's head elements are removed and new route's eleme
 
 ## Type Generation
 
-The vite plugin generates `.effect-ui/routes.d.ts`:
+The vite plugin generates `.trygg/routes.d.ts`:
 
 ```typescript
-declare module "effect-ui/router" {
+declare module "trygg/router" {
   interface RouteMap {
     "/": {}
     "/users": {}
@@ -467,7 +467,7 @@ This provides autocomplete for `Router.Link`, `Router.params`, `Router.navigate`
 ## Testing
 
 ```tsx
-import { Router } from "effect-ui/router"
+import { Router } from "trygg/router"
 
 // testLayer provides in-memory router (no DOM)
 const layer = Router.testLayer("/initial/path")
@@ -488,7 +488,7 @@ it.scoped("navigates", () =>
 
 ```tsx
 // app/routes.ts
-import { Route, Routes, RenderStrategy, ScrollStrategy } from "effect-ui/router"
+import { Route, Routes, RenderStrategy, ScrollStrategy } from "trygg/router"
 import { Schema } from "effect"
 
 export const routes = Routes.make()

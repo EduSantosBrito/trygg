@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { CounterTheme } from "../services/counter";
 import { CountDisplay } from "../components/counter/count-display";
 import { CounterButton } from "../components/counter/counter-button";

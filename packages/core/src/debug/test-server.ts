@@ -11,8 +11,8 @@
  *
  * ```typescript
  * import { Effect } from "effect"
- * import * as Debug from "effect-ui/debug"
- * import { TestServer } from "effect-ui"
+ * import * as Debug from "trygg/debug"
+ * import { TestServer } from "trygg"
  *
  * const program = Effect.gen(function* () {
  *   const server = yield* TestServer
@@ -41,7 +41,7 @@
 // =============================================================================
 // This file is only executed in Bun environments. These declarations allow
 // typechecking to pass in non-Bun environments (e.g., browser apps that
-// import effect-ui but don't use TestServer).
+// import trygg but don't use TestServer).
 
 /** Bun.serve API */
 declare const Bun: {
@@ -60,7 +60,7 @@ interface BunSqliteDatabase {
 import { createConsola } from "consola";
 import { Schema, Effect, Context, Scope, Runtime } from "effect";
 
-const serverLogger = createConsola({ defaults: { tag: "effect-ui" } });
+const serverLogger = createConsola({ defaults: { tag: "trygg" } });
 import type { DebugEvent, EventType } from "./debug.js";
 
 // =============================================================================
@@ -231,7 +231,7 @@ export interface TestServerService {
  * TestServer service tag
  * @since 1.0.0
  */
-export class TestServer extends Context.Tag("effect-ui/TestServer")<
+export class TestServer extends Context.Tag("trygg/TestServer")<
   TestServer,
   TestServerService
 >() {}
@@ -240,7 +240,7 @@ export class TestServer extends Context.Tag("effect-ui/TestServer")<
 // llms.txt Content
 // ============================================================================
 
-const llmsTxt = (port: number): string => `# effect-ui Test Server API
+const llmsTxt = (port: number): string => `# trygg Test Server API
 
 ## Overview
 Real-time debug event query API for LLM observability.

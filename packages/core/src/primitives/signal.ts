@@ -78,13 +78,13 @@ export interface RenderPhase {
  * @internal
  */
 export const CurrentRenderPhase: FiberRef.FiberRef<RenderPhase | null> = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Signal/CurrentRenderPhase"),
+  Symbol.for("trygg/Signal/CurrentRenderPhase"),
   () => FiberRef.unsafeMake<RenderPhase | null>(null),
 );
 
 // Debug: unique ID to detect module duplication
 export const _currentRenderPhaseId = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Signal/_currentRenderPhaseId"),
+  Symbol.for("trygg/Signal/_currentRenderPhaseId"),
   () => `fiberref_${Math.random().toString(36).slice(2, 8)}`,
 );
 
@@ -95,7 +95,7 @@ export const _currentRenderPhaseId = GlobalValue.globalValue(
  * @internal
  */
 export const CurrentComponentScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  GlobalValue.globalValue(Symbol.for("effect-ui/Signal/CurrentComponentScope"), () =>
+  GlobalValue.globalValue(Symbol.for("trygg/Signal/CurrentComponentScope"), () =>
     FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
   );
 
@@ -106,7 +106,7 @@ export const CurrentComponentScope: FiberRef.FiberRef<Scope.CloseableScope | nul
  * @internal
  */
 export const CurrentRenderScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  GlobalValue.globalValue(Symbol.for("effect-ui/Signal/CurrentRenderScope"), () =>
+  GlobalValue.globalValue(Symbol.for("trygg/Signal/CurrentRenderScope"), () =>
     FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
   );
 
@@ -1028,11 +1028,11 @@ export const each: EachFn = (source, renderFn, options) => {
   if (_eachImpl === null) {
     throw new Error(
       "Signal.each is not initialized.\n\n" +
-        "This usually means you imported Signal directly from 'effect-ui/Signal' " +
-        "before the main 'effect-ui' module was loaded.\n\n" +
-        "Fix: Import from 'effect-ui' instead:\n" +
-        "  import { Signal } from 'effect-ui'\n\n" +
-        "Or ensure 'effect-ui' is imported before using Signal.each.",
+        "This usually means you imported Signal directly from 'trygg/Signal' " +
+        "before the main 'trygg' module was loaded.\n\n" +
+        "Fix: Import from 'trygg' instead:\n" +
+        "  import { Signal } from 'trygg'\n\n" +
+        "Or ensure 'trygg' is imported before using Signal.each.",
     );
   }
   return _eachImpl(source, renderFn, options);

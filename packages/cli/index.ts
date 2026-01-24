@@ -1,15 +1,22 @@
 #!/usr/bin/env bun
 /**
- * create-effect-ui CLI
+ * create-trygg-app CLI
  *
- * Usage: bun create effect-ui my-app
- *        bunx create-effect-ui my-app
+ * Usage: bun create trygg-app [project-name] [options]
+ *        bunx create-trygg-app [project-name] [options]
  */
-import { Args, Command } from "@effect/cli";
-import { BunContext, BunRuntime } from "@effect/platform-bun";
-import { FileSystem } from "@effect/platform";
-import { Console, Effect } from "effect";
-import * as path from "node:path";
+import { Args, Command, Options } from "@effect/cli"
+import { BunContext, BunRuntime } from "@effect/platform-bun"
+import { FileSystem } from "@effect/platform"
+import { Effect, Layer } from "effect"
+import * as clack from "@clack/prompts"
+import * as path from "node:path"
+import { promptProjectOptions, type ProjectOptions } from "./src/prompts"
+import { scaffoldProject } from "./src/scaffold"
+import { detectPackageManager, getInstallCommand, getRunCommand } from "./src/detect-pm"
+import { spawn } from "node:child_process"
+import { PromptsLive } from "./src/adapters/prompts-live"
+import { Prompts } from "./src/ports/prompts"
 
 // =============================================================================
 // CLI Definition
@@ -17,89 +24,161 @@ import * as path from "node:path";
 
 const projectName = Args.text({ name: "project-name" }).pipe(
   Args.withDescription("Name of the project to create"),
-);
+  Args.optional,
+)
 
-const TEMPLATE_DIR = path.join(import.meta.dir, "template");
+const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
+  Options.withDescription("Accept all defaults (platform: bun, output: server, vcs: git, install: yes)"),
+)
 
-const create = Command.make("create-effect-ui", { projectName }, ({ projectName }) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
+const TEMPLATES_DIR = path.join(import.meta.dir, "src", "templates")
 
-    // Validate project name
-    if (!/^[a-zA-Z0-9-_]+$/.test(projectName)) {
-      yield* Console.error(
-        `Error: Invalid project name "${projectName}". Use only letters, numbers, hyphens, and underscores.`,
-      );
-      return yield* Effect.fail("Invalid project name");
-    }
+const create = Command.make(
+  "create-trygg-app",
+  {
+    projectName,
+    yes: yesFlag,
+  },
+  (args) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const prompts = yield* Prompts
 
-    const targetDir = path.resolve(process.cwd(), projectName);
+      clack.intro("create-trygg-app v0.2.0")
 
-    // Check if directory exists
-    const exists = yield* fs.exists(targetDir);
-    if (exists) {
-      yield* Console.error(`Error: Directory "${projectName}" already exists.`);
-      return yield* Effect.fail("Directory exists");
-    }
-
-    yield* Console.log(`Creating effect-ui project in ${targetDir}...`);
-
-    // Copy template recursively
-    yield* copyDir(fs, TEMPLATE_DIR, targetDir);
-
-    // Update package.json with project name
-    const pkgPath = path.join(targetDir, "package.json");
-    const pkgContent = yield* fs.readFileString(pkgPath);
-    const pkg = JSON.parse(pkgContent);
-    pkg.name = projectName;
-    yield* fs.writeFileString(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-
-    yield* Console.log(`
-Done! Your effect-ui project is ready.
-
-Next steps:
-  cd ${projectName}
-  bun install
-  bun run dev
-
-Open http://localhost:5173 in your browser.
-`);
-  }),
-).pipe(Command.withDescription("Create a new effect-ui project"));
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-const copyDir = (
-  fs: FileSystem.FileSystem,
-  src: string,
-  dest: string,
-): Effect.Effect<void, Error> =>
-  Effect.gen(function* () {
-    yield* fs.makeDirectory(dest, { recursive: true });
-    const entries = yield* fs.readDirectory(src);
-
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry);
-      const destPath = path.join(dest, entry);
-
-      const stat = yield* fs.stat(srcPath);
-      if (stat.type === "Directory") {
-        yield* copyDir(fs, srcPath, destPath);
+      // Get project name (args.projectName is Option<string>)
+      let name: string
+      if (args.projectName._tag === "Some") {
+        name = args.projectName.value
       } else {
-        yield* fs.copyFile(srcPath, destPath);
+        name = yield* prompts.text({
+          message: "Project name:",
+          placeholder: "my-app",
+          validate: (value) => {
+            if (!value) return "Project name is required"
+            if (!/^[a-zA-Z0-9-_]+$/.test(value)) {
+              return "Use only letters, numbers, hyphens, and underscores"
+            }
+            return undefined
+          },
+        })
       }
-    }
-  });
+
+      // Validate project name
+      if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
+        clack.cancel(`Invalid project name "${name}"`)
+        return yield* Effect.fail("Invalid project name")
+      }
+
+      const targetDir = path.resolve(process.cwd(), name)
+
+      // Check if directory exists
+      const exists = yield* fs.exists(targetDir)
+      if (exists) {
+        clack.cancel(`Directory "${name}" already exists`)
+        return yield* Effect.fail("Directory exists")
+      }
+
+      // Gather options
+      let options: ProjectOptions
+
+      if (args.yes) {
+        // Use all defaults
+        options = {
+          name,
+          platform: "bun",
+          output: "server",
+          includeTailwind: false,
+          vcs: "git",
+          install: true,
+        }
+        clack.note(
+          "Using defaults:\n" +
+            "  Platform: bun\n" +
+            "  Output: server (with API)\n" +
+            "  VCS: git\n" +
+            "  Install: yes",
+          "Configuration",
+        )
+      } else {
+        // Interactive mode
+        options = yield* promptProjectOptions(name)
+      }
+
+      // Scaffold the project
+      const spinner = clack.spinner()
+      spinner.start("Creating project...")
+      yield* scaffoldProject(targetDir, options, TEMPLATES_DIR)
+      spinner.stop("Project created")
+
+      // Initialize VCS
+      if (options.vcs !== "none") {
+        spinner.start(`Initializing ${options.vcs}...`)
+        const vcsCommand = options.vcs === "git" ? "git init" : "jj git init"
+        yield* Effect.async<void>((resume) => {
+          const proc = spawn(vcsCommand, { cwd: targetDir, shell: true })
+          proc.on("close", (code) => {
+            if (code === 0) {
+              spinner.stop(`Initialized ${options.vcs} repository`)
+              resume(Effect.void)
+            } else {
+              spinner.stop(`Failed to initialize ${options.vcs}`)
+              resume(Effect.void)
+            }
+          })
+        })
+      }
+
+      // Install dependencies
+      if (options.install) {
+        const pm = yield* detectPackageManager()
+        const installCmd = getInstallCommand(pm)
+
+        spinner.start(`Installing dependencies with ${pm}...`)
+        yield* Effect.async<void>((resume) => {
+          const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" })
+          proc.on("close", (code) => {
+            if (code === 0) {
+              spinner.stop("Dependencies installed")
+              resume(Effect.void)
+            } else {
+              spinner.stop("Failed to install dependencies")
+              resume(Effect.fail("Install failed"))
+            }
+          })
+        })
+      }
+
+      // Success message
+      const pm = yield* detectPackageManager()
+      const runCmd = getRunCommand(pm)
+
+      const nextSteps = []
+      nextSteps.push(`cd ${name}`)
+      if (!options.install) {
+        nextSteps.push(getInstallCommand(pm))
+      }
+      nextSteps.push(`${runCmd} dev       → http://localhost:5173`)
+      nextSteps.push(`${runCmd} build     → dist/`)
+      if (options.output === "server") {
+        nextSteps.push(`${runCmd} start     → http://localhost:3000`)
+      }
+
+      clack.note(nextSteps.join("\n"), "Next steps")
+      clack.outro(`Done! Created ${name}`)
+    }),
+).pipe(Command.withDescription("Create a new effect-ui project"))
 
 // =============================================================================
 // Run
 // =============================================================================
 
 const cli = Command.run(create, {
-  name: "create-effect-ui",
-  version: "0.1.0",
-});
+  name: "create-trygg-app",
+  version: "0.2.0",
+})
 
-cli(process.argv).pipe(Effect.provide(BunContext.layer), BunRuntime.runMain);
+// Application layer with prompts
+const AppLayer = Layer.mergeAll(BunContext.layer, PromptsLive)
+
+cli(process.argv).pipe(Effect.provide(AppLayer), BunRuntime.runMain)

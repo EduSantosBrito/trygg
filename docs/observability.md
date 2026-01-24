@@ -1,6 +1,6 @@
 # Effect UI - Observability
 
-effect-ui follows the **wide events** approach to observability, inspired by [loggingsucks.com](https://loggingsucks.com/).
+trygg follows the **wide events** approach to observability, inspired by [loggingsucks.com](https://loggingsucks.com/).
 
 ## Philosophy
 
@@ -14,7 +14,7 @@ Traditional logging scatters context across dozens of log lines. Wide events emi
 
 ```tsx
 import { Effect } from "effect"
-import { mount, DevMode } from "effect-ui"
+import { mount, DevMode } from "trygg"
 
 const App = Effect.gen(function* () {
   // your app
@@ -43,12 +43,12 @@ mount(container, <>
 
 ```js
 // URL parameter
-http://localhost:5173/?effectui_debug
-http://localhost:5173/?effectui_debug=signal
+http://localhost:5173/?trygg_debug
+http://localhost:5173/?trygg_debug=signal
 
 // localStorage (persists across reloads)
-localStorage.setItem("effectui_debug", "true")
-localStorage.setItem("effectui_debug", "signal,render")
+localStorage.setItem("trygg_debug", "true")
+localStorage.setItem("trygg_debug", "signal,render")
 ```
 
 These only work when `import.meta.env.DEV === true` or `NODE_ENV === "development"`.
@@ -273,7 +273,7 @@ Check `signal.listener.error`. Listeners run in parallel with error isolation - 
 ### Built-in Plugins
 
 ```tsx
-import * as Debug from "effect-ui/debug"
+import * as Debug from "trygg/debug"
 
 // Console (default when no plugins registered)
 <DevMode plugins={[Debug.consolePlugin]} />
@@ -369,7 +369,7 @@ Spans nest: child spans reference parent via `parentSpanId`.
 ### Recording
 
 ```typescript
-import * as Metrics from "effect-ui/metrics"
+import * as Metrics from "trygg/metrics"
 
 yield* Metrics.recordNavigation
 yield* Metrics.recordSignalUpdate

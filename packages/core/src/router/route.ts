@@ -7,7 +7,7 @@
  *
  * @example
  * ```tsx
- * import { Route } from "effect-ui/router"
+ * import { Route } from "trygg/router"
  *
  * Route.make("/users/:id")
  *   .component(UserProfile)
@@ -60,7 +60,7 @@ type CleanParamName<P extends string> = P extends `${infer Name}*`
 // =============================================================================
 
 /** @internal */
-export const IndexMarker = Symbol.for("effect-ui/router/IndexRoute");
+export const IndexMarker = Symbol.for("trygg/router/IndexRoute");
 export type IndexMarker = typeof IndexMarker;
 
 /**
@@ -237,7 +237,7 @@ export interface AnyRouteBuilder {
 // =============================================================================
 
 /** @internal */
-export const RouteBuilderTypeId: unique symbol = Symbol.for("effect-ui/router/RouteBuilder");
+export const RouteBuilderTypeId: unique symbol = Symbol.for("trygg/router/RouteBuilder");
 export type RouteBuilderTypeId = typeof RouteBuilderTypeId;
 
 /** @internal */

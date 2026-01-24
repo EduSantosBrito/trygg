@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, cx, type ComponentProps } from "effect-ui";
+import { Component, cx, type ComponentProps } from "trygg";
 import { TodoTheme } from "../../services/todo";
 
 export const FilterButton = Component.gen(function* (

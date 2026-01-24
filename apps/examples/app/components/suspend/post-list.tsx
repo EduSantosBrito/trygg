@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 
 export interface Post {
   readonly id: number;

@@ -1,6 +1,6 @@
 import { Effect, Option } from "effect";
-import { Signal } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Signal } from "trygg";
+import * as Router from "trygg/router";
 
 export interface AuthUser {
   readonly id: string;

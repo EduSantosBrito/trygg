@@ -1,13 +1,13 @@
 /**
  * @since 1.0.0
- * Metrics for effect-ui observability
+ * Metrics for trygg observability
  *
  * Provides counters and histograms for tracking navigation, rendering, and signal updates.
  * Uses Effect Metrics with a prefix `effectui.` for all metric names.
  *
  * @example
  * ```tsx
- * import * as Metrics from "effect-ui/metrics"
+ * import * as Metrics from "trygg/metrics"
  * import { Effect } from "effect"
  *
  * // Get current metrics snapshot

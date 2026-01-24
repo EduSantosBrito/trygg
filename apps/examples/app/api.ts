@@ -43,7 +43,7 @@ const mockUsers: Record<string, User> = {
 const mockPosts: ReadonlyArray<Post> = [
   { id: 1, title: "Getting Started with Effect", body: "Effect is a powerful...", authorId: "1" },
   { id: 2, title: "Fine-grained Reactivity", body: "Signals enable...", authorId: "2" },
-  { id: 3, title: "Type-safe Routing", body: "With effect-ui...", authorId: "1" },
+  { id: 3, title: "Type-safe Routing", body: "With trygg...", authorId: "1" },
   { id: 4, title: "Resource Caching", body: "The Resource API...", authorId: "3" },
 ];
 

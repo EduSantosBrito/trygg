@@ -74,7 +74,7 @@ export interface RouteMatcherShape {
  *
  * @since 1.0.0
  */
-export class RouteMatcher extends Context.Tag("effect-ui/RouteMatcher")<
+export class RouteMatcher extends Context.Tag("trygg/RouteMatcher")<
   RouteMatcher,
   RouteMatcherShape
 >() {

@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { Signal, Component, type ComponentProps } from "effect-ui";
+import { Signal, Component, type ComponentProps } from "trygg";
 import { FormTheme } from "../services/form";
 
 export const FormField = Component.gen(function* (

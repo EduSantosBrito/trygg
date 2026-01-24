@@ -1,4 +1,4 @@
-import { Component } from "effect-ui";
+import { Component } from "trygg";
 import { Theme } from "../../services/theme";
 
 export const ThemedCard = Component.gen(function* () {

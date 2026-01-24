@@ -1,5 +1,5 @@
 import { Data } from "effect";
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
 export class UnknownError extends Data.TaggedError("UnknownError")<{

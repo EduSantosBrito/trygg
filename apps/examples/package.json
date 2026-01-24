@@ -1,5 +1,5 @@
 {
-  "name": "effect-ui-examples",
+  "name": "trygg-examples",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,8 @@
   "dependencies": {
     "@effect/platform": "^0.94.1",
     "@effect/platform-browser": "^0.74.0",
-    "effect": "^3.19.14",
-    "effect-ui": "workspace:*"
+    "effect": "^3.19.15",
+    "trygg": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",

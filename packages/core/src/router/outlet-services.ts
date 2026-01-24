@@ -62,7 +62,7 @@ export interface OutletRendererShape {
  * OutletRenderer — component rendering with params/query injection.
  * @since 1.0.0
  */
-export class OutletRenderer extends Context.Tag("effect-ui/OutletRenderer")<
+export class OutletRenderer extends Context.Tag("trygg/OutletRenderer")<
   OutletRenderer,
   OutletRendererShape
 >() {
@@ -90,7 +90,7 @@ export interface BoundaryResolverShape {
  * BoundaryResolver — nearest-wins boundary resolution.
  * @since 1.0.0
  */
-export class BoundaryResolver extends Context.Tag("effect-ui/BoundaryResolver")<
+export class BoundaryResolver extends Context.Tag("trygg/BoundaryResolver")<
   BoundaryResolver,
   BoundaryResolverShape
 >() {
@@ -141,7 +141,7 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends Context.Tag("effect-ui/AsyncLoader")<
+export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<
   AsyncLoader,
   AsyncLoaderShape
 >() {

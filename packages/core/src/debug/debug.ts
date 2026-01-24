@@ -1,13 +1,13 @@
 /**
  * @since 1.0.0
- * Debug logging for effect-ui
+ * Debug logging for trygg
  *
  * Uses wide event pattern - one structured log per operation with full context.
  * Enable by adding <DevMode /> component to your app.
  *
  * @example
  * ```tsx
- * import { mount, DevMode } from "effect-ui"
+ * import { mount, DevMode } from "trygg"
  *
  * mount(container, <>
  *   {App}
@@ -840,7 +840,7 @@ export const nextSpanId = (): string => `span_${++spanCounter}`;
  * @since 1.0.0
  */
 export const CurrentTraceId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Debug/CurrentTraceId"),
+  Symbol.for("trygg/Debug/CurrentTraceId"),
   () => FiberRef.unsafeMake<string | undefined>(undefined),
 );
 
@@ -851,7 +851,7 @@ export const CurrentTraceId: FiberRef.FiberRef<string | undefined> = GlobalValue
  * @since 1.0.0
  */
 export const CurrentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Debug/CurrentSpanId"),
+  Symbol.for("trygg/Debug/CurrentSpanId"),
   () => FiberRef.unsafeMake<string | undefined>(undefined),
 );
 
@@ -862,7 +862,7 @@ export const CurrentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.
  * @since 1.0.0
  */
 export const CurrentParentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("effect-ui/Debug/CurrentParentSpanId"),
+  Symbol.for("trygg/Debug/CurrentParentSpanId"),
   () => FiberRef.unsafeMake<string | undefined>(undefined),
 );
 
@@ -1173,7 +1173,7 @@ const dispatchToPlugins = (fullEvent: DebugEvent): void => {
         plugin.handle(fullEvent);
       } catch (error) {
         // Isolate plugin errors - one failing plugin shouldn't break others
-        console.error(`[effect-ui] Plugin "${plugin.name}" error:`, error);
+        console.error(`[trygg] Plugin "${plugin.name}" error:`, error);
       }
     }
   } else {
@@ -1357,8 +1357,8 @@ export const defaultLayer: Layer.Layer<never> = Layer.scopedDiscard(
  * @example
  * ```typescript
  * import { Effect } from "effect"
- * import * as Debug from "effect-ui/debug"
- * import { TestServer } from "effect-ui/test-server"
+ * import * as Debug from "trygg/debug"
+ * import { TestServer } from "trygg/test-server"
  *
  * const program = Effect.gen(function* () {
  *   const server = yield* TestServer

@@ -69,7 +69,7 @@ export interface DomService {
 // Tag
 // =============================================================================
 
-export class Dom extends Context.Tag("effect-ui/platform/Dom")<Dom, DomService>() {}
+export class Dom extends Context.Tag("trygg/platform/Dom")<Dom, DomService>() {}
 
 // =============================================================================
 // Browser layer

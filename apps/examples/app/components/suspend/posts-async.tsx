@@ -1,5 +1,5 @@
 import { Duration, Effect } from "effect";
-import { Signal, Component, type ComponentProps } from "effect-ui";
+import { Signal, Component, type ComponentProps } from "trygg";
 import { PostList, type Post } from "./post-list";
 
 const fetchPosts = (userId: number) =>

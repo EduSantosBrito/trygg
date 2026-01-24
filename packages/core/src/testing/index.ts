@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Testing utilities for effect-ui
+ * Testing utilities for trygg
  *
  * Provides helpers for rendering and querying components in tests.
  * Works with @effect/vitest for Effect-based testing.
@@ -217,7 +217,7 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
  * ```tsx
  * import { describe, it, expect } from "@effect/vitest"
  * import { Effect } from "effect"
- * import { renderElement } from "effect-ui/testing"
+ * import { renderElement } from "trygg/testing"
  *
  * describe("MyComponent", () => {
  *   it.scoped("renders content", () =>

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, cx, type ComponentProps } from "effect-ui";
+import { Component, cx, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
 export const TriggerButton = Component.gen(function* (

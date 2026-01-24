@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Renderer service for effect-ui
+ * Renderer service for trygg
  *
  * Handles mounting Element trees to the DOM.
  */
@@ -147,7 +147,7 @@ export interface RendererService {
  * Renderer service tag
  * @since 1.0.0
  */
-export class Renderer extends Context.Tag("@effect-ui/Renderer")<Renderer, RendererService>() {}
+export class Renderer extends Context.Tag("@trygg/Renderer")<Renderer, RendererService>() {}
 
 /**
  * Apply a single prop value to a DOM element
@@ -201,7 +201,7 @@ const applyPropValue = (node: HTMLElement, key: string, value: unknown): void =>
       // Debug.log is Effect-based and would need runtime context
       const config = SafeUrl.getConfig();
       console.warn(
-        `[effect-ui] Blocked unsafe ${key}="${url}". ` +
+        `[trygg] Blocked unsafe ${key}="${url}". ` +
           `Allowed schemes: ${config.allowedSchemes.join(", ")}. ` +
           `See SafeUrl.allowSchemes() to add custom schemes.`,
       );
@@ -1467,7 +1467,7 @@ const renderElement = (
                 Effect.sync(() => {
                   // eslint-disable-next-line no-console
                   console.error(
-                    "[effect-ui] ErrorBoundary fallback rendering failed:",
+                    "[trygg] ErrorBoundary fallback rendering failed:",
                     Cause.pretty(fallbackCause),
                   );
                 }),
@@ -1601,7 +1601,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
 
       // Create an anchor comment to mark the mount point
       // This replaces innerHTML="" clearing - we only manage our own nodes
-      const mountAnchor = document.createComment("effect-ui-mount");
+      const mountAnchor = document.createComment("trygg-mount");
       container.appendChild(mountAnchor);
 
       // Render the element tree - content is inserted before the anchor
@@ -1681,7 +1681,7 @@ const isEffectValue = (value: unknown): value is Effect.Effect<Element, unknown,
 /**
  * Mount an app to the DOM
  *
- * Main entrypoint for effect-ui applications. Handles all runtime setup
+ * Main entrypoint for trygg applications. Handles all runtime setup
  * including scope management and the browser renderer layer.
  *
  * Accepts either an Effect<Element> or an Element directly.

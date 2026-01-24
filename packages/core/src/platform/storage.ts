@@ -31,12 +31,12 @@ export interface StorageService {
 // Tags
 // =============================================================================
 
-export class SessionStorage extends Context.Tag("effect-ui/platform/SessionStorage")<
+export class SessionStorage extends Context.Tag("trygg/platform/SessionStorage")<
   SessionStorage,
   StorageService
 >() {}
 
-export class LocalStorage extends Context.Tag("effect-ui/platform/LocalStorage")<
+export class LocalStorage extends Context.Tag("trygg/platform/LocalStorage")<
   LocalStorage,
   StorageService
 >() {}

@@ -1,7 +1,23 @@
 {
-  "name": "effect-ui",
-  "version": "0.1.0",
-  "private": true,
+  "name": "trygg",
+  "version": "0.0.1",
+  "description": "Effect-native UI framework with JSX support and fine-grained reactivity",
+  "keywords": [
+    "effect",
+    "ui",
+    "framework",
+    "jsx",
+    "reactive",
+    "signals",
+    "typescript"
+  ],
+  "homepage": "https://github.com/EduSantosBrito/effect-ui#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EduSantosBrito/effect-ui.git"
+  },
+  "license": "MIT",
+  "sideEffects": false,
   "type": "module",
   "module": "./dist/index.js",
   "exports": {
@@ -30,6 +46,10 @@
       "import": "./dist/jsx-dev-runtime.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
@@ -43,7 +63,7 @@
     "@effect/platform": "^0.94.1",
     "@effect/platform-browser": "^0.74.0",
     "consola": "^3.4.2",
-    "effect": "^3.19.14"
+    "effect": "^3.19.15"
   },
   "devDependencies": {
     "@effect/language-service": "^0.72.0",
@@ -59,12 +79,16 @@
     "vitest": "^3.2.0"
   },
   "peerDependencies": {
+    "@effect/platform-bun": "^0.87.0",
     "@effect/platform-node": "^0.87.0",
     "typescript": "^5",
     "vite": "^5.0.0 || ^6.0.0"
   },
   "peerDependenciesMeta": {
     "vite": {
+      "optional": true
+    },
+    "@effect/platform-bun": {
       "optional": true
     },
     "@effect/platform-node": {

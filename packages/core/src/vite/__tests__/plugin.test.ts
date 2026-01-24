@@ -30,7 +30,7 @@ const makeTempDir = (
 ): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const dir = yield* fs.makeTempDirectory({ prefix: "effect-ui-test-" }).pipe(Effect.orDie);
+    const dir = yield* fs.makeTempDirectory({ prefix: "trygg-test-" }).pipe(Effect.orDie);
     yield* Effect.addFinalizer(() => fs.remove(dir, { recursive: true }).pipe(Effect.ignore));
     yield* Effect.forEach(Object.entries(files), ([filePath, content]) =>
       Effect.gen(function* () {
@@ -57,7 +57,7 @@ describe("Vite Plugin", () => {
 
       assert.isDefined(plugin);
       assert.isString(plugin.name);
-      assert.strictEqual(plugin.name, "effect-ui");
+      assert.strictEqual(plugin.name, "trygg");
       assert.isDefined(plugin.config);
     });
   });
@@ -95,16 +95,16 @@ describe("Vite Plugin", () => {
       const result = configHook({}, { command: "serve", mode: "development" });
       const config = Schema.decodeUnknownSync(EsbuildConfigSchema)(result);
       assert.strictEqual(config.esbuild.jsx, "automatic");
-      assert.strictEqual(config.esbuild.jsxImportSource, "effect-ui");
+      assert.strictEqual(config.esbuild.jsxImportSource, "trygg");
     });
 
-    it("should configure optimizeDeps for effect-ui", () => {
+    it("should configure optimizeDeps for trygg", () => {
       const plugin = effectUI();
       const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
       const result = configHook({}, { command: "serve", mode: "development" });
       const config = Schema.decodeUnknownSync(OptimizeDepsConfigSchema)(result);
       assert.strictEqual(config.optimizeDeps.esbuildOptions.jsx, "automatic");
-      assert.strictEqual(config.optimizeDeps.esbuildOptions.jsxImportSource, "effect-ui");
+      assert.strictEqual(config.optimizeDeps.esbuildOptions.jsxImportSource, "trygg");
     });
   });
 
@@ -164,7 +164,7 @@ describe("Vite Plugin", () => {
     it.scoped("should generate placeholder when no api.ts exists", () =>
       Effect.gen(function* () {
         const dir = yield* makeTempDir({});
-        const genDir = path.join(dir, ".effect-ui");
+        const genDir = path.join(dir, ".trygg");
         const types = yield* generateApiTypes(dir, genDir);
         assert.isTrue(types.includes("No API file found"));
         assert.isTrue(types.includes("export class ApiClient"));
@@ -177,7 +177,7 @@ describe("Vite Plugin", () => {
         const dir = yield* makeTempDir({
           "api.ts": "export class Api {}",
         });
-        const genDir = path.join(dir, ".effect-ui");
+        const genDir = path.join(dir, ".trygg");
         const types = yield* generateApiTypes(dir, genDir);
         assert.isTrue(
           types.includes('import { HttpApiClient, FetchHttpClient } from "@effect/platform"'),
@@ -487,7 +487,7 @@ describe("Vite Plugin", () => {
           { path: "/", params: [], query: [], children: [], isIndex: false },
         ];
         const output = yield* generateRouteTypes(routes);
-        assert.isTrue(output.includes('declare module "effect-ui/router"'));
+        assert.isTrue(output.includes('declare module "trygg/router"'));
         assert.isTrue(output.includes("interface RouteMap"));
         assert.isTrue(output.includes("export {}"));
       }),
@@ -547,11 +547,11 @@ Route.make("/").component(HomePage)
       Effect.gen(function* () {
         const source = `
 import { Schema } from "effect"
-import { Route } from "effect-ui/router"
+import { Route } from "trygg/router"
 Route.make("/users").component(Route)
 `;
         const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
-        // "Route" from "effect-ui/router" is not relative, so not transformed
+        // "Route" from "trygg/router" is not relative, so not transformed
         assert.isTrue(result.includes(".component(Route)"));
       }),
     );
@@ -601,17 +601,17 @@ Route.make("/users").error(ErrorComp).loading(LoadingComp)
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: Plugin options
   // ─────────────────────────────────────────────────────────────────────────────
-  describe("effectUI with routes option", () => {
-    it("should accept routes option", () => {
-      const plugin = effectUI({ routes: "./app/routes.ts" });
+  describe("effectUI with options", () => {
+    it("should accept platform and output options", () => {
+      const plugin = effectUI({ platform: "bun", output: "server" });
       assert.isDefined(plugin);
-      assert.strictEqual(plugin.name, "effect-ui");
+      assert.strictEqual(plugin.name, "trygg");
     });
 
-    it("should still work without options", () => {
+    it("should work without options", () => {
       const plugin = effectUI();
       assert.isDefined(plugin);
-      assert.strictEqual(plugin.name, "effect-ui");
+      assert.strictEqual(plugin.name, "trygg");
     });
   });
 });

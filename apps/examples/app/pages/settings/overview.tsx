@@ -1,5 +1,5 @@
-import { Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 const SettingsOverview = Component.gen(function* () {
   return (

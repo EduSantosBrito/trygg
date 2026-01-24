@@ -6,8 +6,8 @@
  * satisfied by Component.provide(ApiClientLive) at the parent.
  */
 import { Effect } from "effect";
-import { Resource } from "effect-ui";
-import { ApiClient } from "effect-ui/api";
+import { Resource } from "trygg";
+import { ApiClient } from "trygg/api";
 import type { User, Post } from "../api";
 
 export { type User, type Post };

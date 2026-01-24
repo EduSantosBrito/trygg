@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-**effect-ui** is a UI framework built entirely on Effect, providing:
+**trygg** is a UI framework built entirely on Effect, providing:
 
 - **JSX as the authoring format** - Custom runtime, no React dependency
 - **Components are Effects** - `Effect<Element, E, R>`; app entrypoint must have `R = never`
@@ -115,7 +115,7 @@ Development mode (`jsx-dev-runtime.ts`) adds source location info for debugging.
 ### 3.1 Renderer Service
 
 ```typescript
-export class Renderer extends Context.Tag("@effect-ui/Renderer")<Renderer, RendererService>() {}
+export class Renderer extends Context.Tag("@trygg/Renderer")<Renderer, RendererService>() {}
 
 export interface RendererService {
   readonly mount: (container: HTMLElement, element: Element) => Effect<void, unknown, Scope.Scope>
@@ -425,7 +425,7 @@ const RootLayout = Component.gen(function* () {
 ## 7. Portal
 
 ```tsx
-import { Portal } from "effect-ui"
+import { Portal } from "trygg"
 
 const Modal = Component.gen(function* () {
   return (
@@ -445,7 +445,7 @@ Target can be an `HTMLElement` or a CSS selector string.
 ## 8. Error Boundary
 
 ```tsx
-import { ErrorBoundary } from "effect-ui"
+import { ErrorBoundary } from "trygg"
 
 <ErrorBoundary
   fallback={(cause) => <div>Error: {Cause.squash(cause)}</div>}
@@ -571,7 +571,7 @@ export const ApiLive = HttpApiBuilder.group(api, "users", (handlers) =>
 ### 11.2 Type Utilities
 
 ```typescript
-import type { Api } from "effect-ui"
+import type { Api } from "trygg"
 
 // Extract handler type from endpoint
 type Handler = Api.Handler<typeof endpoint>
@@ -584,14 +584,14 @@ type Handlers = Api.GroupHandlers<typeof group>
 
 The plugin:
 1. Validates `app/api.ts` exports (`api`/`Api` and `ApiLive`)
-2. Generates `.effect-ui/api.d.ts` type declarations
-3. Resolves `virtual:effect-ui/client` virtual module
+2. Generates `.trygg/api.d.ts` type declarations
+3. Resolves `virtual:trygg/client` virtual module
 4. Creates dev server middleware using `HttpApiBuilder.toWebHandler`
 
 ### 11.4 Client Usage
 
 ```typescript
-import { api } from "virtual:effect-ui/client"
+import { api } from "virtual:trygg/client"
 import { HttpApiClient } from "@effect/platform"
 
 const client = yield* HttpApiClient.make(api, { baseUrl: "/api" })
@@ -605,7 +605,7 @@ const users = yield* client.users.listUsers()
 ```typescript
 // vite.config.ts
 import { defineConfig } from "vite"
-import effectUI from "effect-ui/vite-plugin"
+import effectUI from "trygg/vite-plugin"
 
 export default defineConfig({
   plugins: [effectUI({ routes: "./app/routes.ts" })]
@@ -614,11 +614,11 @@ export default defineConfig({
 
 ### What it does:
 
-1. **JSX Configuration**: `esbuild.jsx: "automatic"`, `jsxImportSource: "effect-ui"`
-2. **Route type generation**: Parses `routes.ts`, generates `.effect-ui/routes.d.ts` with `RouteMap` augmentation
+1. **JSX Configuration**: `esbuild.jsx: "automatic"`, `jsxImportSource: "trygg"`
+2. **Route type generation**: Parses `routes.ts`, generates `.trygg/routes.d.ts` with `RouteMap` augmentation
 3. **Code splitting** (production): Transforms `.component(X)` to `.component(() => import("./X"))` for Lazy routes
-4. **Entry generation**: Creates `.effect-ui/entry.tsx` with `mountDocument`
-5. **HTML shell**: Generates `.effect-ui/index.html`
+4. **Entry generation**: Creates `.trygg/entry.tsx` with `mountDocument`
+5. **HTML shell**: Generates `.trygg/index.html`
 6. **API middleware**: Dev server serves API routes
 7. **Dev server**: SPA fallback for client-side routing
 
@@ -629,7 +629,7 @@ export default defineConfig({
 ```typescript
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, waitFor, testLayer } from "effect-ui"
+import { testRender, click, waitFor, testLayer } from "trygg"
 
 describe("Counter", () => {
   it.scoped("increments on click", () =>
@@ -658,7 +658,7 @@ describe("Counter", () => {
 ### cx (Class Names)
 
 ```typescript
-import { cx } from "effect-ui"
+import { cx } from "trygg"
 
 const className = cx("base", isActive && "active", isDisabled && "disabled")
 // "base active" or "base disabled" etc.

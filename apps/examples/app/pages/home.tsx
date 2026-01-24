@@ -1,5 +1,5 @@
-import { Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 const features = [
   {
@@ -80,7 +80,7 @@ const HomePage = Component.gen(function* () {
   return (
     <div className="pb-8">
       <div className="text-center py-8 pb-12">
-        <h1 className="text-2xl m-0">effect-ui Examples</h1>
+        <h1 className="text-2xl m-0">trygg Examples</h1>
         <p className="text-gray-500 mt-2 text-lg">An Effect-native UI framework with JSX support</p>
       </div>
 

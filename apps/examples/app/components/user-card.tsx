@@ -1,4 +1,4 @@
-import { Component, cx, type ComponentProps } from "effect-ui";
+import { Component, cx, type ComponentProps } from "trygg";
 import type { User } from "../resources/users";
 
 export const UserCard = Component.gen(function* (

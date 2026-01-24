@@ -1,6 +1,6 @@
 import { Effect, Option } from "effect";
-import { Signal, Component } from "effect-ui";
-import * as Router from "effect-ui/router";
+import { Signal, Component } from "trygg";
+import * as Router from "trygg/router";
 import { authSignal, setAuth } from "../resources/auth";
 
 const ProtectedPage = Component.gen(function* () {

@@ -1,6 +1,6 @@
 /**
  * @since 1.0.0
- * Router Link component for effect-ui
+ * Router Link component for trygg
  *
  * ## Type-Safe Navigation
  *

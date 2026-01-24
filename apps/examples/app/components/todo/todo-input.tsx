@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Signal, Component, type ComponentProps } from "effect-ui";
+import { Signal, Component, type ComponentProps } from "trygg";
 import { TodoTheme } from "../../services/todo";
 
 export const TodoInput = Component.gen(function* (

@@ -9,7 +9,7 @@
  * ```typescript
  * // Single endpoint (route.ts)
  * import { HttpApiEndpoint } from "@effect/platform"
- * import type { Api } from "effect-ui"
+ * import type { Api } from "trygg"
  *
  * export const endpoint = HttpApiEndpoint.get("getUser", "/api/users/:id")
  *   .setPath(Schema.Struct({ id: Schema.String }))
@@ -23,7 +23,7 @@
  * ```typescript
  * // Multiple endpoints (group.ts)
  * import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
- * import type { Api } from "effect-ui"
+ * import type { Api } from "trygg"
  *
  * export const group = HttpApiGroup.make("users")
  *   .add(HttpApiEndpoint.get("listUsers", "/api/users"))

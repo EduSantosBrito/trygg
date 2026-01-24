@@ -5,21 +5,21 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "effect-ui",
+    "jsxImportSource": "trygg",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "effect-ui": ["../../packages/core/src/index.ts"],
-      "effect-ui/api": ["./.effect-ui/api-types.ts"],
-      "effect-ui/router": ["../../packages/core/src/router/index.ts"],
-      "effect-ui/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
-      "effect-ui/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],
-      "effect-ui/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
+      "trygg": ["../../packages/core/src/index.ts"],
+      "trygg/api": ["./.trygg/api-types.ts"],
+      "trygg/router": ["../../packages/core/src/router/index.ts"],
+      "trygg/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
+      "trygg/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],
+      "trygg/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
     }
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", ".effect-ui/**/*.ts"],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", ".trygg/**/*.ts"],
   "exclude": ["vite.config.ts"]
 }

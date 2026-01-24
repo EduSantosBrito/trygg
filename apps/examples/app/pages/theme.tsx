@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { Theme } from "../services/theme";
 import { ThemedCard } from "../components/theme/themed-card";
 import { ThemedTitle } from "../components/theme/themed-title";

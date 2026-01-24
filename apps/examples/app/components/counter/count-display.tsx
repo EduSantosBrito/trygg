@@ -1,4 +1,4 @@
-import { Signal, Component, type ComponentProps } from "effect-ui";
+import { Signal, Component, type ComponentProps } from "trygg";
 import { CounterTheme } from "../../services/counter";
 
 export const CountDisplay = Component.gen(function* (

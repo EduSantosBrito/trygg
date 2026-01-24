@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "effect-ui";
+import { Component, type ComponentProps } from "trygg";
 import { NetworkError } from "./network-error-display";
 import { ValidationError } from "./validation-error-display";
 import { UnknownError } from "./unknown-error-display";

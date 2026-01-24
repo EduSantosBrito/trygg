@@ -1,4 +1,4 @@
-import { Signal, Component } from "effect-ui";
+import { Signal, Component } from "trygg";
 import { UsersList } from "../components/resource/users-list";
 import { UserDetail } from "../components/resource/user-detail";
 import { UserPosts } from "../components/resource/user-posts";
