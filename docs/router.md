@@ -54,6 +54,7 @@ Route.make("/users/:id")
 - `.component()` and `.children()` are mutually exclusive
 - `.params()` only available when path has param segments
 - Schema keys must exactly match path params (type-enforced)
+- `.component()` only accepts `Component.gen` components (not plain `Effect.gen` or functions)
 
 ---
 

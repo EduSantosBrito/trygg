@@ -12,9 +12,11 @@ import {
   type ElementKey,
   normalizeChildren,
   componentElement,
-  isElement,
   empty,
+  type ComponentElementWithRequirements,
 } from "./primitives/element.js";
+import * as Component from "./primitives/component.js";
+import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
 
 /**
  * Props passed to JSX elements
@@ -25,26 +27,17 @@ export interface JSXProps extends ElementProps {
 }
 
 /**
- * Component function type - a function that takes props and returns an Effect<Element>.
- *
- * Effects can require services if they are provided by a parent context.
- *
- * For services, provide layers in a parent component (or <Provide />).
- *
- * @since 1.0.0
- */
-export type ComponentFunction<Props = Record<string, unknown>, E = never, R = unknown> = (
-  props: Props,
-) => Effect.Effect<Element, E, R>;
-
-/**
- * JSX element type - either a string (intrinsic), a component function, or an Effect
+ * Valid JSX element type - either an intrinsic string or a Component.Type
  * @since 1.0.0
  */
 export type JSXElementType<Props = Record<string, unknown>, E = never, R = unknown> =
   | string
-  | ComponentFunction<Props, E, R>
-  | Effect.Effect<Element, E, R>;
+  | ComponentType.Type<Props, E, R>;
+
+type ElementFor<Type> =
+  Type extends ComponentType.Type<any, any, infer R>
+    ? ComponentElementWithRequirements<R>
+    : Element;
 
 /**
  * Check if a value is an Effect
@@ -54,55 +47,84 @@ const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unkn
   typeof value === "object" && value !== null && Effect.EffectTypeId in value;
 
 /**
+ * Check if a value is a valid ElementKey
+ * @internal
+ */
+const isElementKey = (value: unknown): value is ElementKey =>
+  typeof value === "string" || typeof value === "number";
+
+/**
  * Create a JSX element
  *
  * This is called by the TypeScript compiler for JSX expressions.
- * Supports three types:
- * - String: intrinsic elements like `<div>`
- * - Function: component functions `(props) => Effect<Element>`
- * - Effect: component effects directly `Effect<Element>`
+ * Supports two types:
+ * - String: intrinsic elements like `<div>`, `<span>`
+ * - Component.Type: Effect components created with `Component.gen`
+ *
+ * Invalid component types (plain functions or direct Effects) fail with
+ * InvalidComponentError via Effect.fail when rendered.
  *
  * @since 1.0.0
  */
-export const jsx = <Props extends JSXProps>(
-  type: JSXElementType<Props>,
+export const jsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
+  type: Type,
   props: Props | null,
   key?: ElementKey,
-): Element => {
-  const resolvedProps = props ?? ({} as Props);
-  const {
-    children,
-    key: propsKey,
-    ...restProps
-  } = resolvedProps as JSXProps & { children?: unknown };
+): ElementFor<Type> => {
+  const resolvedProps = props ?? {};
+  const children = "children" in resolvedProps ? resolvedProps.children : undefined;
+  const propsKeyRaw = "key" in resolvedProps ? resolvedProps.key : undefined;
+  const propsKey = isElementKey(propsKeyRaw) ? propsKeyRaw : undefined;
   const resolvedKey = key ?? propsKey ?? null;
   const childElements = normalizeChildren(children);
+
+  // Build element props by excluding children and key
+  const elementPropsMutable: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(resolvedProps)) {
+    if (k !== "children" && k !== "key") {
+      elementPropsMutable[k] = v;
+    }
+  }
+  const elementProps = elementPropsMutable as ElementProps;
 
   if (typeof type === "string") {
     // Intrinsic element: <div>, <span>, etc.
     return Element.Intrinsic({
       tag: type,
-      props: restProps as ElementProps,
+      props: elementProps,
       children: childElements,
       key: resolvedKey,
-    });
+    }) as ElementFor<Type>;
   }
 
+  // Check if it's an Effect being passed directly (invalid - not allowed)
   if (isEffect(type)) {
-    // Effect passed directly: <Counter /> where Counter is Effect<Element>
-    return componentElement(() => type, resolvedKey);
+    return componentElement(
+      () =>
+        Effect.fail(
+          new Component.InvalidComponentError({
+            reason: "effect",
+            displayName: type.constructor?.name,
+          }),
+        ),
+      resolvedKey,
+    ) as ElementFor<Type>;
   }
 
-  // Component function: call it to get the result
-  const result = type(resolvedProps);
-
-  // ComponentType from component()/Component() returns Element directly
-  if (isElement(result)) {
-    return result;
+  if (!Component.isEffectComponent(type)) {
+    return componentElement(
+      () =>
+        Effect.fail(
+          new Component.InvalidComponentError({
+            reason: typeof type === "function" ? "plain-function" : "unknown",
+            displayName: typeof type === "function" ? type.name : undefined,
+          }),
+        ),
+      resolvedKey,
+    ) as ElementFor<Type>;
   }
 
-  // Traditional component function returns Effect<Element>
-  return componentElement(() => result, resolvedKey);
+  return type(resolvedProps) as ElementFor<Type>;
 };
 
 /**
@@ -113,7 +135,7 @@ export const jsx = <Props extends JSXProps>(
  *
  * @since 1.0.0
  */
-export const jsxs = jsx;
+export const jsxs: typeof jsx = jsx;
 
 /**
  * Fragment component
@@ -122,21 +144,25 @@ export const jsxs = jsx;
  *
  * @since 1.0.0
  */
-export const Fragment = (props: { children?: unknown }): Element => {
-  const children = normalizeChildren(props?.children);
-  if (children.length === 0) {
+export const Fragment = Component.gen(function* (Props: ComponentProps<{ children?: unknown }>) {
+  const { children } = yield* Props;
+  const normalized = normalizeChildren(children);
+  if (normalized.length === 0) {
     return empty;
   }
-  return Element.Fragment({ children });
-};
+  return Element.Fragment({ children: normalized });
+});
 
 // Re-export Element type for use in JSX
 export { Element };
 export type { ElementProps, ElementKey };
 
+// Re-export error type
+export { InvalidComponentError } from "./primitives/component.js";
+
 // JSX namespace for TypeScript - required for jsxImportSource
 export namespace JSX {
-  export type Element = import("./primitives/element.js").Element;
+  export type Element = import("./primitives/element.js").ElementWithRequirements<unknown>;
 
   export interface IntrinsicAttributes {
     readonly key?: ElementKey;

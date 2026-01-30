@@ -10,16 +10,19 @@
 import {
   Array as Arr,
   Cause,
+  Context,
   Effect,
   FiberRef,
-  Function as F,
   Layer,
   Option,
   Ref,
+  Schema,
   SubscriptionRef,
 } from "effect";
 import { type Element, text, signalElement, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
+import * as Component from "../primitives/component.js";
+import type { ComponentProps } from "../primitives/component.js";
 import { type RoutesManifest, CurrentRoutesManifest } from "./routes.js";
 import {
   resolveRoutes,
@@ -45,9 +48,32 @@ import {
 import { CurrentRouteQuery } from "./route.js";
 import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
-import { isEffectComponent } from "../primitives/component.js";
 import type { RouteComponent, RouteErrorInfo, RouteParams } from "./types.js";
 import * as Metrics from "../debug/metrics.js";
+
+// =============================================================================
+// Schema Validation for RouteComponent
+// =============================================================================
+
+/**
+ * Schema for validating RouteComponent values.
+ * A RouteComponent can be:
+ * - A Component (from Component.gen)
+ * - An Effect<Element>
+ * @internal
+ */
+const RouteComponentSchema = Schema.declare(
+  (u: unknown): u is RouteComponent => Component.isEffectComponent(u) || Effect.isEffect(u),
+  { identifier: "RouteComponent" },
+);
+
+/**
+ * Type guard to check if a RouteComponent is an Effect<Element>.
+ * Used to narrow the union type after checking !Component.isEffectComponent().
+ * @internal
+ */
+const isEffectElement = (u: RouteComponent): u is Effect.Effect<Element, unknown, unknown> =>
+  Effect.isEffect(u);
 
 // =============================================================================
 // Lazy Component Loading
@@ -60,7 +86,7 @@ import * as Metrics from "../debug/metrics.js";
  * @internal
  */
 const isComponentLoader = (value: unknown): value is () => Promise<{ default: unknown }> =>
-  typeof value === "function" && !isEffectComponent(value) && !Effect.isEffect(value);
+  typeof value === "function" && !Component.isEffectComponent(value) && !Effect.isEffect(value);
 
 /**
  * Resolve a route component — handles both direct references and loader functions.
@@ -80,12 +106,37 @@ const resolveComponent = (
     // Loader function from vite transform: () => Promise<{ default: RouteComponent }>
     return Effect.async<RouteComponent, RenderLoadError>((resume) => {
       component()
-        .then((m) => resume(Effect.succeed(F.unsafeCoerce(m.default))))
+        .then((m) => {
+          const decoded = Schema.decodeUnknownSync(RouteComponentSchema)(m.default);
+          resume(Effect.succeed(decoded));
+        })
         .catch((cause) => resume(Effect.fail(new RenderLoadError({ cause }))));
     });
   }
   // Direct component (Component.gen result or Effect<Element>)
-  return Effect.succeed(F.unsafeCoerce(component));
+  return Schema.decodeUnknown(RouteComponentSchema)(component).pipe(
+    Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
+  );
+};
+
+/**
+ * Schema for validating route params - ensures all values are strings.
+ * @internal
+ */
+const RouteParamsSchema = Schema.Record({
+  key: Schema.String,
+  value: Schema.String,
+});
+
+/**
+ * Convert decoded params to RouteParams using Schema validation.
+ * Returns the params if valid, or an empty object if validation fails.
+ * This is safe because decodeRouteParams should only produce string values.
+ * @internal
+ */
+const toRouteParams = (decodedParams: Record<string, unknown>): RouteParams => {
+  const result = Schema.decodeUnknownSync(RouteParamsSchema)(decodedParams);
+  return result;
 };
 
 // =============================================================================
@@ -121,8 +172,9 @@ export interface OutletProps {
  *
  * @since 1.0.0
  */
-export const Outlet = (props: OutletProps = {}): Element => {
-  const { routes } = props;
+export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps>) {
+  const props = yield* Props;
+  const { routes } = props ?? {};
 
   /** Build stable key from match for comparison. @internal */
   const buildMatchKey = (match: RouteMatch, queryStr: string): string =>
@@ -193,7 +245,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
      * Called for both initial render AND subsequent route changes.
      * Does NOT read router.current via Signal.get (no component re-render).
      */
-    const processRoute: Effect.Effect<void, never, never> = Effect.gen(function* () {
+    const processRoute = Effect.gen(function* () {
       // Read route WITHOUT tracking — uses SubscriptionRef directly to
       // avoid registering router.current as a component dependency.
       const route = yield* SubscriptionRef.get(router.current._ref);
@@ -220,7 +272,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
         const notFoundEl = yield* Option.match(boundaries.resolveNotFoundRoot(), {
           onNone: () => Effect.succeed(text("404 - Not Found")),
           onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {})),
+            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
         yield* Signal.set(viewSignal, notFoundEl);
         yield* applyScroll(undefined);
@@ -242,7 +294,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
         const el = yield* Option.match(boundaries.resolveForbidden(match.route), {
           onNone: () => Effect.succeed(text("403 - Forbidden")),
           onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {})),
+            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
         yield* Signal.set(viewSignal, el);
         yield* applyScroll(match.route.definition.scrollStrategy);
@@ -294,7 +346,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
         // Resolve component (handles loader functions from vite transform)
         const component = yield* resolveComponent(rawComponent);
 
-        // Render leaf component
+        // Render leaf component with route context
         const leafElement = yield* renderComponent(component, decodedParams, decodedQuery);
 
         // Collect all layouts: ancestors with layouts (root-to-leaf) + leaf layout
@@ -379,7 +431,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
         let loader: AsyncLoaderShape;
         if (Option.isNone(currentAsyncLoader)) {
           const resolvedLoading = yield* resolveComponent(nearestLoadingComp.value);
-          const loadingElement = yield* renderComponent(resolvedLoading, {});
+          const loadingElement = yield* renderComponent(resolvedLoading, {}, {});
           loader = yield* AsyncLoader.make(loadingElement, scope);
           yield* Ref.set(asyncLoaderRef, Option.some(loader));
 
@@ -422,7 +474,7 @@ export const Outlet = (props: OutletProps = {}): Element => {
   });
 
   return componentElement(() => outletEffect);
-};
+});
 
 // =============================================================================
 // Internal: Trie Matcher Builder
@@ -596,31 +648,35 @@ function renderComponent(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, unknown, never> {
-  const params: RouteParams = F.unsafeCoerce(decodedParams);
-  if (isEffectComponent(component)) {
+  const params = toRouteParams(decodedParams);
+  if (Component.isEffectComponent(component)) {
     const element = component({});
     if (element._tag === "Component") {
       const originalRun = element.run;
       return Effect.succeed(
-        componentElement(() =>
-          originalRun().pipe(
+        componentElement(() => {
+          return originalRun().pipe(
             Effect.locally(CurrentRouteParams, params),
             Effect.locally(CurrentRouteQuery, decodedQuery),
-          ),
-        ),
+          );
+        }),
       );
     }
     return Effect.succeed(element);
   }
-  const effectComp: Effect.Effect<Element, unknown, unknown> = F.unsafeCoerce(component);
-  return Effect.succeed(
-    componentElement(() =>
-      effectComp.pipe(
-        Effect.locally(CurrentRouteParams, params),
-        Effect.locally(CurrentRouteQuery, decodedQuery),
-      ),
-    ),
-  );
+  // Component is an Effect<Element> - wrap it
+  if (isEffectElement(component)) {
+    return Effect.succeed(
+      componentElement(() => {
+        return component.pipe(
+          Effect.locally(CurrentRouteParams, params),
+          Effect.locally(CurrentRouteQuery, decodedQuery),
+        );
+      }),
+    );
+  }
+  // Should never reach here if RouteComponentSchema validation is working
+  return Effect.dieMessage("Invalid RouteComponent: expected Component or Effect<Element>");
 }
 
 function renderLayout(
@@ -629,8 +685,8 @@ function renderLayout(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, unknown, never> {
-  const params: RouteParams = F.unsafeCoerce(decodedParams);
-  if (isEffectComponent(layout)) {
+  const params = toRouteParams(decodedParams);
+  if (Component.isEffectComponent(layout)) {
     const element = layout({});
     if (element._tag === "Component") {
       const originalRun = element.run;
@@ -638,28 +694,46 @@ function renderLayout(
         componentElement(() =>
           Effect.gen(function* () {
             yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-            return yield* originalRun().pipe(
+            const layoutElement = yield* originalRun().pipe(
               Effect.locally(CurrentRouteParams, params),
               Effect.locally(CurrentRouteQuery, decodedQuery),
             );
+            // If layout returns a Provide element, merge its context with parent context
+            if (layoutElement._tag === "Provide") {
+              const capturedContext = yield* Effect.context<never>();
+              const mergedContext = Context.merge(capturedContext, layoutElement.context);
+              return { ...layoutElement, context: mergedContext };
+            }
+            return layoutElement;
           }),
         ),
       );
     }
     return Effect.succeed(element);
   }
-  const effectLayout: Effect.Effect<Element, unknown, unknown> = F.unsafeCoerce(layout);
-  return Effect.succeed(
-    componentElement(() =>
-      Effect.gen(function* () {
-        yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-        return yield* effectLayout.pipe(
-          Effect.locally(CurrentRouteParams, params),
-          Effect.locally(CurrentRouteQuery, decodedQuery),
-        );
-      }),
-    ),
-  );
+  // Layout is an Effect<Element> - wrap it
+  if (isEffectElement(layout)) {
+    return Effect.succeed(
+      componentElement(() =>
+        Effect.gen(function* () {
+          yield* FiberRef.set(CurrentOutletChild, Option.some(child));
+          const layoutElement = yield* layout.pipe(
+            Effect.locally(CurrentRouteParams, params),
+            Effect.locally(CurrentRouteQuery, decodedQuery),
+          );
+          // If layout returns a Provide element, merge its context with parent context
+          if (layoutElement._tag === "Provide") {
+            const capturedContext = yield* Effect.context<never>();
+            const mergedContext = Context.merge(capturedContext, layoutElement.context);
+            return { ...layoutElement, context: mergedContext };
+          }
+          return layoutElement;
+        }),
+      ),
+    );
+  }
+  // Should never reach here if RouteComponentSchema validation is working
+  return Effect.dieMessage("Invalid RouteComponent: expected Component or Effect<Element>");
 }
 
 function renderError(
@@ -675,7 +749,7 @@ function renderError(
       path,
       reset: Signal.update(resetSignal, (n) => n + 1),
     };
-    if (isEffectComponent(errorComp)) {
+    if (Component.isEffectComponent(errorComp)) {
       const element = errorComp({});
       if (element._tag === "Component") {
         const originalRun = element.run;
@@ -685,9 +759,15 @@ function renderError(
       }
       return element;
     }
-    const effectError: Effect.Effect<Element, unknown, unknown> = F.unsafeCoerce(errorComp);
-    return componentElement(() =>
-      effectError.pipe(Effect.locally(CurrentRouteError, Option.some(errorInfo))),
+    // Error component is an Effect<Element> - wrap it
+    if (isEffectElement(errorComp)) {
+      return componentElement(() =>
+        errorComp.pipe(Effect.locally(CurrentRouteError, Option.some(errorInfo))),
+      );
+    }
+    // Should never reach here if RouteComponentSchema validation is working
+    return yield* Effect.dieMessage(
+      "Invalid RouteComponent: expected Component or Effect<Element>",
     );
   });
 }

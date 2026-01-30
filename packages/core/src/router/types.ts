@@ -16,8 +16,8 @@
  */
 import { Data, Effect, type Cause, type Ref } from "effect";
 import { Component } from "../primitives/component.js";
-import type { Element } from "../primitives/element.js";
 import type { Signal } from "../primitives/signal.js";
+import type { Element } from "../primitives/element.js";
 
 // ==========================================
 // Errors
@@ -65,6 +65,7 @@ export interface RouteMap {
 
 /**
  * Route component type - Component.gen result or Effect<Element>.
+ * Can be created with Component.gen or a plain Effect that produces an Element.
  * @since 1.0.0
  */
 export type RouteComponent =

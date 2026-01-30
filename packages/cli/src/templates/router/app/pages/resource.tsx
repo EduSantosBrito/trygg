@@ -1,10 +1,10 @@
-import { Component, Resource } from "trygg"
-import { helloResource } from "../resources/hello"
-import { Skeleton } from "../components/skeleton"
-import { ErrorView } from "../components/error-view"
+import { Component, Resource } from "trygg";
+import { helloResource } from "../resources/hello";
+import { Skeleton } from "../components/skeleton";
+import { ErrorView } from "../components/error-view";
 
 export default Component.gen(function* () {
-  const state = yield* Resource.fetch(helloResource)
+  const state = yield* Resource.fetch(helloResource);
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -40,9 +40,7 @@ export default Component.gen(function* () {
               </pre>
             </div>
           ),
-          Failure: (error) => (
-            <ErrorView error={error} onRetry={Resource.refresh(helloResource)} />
-          ),
+          Failure: (error) => <ErrorView error={error} onRetry={Resource.refresh(helloResource)} />,
         })}
       </div>
 
@@ -56,5 +54,5 @@ export default Component.gen(function* () {
         </ul>
       </div>
     </div>
-  )
-})
+  );
+});

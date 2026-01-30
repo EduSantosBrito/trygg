@@ -37,6 +37,7 @@
  * ```
  */
 import {
+  Cause,
   Context,
   Deferred,
   Effect,
@@ -390,7 +391,8 @@ const fetchInternal = <A, E, R>(
         Debug.log({
           event: "resource.fetch.error",
           key: resource.key,
-          cause: String(cause),
+          error: Cause.squash(cause),
+          error_message: String(Cause.squash(cause)),
         }),
       ),
       Effect.tapDefect((defect) =>
@@ -400,7 +402,7 @@ const fetchInternal = <A, E, R>(
           defect: String(defect),
         }),
       ),
-      Effect.matchEffect({
+      Effect.matchCauseEffect({
         onSuccess: (value) =>
           Effect.gen(function* () {
             yield* Debug.log({
@@ -409,8 +411,9 @@ const fetchInternal = <A, E, R>(
             });
             yield* Signal.set(state, Success<A, E>(value, false));
           }),
-        onFailure: (error) =>
+        onFailure: (cause) =>
           Effect.gen(function* () {
+            const error = Cause.squash(cause);
             yield* Debug.log({
               event: "resource.fetch.set_failure",
               key: resource.key,
@@ -418,14 +421,15 @@ const fetchInternal = <A, E, R>(
             });
             const prev = yield* Signal.get(state);
             const staleValue = prev._tag === "Success" ? Option.some(prev.value) : Option.none();
-            yield* Signal.set(state, Failure<A, E>(error, staleValue));
+            yield* Signal.set(state, Failure<A, E>(error as E, staleValue));
           }),
       }),
       Effect.catchAllCause((cause) =>
         Debug.log({
           event: "resource.fetch.unhandled",
           key: resource.key,
-          cause: String(cause),
+          error: Cause.squash(cause),
+          error_message: String(Cause.squash(cause)),
         }),
       ),
       Effect.ensuring(

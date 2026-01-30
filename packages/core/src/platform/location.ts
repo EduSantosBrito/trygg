@@ -31,10 +31,7 @@ export interface LocationService {
 // Tag
 // =============================================================================
 
-export class Location extends Context.Tag("trygg/platform/Location")<
-  Location,
-  LocationService
->() {}
+export class Location extends Context.Tag("trygg/platform/Location")<Location, LocationService>() {}
 
 // =============================================================================
 // Browser layer

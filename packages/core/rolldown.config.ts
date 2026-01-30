@@ -8,6 +8,7 @@ export default defineConfig({
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts",
     api: "src/api/types.ts",
+    config: "src/config.ts",
   },
   output: {
     dir: "dist",

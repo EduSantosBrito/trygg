@@ -19,6 +19,9 @@ const defaultTodoTheme = Layer.succeed(TodoTheme, {
   primaryColor: "#0066cc",
 });
 
+const ProvidedTodoInput = TodoInput.provide(defaultTodoTheme);
+const ProvidedFilterButton = FilterButton.provide(defaultTodoTheme);
+
 const TodoPage = Component.gen(function* () {
   const todos = yield* Signal.make<ReadonlyArray<Todo>>([]);
   const inputValue = yield* Signal.make("");
@@ -155,48 +158,46 @@ const TodoPage = Component.gen(function* () {
     { key: (todo) => todo.id },
   );
 
-  return yield* Effect.gen(function* () {
-    return (
-      <div className="bg-white p-6 rounded-lg border border-gray-200">
-        <h2>Todo List</h2>
-        <p className="description">
-          Double-click a todo to edit. Try adding/removing todos while editing - the edit state
-          persists!
-        </p>
+  return (
+    <div className="bg-white p-6 rounded-lg border border-gray-200">
+      <h2>Todo List</h2>
+      <p className="description">
+        Double-click a todo to edit. Try adding/removing todos while editing - the edit state
+        persists!
+      </p>
 
-        <TodoInput value={inputValue} onSubmit={addTodo} onInput={onInputChange} />
+      <ProvidedTodoInput value={inputValue} onSubmit={addTodo} onInput={onInputChange} />
 
-        <ul className="list-none p-0">{todoListElement}</ul>
+      <ul className="list-none p-0">{todoListElement}</ul>
 
-        {todosValue.length > 0 && (
-          <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100">
-            <FilterButton
-              label="All"
-              count={todosValue.length}
-              isActive={filterValue === "all"}
-              onClick={() => Signal.set(filter, "all")}
-            />
-            <FilterButton
-              label="Active"
-              count={activeCount}
-              isActive={filterValue === "active"}
-              onClick={() => Signal.set(filter, "active")}
-            />
-            <FilterButton
-              label="Completed"
-              count={completedCount}
-              isActive={filterValue === "completed"}
-              onClick={() => Signal.set(filter, "completed")}
-            />
-          </div>
-        )}
+      {todosValue.length > 0 && (
+        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100">
+          <ProvidedFilterButton
+            label="All"
+            count={todosValue.length}
+            isActive={filterValue === "all"}
+            onClick={() => Signal.set(filter, "all")}
+          />
+          <ProvidedFilterButton
+            label="Active"
+            count={activeCount}
+            isActive={filterValue === "active"}
+            onClick={() => Signal.set(filter, "active")}
+          />
+          <ProvidedFilterButton
+            label="Completed"
+            count={completedCount}
+            isActive={filterValue === "completed"}
+            onClick={() => Signal.set(filter, "completed")}
+          />
+        </div>
+      )}
 
-        {todosValue.length === 0 && (
-          <p className="text-gray-400 text-center">No todos yet. Add one above!</p>
-        )}
-      </div>
-    );
-  }).pipe(Component.provide(defaultTodoTheme));
+      {todosValue.length === 0 && (
+        <p className="text-gray-400 text-center">No todos yet. Add one above!</p>
+      )}
+    </div>
+  );
 });
 
 export default TodoPage;

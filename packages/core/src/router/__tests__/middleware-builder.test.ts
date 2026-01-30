@@ -9,20 +9,25 @@ import * as Route from "../route.js";
 class TestError extends Data.TaggedError("TestError")<{ readonly message: string }> {}
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
+import type { Component } from "../../primitives/component.js";
+
+// Helper to create dummy RouteComponent
+const makeComp = (): RouteComponent => {
+  const fn = () => empty;
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<import("effect").Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<import("effect").Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 // Dummy components
-const comp: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-});
-const errorComp: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-});
-const notFoundComp: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-});
-const forbiddenComp: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-});
+const comp = makeComp();
+const errorComp = makeComp();
+const notFoundComp = makeComp();
+const forbiddenComp = makeComp();
 
 // =============================================================================
 // Middleware chaining
@@ -278,12 +283,8 @@ describe("Boundary component storage", () => {
 
 describe("Nearest-wins boundary resolution", () => {
   it("should find child error boundary over parent", () => {
-    const parentError: RouteComponent = Object.assign(() => empty, {
-      _tag: "EffectComponent" as const,
-    });
-    const childError: RouteComponent = Object.assign(() => empty, {
-      _tag: "EffectComponent" as const,
-    });
+    const parentError = makeComp();
+    const childError = makeComp();
 
     const child = Route.make("/detail").component(comp).error(childError);
     const parent = Route.make("/users").layout(comp).error(parentError).children(child);
@@ -296,9 +297,7 @@ describe("Nearest-wins boundary resolution", () => {
   });
 
   it("should inherit parent boundary when child has none", () => {
-    const parentError: RouteComponent = Object.assign(() => empty, {
-      _tag: "EffectComponent" as const,
-    });
+    const parentError = makeComp();
 
     const child = Route.make("/detail").component(comp);
     const parent = Route.make("/users").layout(comp).error(parentError).children(child);
@@ -310,12 +309,8 @@ describe("Nearest-wins boundary resolution", () => {
   });
 
   it("should propagate forbidden boundary through nesting", () => {
-    const rootForbidden: RouteComponent = Object.assign(() => empty, {
-      _tag: "EffectComponent" as const,
-    });
-    const adminForbidden: RouteComponent = Object.assign(() => empty, {
-      _tag: "EffectComponent" as const,
-    });
+    const rootForbidden = makeComp();
+    const adminForbidden = makeComp();
 
     const billing = Route.make("/billing").component(comp);
     const admin = Route.make("/admin").layout(comp).forbidden(adminForbidden).children(billing);

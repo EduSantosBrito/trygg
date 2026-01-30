@@ -2,7 +2,7 @@
  * Generate .gitignore
  * @since 1.0.0
  */
-import { Effect } from "effect"
+import { Effect } from "effect";
 
 export const generateGitignore = (): Effect.Effect<string> =>
   Effect.succeed(`# Dependencies
@@ -37,4 +37,4 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-`)
+`);

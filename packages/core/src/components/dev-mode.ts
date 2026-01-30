@@ -16,7 +16,9 @@
  */
 import { Effect } from "effect";
 import * as Debug from "../debug/debug.js";
-import { Element, empty, componentElement } from "../primitives/element.js";
+import { empty } from "../primitives/element.js";
+import * as Component from "../primitives/component.js";
+import type { ComponentProps } from "../primitives/component.js";
 
 /**
  * Props for the DevMode component
@@ -115,29 +117,22 @@ export interface DevModeProps {
  *
  * @since 1.0.0
  */
-export const DevMode = (props: DevModeProps = {}): Element => {
-  const { filter, enabled = true, plugins } = props;
+export const DevMode = Component.gen(function* (Props: ComponentProps<DevModeProps>) {
+  const { filter, enabled = true, plugins } = yield* Props;
 
-  // If disabled, return empty immediately (no effect)
   if (!enabled) {
     return empty;
   }
 
-  // Create a component effect that enables debug on mount
-  const effect = Effect.sync(() => {
-    // Enable debug logging
+  return Effect.sync(() => {
     Debug.enable(filter);
 
-    // Register custom plugins if provided
     if (plugins !== undefined && plugins.length > 0) {
       for (const plugin of plugins) {
         Debug.registerPlugin(plugin);
       }
     }
 
-    // Return empty element (DevMode renders nothing)
     return empty;
   });
-
-  return componentElement(() => effect);
-};
+});

@@ -31,16 +31,18 @@
  * })
  * ```
  */
-import { Duration, Effect, Fiber } from "effect";
+import { Duration, Effect, Fiber, Layer, Context } from "effect";
 import {
   Element,
   intrinsic,
-  componentElement,
   normalizeChildren,
   type ElementProps,
+  componentElement,
+  provideElement,
 } from "../primitives/element.js";
+
 import * as Debug from "../debug/debug.js";
-import { get as getRouter } from "./service.js";
+import { get as getRouter, Router } from "./service.js";
 import { buildPath } from "./utils.js";
 import type { RouteParamsFor, RoutePath } from "./types.js";
 import { buildPathWithParams } from "./types.js";
@@ -156,7 +158,7 @@ export type LinkProps<Path extends RoutePath = RoutePath> =
  *
  * @since 1.0.0
  */
-export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element => {
+function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
   const {
     to,
     params,
@@ -167,119 +169,170 @@ export const Link = <Path extends RoutePath>(props: LinkProps<Path>): Element =>
     prefetch = "intent",
   } = props;
 
-  // Link needs router for click handler, but does NOT subscribe to route changes
-  const linkEffect = Effect.gen(function* () {
-    // Build resolved path (substitute params if provided)
-    const resolvedPath = params ? yield* buildPathWithParams(to, params) : to;
+  // Create the effect that builds the link element
+  // Requires Router service from parent context
+  const run = (): Effect.Effect<Element, never, Router> =>
+    Effect.gen(function* () {
+      // Build resolved path (substitute params if provided)
+      const resolvedPath = params ? yield* buildPathWithParams(to, params) : to;
 
-    // Build full href with query string
-    const href = yield* buildPath(resolvedPath, queryParams);
+      // Build full href with query string
+      const href = yield* buildPath(resolvedPath, queryParams);
 
-    const router = yield* getRouter;
+      const router = yield* getRouter;
 
-    // F-001: Prefetch state and handlers
-    let prefetchTriggered = false;
-    let hoverFiber: Fiber.RuntimeFiber<void> | null = null;
+      // F-001: Prefetch state and handlers
+      let prefetchTriggered = false;
+      let hoverFiber: Fiber.RuntimeFiber<void> | null = null;
 
-    // Trigger prefetch once (guarded by flag)
-    const triggerPrefetch = Effect.gen(function* () {
-      if (prefetchTriggered) return;
-      prefetchTriggered = true;
-      yield* router.prefetch(resolvedPath);
-    });
-
-    // Mouse enter handler - 50ms debounce via forked fiber
-    const handleMouseEnter =
-      prefetch === "intent"
-        ? Effect.fnUntraced(function* () {
-            if (prefetchTriggered) return;
-            const fiber = yield* Effect.fork(
-              Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
-                Effect.flatMap(() => triggerPrefetch),
-              ),
-            );
-            hoverFiber = fiber;
-          })
-        : undefined;
-
-    // Mouse leave handler - interrupt pending prefetch fiber
-    const handleMouseLeave =
-      prefetch === "intent"
-        ? Effect.fnUntraced(function* () {
-            if (hoverFiber !== null) {
-              yield* Fiber.interrupt(hoverFiber);
-              hoverFiber = null;
-            }
-          })
-        : undefined;
-
-    // Focus handler - immediate prefetch (accessibility)
-    const handleFocus =
-      prefetch === "intent"
-        ? Effect.fnUntraced(function* () {
-            if (prefetchTriggered) return;
-            yield* triggerPrefetch;
-          })
-        : undefined;
-
-    // Click handler - prevents default and uses router
-    // NOTE: We capture `router` from the closure instead of calling getRouter again,
-    // because event handlers run in forked fibers that don't inherit FiberRef values.
-    const handleClick = Effect.fnUntraced(function* (event: Event) {
-      // Don't intercept if modifier keys are pressed (open in new tab, etc.)
-      if (event instanceof MouseEvent) {
-        if (event.metaKey || event.ctrlKey || event.shiftKey) {
-          yield* Debug.log({
-            event: "router.link.click",
-            to_path: resolvedPath,
-            reason: "modifier key pressed, allowing default",
-          });
-          return;
-        }
-      }
-
-      yield* Debug.log({
-        event: "router.link.click",
-        to_path: resolvedPath,
-        ...(replace !== undefined ? { replace } : {}),
+      // Trigger prefetch once (guarded by flag)
+      const triggerPrefetch = Effect.gen(function* () {
+        if (prefetchTriggered) return;
+        prefetchTriggered = true;
+        yield* router.prefetch(resolvedPath);
       });
 
-      event.preventDefault();
-      const options = {
-        ...(replace !== undefined ? { replace } : {}),
-        ...(queryParams !== undefined ? { query: queryParams } : {}),
+      // Mouse enter handler - 50ms debounce via forked fiber
+      const handleMouseEnter =
+        prefetch === "intent"
+          ? Effect.fnUntraced(function* () {
+              if (prefetchTriggered) return;
+              const fiber = yield* Effect.fork(
+                Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
+                  Effect.flatMap(() => triggerPrefetch),
+                ),
+              );
+              hoverFiber = fiber;
+            })
+          : undefined;
+
+      // Mouse leave handler - interrupt pending prefetch fiber
+      const handleMouseLeave =
+        prefetch === "intent"
+          ? Effect.fnUntraced(function* () {
+              if (hoverFiber !== null) {
+                yield* Fiber.interrupt(hoverFiber);
+                hoverFiber = null;
+              }
+            })
+          : undefined;
+
+      // Focus handler - immediate prefetch (accessibility)
+      const handleFocus =
+        prefetch === "intent"
+          ? Effect.fnUntraced(function* () {
+              if (prefetchTriggered) return;
+              yield* triggerPrefetch;
+            })
+          : undefined;
+
+      // Click handler - prevents default and uses router
+      // NOTE: We capture `router` from the closure instead of calling getRouter again,
+      // because event handlers run in forked fibers that don't inherit FiberRef values.
+      const handleClick = Effect.fnUntraced(function* (event: Event) {
+        // Don't intercept if modifier keys are pressed (open in new tab, etc.)
+        if (event instanceof MouseEvent) {
+          if (event.metaKey || event.ctrlKey || event.shiftKey) {
+            yield* Debug.log({
+              event: "router.link.click",
+              to_path: resolvedPath,
+              reason: "modifier key pressed, allowing default",
+            });
+            return;
+          }
+        }
+
+        yield* Debug.log({
+          event: "router.link.click",
+          to_path: resolvedPath,
+          ...(replace !== undefined ? { replace } : {}),
+        });
+
+        event.preventDefault();
+        const options = {
+          ...(replace !== undefined ? { replace } : {}),
+          ...(queryParams !== undefined ? { query: queryParams } : {}),
+        };
+        yield* router
+          .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
+          .pipe(Effect.ignore);
+      });
+
+      // F-001: Trigger prefetch immediately for "render" strategy
+      if (prefetch === "render") {
+        yield* triggerPrefetch;
+      }
+
+      // Build props for the anchor element
+      const anchorProps: ElementProps = {
+        href,
+        onClick: handleClick,
+        ...(className ? { className } : {}),
+        ...(handleMouseEnter ? { onMouseEnter: handleMouseEnter } : {}),
+        ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
+        ...(handleFocus ? { onFocus: handleFocus } : {}),
+        // F-001: Viewport prefetch uses data attributes + global observer
+        ...(prefetch === "viewport"
+          ? {
+              "data-effectui-prefetch": "viewport",
+              "data-effectui-prefetch-path": resolvedPath,
+            }
+          : {}),
       };
-      yield* router
-        .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
-        .pipe(Effect.ignore);
+
+      const childElements = normalizeChildren(children);
+
+      return intrinsic("a", anchorProps, childElements);
     });
 
-    // F-001: Trigger prefetch immediately for "render" strategy
-    if (prefetch === "render") {
-      yield* triggerPrefetch;
-    }
+  // Return a component element that will execute the effect when rendered
+  return componentElement(run);
+}
 
-    // Build props for the anchor element
-    const anchorProps: ElementProps = {
-      href,
-      onClick: handleClick,
-      ...(className ? { className } : {}),
-      ...(handleMouseEnter ? { onMouseEnter: handleMouseEnter } : {}),
-      ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
-      ...(handleFocus ? { onFocus: handleFocus } : {}),
-      // F-001: Viewport prefetch uses data attributes + global observer
-      ...(prefetch === "viewport"
-        ? {
-            "data-effectui-prefetch": "viewport",
-            "data-effectui-prefetch-path": resolvedPath,
-          }
-        : {}),
-    };
+// Define the Link component type with Component.Type properties
+interface LinkComponent {
+  <Path extends RoutePath>(props: LinkProps<Path>): Element;
+  readonly _tag: "EffectComponent";
+  readonly _layers: ReadonlyArray<Layer.Layer.Any>;
+  readonly _requirements: ReadonlyArray<Context.Tag<any, any>>;
+  readonly _displayName: "Link";
+  provide<RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent;
+}
 
-    const childElements = normalizeChildren(children);
+// Apply Component.Type properties to Link function
+const linkComponent: LinkComponent = Object.assign(
+  <Path extends RoutePath>(props: LinkProps<Path>): Element => LinkImpl(props),
+  {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [Router] as ReadonlyArray<Context.Tag<any, any>>,
+    _displayName: "Link" as const,
+    provide: <RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent => {
+      const wrappedLink: LinkComponent = Object.assign(
+        <Path extends RoutePath>(props: LinkProps<Path>): Element => {
+          const run = (): Effect.Effect<Element, E2, RIn> =>
+            Effect.gen(function* () {
+              const context = yield* Effect.context<ROut>().pipe(
+                Effect.provide(layer),
+                Effect.map((ctx) => ctx as Context.Context<unknown>),
+              );
+              const element = LinkImpl(props);
+              return provideElement(context, element);
+            });
+          return componentElement(run);
+        },
+        {
+          _tag: "EffectComponent" as const,
+          _layers: [layer] as ReadonlyArray<Layer.Layer.Any>,
+          _requirements: [Router] as ReadonlyArray<Context.Tag<any, any>>,
+          _displayName: "Link" as const,
+          provide: linkComponent.provide,
+        },
+      );
+      return wrappedLink;
+    },
+  },
+);
 
-    return intrinsic("a", anchorProps, childElements);
-  });
-
-  return componentElement(() => linkEffect);
-};
+// Export the tagged Link component
+export { linkComponent as Link };

@@ -11,42 +11,55 @@
  * - Cleanup on navigation (different match results)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, FiberRef, Option } from "effect";
+import { Effect, FiberRef, Option, Scope } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
 import * as Signal from "../../primitives/signal.js";
 import { componentElement, text } from "../../primitives/element.js";
-import type { Element } from "../../primitives/element.js";
+import type { Element, ElementKey } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
+import type { Component } from "../../primitives/component.js";
+import type { Layer, Context } from "effect";
 
 // =============================================================================
 // Helper: Create RouteComponent
 // =============================================================================
 
 /** Create a RouteComponent that renders a text element */
-const textComp = (content: string): RouteComponent =>
-  Object.assign(() => componentElement(() => Effect.succeed(text(content))), {
+const textComp = (content: string): RouteComponent => {
+  const fn = () => componentElement(() => Effect.succeed(text(content)));
+  const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
   });
+  return comp as RouteComponent;
+};
 
 /** Create a layout RouteComponent that reads CurrentOutletChild */
-const layoutComp = (_name: string): RouteComponent =>
-  Object.assign(
-    () =>
-      componentElement(() =>
-        Effect.gen(function* () {
-          const childContent = yield* FiberRef.get(Router.CurrentOutletChild);
-          if (Option.isSome(childContent)) {
-            yield* FiberRef.set(Router.CurrentOutletChild, Option.none());
-            return childContent.value;
-          }
-          return text("empty-layout");
-        }),
-      ),
-    { _tag: "EffectComponent" as const },
-  );
+const layoutComp = (_name: string): RouteComponent => {
+  const fn = () =>
+    componentElement(() =>
+      Effect.gen(function* () {
+        const childContent = yield* FiberRef.get(Router.CurrentOutletChild);
+        if (Option.isSome(childContent)) {
+          yield* FiberRef.set(Router.CurrentOutletChild, Option.none());
+          return childContent.value;
+        }
+        return text("empty-layout");
+      }),
+    );
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 // =============================================================================
 // Helper: Run outlet effect and extract result element
@@ -58,22 +71,38 @@ const layoutComp = (_name: string): RouteComponent =>
  * (wrapping a unified viewSignal). This helper unwraps both layers to get the
  * actual content element held in the signal.
  */
-const runOutletEffect = (outletElement: Element): Effect.Effect<Element, never, Router.Router> =>
+type ComponentElement = {
+  readonly _tag: "Component";
+  readonly run: () => Effect.Effect<Element, unknown, Router.Router | Scope.Scope>;
+  readonly key: ElementKey | null;
+};
+
+const isComponentElement = (element: Element): element is ComponentElement =>
+  element._tag === "Component";
+
+const runOutletEffect = (
+  outletElement: Element,
+): Effect.Effect<Element, unknown, Router.Router | Scope.Scope> =>
   Effect.gen(function* () {
-    if (outletElement._tag !== "Component") {
+    if (!isComponentElement(outletElement)) {
       return outletElement;
     }
-    // The outlet's run thunk requires Router via getRouter
-    // We cast away unknown since we know the only requirement is Router (provided by testLayer)
-    const effect = outletElement.run() as Effect.Effect<Element, never, Router.Router>;
-    const result = yield* effect;
 
-    // The refactored outlet always returns SignalElement(viewSignal).
-    // Unwrap to get the current content element.
-    if (result._tag === "SignalElement") {
-      return yield* Signal.get(result.signal as Signal.Signal<Element>);
+    const first = yield* outletElement.run();
+
+    if (isComponentElement(first)) {
+      const second = yield* first.run();
+      if (second._tag === "SignalElement") {
+        return yield* Signal.get(second.signal);
+      }
+      return second;
     }
-    return result;
+
+    if (first._tag === "SignalElement") {
+      return yield* Signal.get(first.signal);
+    }
+
+    return first;
   });
 
 // =============================================================================
@@ -263,7 +292,7 @@ describe("Outlet - Rendering", () => {
       // Pre-set CurrentOutletChild (simulates layout setting child)
       yield* FiberRef.set(Router.CurrentOutletChild, Option.some(text("Child from parent")));
 
-      const outlet = Outlet();
+      const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
       assert.strictEqual(result._tag, "Text");
@@ -277,7 +306,7 @@ describe("Outlet - Rendering", () => {
     Effect.gen(function* () {
       yield* FiberRef.set(Router.CurrentOutletChild, Option.some(text("Child")));
 
-      const outlet = Outlet();
+      const outlet = Outlet({});
       yield* runOutletEffect(outlet);
 
       const remaining = yield* FiberRef.get(Router.CurrentOutletChild);
@@ -660,7 +689,7 @@ describe("Outlet - Implicit Manifest", () => {
       yield* FiberRef.set(Routes.CurrentRoutesManifest, Option.some(manifest));
 
       // Outlet without routes prop — should read from FiberRef
-      const outlet = Outlet();
+      const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
       assert.strictEqual(result._tag, "Component");
@@ -689,7 +718,7 @@ describe("Outlet - Implicit Manifest", () => {
 
   it.scoped("should render 'No routes configured' when neither prop nor FiberRef", () =>
     Effect.gen(function* () {
-      const outlet = Outlet();
+      const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
       assert.strictEqual(result._tag, "Text");

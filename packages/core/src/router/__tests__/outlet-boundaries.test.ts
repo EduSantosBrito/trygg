@@ -23,52 +23,49 @@ import {
 } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
+import type { Component } from "../../primitives/component.js";
+import type { Layer, Context } from "effect";
+
+// Helper to create dummy RouteComponent
+const makeComp = (): RouteComponent => {
+  const fn = () => empty;
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
+
+// Helper to create named dummy RouteComponent
+const makeNamedComp = (name: string): RouteComponent => {
+  const fn = () => empty;
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _name: name,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 // Dummy components with identifiable names
-const Comp: RouteComponent = Object.assign(() => empty, { _tag: "EffectComponent" as const });
-const Layout: RouteComponent = Object.assign(() => empty, { _tag: "EffectComponent" as const });
+const Comp = makeComp();
+const Layout = makeComp();
 
 // Named boundary components for asserting which one was resolved
-const RootError: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "RootError",
-});
-const ParentError: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ParentError",
-});
-const ChildError: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ChildError",
-});
-const RootNotFound: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "RootNotFound",
-});
-const ParentNotFound: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ParentNotFound",
-});
-const RootForbidden: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "RootForbidden",
-});
-const ParentForbidden: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ParentForbidden",
-});
-const ChildForbidden: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ChildForbidden",
-});
-const ParentLoading: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ParentLoading",
-});
-const ChildLoading: RouteComponent = Object.assign(() => empty, {
-  _tag: "EffectComponent" as const,
-  _name: "ChildLoading",
-});
+const RootError = makeNamedComp("RootError");
+const ParentError = makeNamedComp("ParentError");
+const ChildError = makeNamedComp("ChildError");
+const RootNotFound = makeNamedComp("RootNotFound");
+const ParentNotFound = makeNamedComp("ParentNotFound");
+const RootForbidden = makeNamedComp("RootForbidden");
+const ParentForbidden = makeNamedComp("ParentForbidden");
+const ChildForbidden = makeNamedComp("ChildForbidden");
+const ParentLoading = makeNamedComp("ParentLoading");
+const ChildLoading = makeNamedComp("ChildLoading");
 
 // =============================================================================
 // Error Boundary Resolution

@@ -1,8 +1,8 @@
-import { Component, Signal } from "trygg"
+import { Component, Signal } from "trygg";
 
 export default Component.gen(function* () {
-  const count = yield* Signal.make(0)
-  const increment = () => Signal.update(count, (n) => n + 1)
+  const count = yield* Signal.make(0);
+  const increment = () => Signal.update(count, (n) => n + 1);
 
   return (
     <div className="pb-8">
@@ -18,7 +18,7 @@ export default Component.gen(function* () {
         <p className="text-gray-600 mb-4">
           This is a basic counter example using Signal for reactive state.
         </p>
-        <button 
+        <button
           className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer transition-colors hover:bg-blue-700"
           onClick={increment}
         >
@@ -44,5 +44,5 @@ export default Component.gen(function* () {
         </ul>
       </div>
     </div>
-  )
-})
+  );
+});

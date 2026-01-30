@@ -1,10 +1,19 @@
+import { Layer } from "effect";
 import { Component, type ComponentProps } from "trygg";
+import { ErrorTheme } from "../../services/error-boundary";
 import { NetworkError } from "./network-error-display";
 import { ValidationError } from "./validation-error-display";
 import { UnknownError } from "./unknown-error-display";
 import { SuccessDisplay } from "./success-display";
 
 export type AppError = NetworkError | ValidationError | UnknownError;
+
+const defaultErrorTheme = Layer.succeed(ErrorTheme, {
+  errorBackground: "#ffebee",
+  errorText: "#c62828",
+  successBackground: "#e8f5e9",
+  successText: "#2e7d32",
+});
 
 export const RiskyComponent = Component.gen(function* (
   Props: ComponentProps<{ shouldFail: "network" | "validation" | "unknown" | "none" }>,
@@ -24,4 +33,4 @@ export const RiskyComponent = Component.gen(function* (
   }
 
   return <SuccessDisplay />;
-});
+}).provide(defaultErrorTheme);

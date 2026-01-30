@@ -66,14 +66,7 @@ export {
 } from "./primitives/element.js";
 
 // JSX Runtime
-export {
-  jsx,
-  jsxs,
-  Fragment,
-  type JSXProps,
-  type ComponentFunction,
-  type JSXElementType,
-} from "./jsx-runtime.js";
+export { jsx, jsxs, Fragment, type JSXProps, type JSXElementType } from "./jsx-runtime.js";
 
 // Renderer
 export {
@@ -104,7 +97,6 @@ export * as Resource from "./primitives/resource.js";
 import {
   Component as ComponentFn,
   gen as componentGen,
-  provide as componentProvide,
   isEffectComponent,
   type ComponentProps,
   type PropsMarker,
@@ -138,12 +130,10 @@ import {
  */
 type ComponentApi = typeof ComponentFn & {
   readonly gen: typeof componentGen;
-  readonly provide: typeof componentProvide;
 };
 
 export const Component: ComponentApi = Object.assign(ComponentFn, {
   gen: componentGen,
-  provide: componentProvide,
 });
 
 export declare namespace Component {
@@ -167,8 +157,11 @@ export declare namespace Component {
 export { isEffectComponent, type ComponentProps, type PropsMarker };
 
 // Components
-export { ErrorBoundary, type ErrorBoundaryProps } from "./components/error-boundary.js";
 export { DevMode, type DevModeProps } from "./components/dev-mode.js";
+
+// ErrorBoundary
+export * as ErrorBoundary from "./primitives/error-boundary.js";
+export { type ErrorHandler } from "./primitives/error-boundary.js";
 
 // Portal
 export * as Portal from "./primitives/portal.js";

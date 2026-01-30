@@ -39,7 +39,7 @@ describe("mount", () => {
       const app = Effect.succeed(<div data-testid="app">App content</div>);
       const { getByTestId } = yield* render(app);
 
-      assert.strictEqual(getByTestId("app").textContent, "App content");
+      assert.strictEqual((yield* getByTestId("app")).textContent, "App content");
     }),
   );
 
@@ -47,7 +47,7 @@ describe("mount", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="direct">Direct element</div>);
 
-      assert.strictEqual(getByTestId("direct").textContent, "Direct element");
+      assert.strictEqual((yield* getByTestId("direct")).textContent, "Direct element");
     }),
   );
 
@@ -61,12 +61,12 @@ describe("mount", () => {
       });
 
       const { getByTestId } = yield* render(app);
-      assert.strictEqual(getByTestId("reactive").textContent, "0");
+      assert.strictEqual((yield* getByTestId("reactive")).textContent, "0");
 
       yield* Signal.set(count, 5);
       yield* TestClock.adjust(20);
 
-      assert.strictEqual(getByTestId("reactive").textContent, "5");
+      assert.strictEqual((yield* getByTestId("reactive")).textContent, "5");
     }),
   );
 });
@@ -81,7 +81,7 @@ describe("Text element rendering", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="text-parent">Hello World</div>);
 
-      assert.strictEqual(getByTestId("text-parent").textContent, "Hello World");
+      assert.strictEqual((yield* getByTestId("text-parent")).textContent, "Hello World");
     }),
   );
 
@@ -89,7 +89,7 @@ describe("Text element rendering", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<span data-testid="parent">Child text</span>);
 
-      const parent = getByTestId("parent");
+      const parent = yield* getByTestId("parent");
       assert.strictEqual(parent.childNodes.length, 1);
       assert.strictEqual(parent.childNodes[0]?.nodeType, Node.TEXT_NODE);
     }),
@@ -123,7 +123,7 @@ describe("SignalText element rendering", () => {
       const textSignal = yield* Signal.make("Initial text");
       const { getByTestId } = yield* render(<div data-testid="signal-text">{textSignal}</div>);
 
-      assert.strictEqual(getByTestId("signal-text").textContent, "Initial text");
+      assert.strictEqual((yield* getByTestId("signal-text")).textContent, "Initial text");
     }),
   );
 
@@ -135,7 +135,7 @@ describe("SignalText element rendering", () => {
       yield* Signal.set(textSignal, "After");
       yield* TestClock.adjust(10);
 
-      assert.strictEqual(getByTestId("update-text").textContent, "After");
+      assert.strictEqual((yield* getByTestId("update-text")).textContent, "After");
     }),
   );
 
@@ -181,7 +181,7 @@ describe("SignalElement rendering", () => {
       const elemSignal = yield* Signal.make(<span>Initial</span>);
       const { getByTestId } = yield* render(<div data-testid="signal-elem">{elemSignal}</div>);
 
-      assert.include(getByTestId("signal-elem").innerHTML, "Initial");
+      assert.include((yield* getByTestId("signal-elem")).innerHTML, "Initial");
     }),
   );
 
@@ -193,7 +193,7 @@ describe("SignalElement rendering", () => {
       yield* Signal.set(elemSignal, <strong>After</strong>);
       yield* TestClock.adjust(10);
 
-      const container = getByTestId("swap-elem");
+      const container = yield* getByTestId("swap-elem");
       assert.include(container.innerHTML, "After");
       assert.include(container.innerHTML, "<strong>");
     }),
@@ -206,7 +206,7 @@ describe("SignalElement rendering", () => {
         <div data-testid="anchor-test">Before {elemSignal} After</div>,
       );
 
-      const container = getByTestId("anchor-test");
+      const container = yield* getByTestId("anchor-test");
       assert.include(container.textContent, "Before");
       assert.include(container.textContent, "After");
     }),
@@ -234,7 +234,41 @@ describe("SignalElement rendering", () => {
       const numSignal = yield* Signal.make(42);
       const { getByTestId } = yield* render(<div data-testid="prim-signal">{numSignal}</div>);
 
-      assert.strictEqual(getByTestId("prim-signal").textContent, "42");
+      assert.strictEqual((yield* getByTestId("prim-signal")).textContent, "42");
+    }),
+  );
+
+  it.scoped("should preserve provided context when swapping", () =>
+    Effect.gen(function* () {
+      class Theme extends Context.Tag("Theme")<Theme, { value: string }>() {}
+      const themeLayer = Layer.succeed(Theme, { value: "themed" });
+
+      const ViewA = Component.gen(function* () {
+        const theme = yield* Theme;
+        return <div data-testid="view-a">{theme.value}</div>;
+      });
+
+      const ViewB = Component.gen(function* () {
+        const theme = yield* Theme;
+        return <div data-testid="view-b">{theme.value}</div>;
+      });
+
+      const viewSignal = yield* Signal.make<Element>(<ViewA />);
+
+      const App = Component.gen(function* () {
+        return <div data-testid="context-swap">{viewSignal}</div>;
+      }).provide(themeLayer);
+
+      const { getByTestId, queryByTestId } = yield* render(<App />);
+
+      assert.strictEqual((yield* getByTestId("view-a")).textContent, "themed");
+      assert.isNull(queryByTestId("view-b"));
+
+      yield* Signal.set(viewSignal, <ViewB />);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("view-b")).textContent, "themed");
+      assert.isNull(queryByTestId("view-a"));
     }),
   );
 });
@@ -249,7 +283,7 @@ describe("Intrinsic element rendering", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<article data-testid="tag-test" />);
 
-      assert.strictEqual(getByTestId("tag-test").tagName, "ARTICLE");
+      assert.strictEqual((yield* getByTestId("tag-test")).tagName, "ARTICLE");
     }),
   );
 
@@ -259,7 +293,7 @@ describe("Intrinsic element rendering", () => {
         <div data-testid="attr-test" className="my-class" id="my-id" />,
       );
 
-      const el = getByTestId("attr-test");
+      const el = yield* getByTestId("attr-test");
       assert.strictEqual(el.className, "my-class");
       assert.strictEqual(el.id, "my-id");
     }),
@@ -274,7 +308,7 @@ describe("Intrinsic element rendering", () => {
         </ul>,
       );
 
-      const ul = getByTestId("children-test");
+      const ul = yield* getByTestId("children-test");
       const lis = ul.querySelectorAll("li");
       assert.strictEqual(lis.length, 2);
     }),
@@ -330,7 +364,7 @@ describe("Component element rendering", () => {
 
       const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("comp-output").textContent, "Component content");
+      assert.strictEqual((yield* getByTestId("comp-output")).textContent, "Component content");
     }),
   );
 
@@ -344,7 +378,7 @@ describe("Component element rendering", () => {
 
       const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("tracked").textContent, "0");
+      assert.strictEqual((yield* getByTestId("tracked")).textContent, "0");
     }),
   );
 
@@ -358,12 +392,12 @@ describe("Component element rendering", () => {
       });
 
       const { getByTestId } = yield* render(<Counter />);
-      assert.strictEqual(getByTestId("rerender").textContent, "0");
+      assert.strictEqual((yield* getByTestId("rerender")).textContent, "0");
 
       yield* Signal.set(count, 10);
       yield* TestClock.adjust(20);
 
-      assert.strictEqual(getByTestId("rerender").textContent, "10");
+      assert.strictEqual((yield* getByTestId("rerender")).textContent, "10");
     }),
   );
 
@@ -404,7 +438,7 @@ describe("Component element rendering", () => {
         </div>,
       );
 
-      const content = getByTestId("comp-anchor").textContent;
+      const content = (yield* getByTestId("comp-anchor")).textContent;
       assert.include(content, "Before");
       assert.include(content, "Component");
       assert.include(content, "After");
@@ -476,7 +510,7 @@ describe("Component element rendering", () => {
 
         // The inner component's effect should have run
         assert.isTrue(innerEffectRan, "Inner component effect should run");
-        assert.strictEqual(getByTestId("inner").textContent, "Inner content");
+        assert.strictEqual((yield* getByTestId("inner")).textContent, "Inner content");
       }),
   );
 
@@ -513,7 +547,7 @@ describe("Component element rendering", () => {
 
       // Initial render
       assert.strictEqual(innerRenderCount, 1, "Inner should render once initially");
-      assert.strictEqual(getByTestId("inner").textContent, "Value: 0");
+      assert.strictEqual((yield* getByTestId("inner")).textContent, "Value: 0");
 
       // Change outer signal
       yield* Signal.set(outerSignal, 42);
@@ -521,7 +555,7 @@ describe("Component element rendering", () => {
 
       // Inner should re-render
       assert.strictEqual(innerRenderCount, 2, "Inner should re-render when signal changes");
-      assert.strictEqual(getByTestId("inner").textContent, "Value: 42");
+      assert.strictEqual((yield* getByTestId("inner")).textContent, "Value: 42");
     }),
   );
 });
@@ -540,9 +574,9 @@ describe("Fragment element rendering", () => {
         </div>,
       );
 
-      assert.include(getByTestId("frag-parent").textContent, "One");
-      assert.include(getByTestId("frag-parent").textContent, "Two");
-      assert.include(getByTestId("frag-parent").textContent, "Three");
+      assert.include((yield* getByTestId("frag-parent")).textContent, "One");
+      assert.include((yield* getByTestId("frag-parent")).textContent, "Two");
+      assert.include((yield* getByTestId("frag-parent")).textContent, "Three");
     }),
   );
 
@@ -556,7 +590,7 @@ describe("Fragment element rendering", () => {
         </div>,
       );
 
-      const parent = getByTestId("no-wrapper");
+      const parent = yield* getByTestId("no-wrapper");
       const spans = parent.querySelectorAll(".frag-child");
       assert.strictEqual(spans.length, 1);
       assert.strictEqual(spans[0]?.parentElement, parent);
@@ -571,7 +605,7 @@ describe("Fragment element rendering", () => {
         </div>,
       );
 
-      const parent = getByTestId("empty-frag");
+      const parent = yield* getByTestId("empty-frag");
       assert.isTrue(parent.childNodes.length >= 0);
     }),
   );
@@ -610,7 +644,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="classname" className="my-class" />);
 
-      assert.strictEqual(getByTestId("classname").className, "my-class");
+      assert.strictEqual((yield* getByTestId("classname")).className, "my-class");
     }),
   );
 
@@ -620,7 +654,7 @@ describe("Props application", () => {
         <div data-testid="style" style={{ color: "red", fontSize: "16px" }} />,
       );
 
-      const el = getByTestId("style");
+      const el = yield* getByTestId("style");
       assert.strictEqual(el.style.color, "red");
       assert.strictEqual(el.style.fontSize, "16px");
     }),
@@ -630,7 +664,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<label data-testid="htmlfor" htmlFor="input-id" />);
 
-      assert.strictEqual(getByTestId("htmlfor").getAttribute("for"), "input-id");
+      assert.strictEqual((yield* getByTestId("htmlfor")).getAttribute("for"), "input-id");
     }),
   );
 
@@ -640,7 +674,7 @@ describe("Props application", () => {
         <input data-testid="checked" type="checkbox" checked={true} />,
       );
 
-      assert.isTrue((getByTestId("checked") as HTMLInputElement).checked);
+      assert.isTrue(((yield* getByTestId("checked")) as HTMLInputElement).checked);
     }),
   );
 
@@ -650,7 +684,7 @@ describe("Props application", () => {
         <input data-testid="value" type="text" value="hello" />,
       );
 
-      assert.strictEqual((getByTestId("value") as HTMLInputElement).value, "hello");
+      assert.strictEqual(((yield* getByTestId("value")) as HTMLInputElement).value, "hello");
     }),
   );
 
@@ -658,7 +692,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<button data-testid="disabled" disabled={true} />);
 
-      assert.isTrue((getByTestId("disabled") as HTMLButtonElement).disabled);
+      assert.isTrue(((yield* getByTestId("disabled")) as HTMLButtonElement).disabled);
     }),
   );
 
@@ -666,7 +700,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="hidden" hidden={true} />);
 
-      assert.isTrue(getByTestId("hidden").hidden);
+      assert.isTrue((yield* getByTestId("hidden")).hidden);
     }),
   );
 
@@ -674,7 +708,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="data-attr" data-custom="value" />);
 
-      assert.strictEqual(getByTestId("data-attr").getAttribute("data-custom"), "value");
+      assert.strictEqual((yield* getByTestId("data-attr")).getAttribute("data-custom"), "value");
     }),
   );
 
@@ -682,7 +716,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<button data-testid="aria" aria-label="Close" />);
 
-      assert.strictEqual(getByTestId("aria").getAttribute("aria-label"), "Close");
+      assert.strictEqual((yield* getByTestId("aria")).getAttribute("aria-label"), "Close");
     }),
   );
 
@@ -692,7 +726,7 @@ describe("Props application", () => {
         <input data-testid="bool" type="text" readonly={true} required={true} />,
       );
 
-      const input = getByTestId("bool") as HTMLInputElement;
+      const input = (yield* getByTestId("bool")) as HTMLInputElement;
       assert.isTrue(input.readOnly);
       assert.isTrue(input.required);
     }),
@@ -712,12 +746,12 @@ describe("Signal props", () => {
         <div data-testid="sig-class" className={classSignal} />,
       );
 
-      assert.strictEqual(getByTestId("sig-class").className, "initial");
+      assert.strictEqual((yield* getByTestId("sig-class")).className, "initial");
 
       yield* Signal.set(classSignal, "updated");
       yield* TestClock.adjust(10);
 
-      assert.strictEqual(getByTestId("sig-class").className, "updated");
+      assert.strictEqual((yield* getByTestId("sig-class")).className, "updated");
     }),
   );
 
@@ -728,12 +762,12 @@ describe("Signal props", () => {
         <input data-testid="sig-value" type="text" value={valueSignal} />,
       );
 
-      assert.strictEqual((getByTestId("sig-value") as HTMLInputElement).value, "initial");
+      assert.strictEqual(((yield* getByTestId("sig-value")) as HTMLInputElement).value, "initial");
 
       yield* Signal.set(valueSignal, "updated");
       yield* TestClock.adjust(10);
 
-      assert.strictEqual((getByTestId("sig-value") as HTMLInputElement).value, "updated");
+      assert.strictEqual(((yield* getByTestId("sig-value")) as HTMLInputElement).value, "updated");
     }),
   );
 
@@ -744,12 +778,12 @@ describe("Signal props", () => {
         <input data-testid="sig-checked" type="checkbox" checked={checkedSignal} />,
       );
 
-      assert.isFalse((getByTestId("sig-checked") as HTMLInputElement).checked);
+      assert.isFalse(((yield* getByTestId("sig-checked")) as HTMLInputElement).checked);
 
       yield* Signal.set(checkedSignal, true);
       yield* TestClock.adjust(10);
 
-      assert.isTrue((getByTestId("sig-checked") as HTMLInputElement).checked);
+      assert.isTrue(((yield* getByTestId("sig-checked")) as HTMLInputElement).checked);
     }),
   );
 
@@ -762,12 +796,12 @@ describe("Signal props", () => {
         </button>,
       );
 
-      assert.isFalse((getByTestId("sig-disabled") as HTMLButtonElement).disabled);
+      assert.isFalse(((yield* getByTestId("sig-disabled")) as HTMLButtonElement).disabled);
 
       yield* Signal.set(disabledSignal, true);
       yield* TestClock.adjust(10);
 
-      assert.isTrue((getByTestId("sig-disabled") as HTMLButtonElement).disabled);
+      assert.isTrue(((yield* getByTestId("sig-disabled")) as HTMLButtonElement).disabled);
     }),
   );
 
@@ -776,12 +810,12 @@ describe("Signal props", () => {
       const dataSignal = yield* Signal.make("initial");
       const { getByTestId } = yield* render(<div data-testid="sig-data" data-value={dataSignal} />);
 
-      assert.strictEqual(getByTestId("sig-data").getAttribute("data-value"), "initial");
+      assert.strictEqual((yield* getByTestId("sig-data")).getAttribute("data-value"), "initial");
 
       yield* Signal.set(dataSignal, "updated");
       yield* TestClock.adjust(10);
 
-      assert.strictEqual(getByTestId("sig-data").getAttribute("data-value"), "updated");
+      assert.strictEqual((yield* getByTestId("sig-data")).getAttribute("data-value"), "updated");
     }),
   );
 
@@ -825,7 +859,7 @@ describe("Event handlers", () => {
         </button>,
       );
 
-      getByTestId("event-btn").click();
+      (yield* getByTestId("event-btn")).click();
       yield* TestClock.adjust(10);
 
       assert.isNotNull(eventReceived);
@@ -848,7 +882,7 @@ describe("Event handlers", () => {
         </button>,
       );
 
-      getByTestId("effect-btn").click();
+      (yield* getByTestId("effect-btn")).click();
       yield* TestClock.adjust(10);
 
       assert.isTrue(handlerExecuted);
@@ -873,7 +907,7 @@ describe("Event handlers", () => {
         />,
       );
 
-      const input = getByTestId("multi-event");
+      const input = yield* getByTestId("multi-event");
       input.click();
       input.focus();
       yield* TestClock.adjust(10);
@@ -1063,7 +1097,7 @@ describe("Re-render behavior", () => {
       const { getByTestId } = yield* render(<Parent />);
 
       assert.strictEqual(childRenderCount, 1);
-      assert.strictEqual(getByTestId("child").textContent, "100");
+      assert.strictEqual((yield* getByTestId("child")).textContent, "100");
 
       yield* Signal.set(parentTrigger, 1);
       yield* TestClock.adjust(20);
@@ -1106,7 +1140,7 @@ describe("Re-render behavior", () => {
       );
 
       // Initial state: Route A is rendered
-      assert.strictEqual(getByTestId("route-a").textContent, "Route A Content");
+      assert.strictEqual((yield* getByTestId("route-a")).textContent, "Route A Content");
       assert.strictEqual(container.querySelectorAll("[data-testid]").length, 2); // outlet + route-a
 
       // Navigate to Route B
@@ -1123,7 +1157,7 @@ describe("Re-render behavior", () => {
         container.querySelector("[data-testid='route-b']"),
         "Route B should be in DOM",
       );
-      assert.strictEqual(getByTestId("route-b").textContent, "Route B Content");
+      assert.strictEqual((yield* getByTestId("route-b")).textContent, "Route B Content");
 
       // Should have exactly 2 test elements: outlet + route-b
       assert.strictEqual(
@@ -1496,14 +1530,14 @@ describe("Renderer error handling", () => {
       const { getByTestId } = yield* render(<ConditionalErrorComponent />);
 
       // Initial render succeeds
-      assert.strictEqual(getByTestId("content").textContent, "Working content");
+      assert.strictEqual((yield* getByTestId("content")).textContent, "Working content");
 
       // Trigger re-render that will fail
       yield* Signal.set(shouldError, true);
       yield* TestClock.adjust(20);
 
       // Old content should be preserved (not removed)
-      assert.strictEqual(getByTestId("content").textContent, "Working content");
+      assert.strictEqual((yield* getByTestId("content")).textContent, "Working content");
     }),
   );
 
@@ -1526,14 +1560,14 @@ describe("Renderer error handling", () => {
       const { getByTestId } = yield* render(<App />);
 
       // Initial render shows working view
-      assert.strictEqual(getByTestId("view").textContent, "Working view");
+      assert.strictEqual((yield* getByTestId("view")).textContent, "Working view");
 
       // Trigger swap to error view
       yield* Signal.set(viewSignal, "error");
       yield* TestClock.adjust(20);
 
       // Old content should be preserved
-      assert.strictEqual(getByTestId("view").textContent, "Working view");
+      assert.strictEqual((yield* getByTestId("view")).textContent, "Working view");
     }),
   );
 
@@ -1556,19 +1590,19 @@ describe("Renderer error handling", () => {
 
       // Initial render (errors = 0) succeeds
       assert.strictEqual(renderCount, 1);
-      assert.strictEqual(getByTestId("retry").textContent, "0");
+      assert.strictEqual((yield* getByTestId("retry")).textContent, "0");
 
       // First re-render (errors = 1) fails - old content preserved
       yield* Signal.set(errorCount, 1);
       yield* TestClock.adjust(20);
       assert.strictEqual(renderCount, 2);
-      assert.strictEqual(getByTestId("retry").textContent, "0"); // Old content preserved
+      assert.strictEqual((yield* getByTestId("retry")).textContent, "0"); // Old content preserved
 
       // Second re-render (errors = 2) succeeds - subscription still works
       yield* Signal.set(errorCount, 2);
       yield* TestClock.adjust(20);
       assert.strictEqual(renderCount, 3);
-      assert.strictEqual(getByTestId("retry").textContent, "2"); // New content rendered
+      assert.strictEqual((yield* getByTestId("retry")).textContent, "2"); // New content rendered
     }),
   );
 
@@ -1621,13 +1655,13 @@ describe("Provide element", () => {
         return <span data-testid="ctx-child">{ctx.value}</span>;
       });
 
-      const component = Effect.gen(function* () {
+      const Parent = Component.gen(function* () {
         return <Child />;
-      }).pipe(Component.provide(Layer.succeed(TestCtx, { value: "provided" })));
+      }).provide(Layer.succeed(TestCtx, { value: "provided" }));
 
-      const { getByTestId } = yield* render(component);
+      const { getByTestId } = yield* render(<Parent />);
 
-      assert.strictEqual(getByTestId("ctx-child").textContent, "provided");
+      assert.strictEqual((yield* getByTestId("ctx-child")).textContent, "provided");
     }),
   );
 
@@ -1648,13 +1682,13 @@ describe("Provide element", () => {
         );
       });
 
-      const component = Effect.gen(function* () {
+      const TopLevel = Component.gen(function* () {
         return <MiddleChild />;
-      }).pipe(Component.provide(Layer.succeed(DeepCtx, { nested: "deep-value" })));
+      }).provide(Layer.succeed(DeepCtx, { nested: "deep-value" }));
 
-      const { getByTestId } = yield* render(component);
+      const { getByTestId } = yield* render(<TopLevel />);
 
-      assert.strictEqual(getByTestId("deep").textContent, "deep-value");
+      assert.strictEqual((yield* getByTestId("deep")).textContent, "deep-value");
     }),
   );
 });

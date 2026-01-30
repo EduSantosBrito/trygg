@@ -2,7 +2,7 @@
  * Generate tsconfig.json
  * @since 1.0.0
  */
-import { Effect } from "effect"
+import { Effect } from "effect";
 
 export const generateTsConfig = (): Effect.Effect<string> =>
   Effect.succeed(`{
@@ -23,4 +23,4 @@ export const generateTsConfig = (): Effect.Effect<string> =>
   },
   "include": ["app/**/*.ts", "app/**/*.tsx"]
 }
-`)
+`);

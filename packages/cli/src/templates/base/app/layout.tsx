@@ -1,8 +1,8 @@
-import "../styles.css"
-import { Effect } from "effect"
-import { Component, DevMode } from "trygg"
-import * as Router from "trygg/router"
-import { ApiClientLive } from "trygg/api"
+import "../styles.css";
+import { Effect } from "effect";
+import { Component, DevMode } from "trygg";
+import * as Router from "trygg/router";
+import { ApiClientLive } from "trygg/api";
 
 export default Component.gen(function* () {
   return Effect.succeed(
@@ -49,6 +49,6 @@ export default Component.gen(function* () {
           </div>
         </main>
       </body>
-    </html>
-  ).pipe(Component.provide(ApiClientLive))
-})
+    </html>,
+  ).pipe(Component.provide(ApiClientLive));
+});

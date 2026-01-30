@@ -79,6 +79,14 @@ export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNot
 }
 
 /**
+ * Error thrown when a component anchor has no parent element
+ * @since 1.0.0
+ */
+export class ComponentAnchorError extends Data.TaggedError("ComponentAnchorError")<{
+  readonly message: string;
+}> {}
+
+/**
  * Render context passed through the rendering tree
  * @since 1.0.0
  */
@@ -748,7 +756,9 @@ const renderElement = (
           // Get the actual parent from the anchor's current location
           const actualParent = anchor.parentNode;
           if (actualParent === null) {
-            throw new Error("Component anchor has no parent - component may have been unmounted");
+            return yield* new ComponentAnchorError({
+              message: "Component anchor has no parent - component may have been unmounted",
+            });
           }
           const result = yield* renderElement(
             childElement,
@@ -1430,12 +1440,11 @@ const renderElement = (
 
               // Call onError callback if provided
               if (onError !== null) {
-                yield* Effect.provide(onError(Cause.squash(cause)), context ?? emptyContext);
+                yield* Effect.provide(onError(cause), context ?? emptyContext);
               }
 
               // Compute fallback element
-              const fallbackElement =
-                typeof fallback === "function" ? fallback(Cause.squash(cause)) : fallback;
+              const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
 
               // Render fallback with a new scope (no error handler - don't catch fallback errors)
               const fallbackScope = yield* Scope.make();
@@ -1491,12 +1500,11 @@ const renderElement = (
 
           // Call onError callback if provided
           if (onError !== null) {
-            yield* Effect.provide(onError(Cause.squash(cause)), context ?? emptyContext);
+            yield* Effect.provide(onError(cause), context ?? emptyContext);
           }
 
           // Compute fallback element
-          const fallbackElement =
-            typeof fallback === "function" ? fallback(Cause.squash(cause)) : fallback;
+          const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
 
           // Render fallback with a new scope (no error handler - don't catch fallback errors)
           const fallbackScope = yield* Scope.make();

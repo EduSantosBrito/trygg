@@ -107,7 +107,11 @@ const isSignal = (value: unknown): value is Signal.Signal<unknown> => {
 export const make = (
   content: Element,
   options?: PortalOptions,
-): Effect.Effect<Component.Type<PortalProps>, PortalTargetNotFoundError, Scope.Scope> =>
+): Effect.Effect<
+  Component.Type<PortalProps, never, Scope.Scope>,
+  PortalTargetNotFoundError,
+  Scope.Scope
+> =>
   Effect.gen(function* () {
     let resolvedTarget: HTMLElement;
 

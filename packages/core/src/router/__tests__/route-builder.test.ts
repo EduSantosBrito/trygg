@@ -12,11 +12,25 @@ import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
+import type { Component } from "../../primitives/component.js";
+import type { Context } from "effect";
+
+// Helper to create dummy RouteComponent
+const makeComp = (): RouteComponent => {
+  const fn = () => empty;
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 // Dummy components for testing - return empty Element
-const component: RouteComponent = Object.assign(() => empty, { _tag: "EffectComponent" as const });
-const layout: RouteComponent = Object.assign(() => empty, { _tag: "EffectComponent" as const });
-const loading: RouteComponent = Object.assign(() => empty, { _tag: "EffectComponent" as const });
+const component = makeComp();
+const layout = makeComp();
+const loading = makeComp();
 
 // =============================================================================
 // Route.make - Create route with path

@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
-import effectUI from "trygg/vite-plugin";
+import { trygg } from "trygg/vite-plugin";
+import tryggConfig from "./trygg.config";
 
 export default defineConfig({
-  plugins: [effectUI()],
+  plugins: [trygg(tryggConfig)],
 });

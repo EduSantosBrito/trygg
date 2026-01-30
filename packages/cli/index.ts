@@ -5,18 +5,23 @@
  * Usage: bun create trygg-app [project-name] [options]
  *        bunx create-trygg-app [project-name] [options]
  */
-import { Args, Command, Options } from "@effect/cli"
-import { BunContext, BunRuntime } from "@effect/platform-bun"
-import { FileSystem } from "@effect/platform"
-import { Effect, Layer } from "effect"
-import * as clack from "@clack/prompts"
-import * as path from "node:path"
-import { promptProjectOptions, type ProjectOptions } from "./src/prompts"
-import { scaffoldProject } from "./src/scaffold"
-import { detectPackageManager, getInstallCommand, getRunCommand } from "./src/detect-pm"
-import { spawn } from "node:child_process"
-import { PromptsLive } from "./src/adapters/prompts-live"
-import { Prompts } from "./src/ports/prompts"
+import { Args, Command, Options } from "@effect/cli";
+import { BunContext, BunRuntime } from "@effect/platform-bun";
+import { FileSystem } from "@effect/platform";
+import { Effect, Layer, Option } from "effect";
+import * as clack from "@clack/prompts";
+import * as path from "node:path";
+import { promptProjectOptions, type ProjectOptions } from "./src/prompts";
+import { scaffoldProject } from "./src/scaffold";
+import { detectPackageManager, getInstallCommand, getRunCommand } from "./src/detect-pm";
+import { spawn } from "node:child_process";
+import { PromptsLive } from "./src/adapters/prompts-live";
+import {
+  Prompts,
+  InvalidProjectNameError,
+  DirectoryExistsError,
+  InstallFailedError,
+} from "./src/ports/prompts";
 
 // =============================================================================
 // CLI Definition
@@ -25,13 +30,15 @@ import { Prompts } from "./src/ports/prompts"
 const projectName = Args.text({ name: "project-name" }).pipe(
   Args.withDescription("Name of the project to create"),
   Args.optional,
-)
+);
 
 const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
-  Options.withDescription("Accept all defaults (platform: bun, output: server, vcs: git, install: yes)"),
-)
+  Options.withDescription(
+    "Accept all defaults (platform: bun, output: server, tailwind: yes, vcs: git, install: yes)",
+  ),
+);
 
-const TEMPLATES_DIR = path.join(import.meta.dir, "src", "templates")
+const TEMPLATES_DIR = path.join(import.meta.dir, "src", "templates");
 
 const create = Command.make(
   "create-trygg-app",
@@ -41,46 +48,46 @@ const create = Command.make(
   },
   (args) =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const prompts = yield* Prompts
+      const fs = yield* FileSystem.FileSystem;
+      const prompts = yield* Prompts;
 
-      clack.intro("create-trygg-app v0.2.0")
+      clack.intro("create-trygg-app v0.2.0");
 
       // Get project name (args.projectName is Option<string>)
-      let name: string
-      if (args.projectName._tag === "Some") {
-        name = args.projectName.value
+      let name: string;
+      if (Option.isSome(args.projectName)) {
+        name = args.projectName.value;
       } else {
         name = yield* prompts.text({
           message: "Project name:",
           placeholder: "my-app",
           validate: (value) => {
-            if (!value) return "Project name is required"
+            if (!value) return "Project name is required";
             if (!/^[a-zA-Z0-9-_]+$/.test(value)) {
-              return "Use only letters, numbers, hyphens, and underscores"
+              return "Use only letters, numbers, hyphens, and underscores";
             }
-            return undefined
+            return undefined;
           },
-        })
+        });
       }
 
       // Validate project name
       if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
-        clack.cancel(`Invalid project name "${name}"`)
-        return yield* Effect.fail("Invalid project name")
+        clack.cancel(`Invalid project name "${name}"`);
+        return yield* new InvalidProjectNameError({ name });
       }
 
-      const targetDir = path.resolve(process.cwd(), name)
+      const targetDir = path.resolve(process.cwd(), name);
 
       // Check if directory exists
-      const exists = yield* fs.exists(targetDir)
+      const exists = yield* fs.exists(targetDir);
       if (exists) {
-        clack.cancel(`Directory "${name}" already exists`)
-        return yield* Effect.fail("Directory exists")
+        clack.cancel(`Directory "${name}" already exists`);
+        return yield* new DirectoryExistsError({ path: targetDir });
       }
 
       // Gather options
-      let options: ProjectOptions
+      let options: ProjectOptions;
 
       if (args.yes) {
         // Use all defaults
@@ -88,10 +95,9 @@ const create = Command.make(
           name,
           platform: "bun",
           output: "server",
-          includeTailwind: false,
           vcs: "git",
           install: true,
-        }
+        };
         clack.note(
           "Using defaults:\n" +
             "  Platform: bun\n" +
@@ -99,75 +105,75 @@ const create = Command.make(
             "  VCS: git\n" +
             "  Install: yes",
           "Configuration",
-        )
+        );
       } else {
         // Interactive mode
-        options = yield* promptProjectOptions(name)
+        options = yield* promptProjectOptions(name);
       }
 
       // Scaffold the project
-      const spinner = clack.spinner()
-      spinner.start("Creating project...")
-      yield* scaffoldProject(targetDir, options, TEMPLATES_DIR)
-      spinner.stop("Project created")
+      const spinner = clack.spinner();
+      spinner.start("Creating project...");
+      yield* scaffoldProject(targetDir, options, TEMPLATES_DIR);
+      spinner.stop("Project created");
 
       // Initialize VCS
       if (options.vcs !== "none") {
-        spinner.start(`Initializing ${options.vcs}...`)
-        const vcsCommand = options.vcs === "git" ? "git init" : "jj git init"
+        spinner.start(`Initializing ${options.vcs}...`);
+        const vcsCommand = options.vcs === "git" ? "git init" : "jj git init";
         yield* Effect.async<void>((resume) => {
-          const proc = spawn(vcsCommand, { cwd: targetDir, shell: true })
+          const proc = spawn(vcsCommand, { cwd: targetDir, shell: true });
           proc.on("close", (code) => {
             if (code === 0) {
-              spinner.stop(`Initialized ${options.vcs} repository`)
-              resume(Effect.void)
+              spinner.stop(`Initialized ${options.vcs} repository`);
+              resume(Effect.void);
             } else {
-              spinner.stop(`Failed to initialize ${options.vcs}`)
-              resume(Effect.void)
+              spinner.stop(`Failed to initialize ${options.vcs}`);
+              resume(Effect.void);
             }
-          })
-        })
+          });
+        });
       }
 
       // Install dependencies
       if (options.install) {
-        const pm = yield* detectPackageManager()
-        const installCmd = getInstallCommand(pm)
+        const pm = yield* detectPackageManager();
+        const installCmd = getInstallCommand(pm);
 
-        spinner.start(`Installing dependencies with ${pm}...`)
-        yield* Effect.async<void>((resume) => {
-          const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" })
+        spinner.start(`Installing dependencies with ${pm}...`);
+        yield* Effect.async<void, InstallFailedError>((resume) => {
+          const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" });
           proc.on("close", (code) => {
             if (code === 0) {
-              spinner.stop("Dependencies installed")
-              resume(Effect.void)
+              spinner.stop("Dependencies installed");
+              resume(Effect.void);
             } else {
-              spinner.stop("Failed to install dependencies")
-              resume(Effect.fail("Install failed"))
+              spinner.stop("Failed to install dependencies");
+              resume(Effect.fail(new InstallFailedError()));
             }
-          })
-        })
+          });
+        });
       }
 
       // Success message
-      const pm = yield* detectPackageManager()
-      const runCmd = getRunCommand(pm)
+      const pm = yield* detectPackageManager();
+      const runCmd = getRunCommand(pm);
 
-      const nextSteps = []
-      nextSteps.push(`cd ${name}`)
+      const nextSteps = [];
+      nextSteps.push(`cd ${name}`);
       if (!options.install) {
-        nextSteps.push(getInstallCommand(pm))
+        nextSteps.push(getInstallCommand(pm));
       }
-      nextSteps.push(`${runCmd} dev       → http://localhost:5173`)
-      nextSteps.push(`${runCmd} build     → dist/`)
+      nextSteps.push(`${runCmd} dev       → http://localhost:5173`);
+      nextSteps.push(`${runCmd} build     → dist/`);
       if (options.output === "server") {
-        nextSteps.push(`${runCmd} start     → http://localhost:3000`)
+        nextSteps.push(`${runCmd} start     → http://localhost:3000`);
       }
 
-      clack.note(nextSteps.join("\n"), "Next steps")
-      clack.outro(`Done! Created ${name}`)
+      clack.note(nextSteps.join("\n"), "Next steps");
+      clack.outro(`Done! Created ${name}`);
     }),
-).pipe(Command.withDescription("Create a new effect-ui project"))
+).pipe(Command.withDescription("Create a new effect-ui project"));
 
 // =============================================================================
 // Run
@@ -176,9 +182,9 @@ const create = Command.make(
 const cli = Command.run(create, {
   name: "create-trygg-app",
   version: "0.2.0",
-})
+});
 
 // Application layer with prompts
-const AppLayer = Layer.mergeAll(BunContext.layer, PromptsLive)
+const AppLayer = Layer.mergeAll(BunContext.layer, PromptsLive);
 
-cli(process.argv).pipe(Effect.provide(AppLayer), BunRuntime.runMain)
+cli(process.argv).pipe(Effect.provide(AppLayer), BunRuntime.runMain);

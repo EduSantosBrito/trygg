@@ -5,16 +5,18 @@
 import { assert, describe, it } from "@effect/vitest";
 import { FileSystem } from "@effect/platform";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Effect, Schema, Scope } from "effect";
+import { Cause, Effect, Exit, Schema, Scope } from "effect";
 import * as path from "path";
 import {
-  effectUI,
+  trygg,
   extractParamNames,
   generateParamType,
   generateApiTypes,
   parseRoutes,
   generateRouteTypes,
   transformRoutesForBuild,
+  validateApiPlatform,
+  PluginValidationError,
   schemaToType,
   parseSchemaStruct,
   resolveRoutePaths,
@@ -51,9 +53,9 @@ describe("Vite Plugin", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: Plugin initialization
   // ─────────────────────────────────────────────────────────────────────────────
-  describe("effectUI function", () => {
+  describe("trygg function", () => {
     it("should return a valid Vite plugin", () => {
-      const plugin = effectUI();
+      const plugin = trygg();
 
       assert.isDefined(plugin);
       assert.isString(plugin.name);
@@ -90,7 +92,7 @@ describe("Vite Plugin", () => {
     });
 
     it("should set esbuild jsx to automatic mode", () => {
-      const plugin = effectUI();
+      const plugin = trygg();
       const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
       const result = configHook({}, { command: "serve", mode: "development" });
       const config = Schema.decodeUnknownSync(EsbuildConfigSchema)(result);
@@ -99,7 +101,7 @@ describe("Vite Plugin", () => {
     });
 
     it("should configure optimizeDeps for trygg", () => {
-      const plugin = effectUI();
+      const plugin = trygg();
       const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
       const result = configHook({}, { command: "serve", mode: "development" });
       const config = Schema.decodeUnknownSync(OptimizeDepsConfigSchema)(result);
@@ -187,6 +189,57 @@ describe("Vite Plugin", () => {
         assert.isTrue(types.includes("ApiClientService"));
         assert.isTrue(types.includes("export class ApiClient"));
         assert.isTrue(types.includes("export const ApiClientLive:"));
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: API platform guard
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("validateApiPlatform", () => {
+    it.scoped("should reject platform-node imports when platform is bun", () =>
+      Effect.gen(function* () {
+        const dir = yield* makeTempDir({
+          "app/api.ts":
+            'import { NodeHttpServer } from "@effect/platform-node"\nexport const Api = {}',
+        });
+        const apiPath = path.join(dir, "app", "api.ts");
+
+        const exit = yield* Effect.exit(validateApiPlatform(apiPath, "bun"));
+
+        if (Exit.isSuccess(exit)) {
+          throw new Error("Expected failure but got success");
+        }
+
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof PluginValidationError)) {
+          throw new Error(`Expected PluginValidationError but got ${error}`);
+        }
+
+        assert.strictEqual(error.reason, "InvalidStructure");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    it.scoped("should allow platform-node imports when platform is node", () =>
+      Effect.gen(function* () {
+        const dir = yield* makeTempDir({
+          "app/api.ts":
+            'import { NodeHttpServer } from "@effect/platform-node"\nexport const Api = {}',
+        });
+        const apiPath = path.join(dir, "app", "api.ts");
+
+        yield* validateApiPlatform(apiPath, "node");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    it.scoped("should allow bun platform when no node imports", () =>
+      Effect.gen(function* () {
+        const dir = yield* makeTempDir({
+          "app/api.ts": "export const Api = {}",
+        });
+        const apiPath = path.join(dir, "app", "api.ts");
+
+        yield* validateApiPlatform(apiPath, "bun");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
@@ -601,15 +654,15 @@ Route.make("/users").error(ErrorComp).loading(LoadingComp)
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: Plugin options
   // ─────────────────────────────────────────────────────────────────────────────
-  describe("effectUI with options", () => {
+  describe("trygg with options", () => {
     it("should accept platform and output options", () => {
-      const plugin = effectUI({ platform: "bun", output: "server" });
+      const plugin = trygg({ platform: "bun", output: "server" });
       assert.isDefined(plugin);
       assert.strictEqual(plugin.name, "trygg");
     });
 
     it("should work without options", () => {
-      const plugin = effectUI();
+      const plugin = trygg();
       assert.isDefined(plugin);
       assert.strictEqual(plugin.name, "trygg");
     });

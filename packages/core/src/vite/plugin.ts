@@ -4,7 +4,7 @@
  *
  * Fully Effect-native implementation using:
  * - Data.TaggedError for yieldable errors
- * - FileSystem service from @effect/platform-node
+ * - FileSystem service via DevPlatform abstraction
  * - Match for exhaustive pattern matching
  * - Schema for dynamic validation
  * - Effect.forEach with concurrency for parallel operations
@@ -13,17 +13,17 @@
  * ```ts
  * // vite.config.ts
  * import { defineConfig } from "vite"
- * import { effectUI } from "trygg/vite"
+ * import { trygg } from "trygg/vite-plugin"
+ * import tryggConfig from "./trygg.config"
  *
  * export default defineConfig({
- *   plugins: [effectUI()]
+ *   plugins: [trygg(tryggConfig)]
  * })
  * ```
  */
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
 import { FileSystem } from "@effect/platform";
-import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import {
   Array,
   Data,
@@ -40,7 +40,10 @@ import {
   Scope,
 } from "effect";
 import * as nodePath from "node:path";
-import { ApiInitError, type ApiMiddleware, createApiMiddleware } from "../api/middleware.js";
+import type { TryggConfig, Platform } from "../config.js";
+import { DevPlatform, type DevApiHandle, ApiInitError, ImportError } from "./dev-platform.js";
+import { NodeDevPlatformLive } from "./dev-platform-node.js";
+import { BunDevPlatformLive } from "./dev-platform-bun.js";
 
 // =============================================================================
 // Constants
@@ -175,14 +178,21 @@ const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
 });
 
 /**
- * Plugin layer combining FileSystem, consola logger, and debug-level minimum.
+ * Create plugin layer for given platform.
+ * Uses DevPlatform to get platform-specific FileSystem.
  * @internal
  */
-const PluginLayer = Layer.mergeAll(
-  NodeFileSystemLayer,
-  Logger.replace(Logger.defaultLogger, PluginLogger),
-  Logger.minimumLogLevel(LogLevel.Debug),
-);
+const makePluginLayer = (
+  platform: Platform,
+): Layer.Layer<FileSystem.FileSystem | DevPlatform, ImportError> => {
+  const platformLayer = platform === "bun" ? BunDevPlatformLive : NodeDevPlatformLive;
+
+  return Layer.mergeAll(
+    platformLayer,
+    Logger.replace(Logger.defaultLogger, PluginLogger),
+    Logger.minimumLogLevel(LogLevel.Debug),
+  );
+};
 
 /**
  * Log validation errors with details.
@@ -199,6 +209,25 @@ const logValidationErrors = (e: PluginValidationErrors): Effect.Effect<void> =>
   ).pipe(Effect.asVoid);
 
 /**
+ * Log single validation error.
+ * @internal
+ */
+const logValidationError = (e: PluginValidationError): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    yield* Effect.logError(e.message);
+    if (e.details) {
+      yield* Effect.logDebug(`  ${e.details}`);
+    }
+  });
+
+/**
+ * Log file system errors.
+ * @internal
+ */
+const logFileSystemError = (e: PluginFileSystemError): Effect.Effect<void> =>
+  Effect.logError(`File system ${e.operation} failed for ${e.path}`);
+
+/**
  * Log parse error.
  * @internal
  */
@@ -209,10 +238,14 @@ const logParseError = (e: PluginParseError): Effect.Effect<void> =>
  * Log API validation errors (handles both validation and parse errors).
  * @internal
  */
-const logApiValidationError = (e: PluginValidationErrors | PluginParseError): Effect.Effect<void> =>
+const logApiValidationError = (
+  e: PluginValidationErrors | PluginValidationError | PluginParseError | PluginFileSystemError,
+): Effect.Effect<void> =>
   Match.value(e).pipe(
     Match.tag("PluginValidationErrors", logValidationErrors),
+    Match.tag("PluginValidationError", logValidationError),
     Match.tag("PluginParseError", logParseError),
+    Match.tag("PluginFileSystemError", logFileSystemError),
     Match.exhaustive,
   );
 
@@ -696,6 +729,12 @@ const collectImports = (
 /** Escape special regex characters in a string. @internal */
 const escapeRegex = (str: string): string => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+const nodePlatformImportPattern =
+  /\b(?:import|export)\s+(?:[^"']+from\s+)?["']@effect\/platform-node(?:\/[^"']*)?["']/;
+
 // =============================================================================
 // File System Operations
 // =============================================================================
@@ -785,6 +824,45 @@ export const validateApiExports = (
     }
   });
 
+/**
+ * Validate that api.ts does not import @effect/platform-node when platform is bun.
+ * @since 1.0.0
+ */
+export const validateApiPlatform = (
+  apiPath: string,
+  platform: Platform,
+): Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (platform !== "bun") {
+      return;
+    }
+
+    const hasApi = yield* pathExists(apiPath);
+    if (!hasApi) {
+      return;
+    }
+
+    const fs = yield* FileSystem.FileSystem;
+    const source = yield* fs.readFileString(apiPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginFileSystemError({
+            operation: "read",
+            path: apiPath,
+            cause,
+          }),
+      ),
+    );
+
+    const stripped = stripComments(source);
+    if (nodePlatformImportPattern.test(stripped)) {
+      return yield* PluginValidationError.invalidStructure(
+        '@effect/platform-node imports are not allowed in app/api.ts when platform is "bun"',
+        apiPath,
+      );
+    }
+  });
+
 // =============================================================================
 // Code Generation
 // =============================================================================
@@ -814,7 +892,7 @@ import { Context } from "effect"
 
 export interface ApiClient extends never {}
 export class ApiClient extends Context.Tag("trygg/ApiClient")<ApiClient, never>() {}
-export const ApiClientLive: Layer.Layer<ApiClient> = Layer.empty as any
+export const ApiClientLive: Layer.Layer<ApiClient> = Layer.fail(ApiClient, new Error("No API file found"))
 `;
     }
 
@@ -855,7 +933,7 @@ export const generateClientModule = (
     const hasApi = yield* pathExists(apiPath);
 
     if (!hasApi) {
-    return `// Auto-generated by trygg
+      return `// Auto-generated by trygg
 import { Context } from "effect"
 
 // Export for compatibility
@@ -953,8 +1031,8 @@ export const generateServerEntry = (
         : 'import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"';
 
     const platformServerLayer =
-      platform === "bun" 
-        ? "BunHttpServer.layer({ port: PORT, hostname: HOST })" 
+      platform === "bun"
+        ? "BunHttpServer.layer({ port: PORT, hostname: HOST })"
         : "NodeHttpServer.layer({ port: PORT, hostname: HOST })";
 
     const platformRuntime = platform === "bun" ? "BunRuntime" : "NodeRuntime";
@@ -1125,7 +1203,7 @@ ${platformRuntime}.runMain(
  * )
  *
  * // Plugin factory becomes a thin wrapper:
- * export const effectUI = (): Plugin => {
+ * export const trygg = (): Plugin => {
  *   const runtime = Effect.runSync(
  *     Layer.toRuntime(Layer.mergeAll(PluginServiceLive, PluginLayer))
  *   )
@@ -1140,27 +1218,32 @@ ${platformRuntime}.runMain(
  */
 /**
  * Plugin options for trygg.
+ * Uses TryggConfig for type-safe configuration.
  * @since 1.0.0
  */
-export interface EffectUIOptions {
-  /**
-   * Platform runtime for the production server.
-   * @default "node"
-   */
-  readonly platform?: "node" | "bun";
+export interface TryggOptions extends TryggConfig {}
 
-  /**
-   * Output mode for the build.
-   * - "server": Self-contained server with API routes (default)
-   * - "static": Static files only (no server)
-   * @default "server"
-   */
-  readonly output?: "server" | "static";
-}
+/**
+ * Create trygg Vite plugin with platform-aware dev API.
+ *
+ * @example
+ * ```ts
+ * import { trygg } from "trygg/vite-plugin"
+ * import tryggConfig from "./trygg.config"
+ *
+ * export default defineConfig({
+ *   plugins: [trygg(tryggConfig)]
+ * })
+ * ```
+ *
+ * @since 1.0.0
+ */
+export const trygg = (tryggConfig?: TryggConfig): Plugin => {
+  const platform = tryggConfig?.platform ?? "node";
+  const output = tryggConfig?.output ?? "server";
 
-export const effectUI = (options?: EffectUIOptions): Plugin => {
-  const platform = options?.platform ?? "node";
-  const output = options?.output ?? "server";
+  // Create platform-specific plugin layer
+  const pluginLayer = makePluginLayer(platform);
 
   let config: ResolvedConfig;
   // Initialize with process.cwd() as fallback for early hooks
@@ -1236,7 +1319,7 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
           if (routesFilePath !== undefined) {
             yield* Effect.logDebug(`  Routes: ${routesFilePath}`);
           }
-        }).pipe(Effect.provide(PluginLayer)),
+        }).pipe(Effect.provide(pluginLayer)),
       );
     },
 
@@ -1244,6 +1327,9 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
       const effect = Effect.gen(function* () {
         // Extract runtime for use in non-Effect callbacks (Vite boundary)
         const runtime = yield* Effect.runtime<FileSystem.FileSystem>();
+
+        // Get DevPlatform service
+        const devPlatform = yield* DevPlatform;
 
         const routeTypesPath = nodePath.join(generatedDir, "routes.d.ts");
         const apiTypesPath = nodePath.join(generatedDir, "api-types.ts");
@@ -1257,7 +1343,8 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
             catch: (err) => new PluginParseError({ message: String(err), input: path }),
           });
 
-        // Validate API exports
+        // Validate API imports and exports
+        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
         yield* validateApiExports(apiPath, loadModule).pipe(Effect.tapError(logApiValidationError));
 
         // Generate route types from routes file
@@ -1284,18 +1371,17 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
           Effect.annotateLogs("style", "success"),
         );
 
-        let apiMiddleware: Option.Option<ApiMiddleware> = Option.none();
+        let apiHandle: Option.Option<DevApiHandle> = Option.none();
         let apiScope: Option.Option<Scope.CloseableScope> = Option.none();
         const hasApi = yield* pathExists(apiPath);
 
         if (hasApi) {
-          // Create scope for middleware lifecycle
+          // Create scope for API lifecycle
           const scope = yield* Scope.make();
 
-          // Create middleware with scope - use Scope.extend to bind finalizers to scope
-          const mw = yield* Scope.extend(
-            createApiMiddleware({
-              // Use Effect-based loadModule with error mapping
+          // Create dev API using platform-specific implementation
+          const handle = yield* Scope.extend(
+            devPlatform.createDevApi({
               loadApiModule: () =>
                 loadModule(apiPath).pipe(
                   Effect.mapError(
@@ -1307,11 +1393,12 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
                   ),
                 ),
               onError: (error) => Effect.logError(`API handler error: ${error}`),
+              baseUrl: "",
             }),
             scope,
           );
 
-          apiMiddleware = Option.some(mw);
+          apiHandle = Option.some(handle);
           apiScope = Option.some(scope);
 
           yield* Effect.logInfo("API handlers loaded").pipe(
@@ -1342,8 +1429,8 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
                 yield* writeFileSafe(apiTypesPath, content);
                 yield* Effect.logDebug("Regenerated api-types.ts");
 
-                if (Option.isSome(apiMiddleware)) {
-                  yield* apiMiddleware.value.reload;
+                if (Option.isSome(apiHandle)) {
+                  yield* apiHandle.value.reload;
                   yield* Effect.logDebug("Reloaded API handlers");
                 }
               }
@@ -1354,12 +1441,13 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
         // Vite boundary: close scope when server closes (triggers finalizer)
         server.httpServer?.on("close", () => {
           if (Option.isSome(apiScope)) {
-            void Runtime.runPromise(runtime)(Scope.close(apiScope.value, Exit.void));
+            // Properly fork the scope close effect to avoid floating effects
+            Runtime.runFork(runtime)(Scope.close(apiScope.value, Exit.void));
           }
         });
 
-        if (Option.isSome(apiMiddleware)) {
-          server.middlewares.use(apiMiddleware.value.middleware);
+        if (Option.isSome(apiHandle)) {
+          server.middlewares.use(apiHandle.value.middleware);
         }
 
         return () => {
@@ -1387,7 +1475,7 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
             void Runtime.runPromise(runtime)(effect);
           });
         };
-      }).pipe(Effect.provide(PluginLayer));
+      }).pipe(Effect.provide(pluginLayer));
 
       return await Effect.runPromise(effect);
     },
@@ -1408,7 +1496,7 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
         if (!appDir) {
           throw new Error("[trygg] Plugin not properly initialized - configResolved not called");
         }
-        return Effect.runPromise(generateClientModule(appDir).pipe(Effect.provide(PluginLayer)));
+        return Effect.runPromise(generateClientModule(appDir).pipe(Effect.provide(pluginLayer)));
       }
       return null;
     },
@@ -1420,7 +1508,7 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
       if (config.command !== "build") return null;
 
       const result = await Effect.runPromise(
-        transformRoutesForBuild(code, id).pipe(Effect.provide(PluginLayer)),
+        transformRoutesForBuild(code, id).pipe(Effect.provide(pluginLayer)),
       );
       return result !== code ? result : null;
     },
@@ -1428,6 +1516,9 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
     async buildStart() {
       const effect = Effect.gen(function* () {
         const entryPath = nodePath.join(generatedDir, "entry.tsx");
+        const apiPath = nodePath.join(appDir, "api.ts");
+
+        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
 
         // Always regenerate entry when routes file is configured
         const hasEntry = yield* pathExists(entryPath);
@@ -1442,15 +1533,14 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
           yield* writeFileSafe(indexPath, generateHtmlTemplate());
 
           // Warn if API exists with static output
-          const apiPath = nodePath.join(appDir, "api.ts");
           const hasApi = yield* pathExists(apiPath);
           if (hasApi && output === "static") {
             yield* Effect.logWarning(
-              "⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: \"server\".",
+              '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
             );
           }
         }
-      }).pipe(Effect.provide(PluginLayer));
+      }).pipe(Effect.provide(pluginLayer));
 
       await Effect.runPromise(effect);
     },
@@ -1501,11 +1591,11 @@ export const effectUI = (options?: EffectUIOptions): Plugin => {
         yield* Effect.logInfo("Server build complete").pipe(
           Effect.annotateLogs("style", "success"),
         );
-      }).pipe(Effect.provide(PluginLayer));
+      }).pipe(Effect.provide(pluginLayer));
 
       await Effect.runPromise(effect);
     },
   };
 };
 
-export default effectUI;
+export default trygg;

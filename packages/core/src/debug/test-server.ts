@@ -231,10 +231,7 @@ export interface TestServerService {
  * TestServer service tag
  * @since 1.0.0
  */
-export class TestServer extends Context.Tag("trygg/TestServer")<
-  TestServer,
-  TestServerService
->() {}
+export class TestServer extends Context.Tag("trygg/TestServer")<TestServer, TestServerService>() {}
 
 // ============================================================================
 // llms.txt Content

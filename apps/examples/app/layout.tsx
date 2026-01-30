@@ -5,13 +5,13 @@
  * Docs-style layout with fixed sidebar navigation and scrollable content area.
  */
 import "../styles.css";
-import { Effect } from "effect";
+
 import { Component, DevMode } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
 
 export default Component.gen(function* () {
-  return Effect.succeed(
+  return (
     <html lang="en">
       <head>
         <title>trygg examples</title>
@@ -107,6 +107,6 @@ export default Component.gen(function* () {
           </div>
         </main>
       </body>
-    </html>,
-  ).pipe(Component.provide(ApiClientLive));
-});
+    </html>
+  );
+}).provide(ApiClientLive);

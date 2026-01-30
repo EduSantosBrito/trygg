@@ -1106,6 +1106,7 @@ const formatDetails = (event: DebugEvent): string => {
   if ("trigger" in e) parts.push(`trigger:${e.trigger}`);
   if ("reason" in e) parts.push(`${e.reason}`);
   if ("value" in e) parts.push(`val:${JSON.stringify(e.value)}`);
+  if ("error_message" in e) parts.push(`err:${e.error_message}`);
 
   return parts.length > 0 ? parts.join("  ") : "";
 };

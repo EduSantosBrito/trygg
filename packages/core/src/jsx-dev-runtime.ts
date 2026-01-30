@@ -5,23 +5,12 @@
  * This module is used in development mode and provides additional debugging
  * information for better error messages and stack traces.
  */
-import {
-  jsx,
-  Fragment,
-  Element,
-  type JSXProps,
-  type JSXElementType,
-  type ElementKey,
-} from "./jsx-runtime.js";
+import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
+import type { ComponentElementWithRequirements } from "./primitives/element.js";
+import type { Component as ComponentType } from "./primitives/component.js";
 
 export { jsx, Fragment, Element };
-export type {
-  JSXProps,
-  ComponentFunction,
-  JSXElementType,
-  ElementProps,
-  ElementKey,
-} from "./jsx-runtime.js";
+export type { JSXProps, JSXElementType, ElementProps, ElementKey } from "./jsx-runtime.js";
 
 /**
  * Source location info passed by the compiler in development mode
@@ -42,18 +31,23 @@ interface JSXSource {
  *
  * @since 1.0.0
  */
-export const jsxDEV = <Props extends JSXProps>(
-  type: JSXElementType<Props>,
+type ElementFor<Type> =
+  Type extends ComponentType.Type<any, any, infer R>
+    ? ComponentElementWithRequirements<R>
+    : Element;
+
+export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
+  type: Type,
   props: Props | null,
   key?: ElementKey,
   _isStaticChildren?: boolean,
   _source?: JSXSource,
   _self?: unknown,
-): Element => {
+): ElementFor<Type> => {
   // For now, just delegate to the production jsx
   // In the future, we could store source info for better error messages
-  return jsx(type, props, key);
+  return jsx(type, props, key) as ElementFor<Type>;
 };
 
 // Also export jsxs for dev mode (same as jsxDEV)
-export const jsxsDEV = jsxDEV;
+export const jsxsDEV: typeof jsxDEV = jsxDEV;

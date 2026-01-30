@@ -2,24 +2,23 @@
  * Interactive prompts using Effect and @clack/prompts
  * @since 1.0.0
  */
-import { Effect } from "effect"
-import { Prompts } from "./ports/prompts"
+import { Effect } from "effect";
+import { Prompts } from "./ports/prompts";
 
 export interface ProjectOptions {
-  readonly name: string
-  readonly platform: "node" | "bun"
-  readonly output: "server" | "static"
-  readonly includeTailwind: boolean
-  readonly vcs: "git" | "jj" | "none"
-  readonly install: boolean
+  readonly name: string;
+  readonly platform: "node" | "bun";
+  readonly output: "server" | "static";
+  readonly vcs: "git" | "jj" | "none";
+  readonly install: boolean;
 }
 
 /**
  * Run interactive prompts to gather project configuration
  */
-export const promptProjectOptions = (name: string): Effect.Effect<ProjectOptions, never, Prompts> =>
+export const promptProjectOptions = (name: string) =>
   Effect.gen(function* () {
-    const prompts = yield* Prompts
+    const prompts = yield* Prompts;
 
     // Platform selection
     const platform = yield* prompts.select({
@@ -28,7 +27,7 @@ export const promptProjectOptions = (name: string): Effect.Effect<ProjectOptions
         { value: "bun" as const, label: "Bun", hint: "recommended" },
         { value: "node" as const, label: "Node" },
       ],
-    })
+    });
 
     // Output mode selection
     const output = yield* prompts.select({
@@ -41,13 +40,7 @@ export const promptProjectOptions = (name: string): Effect.Effect<ProjectOptions
         },
         { value: "static" as const, label: "Static", hint: "client-only, CDN deploy" },
       ],
-    })
-
-    // Tailwind
-    const includeTailwind = yield* prompts.confirm({
-      message: "Include Tailwind CSS v4?",
-      initialValue: false,
-    })
+    });
 
     // VCS selection
     const vcs = yield* prompts.select({
@@ -57,20 +50,19 @@ export const promptProjectOptions = (name: string): Effect.Effect<ProjectOptions
         { value: "jj" as const, label: "Jujutsu (jj)" },
         { value: "none" as const, label: "None" },
       ],
-    })
+    });
 
     // Install dependencies
     const install = yield* prompts.confirm({
       message: "Install dependencies?",
       initialValue: true,
-    })
+    });
 
     return {
       name,
       platform,
       output,
-      includeTailwind,
       vcs,
       install,
-    }
-  })
+    };
+  });

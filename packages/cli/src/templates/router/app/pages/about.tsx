@@ -1,5 +1,5 @@
-import { Component } from "trygg"
-import * as Router from "trygg/router"
+import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 export default Component.gen(function* () {
   return (
@@ -8,5 +8,5 @@ export default Component.gen(function* () {
       <p>Built with trygg.</p>
       <Router.Link to="/">← Home</Router.Link>
     </main>
-  )
-})
+  );
+});

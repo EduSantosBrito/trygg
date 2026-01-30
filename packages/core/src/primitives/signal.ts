@@ -10,6 +10,7 @@
  */
 import {
   Cause,
+  Data,
   Effect,
   Equal,
   Exit,
@@ -22,6 +23,14 @@ import {
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
+
+/**
+ * Error raised when Signal module is not properly initialized.
+ * @since 1.0.0
+ */
+export class SignalInitError extends Data.TaggedError("SignalInitError")<{
+  readonly message: string;
+}> {}
 
 /**
  * Callback type for signal change notifications.
@@ -926,8 +935,12 @@ export const suspend: <Props, E>(
     // Return a ComponentType that renders the signal as a SignalElement
     // This allows usage as <SuspendedView /> in JSX
     const suspendedComponent = (_props: {}): SuspendElement => {
-      if (!_signalElementImpl) {
-        throw new Error("Signal module not initialized - element.ts must be imported first");
+      if (!_signalElementImpl || !_textElementImpl) {
+        // Return a text element with error message instead of throwing
+        // This avoids synchronous throw while still surfacing the error
+        return _textElementImpl!({
+          content: "[Error: Signal module not initialized - element.ts must be imported first]",
+        });
       }
       return _signalElementImpl(viewSignal as Signal<SuspendElement>) as SuspendElement;
     };
@@ -984,12 +997,23 @@ export const _setEachImpl = (impl: EachFn): void => {
 // Lazy reference to signalElement to break circular dependency
 let _signalElementImpl: ((signal: Signal<Element>) => Element) | null = null;
 
+// Lazy reference to Text constructor to break circular dependency
+let _textElementImpl: ((props: { content: string }) => Element) | null = null;
+
 /**
  * @internal
  * Set the implementation of signalElement (called by Element.ts to break circular dependency)
  */
 export const _setSignalElementImpl = (impl: (signal: Signal<Element>) => Element): void => {
   _signalElementImpl = impl;
+};
+
+/**
+ * @internal
+ * Set the Text constructor (called by Element.ts to break circular dependency)
+ */
+export const _setTextElementImpl = (impl: (props: { content: string }) => Element): void => {
+  _textElementImpl = impl;
 };
 
 /**
@@ -1026,13 +1050,17 @@ export const _setSignalElementImpl = (impl: (signal: Signal<Element>) => Element
  */
 export const each: EachFn = (source, renderFn, options) => {
   if (_eachImpl === null) {
-    throw new Error(
-      "Signal.each is not initialized.\n\n" +
-        "This usually means you imported Signal directly from 'trygg/Signal' " +
-        "before the main 'trygg' module was loaded.\n\n" +
-        "Fix: Import from 'trygg' instead:\n" +
-        "  import { Signal } from 'trygg'\n\n" +
-        "Or ensure 'trygg' is imported before using Signal.each.",
+    // Return an Effect that fails instead of throwing synchronously
+    return Effect.fail(
+      new SignalInitError({
+        message:
+          "Signal.each is not initialized.\n\n" +
+          "This usually means you imported Signal directly from 'trygg/Signal' " +
+          "before the main 'trygg' module was loaded.\n\n" +
+          "Fix: Import from 'trygg' instead:\n" +
+          "  import { Signal } from 'trygg'\n\n" +
+          "Or ensure 'trygg' is imported before using Signal.each.",
+      }),
     );
   }
   return _eachImpl(source, renderFn, options);

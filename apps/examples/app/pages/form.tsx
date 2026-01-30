@@ -124,48 +124,46 @@ const FormPage = Component.gen(function* () {
       yield* Signal.set(submitted, false);
     });
 
-  return Effect.gen(function* () {
-    return (
-      <div className="bg-white p-6 rounded-lg border border-gray-200">
-        <h2 className="m-0 mb-1 text-2xl">Form Validation</h2>
-        <p className="text-gray-500 m-0 mb-6 text-[0.95rem]">
-          Typed errors, validation Effects, form state
-        </p>
+  return (
+    <div className="bg-white p-6 rounded-lg border border-gray-200">
+      <h2 className="m-0 mb-1 text-2xl">Form Validation</h2>
+      <p className="text-gray-500 m-0 mb-6 text-[0.95rem]">
+        Typed errors, validation Effects, form state
+      </p>
 
-        {submittedValue ? (
-          <SuccessMessage email={emailValueForDisplay} onReset={resetForm} />
-        ) : (
-          <form onSubmit={onSubmit}>
-            <FormField
-              label="Email"
-              type="email"
-              value={email}
-              error={emailErrorValue}
-              placeholder="Enter your email"
-              onInput={onEmailChange}
-            />
+      {submittedValue ? (
+        <SuccessMessage email={emailValueForDisplay} onReset={resetForm} />
+      ) : (
+        <form onSubmit={onSubmit}>
+          <FormField
+            label="Email"
+            type="email"
+            value={email}
+            error={emailErrorValue}
+            placeholder="Enter your email"
+            onInput={onEmailChange}
+          />
 
-            <FormField
-              label="Password"
-              type="password"
-              value={password}
-              error={passwordErrorValue}
-              placeholder="Enter your password"
-              hint="Must be at least 8 characters with at least one number"
-              onInput={onPasswordChange}
-            />
+          <FormField
+            label="Password"
+            type="password"
+            value={password}
+            error={passwordErrorValue}
+            placeholder="Enter your password"
+            hint="Must be at least 8 characters with at least one number"
+            onInput={onPasswordChange}
+          />
 
-            <button
-              type="submit"
-              className="px-4 py-2 text-base border border-blue-600 rounded bg-blue-600 text-white cursor-pointer transition-colors hover:bg-blue-700"
-            >
-              Submit
-            </button>
-          </form>
-        )}
-      </div>
-    );
-  }).pipe(Component.provide(defaultFormTheme));
-});
+          <button
+            type="submit"
+            className="px-4 py-2 text-base border border-blue-600 rounded bg-blue-600 text-white cursor-pointer transition-colors hover:bg-blue-700"
+          >
+            Submit
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}).provide(defaultFormTheme);
 
 export default FormPage;

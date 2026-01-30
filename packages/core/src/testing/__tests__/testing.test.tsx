@@ -187,12 +187,12 @@ describe("Testing Utilities", () => {
 
         const result = yield* render(component);
 
-        assert.strictEqual(result.getByTestId("counter").textContent, "0");
+        assert.strictEqual((yield* result.getByTestId("counter")).textContent, "0");
 
         yield* Signal.set(count, 5);
         yield* TestClock.adjust(10);
 
-        assert.strictEqual(result.getByTestId("counter").textContent, "5");
+        assert.strictEqual((yield* result.getByTestId("counter")).textContent, "5");
       }),
     );
   });
@@ -209,7 +209,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByText("Hello World");
+        const found = yield* result.getByText("Hello World");
         assert.strictEqual(found.tagName, "SPAN");
       }),
     );
@@ -224,7 +224,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByText("Nested");
+        const found = yield* result.getByText("Nested");
         assert.strictEqual(found.tagName, "SPAN");
       }),
     );
@@ -239,16 +239,17 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByText("Direct text");
+        const found = yield* result.getByText("Direct text");
         assert.strictEqual(found.tagName, "P");
       }),
     );
 
-    it.scoped("should throw ElementNotFoundError when text not found", () =>
+    it.scoped("should fail with ElementNotFoundError when text not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Existing</div>);
 
-        assert.throws(() => result.getByText("Not found"), ElementNotFoundError);
+        const exit = yield* Effect.exit(result.getByText("Not found"));
+        assert.strictEqual(exit._tag, "Failure");
       }),
     );
 
@@ -260,7 +261,8 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        assert.throws(() => result.getByText("Hello"), ElementNotFoundError);
+        const exit = yield* Effect.exit(result.getByText("Hello"));
+        assert.strictEqual(exit._tag, "Failure");
       }),
     );
 
@@ -272,7 +274,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByText("Trimmed");
+        const found = yield* result.getByText("Trimmed");
         assert.strictEqual(found.tagName, "SPAN");
       }),
     );
@@ -318,17 +320,18 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByTestId("submit-btn");
+        const found = yield* result.getByTestId("submit-btn");
         assert.strictEqual(found.tagName, "BUTTON");
         assert.strictEqual(found.textContent, "Submit");
       }),
     );
 
-    it.scoped("should throw ElementNotFoundError when testid not found", () =>
+    it.scoped("should fail with ElementNotFoundError when testid not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No testid</div>);
 
-        assert.throws(() => result.getByTestId("missing"), ElementNotFoundError);
+        const exit = yield* Effect.exit(result.getByTestId("missing"));
+        assert.strictEqual(exit._tag, "Failure");
       }),
     );
 
@@ -344,7 +347,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByTestId("nested");
+        const found = yield* result.getByTestId("nested");
         assert.strictEqual(found.tagName, "SPAN");
         assert.strictEqual(found.textContent, "Deep");
       }),
@@ -391,7 +394,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("dialog");
+        const found = yield* result.getByRole("dialog");
         assert.strictEqual(found.textContent, "Modal");
       }),
     );
@@ -404,7 +407,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("button");
+        const found = yield* result.getByRole("button");
         assert.strictEqual(found.tagName, "BUTTON");
       }),
     );
@@ -417,7 +420,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("link");
+        const found = yield* result.getByRole("link");
         assert.strictEqual(found.tagName, "A");
       }),
     );
@@ -430,7 +433,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("textbox");
+        const found = yield* result.getByRole("textbox");
         assert.strictEqual(found.tagName, "INPUT");
       }),
     );
@@ -443,7 +446,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("heading");
+        const found = yield* result.getByRole("heading");
         assert.strictEqual(found.tagName, "H1");
       }),
     );
@@ -456,7 +459,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("navigation");
+        const found = yield* result.getByRole("navigation");
         assert.strictEqual(found.tagName, "NAV");
       }),
     );
@@ -469,7 +472,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("main");
+        const found = yield* result.getByRole("main");
         assert.strictEqual(found.tagName, "MAIN");
       }),
     );
@@ -482,7 +485,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("list");
+        const found = yield* result.getByRole("list");
         assert.strictEqual(found.tagName, "UL");
       }),
     );
@@ -495,7 +498,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("listitem");
+        const found = yield* result.getByRole("listitem");
         assert.strictEqual(found.tagName, "LI");
       }),
     );
@@ -508,16 +511,17 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.getByRole("table");
+        const found = yield* result.getByRole("table");
         assert.strictEqual(found.tagName, "TABLE");
       }),
     );
 
-    it.scoped("should throw ElementNotFoundError when role not found", () =>
+    it.scoped("should fail with ElementNotFoundError when role not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No role</div>);
 
-        assert.throws(() => result.getByRole("button"), ElementNotFoundError);
+        const exit = yield* Effect.exit(result.getByRole("button"));
+        assert.strictEqual(exit._tag, "Failure");
       }),
     );
   });
@@ -562,7 +566,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelector("span");
+        const found = yield* result.querySelector("span");
         assert.strictEqual(found.textContent, "Target");
       }),
     );
@@ -575,7 +579,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelector(".highlight");
+        const found = yield* result.querySelector(".highlight");
         assert.strictEqual(found.textContent, "Styled");
       }),
     );
@@ -588,7 +592,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelector("#unique");
+        const found = yield* result.querySelector("#unique");
         assert.strictEqual(found.textContent, "Unique");
       }),
     );
@@ -601,7 +605,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelector("[type='email']");
+        const found = yield* result.querySelector("[type='email']");
         assert.strictEqual(found.tagName, "INPUT");
       }),
     );
@@ -616,16 +620,17 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelector(".parent .child span");
+        const found = yield* result.querySelector(".parent .child span");
         assert.strictEqual(found.textContent, "Descendant");
       }),
     );
 
-    it.scoped("should throw ElementNotFoundError when selector matches nothing", () =>
+    it.scoped("should fail with ElementNotFoundError when selector matches nothing", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Content</div>);
 
-        assert.throws(() => result.querySelector(".missing"), ElementNotFoundError);
+        const exit = yield* Effect.exit(result.querySelector(".missing"));
+        assert.strictEqual(exit._tag, "Failure");
       }),
     );
   });
@@ -712,7 +717,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const button = result.getByTestId("btn");
+        const button = yield* result.getByTestId("btn");
         button.addEventListener("click", () => {
           clicked = true;
         });
@@ -733,7 +738,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const button = result.getByTestId("btn");
+        const button = yield* result.getByTestId("btn");
         button.onclick = () => {
           handlerCalled = true;
         };
@@ -756,8 +761,8 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const link = result.getByTestId("link");
-        link.addEventListener("click", (e) => {
+        const link = yield* result.getByTestId("link");
+        link.addEventListener("click", (e: Event) => {
           e.preventDefault();
           clicked = true;
         });
@@ -776,7 +781,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const button = result.getByTestId("btn");
+        const button = yield* result.getByTestId("btn");
         const clickResult = yield* click(button);
 
         assert.isUndefined(clickResult);
@@ -796,7 +801,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = result.getByTestId("input") as HTMLInputElement;
+        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
 
         yield* type(input, "Hello World");
 
@@ -814,7 +819,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = result.getByTestId("input") as HTMLInputElement;
+        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
         input.addEventListener("input", () => {
           inputEventFired = true;
         });
@@ -835,7 +840,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = result.getByTestId("input") as HTMLInputElement;
+        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
         input.addEventListener("change", () => {
           changeEventFired = true;
         });
@@ -854,7 +859,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = result.getByTestId("input") as HTMLInputElement;
+        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
 
         yield* type(input, "Input value");
 
@@ -870,7 +875,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const textarea = result.getByTestId("textarea") as HTMLTextAreaElement;
+        const textarea = (yield* result.getByTestId("textarea")) as HTMLTextAreaElement;
 
         yield* type(textarea, "Textarea value");
 
@@ -886,7 +891,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = result.getByTestId("input") as HTMLInputElement;
+        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
         const typeResult = yield* type(input, "Test");
 
         assert.isUndefined(typeResult);
@@ -1148,8 +1153,8 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const button = result.getByTestId("increment");
-        const display = result.getByTestId("display");
+        const button = yield* result.getByTestId("increment");
+        const display = yield* result.getByTestId("display");
 
         button.addEventListener("click", () => {
           value++;
@@ -1172,7 +1177,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const status = result.getByTestId("status");
+        const status = yield* result.getByTestId("status");
         let checkCount = 0;
 
         // Fork waitFor and a delayed update
@@ -1206,10 +1211,10 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const byText = result.getByText("Submit");
-        const byTestId = result.getByTestId("btn");
-        const byRole = result.getByRole("button");
-        const bySelector = result.querySelector(".primary");
+        const byText = yield* result.getByText("Submit");
+        const byTestId = yield* result.getByTestId("btn");
+        const byRole = yield* result.getByRole("button");
+        const bySelector = yield* result.querySelector(".primary");
 
         assert.strictEqual(byText, byTestId);
         assert.strictEqual(byTestId, byRole);

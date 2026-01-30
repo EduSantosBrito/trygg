@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import { Signal, Component } from "trygg";
 import { Theme } from "../services/theme";
 import { ThemedCard } from "../components/theme/themed-card";
@@ -28,30 +28,33 @@ const ThemePage = Component.gen(function* () {
 
   const toggleTheme = () => Signal.update(isDark, (v) => !v);
 
-  return Effect.gen(function* () {
-    return (
-      <div className="bg-white p-6 rounded-lg border border-gray-200">
-        <h2 className="m-0 mb-1 text-2xl">Theme (Dependency Injection)</h2>
-        <p className="text-gray-500 m-0 mb-6 text-[0.95rem]">
-          Dependency injection with Component.provide, swappable layers
-        </p>
+  // Partial provision: provide theme based on current signal state
+  // The themed components still need Theme, we provide it at usage time
+  const ProvidedCard = ThemedCard.provide(currentTheme);
+  const ProvidedTitle = ThemedTitle.provide(currentTheme);
 
-        <div className="mb-4">
-          <button
-            className="px-4 py-2 text-base border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100"
-            onClick={toggleTheme}
-          >
-            Switch to {isDarkValue ? "Light" : "Dark"} Theme
-          </button>
-        </div>
+  return (
+    <div className="bg-white p-6 rounded-lg border border-gray-200">
+      <h2 className="m-0 mb-1 text-2xl">Theme (Dependency Injection)</h2>
+      <p className="text-gray-500 m-0 mb-6 text-[0.95rem]">
+        Dependency injection with Component.provide, swappable layers
+      </p>
 
-        <ThemedCard />
-        <div className="mt-4">
-          <ThemedTitle title="Using Component API" />
-        </div>
+      <div className="mb-4">
+        <button
+          className="px-4 py-2 text-base border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100"
+          onClick={toggleTheme}
+        >
+          Switch to {isDarkValue ? "Light" : "Dark"} Theme
+        </button>
       </div>
-    );
-  }).pipe(Component.provide(currentTheme));
+
+      <ProvidedCard />
+      <div className="mt-4">
+        <ProvidedTitle title="Using Component API" />
+      </div>
+    </div>
+  );
 });
 
 export default ThemePage;

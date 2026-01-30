@@ -9,16 +9,17 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, TestClock } from "effect";
+import { Cause, Data, Effect, Exit, TestClock } from "effect";
 import * as Signal from "../../primitives/signal.js";
-
-// Tagged error for testing error boundaries
-class TestError extends Data.TaggedError("TestError")<{ message: string }> {}
-import { ErrorBoundary } from "../error-boundary.js";
+import * as ErrorBoundary from "../../primitives/error-boundary.js";
 import { DevMode } from "../dev-mode.js";
 import * as Debug from "../../debug/debug.js";
-import { isEmpty } from "../../primitives/element.js";
 import { render } from "../../testing/index.js";
+import * as Component from "../../primitives/component.js";
+
+// Tagged errors for testing error boundaries
+class TestError extends Data.TaggedError("TestError")<{ message: string }> {}
+class OtherError extends Data.TaggedError("OtherError")<{}> {}
 
 // Helper to reset debug state
 const withDebugReset = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -43,127 +44,105 @@ const withDebugReset = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<
 describe("ErrorBoundary", () => {
   it.scoped("should render children when no error occurs", () =>
     Effect.gen(function* () {
-      const childEffect = Effect.succeed(<div>Success</div>);
-      const element = <ErrorBoundary fallback={<div>Error</div>}>{childEffect}</ErrorBoundary>;
+      const SuccessComponent = Component.gen(function* () {
+        return <div>Success</div>;
+      });
 
-      const { getByText } = yield* render(element);
+      const SafeComponent = yield* ErrorBoundary.catch(SuccessComponent).catchAll(() => (
+        <div>Error</div>
+      ));
+
+      const { getByText } = yield* render(<SafeComponent />);
 
       assert.isDefined(getByText("Success"));
     }),
   );
 
-  it.scoped("should render fallback when child effect fails", () =>
+  it.scoped("should render fallback when component fails", () =>
     Effect.gen(function* () {
-      const childEffect = Effect.fail(new TestError({ message: "Test error" }));
-      const element = (
-        <ErrorBoundary fallback={<div>Fallback shown</div>}>{childEffect}</ErrorBoundary>
-      );
+      const FailingComponent = Component.gen(function* () {
+        return yield* new TestError({ message: "Test error" });
+      });
 
-      const { getByText } = yield* render(element);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).catchAll(() => (
+        <div>Fallback shown</div>
+      ));
+
+      const { getByText } = yield* render(<SafeComponent />);
 
       assert.isDefined(getByText("Fallback shown"));
     }),
   );
 
-  it.scoped("should pass error to fallback function", () =>
+  it.scoped("should pass cause to specific error handler", () =>
     Effect.gen(function* () {
-      const testError = new Error("Specific error");
-      const childEffect = Effect.fail(testError);
-      const element = (
-        <ErrorBoundary fallback={(error: Error) => <div>Error: {error.message}</div>}>
-          {childEffect}
-        </ErrorBoundary>
-      );
+      const FailingComponent = Component.gen(function* () {
+        return yield* new TestError({ message: "Specific error" });
+      });
 
-      const { getByText } = yield* render(element);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent)
+        .on("TestError", (cause) => {
+          const error = Cause.squash(cause) as TestError;
+          return <div>Error: {error.message}</div>;
+        })
+        .catchAll(() => <div>Generic error</div>);
+
+      const { getByText } = yield* render(<SafeComponent />);
 
       assert.isDefined(getByText("Error: Specific error"));
     }),
   );
 
-  it.scoped("should call onError callback when error caught", () =>
+  it.scoped("should use catchAll for unmatched errors", () =>
     Effect.gen(function* () {
-      let capturedError: unknown = null;
-      const childEffect = Effect.fail(new TestError({ message: "Caught error" }));
-      const element = (
-        <ErrorBoundary
-          fallback={<div>Fallback</div>}
-          onError={(error) =>
-            Effect.sync(() => {
-              capturedError = error;
-            })
-          }
-        >
-          {childEffect}
-        </ErrorBoundary>
-      );
+      const FailingComponent = Component.gen(function* () {
+        return yield* new OtherError();
+      });
 
-      yield* render(element);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).catchAll((cause) => {
+        const error = Cause.squash(cause);
+        return <div data-testid="catch-all">Catch-all: {String(error)}</div>;
+      });
 
-      assert.isNotNull(capturedError);
-      assert.instanceOf(capturedError, Error);
-      assert.strictEqual((capturedError as Error).message, "Caught error");
+      const { getByTestId } = yield* render(<SafeComponent />);
+
+      assert.isDefined(getByTestId("catch-all"));
     }),
   );
 
-  it.scoped("should render static fallback element", () =>
+  it.scoped("should render static fallback with catchAll", () =>
     Effect.gen(function* () {
-      const childEffect = Effect.fail("error");
-      const staticFallback = <div data-testid="static-fallback">Static fallback content</div>;
-      const element = <ErrorBoundary fallback={staticFallback}>{childEffect}</ErrorBoundary>;
+      const FailingComponent = Component.gen(function* () {
+        return yield* Effect.fail("error");
+      });
 
-      const { getByTestId } = yield* render(element);
+      const staticFallback = <div data-testid="static-fallback">Static fallback content</div>;
+
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).catchAll(
+        () => staticFallback,
+      );
+
+      const { getByTestId } = yield* render(<SafeComponent />);
 
       assert.isDefined(getByTestId("static-fallback"));
     }),
   );
 
-  it.scoped("should catch Effect.fail errors", () =>
-    Effect.gen(function* () {
-      const childEffect = Effect.fail({ code: "CUSTOM_ERROR", message: "Custom failure" });
-      const element = (
-        <ErrorBoundary fallback={(error: { code: string }) => <div>Code: {error.code}</div>}>
-          {childEffect}
-        </ErrorBoundary>
-      );
-
-      const { getByText } = yield* render(element);
-
-      assert.isDefined(getByText("Code: CUSTOM_ERROR"));
-    }),
-  );
-
-  it.scoped("should catch errors from Effect.die wrapped with catchAllCause", () =>
-    Effect.gen(function* () {
-      // ErrorBoundary uses catchAll which catches Fail, not Die.
-      // To catch defects (thrown errors), use a component that wraps with catchAllCause.
-      // This test verifies standard Effect.fail behavior works.
-      const childEffect = Effect.fail("Failure from Effect.fail");
-      const element = (
-        <ErrorBoundary fallback={(error: string) => <div>Caught: {error}</div>}>
-          {childEffect}
-        </ErrorBoundary>
-      );
-
-      const { getByText } = yield* render(element);
-
-      assert.isDefined(getByText("Caught: Failure from Effect.fail"));
-    }),
-  );
-
   it.scoped("should catch at nearest boundary", () =>
     Effect.gen(function* () {
-      const innerFailing = Effect.fail(new TestError({ message: "Inner error" }));
-      const innerBoundary = (
-        <ErrorBoundary fallback={<div>Inner fallback</div>}>{innerFailing}</ErrorBoundary>
-      );
-      const outerBoundary = (
-        <ErrorBoundary fallback={<div>Outer fallback</div>}>
-          {Effect.succeed(innerBoundary)}
-        </ErrorBoundary>
-      );
+      const InnerFailing = Component.gen(function* () {
+        return yield* new TestError({ message: "Inner error" });
+      });
 
-      const { getByText, queryByText } = yield* render(outerBoundary);
+      const InnerSafe = yield* ErrorBoundary.catch(InnerFailing as any).catchAll(() => (
+        <div>Inner fallback</div>
+      ));
+
+      const OuterSafe = yield* ErrorBoundary.catch(InnerSafe as any).catchAll(() => (
+        <div>Outer fallback</div>
+      ));
+
+      const { getByText, queryByText } = yield* render(<OuterSafe />);
 
       // Inner boundary should catch, outer should not be triggered
       assert.isDefined(getByText("Inner fallback"));
@@ -175,9 +154,8 @@ describe("ErrorBoundary", () => {
   it.scoped("should catch error when child component throws on re-render", () =>
     Effect.gen(function* () {
       const shouldThrow = Signal.unsafeMake(false);
-      let onErrorCalled = false;
 
-      const ChildComponent = Effect.gen(function* () {
+      const ChildComponent = Component.gen(function* () {
         const throwNow = yield* Signal.get(shouldThrow);
         if (throwNow) {
           return yield* new TestError({ message: "Re-render error" });
@@ -185,20 +163,11 @@ describe("ErrorBoundary", () => {
         return <div data-testid="child">Child content</div>;
       });
 
-      const element = (
-        <ErrorBoundary
-          fallback={<div data-testid="fallback">Error caught!</div>}
-          onError={() =>
-            Effect.sync(() => {
-              onErrorCalled = true;
-            })
-          }
-        >
-          {ChildComponent}
-        </ErrorBoundary>
-      );
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent as any).catchAll(() => (
+        <div data-testid="fallback">Error caught!</div>
+      ));
 
-      const { getByTestId, queryByTestId } = yield* render(element);
+      const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
       // Initial render should show child
       assert.isDefined(getByTestId("child"));
@@ -211,63 +180,55 @@ describe("ErrorBoundary", () => {
       // Should show fallback, child should be gone
       assert.isDefined(getByTestId("fallback"));
       assert.isNull(queryByTestId("child"));
-      assert.isTrue(onErrorCalled);
     }),
   );
 
-  it.scoped("should support static Element children (not just Effect)", () =>
+  it.scoped("should re-render when signal props change", () =>
     Effect.gen(function* () {
-      // ErrorBoundary should also wrap static elements for re-render error catching
-      const staticChild = <div data-testid="static-child">Static content</div>;
+      const mode = yield* Signal.make<"ok" | "error">("ok");
 
-      const element = (
-        <ErrorBoundary fallback={<div>Error fallback</div>}>{staticChild}</ErrorBoundary>
-      );
-
-      const { getByTestId } = yield* render(element);
-
-      assert.isDefined(getByTestId("static-child"));
-    }),
-  );
-
-  it.scoped("should call onError with squashed cause from re-render errors", () =>
-    Effect.gen(function* () {
-      const shouldThrow = Signal.unsafeMake(false);
-      let capturedError: unknown = null;
-
-      const ChildComponent = Effect.gen(function* () {
-        const throwNow = yield* Signal.get(shouldThrow);
-        if (throwNow) {
-          return yield* Effect.fail({ code: "RERENDER_ERROR", message: "Failed during rerender" });
+      const ChildComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ mode: "ok" | "error" }>,
+      ) {
+        const { mode } = yield* Props;
+        if (mode === "error") {
+          return yield* new TestError({ message: "Prop error" });
         }
-        return <div>OK</div>;
+        return <div data-testid="ok">OK</div>;
       });
 
-      const element = (
-        <ErrorBoundary
-          fallback={<div data-testid="fallback">Error</div>}
-          onError={(error) =>
-            Effect.sync(() => {
-              capturedError = error;
-            })
-          }
-        >
-          {ChildComponent}
-        </ErrorBoundary>
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent).catchAll(() => (
+        <div data-testid="fallback">Fallback</div>
+      ));
+
+      const { getByTestId, queryByTestId } = yield* render(
+        <SafeComponent mode={mode} />,
       );
 
-      yield* render(element);
+      assert.isDefined(getByTestId("ok"));
+      assert.isNull(queryByTestId("fallback"));
 
-      // Trigger error
-      yield* Signal.set(shouldThrow, true);
+      yield* Signal.set(mode, "error");
       yield* TestClock.adjust(20);
 
-      // onError should have been called with the squashed cause (the actual error value)
-      assert.isNotNull(capturedError);
-      assert.deepStrictEqual(capturedError, {
-        code: "RERENDER_ERROR",
-        message: "Failed during rerender",
+      assert.isDefined(getByTestId("fallback"));
+      assert.isNull(queryByTestId("ok"));
+    }),
+  );
+
+  it.scoped("should support static Element children", () =>
+    Effect.gen(function* () {
+      const StaticComponent = Component.gen(function* () {
+        return <div data-testid="static-child">Static content</div>;
       });
+
+      const SafeComponent = yield* ErrorBoundary.catch(StaticComponent as any).catchAll(() => (
+        <div>Error fallback</div>
+      ));
+
+      const { getByTestId } = yield* render(<SafeComponent />);
+
+      assert.isDefined(getByTestId("static-child"));
     }),
   );
 
@@ -275,9 +236,7 @@ describe("ErrorBoundary", () => {
     Effect.gen(function* () {
       const contentSignal = Signal.unsafeMake<"ok" | "error">("ok");
 
-      // Component that reads signal and conditionally throws during re-render
-      // The error happens inside the Component's re-render, which propagates to ErrorBoundary
-      const ChildComponent = Effect.gen(function* () {
+      const ChildComponent = Component.gen(function* () {
         const value = yield* Signal.get(contentSignal);
         if (value === "error") {
           return yield* new TestError({ message: "Component threw on rerender" });
@@ -285,13 +244,11 @@ describe("ErrorBoundary", () => {
         return <div data-testid="content">Good content</div>;
       });
 
-      const element = (
-        <ErrorBoundary fallback={<div data-testid="fallback">Signal error caught</div>}>
-          {ChildComponent}
-        </ErrorBoundary>
-      );
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent as any).catchAll(() => (
+        <div data-testid="fallback">Signal error caught</div>
+      ));
 
-      const { getByTestId, queryByTestId } = yield* render(element);
+      const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
       // Initial render
       assert.isDefined(getByTestId("content"));
@@ -304,6 +261,64 @@ describe("ErrorBoundary", () => {
       // Should catch error and show fallback
       assert.isDefined(getByTestId("fallback"));
       assert.isNull(queryByTestId("content"));
+    }),
+  );
+
+  it.scoped("should throw if adding handler after catchAll", () =>
+    Effect.gen(function* () {
+      const Component_ = Component.gen(function* () {
+        return <div>OK</div>;
+      });
+
+      const builder = ErrorBoundary.catch(Component_ as any);
+
+      // First add catchAll
+      yield* builder.catchAll(() => <div>Error</div>);
+
+      // Then try to add .on() - should throw
+      const exit = yield* Effect.exit(
+        Effect.try(() => {
+          builder.on("TestError", () => <div>Test</div>);
+        }),
+      );
+
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        assert.isTrue(error instanceof Error);
+        if (error instanceof Error && error.cause instanceof Error) {
+          assert.strictEqual(
+            error.cause.message,
+            "Cannot add .on() handler after .catchAll()",
+          );
+        }
+      }
+    }),
+  );
+
+  it.scoped("should throw on duplicate handler", () =>
+    Effect.gen(function* () {
+      const Component_ = Component.gen(function* () {
+        return <div>OK</div>;
+      });
+
+      const builder = ErrorBoundary.catch(Component_ as any).on("TestError", () => <div>Test</div>);
+
+      // Try to add duplicate handler
+      const exit = yield* Effect.exit(
+        Effect.try(() => {
+          builder.on("TestError", () => <div>Test 2</div>);
+        }),
+      );
+
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        assert.isTrue(error instanceof Error);
+        if (error instanceof Error && error.cause instanceof Error) {
+          assert.strictEqual(error.cause.message, "Duplicate handler for error tag: TestError");
+        }
+      }
     }),
   );
 });
@@ -357,15 +372,16 @@ describe("DevMode", () => {
     ),
   );
 
-  it("should not enable debug when enabled is false", () => {
-    Debug.disable();
+  it.scoped("should not enable debug when enabled is false", () =>
+    withDebugReset(
+      Effect.gen(function* () {
+        const { container } = yield* render(<DevMode enabled={false} />);
 
-    const element = <DevMode enabled={false} />;
-
-    // When enabled=false, DevMode returns empty immediately
-    assert.isTrue(isEmpty(element));
-    assert.isFalse(Debug.isEnabled());
-  });
+        assert.strictEqual(container.querySelectorAll("*").length, 0);
+        assert.isFalse(Debug.isEnabled());
+      }),
+    ),
+  );
 
   it.scoped("should register custom plugins", () =>
     withDebugReset(

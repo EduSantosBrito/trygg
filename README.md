@@ -39,10 +39,10 @@ bun add trygg effect @effect/platform-browser
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite"
-import effectUI from "trygg/vite-plugin"
+import { trygg } from "trygg/vite-plugin"
 
 export default defineConfig({
-  plugins: [effectUI()]
+  plugins: [trygg()]
 })
 ```
 
@@ -64,12 +64,11 @@ export default defineConfig({
 
 ```tsx
 // src/main.tsx
-import { Effect } from "effect"
-import { mount, Signal } from "trygg"
+import { Component, mount, Signal } from "trygg"
 
-const Counter = Effect.gen(function* () {
+const Counter = Component.gen(function* () {
   const count = yield* Signal.make(0)
-  
+
   return (
     <button onClick={() => Signal.update(count, n => n + 1)}>
       Count: {count}
@@ -77,17 +76,17 @@ const Counter = Effect.gen(function* () {
   )
 })
 
-mount(document.getElementById("root")!, Counter)
+mount(document.getElementById("root")!, <Counter />)
 ```
 
 ## Core Concepts
 
-### Components are Effects
+### Components use Component.gen
 
-Components are regular `Effect.gen` functions that return JSX:
+Components are created with `Component.gen` and return JSX:
 
 ```tsx
-const Greeting = Effect.gen(function* () {
+const Greeting = Component.gen(function* () {
   return <h1>Hello, world!</h1>
 })
 ```
@@ -97,10 +96,10 @@ const Greeting = Effect.gen(function* () {
 `Signal` provides fine-grained reactivity without re-rendering entire components:
 
 ```tsx
-const Counter = Effect.gen(function* () {
+const Counter = Component.gen(function* () {
   // Create a signal (does NOT subscribe component to changes)
   const count = yield* Signal.make(0)
-  
+
   // Pass signal directly to JSX - only the text node updates!
   return (
     <button onClick={() => Signal.update(count, n => n + 1)}>
@@ -154,9 +153,12 @@ const Header = Component.gen(function* () {
 
 // Provide the layer
 const themeLayer = Layer.succeed(Theme, { primary: "blue" })
-mount(container, Effect.gen(function* () {
+
+const App = Component.gen(function* () {
   return <Header />
-}).pipe(Component.provide(themeLayer)))
+}).provide(themeLayer)
+
+mount(container, <App />)
 ```
 
 ## Component.gen API
@@ -180,10 +182,10 @@ const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) 
   return <div style={{ color: theme.primary }}>{title}</div>
 })
 
-// Usage - provide layers at the parent
-Effect.gen(function* () {
+// Provide the layer to the component
+const App = Component.gen(function* () {
   return <Card title="Hello" />
-}).pipe(Component.provide(themeLayer))
+}).provide(themeLayer)
 ```
 
 ## Debugging
@@ -194,7 +196,7 @@ Add `<DevMode />` to see debug events in your console:
 import { DevMode } from "trygg"
 
 mount(container, <>
-  {App}
+  <App />
   <DevMode />
 </>)
 ```
@@ -230,7 +232,7 @@ bun run examples          # Start at http://localhost:5173
 Examples include:
 - **Counter** - Basic state with Signal
 - **Todo** - List operations with `Signal.each`
-- **Theme** - Dependency injection with Component.provide
+- **Theme** - Dependency injection with .provide() method
 - **Form** - Input handling, validation
 - **Error Boundary** - Error handling patterns
 - **Dashboard** - Multiple services, real-world patterns
@@ -240,12 +242,11 @@ Examples include:
 trygg includes file-based routing out of the box:
 
 ```tsx
-import { Effect } from "effect"
-import { mount } from "trygg"
+import { Component, mount } from "trygg"
 import * as Router from "trygg/router"
 import { routes } from "virtual:trygg-routes"
 
-const App = Effect.gen(function* () {
+const App = Component.gen(function* () {
   return (
     <div>
       <nav>
@@ -258,7 +259,7 @@ const App = Effect.gen(function* () {
 })
 
 // Router is included by default!
-mount(document.getElementById("root")!, App)
+mount(document.getElementById("root")!, <App />)
 ```
 
 See the examples for routing patterns including layouts, params, and guards.

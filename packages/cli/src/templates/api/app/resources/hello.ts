@@ -5,9 +5,9 @@
  * The ApiClient requirement propagates to the component,
  * satisfied by Component.provide(ApiClientLive) at the parent.
  */
-import { Effect } from "effect"
-import { Resource } from "trygg"
-import { ApiClient } from "trygg/api"
+import { Effect } from "effect";
+import { Resource } from "trygg";
+import { ApiClient } from "trygg/api";
 
 /**
  * Resource for fetching hello message.
@@ -15,8 +15,8 @@ import { ApiClient } from "trygg/api"
 export const helloResource = Resource.make(
   () =>
     Effect.gen(function* () {
-      const client = yield* ApiClient
-      return yield* client.hello.greet()
+      const client = yield* ApiClient;
+      return yield* client.hello.greet();
     }),
-  { key: "hello.greet" }
-)
+  { key: "hello.greet" },
+);

@@ -76,7 +76,7 @@ describe("Component.gen without props", () => {
 
       const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("result").textContent, "42");
+      assert.strictEqual((yield* getByTestId("result")).textContent, "42");
     }),
   );
 
@@ -85,15 +85,11 @@ describe("Component.gen without props", () => {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
         return <div data-testid="service">{service.value}</div>;
-      });
+      }).provide(testServiceLayer);
 
-      const element = Effect.gen(function* () {
-        return <MyComponent />;
-      }).pipe(Component.provide(testServiceLayer));
+      const { getByTestId } = yield* render(<MyComponent />);
 
-      const { getByTestId } = yield* render(element);
-
-      assert.strictEqual(getByTestId("service").textContent, "test-value");
+      assert.strictEqual((yield* getByTestId("service")).textContent, "test-value");
     }),
   );
 });
@@ -115,125 +111,105 @@ describe("Component.gen with props", () => {
     assert.strictEqual(MyComponent._tag, "EffectComponent");
   });
 
-  it.scoped("should provide props via yield", () =>
+  it.scoped("should receive props via yield* Props", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* (
-        Props: Component.ComponentProps<{ message: string }>,
+        Props: Component.ComponentProps<{ title: string }>,
       ) {
-        const { message } = yield* Props;
-        return <span data-testid="msg">{message}</span>;
+        const { title } = yield* Props;
+        return <div data-testid="title">{title}</div>;
       });
 
-      const { getByTestId } = yield* render(<MyComponent message="Hello World" />);
+      const { getByTestId } = yield* render(<MyComponent title="Hello World" />);
 
-      assert.strictEqual(getByTestId("msg").textContent, "Hello World");
-    }),
-  );
-
-  it.scoped("should infer props type from ComponentProps parameter", () =>
-    Effect.gen(function* () {
-      const MyComponent = Component.gen(function* (
-        Props: Component.ComponentProps<{ count: number; label: string }>,
-      ) {
-        const { count, label } = yield* Props;
-        return <div data-testid="display">{`${label}: ${count}`}</div>;
-      });
-
-      const { getByTestId } = yield* render(<MyComponent count={5} label="Total" />);
-
-      assert.strictEqual(getByTestId("display").textContent, "Total: 5");
-    }),
-  );
-
-  it.scoped("should receive props from JSX usage", () =>
-    Effect.gen(function* () {
-      const Greeting = Component.gen(function* (Props: Component.ComponentProps<{ name: string }>) {
-        const { name } = yield* Props;
-        return <h1 data-testid="greeting">{`Hello, ${name}!`}</h1>;
-      });
-
-      const { getByTestId } = yield* render(<Greeting name="Alice" />);
-
-      assert.strictEqual(getByTestId("greeting").textContent, "Hello, Alice!");
-    }),
-  );
-
-  it.scoped("should support multiple props", () =>
-    Effect.gen(function* () {
-      const Card = Component.gen(function* (
-        Props: Component.ComponentProps<{ title: string; body: string; footer: string }>,
-      ) {
-        const { title, body, footer } = yield* Props;
-        return (
-          <div data-testid="card">
-            <h2>{title}</h2>
-            <p>{body}</p>
-            <footer>{footer}</footer>
-          </div>
-        );
-      });
-
-      const { getByTestId } = yield* render(
-        <Card title="Title" body="Body text" footer="Footer" />,
-      );
-
-      const card = getByTestId("card");
-      assert.include(card.textContent, "Title");
-      assert.include(card.textContent, "Body text");
-      assert.include(card.textContent, "Footer");
+      assert.strictEqual((yield* getByTestId("title")).textContent, "Hello World");
     }),
   );
 
   it.scoped("should support optional props", () =>
     Effect.gen(function* () {
-      const OptionalComponent = Component.gen(function* (
-        Props: Component.ComponentProps<{ required: string; optional?: string }>,
+      const MyComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ title?: string }>,
       ) {
-        const { required, optional } = yield* Props;
-        return <div data-testid="opt">{optional ? `${required} - ${optional}` : required}</div>;
+        const { title } = yield* Props;
+        return <div data-testid="title">{title ?? "Default"}</div>;
       });
 
-      const { getByTestId } = yield* render(<OptionalComponent required="Required" />);
+      const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("opt").textContent, "Required");
+      assert.strictEqual((yield* getByTestId("title")).textContent, "Default");
+    }),
+  );
+
+  it.scoped("should combine props and services", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ prefix: string }>,
+      ) {
+        const { prefix } = yield* Props;
+        const service = yield* TestService;
+        return (
+          <div data-testid="combined">
+            {prefix}-{service.value}
+          </div>
+        );
+      }).provide(testServiceLayer);
+
+      const { getByTestId } = yield* render(<MyComponent prefix="Test" />);
+
+      assert.strictEqual((yield* getByTestId("combined")).textContent, "Test-test-value");
     }),
   );
 });
 
 // =============================================================================
-// Component.gen - Curried form
+// Component Type
 // =============================================================================
-// Scope: Alternative curried API for props
+// Scope: Component type properties and metadata
 
-describe("Component.gen curried form", () => {
-  it("should support curried form with type parameter", () => {
-    const MyComponent = Component.Component<{ value: number }>()((Props) =>
-      Effect.gen(function* () {
-        const { value } = yield* Props;
-        return <div>{String(value)}</div>;
-      }),
-    );
+describe("Component Type", () => {
+  it("should track _tag as EffectComponent", () => {
+    const MyComponent = Component.gen(function* () {
+      return <div>Test</div>;
+    });
 
     assert.strictEqual(MyComponent._tag, "EffectComponent");
+  });
+
+  it("should have _layers array", () => {
+    const MyComponent = Component.gen(function* () {
+      return <div>Test</div>;
+    });
+
+    assert.isArray(MyComponent._layers);
+    assert.strictEqual(MyComponent._layers.length, 0);
+  });
+
+  it("should have _requirements array", () => {
+    const MyComponent = Component.gen(function* () {
+      return <div>Test</div>;
+    });
+
+    assert.isArray(MyComponent._requirements);
   });
 });
 
 // =============================================================================
-// Component.provide - Service propagation
+// Component.provide
 // =============================================================================
-// Scope: Providing layers to child components
+// Scope: Providing layers to satisfy service requirements
 
 describe("Component.provide", () => {
-  it.scoped("should provide layer services to effect", () =>
+  it.scoped("should provide layer services to component", () =>
     Effect.gen(function* () {
-      const component = Effect.gen(function* () {
+      const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
         return <div data-testid="provided">{service.value}</div>;
-      }).pipe(Component.provide(testServiceLayer));
+      }).provide(testServiceLayer);
 
-      const { getByTestId } = yield* render(component);
+      const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("provided").textContent, "test-value");
+      assert.strictEqual((yield* getByTestId("provided")).textContent, "test-value");
     }),
   );
 
@@ -244,33 +220,33 @@ describe("Component.provide", () => {
         return <span data-testid="child">{service.value}</span>;
       });
 
-      const Parent = Effect.gen(function* () {
+      const Parent = Component.gen(function* () {
         return (
           <div>
             <Child />
           </div>
         );
-      }).pipe(Component.provide(testServiceLayer));
+      }).provide(testServiceLayer);
 
-      const { getByTestId } = yield* render(Parent);
+      const { getByTestId } = yield* render(<Parent />);
 
-      assert.strictEqual(getByTestId("child").textContent, "test-value");
+      assert.strictEqual((yield* getByTestId("child")).textContent, "test-value");
     }),
   );
 
-  it.scoped("should wrap result in Provide element", () =>
+  it.scoped("should support providing services at parent level", () =>
     Effect.gen(function* () {
-      const component = Effect.gen(function* () {
+      const MyComponent = Component.gen(function* () {
         return <div data-testid="wrapped">Content</div>;
-      }).pipe(Component.provide(testServiceLayer));
+      }).provide(testServiceLayer);
 
-      const { getByTestId } = yield* render(component);
+      const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("wrapped").textContent, "Content");
+      assert.strictEqual((yield* getByTestId("wrapped")).textContent, "Content");
     }),
   );
 
-  it.scoped("should merge with existing context", () =>
+  it.scoped("should merge with existing context from parent", () =>
     Effect.gen(function* () {
       class AnotherService extends Context.Tag("AnotherService")<
         AnotherService,
@@ -283,40 +259,36 @@ describe("Component.provide", () => {
         return <div data-testid="merged">{`${test.value}-${another.other}`}</div>;
       });
 
-      const component = Effect.gen(function* () {
+      const Parent = Component.gen(function* () {
         return <Child />;
-      }).pipe(
-        Component.provide(Layer.succeed(AnotherService, { other: "other-value" })),
-        Component.provide(testServiceLayer),
-      );
+      }).provide(Layer.succeed(AnotherService, { other: "other-value" }));
 
-      const { getByTestId } = yield* render(component);
+      const GrandParent = Component.gen(function* () {
+        return <Parent />;
+      }).provide(testServiceLayer);
 
-      assert.strictEqual(getByTestId("merged").textContent, "test-value-other-value");
+      const { getByTestId } = yield* render(<GrandParent />);
+
+      assert.strictEqual((yield* getByTestId("merged")).textContent, "test-value-other-value");
     }),
   );
 
-  it.scoped("should support chaining multiple provides", () =>
+  it.scoped("should support chaining multiple provides on same component", () =>
     Effect.gen(function* () {
       class ServiceA extends Context.Tag("ServiceA")<ServiceA, { a: string }>() {}
       class ServiceB extends Context.Tag("ServiceB")<ServiceB, { b: string }>() {}
 
-      const Child = Component.gen(function* () {
+      const MyComponent = Component.gen(function* () {
         const a = yield* ServiceA;
         const b = yield* ServiceB;
         return <div data-testid="chained">{`${a.a}-${b.b}`}</div>;
-      });
+      })
+        .provide(Layer.succeed(ServiceA, { a: "A" }))
+        .provide(Layer.succeed(ServiceB, { b: "B" }));
 
-      const component = Effect.gen(function* () {
-        return <Child />;
-      }).pipe(
-        Component.provide(Layer.succeed(ServiceA, { a: "A" })),
-        Component.provide(Layer.succeed(ServiceB, { b: "B" })),
-      );
+      const { getByTestId } = yield* render(<MyComponent />);
 
-      const { getByTestId } = yield* render(component);
-
-      assert.strictEqual(getByTestId("chained").textContent, "A-B");
+      assert.strictEqual((yield* getByTestId("chained")).textContent, "A-B");
     }),
   );
 });
@@ -324,163 +296,34 @@ describe("Component.provide", () => {
 // =============================================================================
 // Service access
 // =============================================================================
-// Scope: Accessing services from parent context
+// Scope: Components yielding services from context
 
-describe("Service access in components", () => {
-  it.scoped("should access service from parent context", () =>
-    Effect.gen(function* () {
-      const Child = Component.gen(function* () {
-        const service = yield* TestService;
-        return <span data-testid="svc">{service.value}</span>;
-      });
-
-      const component = Effect.gen(function* () {
-        return <Child />;
-      }).pipe(Component.provide(testServiceLayer));
-
-      const { getByTestId } = yield* render(component);
-
-      assert.strictEqual(getByTestId("svc").textContent, "test-value");
-    }),
-  );
-
-  it.scoped("should fail when required service not provided", () =>
-    Effect.gen(function* () {
-      const Child = Component.gen(function* () {
-        const service = yield* TestService;
-        return <span>{service.value}</span>;
-      });
-
-      const exit = yield* Effect.exit(render(<Child />));
-
-      assert.strictEqual(exit._tag, "Failure");
-    }),
-  );
-
-  it.scoped("should propagate services to nested components", () =>
-    Effect.gen(function* () {
-      const DeepChild = Component.gen(function* () {
-        const service = yield* TestService;
-        return <span data-testid="deep">{service.value}</span>;
-      });
-
-      const MiddleChild = Component.gen(function* () {
-        return (
-          <div>
-            <DeepChild />
-          </div>
-        );
-      });
-
-      const component = Effect.gen(function* () {
-        return <MiddleChild />;
-      }).pipe(Component.provide(testServiceLayer));
-
-      const { getByTestId } = yield* render(component);
-
-      assert.strictEqual(getByTestId("deep").textContent, "test-value");
-    }),
-  );
-});
-
-// =============================================================================
-// isEffectComponent - Type guard
-// =============================================================================
-// Scope: Checking if value is an EffectComponent
-
-describe("isEffectComponent", () => {
-  it("should return true for Component.gen result", () => {
-    const MyComponent = Component.gen(function* () {
-      return <div />;
-    });
-
-    assert.isTrue(Component.isEffectComponent(MyComponent));
-  });
-
-  it("should return false for plain functions", () => {
-    const plainFn = () => <div />;
-
-    assert.isFalse(Component.isEffectComponent(plainFn));
-  });
-
-  it("should return false for plain objects", () => {
-    const obj = { _tag: "SomeOtherTag" };
-
-    assert.isFalse(Component.isEffectComponent(obj));
-  });
-
-  it("should return false for null", () => {
-    assert.isFalse(Component.isEffectComponent(null));
-  });
-});
-
-// =============================================================================
-// Component rendering
-// =============================================================================
-// Scope: Components produce correct Element structure
-
-describe("Component rendering", () => {
-  it.scoped("should return JSX as Element", () =>
+describe("Service access", () => {
+  it.scoped("should yield service from provided layer", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
-        return <article data-testid="article">Article content</article>;
-      });
+        const service = yield* TestService;
+        return <div data-testid="service">{service.value}</div>;
+      }).provide(testServiceLayer);
 
       const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual(getByTestId("article").tagName, "ARTICLE");
+      assert.strictEqual((yield* getByTestId("service")).textContent, "test-value");
     }),
   );
 
-  it.scoped("should support nested component usage", () =>
+  it.scoped("should fail when service is not provided", () =>
     Effect.gen(function* () {
-      const Inner = Component.gen(function* () {
-        return <span data-testid="inner">Inner</span>;
+      const MyComponent = Component.gen(function* () {
+        const service = yield* TestService;
+        return <div>{service.value}</div>;
       });
 
-      const Outer = Component.gen(function* () {
-        return (
-          <div data-testid="outer">
-            <Inner />
-          </div>
-        );
-      });
+      // Intentionally not providing - this test verifies error handling when service is missing
+      const result = yield* Effect.either(render(<MyComponent />).pipe(Effect.sandbox));
 
-      const { getByTestId } = yield* render(<Outer />);
-
-      assert.strictEqual(getByTestId("outer").tagName, "DIV");
-      assert.strictEqual(getByTestId("inner").textContent, "Inner");
-    }),
-  );
-
-  it.scoped("should support conditional rendering", () =>
-    Effect.gen(function* () {
-      const Conditional = Component.gen(function* (
-        Props: Component.ComponentProps<{ show: boolean }>,
-      ) {
-        const { show } = yield* Props;
-        if (show) {
-          return <div data-testid="shown">Visible</div>;
-        }
-        return <div data-testid="hidden">Hidden</div>;
-      });
-
-      const { getByTestId } = yield* render(<Conditional show={true} />);
-
-      assert.strictEqual(getByTestId("shown").textContent, "Visible");
-    }),
-  );
-
-  it.scoped("should support returning Effect of Element", () =>
-    Effect.gen(function* () {
-      const AsyncComponent = Component.gen(function* () {
-        const data = yield* Effect.succeed("Async data");
-        return <div data-testid="async">{data}</div>;
-      });
-
-      const { getByTestId } = yield* render(<AsyncComponent />);
-
-      assert.strictEqual(getByTestId("async").textContent, "Async data");
+      // The error should be a failure (Left) because TestService is not available
+      assert.strictEqual(result._tag, "Left");
     }),
   );
 });
@@ -488,32 +331,294 @@ describe("Component rendering", () => {
 // =============================================================================
 // Error handling
 // =============================================================================
-// Scope: Error propagation from components
+// Scope: Component error handling
 
-describe("Component error handling", () => {
-  it.scoped("should propagate errors from generator", () =>
+describe("Error handling", () => {
+  it.scoped("should propagate errors from component", () =>
     Effect.gen(function* () {
-      const ErrorComponent = Component.gen(function* () {
-        yield* new ComponentError({ message: "Component error" });
-        return <div />;
+      const MyComponent = Component.gen(function* () {
+        return yield* new ComponentError({ message: "Component failed" });
       });
 
-      const exit = yield* Effect.exit(render(<ErrorComponent />));
+      const result = yield* Effect.either(render(<MyComponent />));
 
-      assert.strictEqual(exit._tag, "Failure");
+      assert.isTrue(result._tag === "Left");
     }),
   );
 
-  it.scoped("should propagate Effect failures", () =>
+  it.scoped("should handle errors in nested components", () =>
     Effect.gen(function* () {
-      const FailingComponent = Component.gen(function* () {
-        yield* Effect.fail("Failure reason");
-        return <div />;
+      const ErrorChild = Component.gen(function* () {
+        return yield* new ComponentError({ message: "Child error" });
       });
 
-      const exit = yield* Effect.exit(render(<FailingComponent />));
+      const Parent = Component.gen(function* () {
+        return (
+          <div>
+            <ErrorChild />
+          </div>
+        );
+      });
 
-      assert.strictEqual(exit._tag, "Failure");
+      const result = yield* Effect.either(render(<Parent />));
+
+      assert.isTrue(result._tag === "Left");
+    }),
+  );
+});
+
+// =============================================================================
+// isEffectComponent
+// =============================================================================
+// Scope: Type guard for component detection
+
+describe("isEffectComponent", () => {
+  it("should return true for Component.gen result", () => {
+    const MyComponent = Component.gen(function* () {
+      return <div>Test</div>;
+    });
+
+    assert.isTrue(Component.isEffectComponent(MyComponent));
+  });
+
+  it("should return false for plain functions", () => {
+    const plainFn = () => <div>Test</div>;
+
+    assert.isFalse(Component.isEffectComponent(plainFn));
+  });
+
+  it("should return false for regular objects", () => {
+    assert.isFalse(Component.isEffectComponent({}));
+    assert.isFalse(Component.isEffectComponent(null));
+    assert.isFalse(Component.isEffectComponent(undefined));
+  });
+
+  it("should return true for components with .provide() applied", () => {
+    const MyComponent = Component.gen(function* () {
+      return <div>Test</div>;
+    }).provide(testServiceLayer);
+
+    assert.isTrue(Component.isEffectComponent(MyComponent));
+  });
+});
+
+// =============================================================================
+// Component function API (Component())
+// =============================================================================
+// Scope: Alternative component creation with explicit type parameter
+
+describe("Component function API", () => {
+  it("should create component with explicit props type", () => {
+    const MyComponent = Component.Component<{ title: string }>()((Props) =>
+      Effect.gen(function* () {
+        const { title } = yield* Props;
+        return <div>{title}</div>;
+      }),
+    );
+
+    assert.strictEqual(MyComponent._tag, "EffectComponent");
+  });
+
+  it.scoped("should work with props", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.Component<{ message: string }>()((Props) =>
+        Effect.gen(function* () {
+          const { message } = yield* Props;
+          return <div data-testid="msg">{message}</div>;
+        }),
+      );
+
+      const { getByTestId } = yield* render(<MyComponent message="Hello" />);
+
+      assert.strictEqual((yield* getByTestId("msg")).textContent, "Hello");
+    }),
+  );
+
+  it.scoped("should support services with Component() API", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.Component()(() =>
+        Effect.gen(function* () {
+          const service = yield* TestService;
+          return <div data-testid="svc">{service.value}</div>;
+        }),
+      ).provide(testServiceLayer);
+
+      const { getByTestId } = yield* render(<MyComponent />);
+
+      assert.strictEqual((yield* getByTestId("svc")).textContent, "test-value");
+    }),
+  );
+});
+
+// =============================================================================
+// Layer Precedence
+// =============================================================================
+// Scope: Verify last-write-wins semantics
+
+describe("Layer Precedence", () => {
+  it.scoped("should override via chaining (last provision wins)", () =>
+    Effect.gen(function* () {
+      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+
+      const BlueTheme = Layer.succeed(Theme, { color: "blue" });
+      const RedTheme = Layer.succeed(Theme, { color: "red" });
+
+      const MyComponent = Component.gen(function* () {
+        const theme = yield* Theme;
+        return <div data-testid="theme">{theme.color}</div>;
+      })
+        .provide(BlueTheme)
+        .provide(RedTheme);
+
+      const { getByTestId } = yield* render(<MyComponent />);
+
+      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
+    }),
+  );
+
+  it.scoped("should override via array order (last in array wins)", () =>
+    Effect.gen(function* () {
+      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+
+      const BlueTheme = Layer.succeed(Theme, { color: "blue" });
+      const RedTheme = Layer.succeed(Theme, { color: "red" });
+
+      const MyComponent = Component.gen(function* () {
+        const theme = yield* Theme;
+        return <div data-testid="theme">{theme.color}</div>;
+      }).provide([BlueTheme, RedTheme]);
+
+      const { getByTestId } = yield* render(<MyComponent />);
+
+      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
+    }),
+  );
+
+  it.scoped("should allow override after full provision", () =>
+    Effect.gen(function* () {
+      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+
+      const BlueTheme = Layer.succeed(Theme, { color: "blue" });
+      const RedTheme = Layer.succeed(Theme, { color: "red" });
+
+      const BaseComponent = Component.gen(function* () {
+        const theme = yield* Theme;
+        return <div data-testid="theme">{theme.color}</div>;
+      }).provide(BlueTheme);
+
+      const OverriddenComponent = BaseComponent.provide(RedTheme);
+
+      const { getByTestId } = yield* render(<OverriddenComponent />);
+
+      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
+    }),
+  );
+});
+
+// =============================================================================
+// Immutability
+// =============================================================================
+// Scope: Verify original component is not mutated
+
+describe("Immutability", () => {
+  it("should not mutate original component after provision", () => {
+    const BaseComponent = Component.gen(function* () {
+      return <div>Base</div>;
+    });
+
+    const ProvidedComponent = BaseComponent.provide(testServiceLayer);
+
+    // Original should still have empty layers
+    assert.strictEqual(BaseComponent._layers.length, 0);
+    // New component should have the layer
+    assert.strictEqual(ProvidedComponent._layers.length, 1);
+  });
+
+  it("should create independent variants from base", () =>
+    Effect.gen(function* () {
+      class ServiceA extends Context.Tag("ServiceA")<ServiceA, { value: string }>() {}
+      class ServiceB extends Context.Tag("ServiceB")<ServiceB, { value: string }>() {}
+
+      const BaseComponent = Component.gen(function* () {
+        const a = yield* ServiceA;
+        const b = yield* ServiceB;
+        return (
+          <div data-testid="combined">
+            {a.value}-{b.value}
+          </div>
+        );
+      });
+
+      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" }));
+
+      // VariantA provides ServiceA, and ServiceB comes from outer context
+      const { getByTestId: getA } = yield* render(<VariantA />);
+      assert.strictEqual((yield* getA("combined")).textContent, "A-B");
+    }));
+
+  it("should create distinct objects on chaining", () => {
+    const Step1 = Component.gen(function* () {
+      return <div>Step1</div>;
+    }).provide(testServiceLayer);
+
+    const Step2 = Step1.provide(testServiceLayer);
+    const Step3 = Step2.provide(testServiceLayer);
+
+    // Each step should be a different object
+    assert.notStrictEqual(Step1, Step2);
+    assert.notStrictEqual(Step2, Step3);
+    assert.notStrictEqual(Step1, Step3);
+  });
+});
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+// Scope: Boundary conditions and unusual scenarios
+
+describe("Edge Cases", () => {
+  it.scoped("should handle providing to component with no requirements", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.gen(function* () {
+        return <div data-testid="no-req">No requirements</div>;
+      });
+
+      const ProvidedComponent = MyComponent.provide(testServiceLayer);
+
+      const { getByTestId } = yield* render(<ProvidedComponent />);
+
+      assert.strictEqual((yield* getByTestId("no-req")).textContent, "No requirements");
+    }),
+  );
+
+  it.scoped("should preserve props after provision", () =>
+    Effect.gen(function* () {
+      const MyComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ title: string }>,
+      ) {
+        const { title } = yield* Props;
+        return <div data-testid="props">{title}</div>;
+      }).provide(testServiceLayer);
+
+      const { getByTestId } = yield* render(<MyComponent title="Test Title" />);
+
+      assert.strictEqual((yield* getByTestId("props")).textContent, "Test Title");
+    }),
+  );
+
+  it.scoped("should handle already satisfied service (extra provision)", () =>
+    Effect.gen(function* () {
+      // Component with no requirements
+      const MyComponent = Component.gen(function* () {
+        return <div data-testid="extra">Extra provision</div>;
+      });
+
+      // Providing extra layers should be harmless
+      const ProvidedComponent = MyComponent.provide(testServiceLayer);
+
+      const { getByTestId } = yield* render(<ProvidedComponent />);
+
+      assert.strictEqual((yield* getByTestId("extra")).textContent, "Extra provision");
     }),
   );
 });

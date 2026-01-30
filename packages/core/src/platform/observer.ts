@@ -63,10 +63,7 @@ export interface TestObserverService extends ObserverService {
 // Tag
 // =============================================================================
 
-export class Observer extends Context.Tag("trygg/platform/Observer")<
-  Observer,
-  ObserverService
->() {}
+export class Observer extends Context.Tag("trygg/platform/Observer")<Observer, ObserverService>() {}
 
 // =============================================================================
 // Browser layer
@@ -194,16 +191,22 @@ export const test: Layer.Layer<Observer> = Layer.effect(
         Effect.gen(function* () {
           const handler = intersectionHandlers.get(el);
           if (handler !== undefined) {
-            const mockEntry = {
+            const mockEntry: IntersectionObserverEntry = {
               target: el,
               isIntersecting: true,
               intersectionRatio: 1,
-              boundingClientRect: {} as DOMRectReadOnly,
-              intersectionRect: {} as DOMRectReadOnly,
+              boundingClientRect: Object.setPrototypeOf(
+                { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
+                DOMRectReadOnly.prototype,
+              ),
+              intersectionRect: Object.setPrototypeOf(
+                { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
+                DOMRectReadOnly.prototype,
+              ),
               rootBounds: null,
               time: 0,
               ...entry,
-            } as IntersectionObserverEntry;
+            };
             yield* handler(mockEntry);
           }
         }),

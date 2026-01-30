@@ -23,7 +23,7 @@ import { Effect } from "effect";
 export const runPrefetch = (
   prefetchFns: ReadonlyArray<(ctx: unknown) => Effect.Effect<unknown, unknown, never>>,
   ctx: unknown,
-): Effect.Effect<void, never, never> => {
+) => {
   if (prefetchFns.length === 0) {
     return Effect.void;
   }

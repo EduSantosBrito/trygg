@@ -4,21 +4,25 @@
   "description": "Effect-native UI framework with JSX support and fine-grained reactivity",
   "keywords": [
     "effect",
-    "ui",
     "framework",
     "jsx",
     "reactive",
     "signals",
-    "typescript"
+    "typescript",
+    "ui"
   ],
   "homepage": "https://github.com/EduSantosBrito/effect-ui#readme",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/EduSantosBrito/effect-ui.git"
   },
-  "license": "MIT",
-  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
+  "sideEffects": false,
   "module": "./dist/index.js",
   "exports": {
     ".": {
@@ -44,12 +48,12 @@
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-dev-runtime.d.ts",
       "import": "./dist/jsx-dev-runtime.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "scripts": {
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",

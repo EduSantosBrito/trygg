@@ -29,44 +29,56 @@ import { Element } from "../../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
+import type { Component } from "../../primitives/component.js";
+import type { Context } from "effect";
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
 /** Create a RouteComponent that renders a div with data-testid */
-const identifiableComp = (testId: string, content: string): RouteComponent =>
-  Object.assign(
-    () =>
-      componentElement(() =>
-        Effect.succeed(
-          Element.Intrinsic({
-            tag: "div",
-            props: { "data-testid": testId },
-            children: [text(content)],
-            key: null,
-          }),
-        ),
+const identifiableComp = (testId: string, content: string): RouteComponent => {
+  const fn = () =>
+    componentElement(() =>
+      Effect.succeed(
+        Element.Intrinsic({
+          tag: "div",
+          props: { "data-testid": testId },
+          children: [text(content)],
+          key: null,
+        }),
       ),
-    { _tag: "EffectComponent" as const },
-  );
+    );
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 /** Create a loading RouteComponent */
-const loadingComp = (): RouteComponent =>
-  Object.assign(
-    () =>
-      componentElement(() =>
-        Effect.succeed(
-          Element.Intrinsic({
-            tag: "div",
-            props: { "data-testid": "loading" },
-            children: [text("Loading...")],
-            key: null,
-          }),
-        ),
+const loadingComp = (): RouteComponent => {
+  const fn = () =>
+    componentElement(() =>
+      Effect.succeed(
+        Element.Intrinsic({
+          tag: "div",
+          props: { "data-testid": "loading" },
+          children: [text("Loading...")],
+          key: null,
+        }),
       ),
-    { _tag: "EffectComponent" as const },
-  );
+    );
+  const comp = Object.assign(fn, {
+    _tag: "EffectComponent" as const,
+    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+    provide: () => comp as Component.Type<never, unknown, unknown>,
+  });
+  return comp as RouteComponent;
+};
 
 /** Custom test layer with specified initial path */
 const testLayerAt = (path: string): Layer.Layer<Renderer | Router.Router> =>

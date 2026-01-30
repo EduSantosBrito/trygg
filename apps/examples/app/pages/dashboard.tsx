@@ -66,54 +66,60 @@ const DashboardPage = Component.gen(function* () {
     { text: "Report generated", time: "3 hours ago" },
   ];
 
-  return Effect.gen(function* () {
-    return (
-      <div className="min-h-screen font-sans -m-6 p-0" style={{ background: theme.background }}>
-        <Header userName="Developer" />
+  // Partial provision: provide services based on current signal state
+  // Components have different requirements, so we provide different layer combinations
+  const ProvidedHeader = Header.provide([currentTheme, loggerLayer]);
+  const ProvidedStatCard = StatCard.provide(currentTheme);
+  const ProvidedActionButton = ActionButton.provide([currentTheme, analyticsLayer]);
+  const ProvidedSectionTitle = SectionTitle.provide(currentTheme);
+  const ProvidedActivityItem = ActivityItem.provide([currentTheme, analyticsLayer]);
 
-        <main className="p-6 max-w-300 mx-auto">
-          <div className="flex justify-between items-center mb-6">
-            <SectionTitle title="Overview" />
-            <ActionButton
-              label={`Switch to ${isDarkValue ? "Light" : "Dark"}`}
-              variant="secondary"
-              onClick={toggleTheme}
-            />
-          </div>
+  return (
+    <div className="min-h-screen font-sans -m-6 p-0" style={{ background: theme.background }}>
+      <ProvidedHeader userName="Developer" />
 
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-8">
-            <StatCard title="Total Users" value="12,345" change="+12%" />
-            <StatCard title="Revenue" value="$45,678" change="+8%" />
-            <StatCard title="Orders" value="1,234" change="-3%" />
-            <StatCard title="Conversion" value="3.2%" change="+0.5%" />
-          </div>
+      <main className="p-6 max-w-300 mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <ProvidedSectionTitle title="Overview" />
+          <ProvidedActionButton
+            label={`Switch to ${isDarkValue ? "Light" : "Dark"}`}
+            variant="secondary"
+            onClick={toggleTheme}
+          />
+        </div>
 
-          <SectionTitle title="Recent Activity" />
-          <div
-            className="rounded-lg overflow-hidden shadow"
-            style={{ background: theme.cardBackground }}
-          >
-            {activities.map((activity, i) => (
-              <ActivityItem key={i} text={activity.text} time={activity.time} />
-            ))}
-          </div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-8">
+          <ProvidedStatCard title="Total Users" value="12,345" change="+12%" />
+          <ProvidedStatCard title="Revenue" value="$45,678" change="+8%" />
+          <ProvidedStatCard title="Orders" value="1,234" change="-3%" />
+          <ProvidedStatCard title="Conversion" value="3.2%" change="+0.5%" />
+        </div>
 
-          <div className="mt-8 flex gap-4">
-            <ActionButton
-              label="Generate Report"
-              variant="primary"
-              onClick={() => Effect.log("Generating report...")}
-            />
-            <ActionButton
-              label="Export Data"
-              variant="secondary"
-              onClick={() => Effect.log("Exporting data...")}
-            />
-          </div>
-        </main>
-      </div>
-    );
-  }).pipe(Component.provide(Layer.mergeAll(currentTheme, analyticsLayer, loggerLayer)));
+        <ProvidedSectionTitle title="Recent Activity" />
+        <div
+          className="rounded-lg overflow-hidden shadow"
+          style={{ background: theme.cardBackground }}
+        >
+          {activities.map((activity, i) => (
+            <ProvidedActivityItem key={i} text={activity.text} time={activity.time} />
+          ))}
+        </div>
+
+        <div className="mt-8 flex gap-4">
+          <ProvidedActionButton
+            label="Generate Report"
+            variant="primary"
+            onClick={() => Effect.log("Generating report...")}
+          />
+          <ProvidedActionButton
+            label="Export Data"
+            variant="secondary"
+            onClick={() => Effect.log("Exporting data...")}
+          />
+        </div>
+      </main>
+    </div>
+  );
 });
 
 export default DashboardPage;

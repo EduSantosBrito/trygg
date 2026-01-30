@@ -450,7 +450,7 @@ describe("Renderer Integration", () => {
       const { getByTestId, container } = yield* render(<App />);
 
       // Content rendered normally
-      assert.strictEqual(getByTestId("content").textContent, "Hello");
+      assert.strictEqual((yield* getByTestId("content")).textContent, "Hello");
 
       // Title NOT in the container (hoisted)
       assert.isNull(container.querySelector("title"));
@@ -499,7 +499,7 @@ describe("Renderer Integration", () => {
       const { getByTestId } = yield* render(<App />);
 
       // Style stays in container (not hoisted)
-      const style = getByTestId("wrapper").querySelector("style");
+      const style = (yield* getByTestId("wrapper")).querySelector("style");
       assert.isNotNull(style);
       assert.strictEqual(style?.textContent, ".x { color: red; }");
     }),

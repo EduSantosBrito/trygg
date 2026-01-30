@@ -1,13 +1,13 @@
-import { Effect } from "effect"
-import { Component, type ComponentProps } from "trygg"
+import { Effect } from "effect";
+import { Component, type ComponentProps } from "trygg";
 
 export const ErrorView = Component.gen(function* (
-  Props: ComponentProps<{ 
-    error: unknown
-    onRetry?: () => Effect.Effect<void> 
-  }>
+  Props: ComponentProps<{
+    error: unknown;
+    onRetry?: () => Effect.Effect<void>;
+  }>,
 ) {
-  const { error, onRetry } = yield* Props
+  const { error, onRetry } = yield* Props;
 
   return (
     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -24,5 +24,5 @@ export const ErrorView = Component.gen(function* (
         </button>
       )}
     </div>
-  )
-})
+  );
+});

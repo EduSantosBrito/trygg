@@ -2,15 +2,15 @@
  * @since 1.0.0
  * Virtual DOM Element representation for trygg
  */
-import { Context, Data, Effect, Scope } from "effect";
+import { Cause, Context, Data, Effect, Scope } from "effect";
 import type { Signal, EachOptions } from "./signal.js";
-import { _setEachImpl, _setSignalElementImpl, peekSync } from "./signal.js";
+import { _setEachImpl, _setSignalElementImpl, _setTextElementImpl, peekSync } from "./signal.js";
 
 /**
  * Check if a value is an Effect
  * @internal
  */
-const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
+export const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
   typeof value === "object" && value !== null && Effect.EffectTypeId in value;
 
 /**
@@ -284,10 +284,22 @@ export type Element = Data.TaggedEnum<{
    */
   readonly ErrorBoundaryElement: {
     readonly child: Element;
-    readonly fallback: Element | ((cause: unknown) => Element);
-    readonly onError: ((cause: unknown) => Effect.Effect<void, never, unknown>) | null;
+    readonly fallback: Element | ((cause: Cause.Cause<unknown>) => Element);
+    readonly onError: ((cause: Cause.Cause<unknown>) => Effect.Effect<void, never, unknown>) | null;
   };
 }>;
+
+export declare const ElementRequirementsSymbol: unique symbol;
+
+export type ElementWithRequirements<R> = Element & {
+  readonly [ElementRequirementsSymbol]?: R;
+};
+
+export type ComponentElement = Extract<Element, { _tag: "Component" }>;
+
+export type ComponentElementWithRequirements<R> = ComponentElement & {
+  readonly [ElementRequirementsSymbol]?: R;
+};
 
 /**
  * Element constructors and utilities
@@ -324,10 +336,10 @@ export const text = (content: string) => Element.Text({ content });
  * @since 1.0.0
  * @internal
  */
-export const componentElement = <E>(
-  run: () => Effect.Effect<Element, E, unknown>,
+export const componentElement = <E, R>(
+  run: () => Effect.Effect<Element, E, R>,
   key: ElementKey | null = null,
-): Element => Element.Component({ run, key });
+): ComponentElementWithRequirements<R> => Element.Component({ run, key });
 
 /**
  * Create a context boundary element.
@@ -432,6 +444,9 @@ export const signalElement = (signal: Signal<Element>): Element =>
 
 // Initialize signalElement implementation in signal.ts to break circular dependency
 _setSignalElementImpl(signalElement);
+
+// Initialize Text constructor in signal.ts to break circular dependency
+_setTextElementImpl((props: { content: string }) => Element.Text(props));
 
 /**
  * Normalize a child value to an Element

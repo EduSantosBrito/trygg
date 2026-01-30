@@ -13,15 +13,14 @@ Traditional logging scatters context across dozens of log lines. Wide events emi
 ### Component-Based (Recommended)
 
 ```tsx
-import { Effect } from "effect"
-import { mount, DevMode } from "trygg"
+import { Component, mount, DevMode } from "trygg"
 
-const App = Effect.gen(function* () {
+const App = Component.gen(function* () {
   // your app
 })
 
 mount(container, <>
-  {App}
+  <App />
   <DevMode />
 </>)
 ```

@@ -2,6 +2,36 @@
 
 Effect-native UI framework with JSX support and fine-grained reactivity.
 
+- In all interaction and commit messages, be extremely concise and sacrifice grammar for the sake of concision.
+
+## Code Quality Standards
+
+- Make minimal, surgical changes
+- **Never compromise type safety**: No `any`, no non-null assertion operator (`!`), no type assertions (`as Type`)
+- **Make illegal states unrepresentable**: Model domain with ADTs/discriminated unions; parse inputs at boundaries into typed structures; if state can't exist, code can't mishandle it
+- **Abstractions**: Consciously constrained, pragmatically parameterised, doggedly documented
+
+### **ENTROPY REMINDER**
+This codebase will outlive you. Every shortcut you take becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down.
+
+You are not just writing code. You are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
+
+**Fight entropy. Leave the codebase better than you found it.**
+
+## VCS & Attribution
+
+- **ALWAYS check for `.jj/` dir before ANY VCS command** - if present, use jj not git
+- **Never** add Claude to attribution or as a contributor in PRs, commits, messages, or PR descriptions
+- **gh CLI available** for GitHub operations (PRs, issues, etc.)
+
+## Specialized Subagents
+
+| Subagent | Invoke For |
+|----------|------------|
+| **@oracle** | Architecture decisions, complex debugging, refactor planning, second opinion |
+| **@librarian** | Understanding 3rd party libraries (Effect, etc.), exploring remote repositories |
+| **@overseer** | Task orchestration, milestone management, finding next ready work |
+
 ## Quick Reference
 
 | Command | Purpose |
@@ -16,8 +46,8 @@ Effect-native UI framework with JSX support and fine-grained reactivity.
 - **All functions return Effects**: No synchronous helper functions that throw. If a function can fail, it must return an Effect.
 - **Errors must be yieldable**: Use `Data.TaggedError` instead of `new Error()` or `Effect.die(new Error(...))`. All errors should be yieldable.
 - **Components use `Component.gen`**: Always `Component.gen(function* () { ... })`. Never plain functions or raw Effect.gen.
-- **Provide layers at the parent**: When children require services, wrap return JSX in `Effect.gen(function* () { return <jsx/> }).pipe(Component.provide(layer))`. Children yield; parents provide.
-- **R = never at the top**: Components may require services, but the top-level effect passed to mount must have `R = never`. Use `Component.provide` on parent effects.
+- **Provide layers at the parent**: When children require services, use `.provide(layer)` on the component. Children yield; parents provide.
+- **R = never at the top**: Components may require services, but the top-level effect passed to mount must have `R = never`. Use `.provide()` method on parent components.
 - **No floating Effects**: Every `Effect.runFork` or fiber spawn must be held in a Scope. No fire-and-forget.
 - **Event handlers as Effect thunks**: Handlers are `() => Effect.Effect<void>`. Never run Effects synchronously inside handlers.
 - **Search before writing**: Before implementing a helper, check if Effect or existing utils already provide it.

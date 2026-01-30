@@ -23,7 +23,7 @@ export interface TestRenderResult {
   /**
    * Get an element by its text content (exact match)
    */
-  readonly getByText: (text: string) => HTMLElement;
+  readonly getByText: (text: string) => Effect.Effect<HTMLElement, ElementNotFoundError, never>;
 
   /**
    * Query for an element by its text content (returns null if not found)
@@ -33,7 +33,7 @@ export interface TestRenderResult {
   /**
    * Get an element by its test id (data-testid attribute)
    */
-  readonly getByTestId: (testId: string) => HTMLElement;
+  readonly getByTestId: (testId: string) => Effect.Effect<HTMLElement, ElementNotFoundError, never>;
 
   /**
    * Query for an element by its test id (returns null if not found)
@@ -43,7 +43,7 @@ export interface TestRenderResult {
   /**
    * Get an element by its role attribute
    */
-  readonly getByRole: (role: string) => HTMLElement;
+  readonly getByRole: (role: string) => Effect.Effect<HTMLElement, ElementNotFoundError, never>;
 
   /**
    * Query for an element by its role (returns null if not found)
@@ -53,7 +53,9 @@ export interface TestRenderResult {
   /**
    * Get an element by CSS selector
    */
-  readonly querySelector: <T extends HTMLElement = HTMLElement>(selector: string) => T;
+  readonly querySelector: <T extends HTMLElement = HTMLElement>(
+    selector: string,
+  ) => Effect.Effect<T, ElementNotFoundError, never>;
 
   /**
    * Query all elements matching a CSS selector
@@ -84,12 +86,12 @@ export class ElementNotFoundError extends Error {
  * @internal
  */
 const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "container"> => {
-  const getByText = (text: string): HTMLElement => {
+  const getByText = (text: string): Effect.Effect<HTMLElement, ElementNotFoundError, never> => {
     const result = queryByText(text);
     if (!result) {
-      throw new ElementNotFoundError("text", text);
+      return Effect.fail(new ElementNotFoundError("text", text));
     }
-    return result;
+    return Effect.succeed(result);
   };
 
   const queryByText = (text: string): HTMLElement | null => {
@@ -117,24 +119,24 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
     return node ? (node as HTMLElement) : null;
   };
 
-  const getByTestId = (testId: string): HTMLElement => {
+  const getByTestId = (testId: string): Effect.Effect<HTMLElement, ElementNotFoundError, never> => {
     const result = queryByTestId(testId);
     if (!result) {
-      throw new ElementNotFoundError("testId", testId);
+      return Effect.fail(new ElementNotFoundError("testId", testId));
     }
-    return result;
+    return Effect.succeed(result);
   };
 
   const queryByTestId = (testId: string): HTMLElement | null => {
     return container.querySelector(`[data-testid="${testId}"]`);
   };
 
-  const getByRole = (role: string): HTMLElement => {
+  const getByRole = (role: string): Effect.Effect<HTMLElement, ElementNotFoundError, never> => {
     const result = queryByRole(role);
     if (!result) {
-      throw new ElementNotFoundError("role", role);
+      return Effect.fail(new ElementNotFoundError("role", role));
     }
-    return result;
+    return Effect.succeed(result);
   };
 
   const queryByRole = (role: string): HTMLElement | null => {
@@ -181,12 +183,14 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
     return null;
   };
 
-  const querySelector = <T extends HTMLElement = HTMLElement>(selector: string): T => {
+  const querySelector = <T extends HTMLElement = HTMLElement>(
+    selector: string,
+  ): Effect.Effect<T, ElementNotFoundError, never> => {
     const result = container.querySelector<T>(selector);
     if (!result) {
-      throw new ElementNotFoundError("selector", selector);
+      return Effect.fail(new ElementNotFoundError("selector", selector));
     }
-    return result;
+    return Effect.succeed(result);
   };
 
   const querySelectorAll = <T extends HTMLElement = HTMLElement>(

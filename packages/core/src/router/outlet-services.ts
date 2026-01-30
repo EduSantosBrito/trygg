@@ -20,6 +20,7 @@ import {
 } from "effect";
 import { type Element, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
+import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
 import type { RoutesManifest } from "./routes.js";
 import type { RouteComponent, RouteErrorInfo, RouteParams } from "./types.js";
@@ -32,7 +33,14 @@ import {
 } from "./matching.js";
 import { CurrentRouteParams, CurrentRouteError, CurrentOutletChild } from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
-import { isEffectComponent } from "../primitives/component.js";
+
+/**
+ * Type guard to check if a RouteComponent is an Effect<Element>.
+ * Used to narrow the union type after checking !Component.isEffectComponent().
+ * @internal
+ */
+const isEffectElement = (u: RouteComponent): u is Effect.Effect<Element, unknown, unknown> =>
+  Effect.isEffect(u);
 
 // =============================================================================
 // OutletRenderer Service
@@ -141,10 +149,7 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<
-  AsyncLoader,
-  AsyncLoaderShape
->() {
+export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<AsyncLoader, AsyncLoaderShape>() {
   /** Create a live AsyncLoader. Must be called within a Scope. */
   static readonly make = (
     loadingElement: Element,
@@ -243,7 +248,7 @@ export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<
 
 /**
  * Render a RouteComponent to an Element.
- * Handles both ComponentType (from Component.gen) and Effect<Element>.
+ * RouteComponent must be Component.Type from Component.gen.
  * @internal
  */
 function renderComponent(
@@ -253,7 +258,8 @@ function renderComponent(
 ): Effect.Effect<Element, unknown, never> {
   const params = decodedParams as unknown as RouteParams;
 
-  if (isEffectComponent(component)) {
+  // RouteComponent can be Component.Type or Effect<Element>
+  if (Component.isEffectComponent(component)) {
     const element = component({});
     if (element._tag === "Component") {
       const originalRun = element.run;
@@ -269,16 +275,20 @@ function renderComponent(
     return Effect.succeed(element);
   }
 
-  const effectComp = component as Effect.Effect<Element, unknown, unknown>;
-  return Effect.succeed(
-    componentElement(
-      () =>
-        effectComp.pipe(
+  // Component is an Effect<Element> - wrap it
+  if (isEffectElement(component)) {
+    return Effect.succeed(
+      componentElement(() =>
+        component.pipe(
           Effect.locally(CurrentRouteParams, params),
           Effect.locally(CurrentRouteQuery, decodedQuery),
-        ) as Effect.Effect<Element, unknown, never>,
-    ),
-  );
+        ),
+      ),
+    );
+  }
+
+  // Should never reach here if RouteComponent type is correct
+  return Effect.die(new Error("Invalid RouteComponent: expected Component or Effect<Element>"));
 }
 
 /**
@@ -293,7 +303,8 @@ function renderLayout(
 ): Effect.Effect<Element, unknown, never> {
   const params = decodedParams as unknown as RouteParams;
 
-  if (isEffectComponent(layout)) {
+  // RouteComponent can be Component.Type or Effect<Element>
+  if (Component.isEffectComponent(layout)) {
     const element = layout({});
     if (element._tag === "Component") {
       const originalRun = element.run;
@@ -312,19 +323,23 @@ function renderLayout(
     return Effect.succeed(element);
   }
 
-  const effectLayout = layout as Effect.Effect<Element, unknown, unknown>;
-  return Effect.succeed(
-    componentElement(
-      () =>
+  // Layout is an Effect<Element> - wrap it
+  if (isEffectElement(layout)) {
+    return Effect.succeed(
+      componentElement(() =>
         Effect.gen(function* () {
           yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-          return yield* effectLayout.pipe(
+          return yield* layout.pipe(
             Effect.locally(CurrentRouteParams, params),
             Effect.locally(CurrentRouteQuery, decodedQuery),
           );
-        }) as Effect.Effect<Element, unknown, never>,
-    ),
-  );
+        }),
+      ),
+    );
+  }
+
+  // Should never reach here if RouteComponent type is correct
+  return Effect.die(new Error("Invalid RouteComponent: expected Component or Effect<Element>"));
 }
 
 /**
@@ -347,7 +362,8 @@ function renderError(
       reset: Signal.update(resetSignal, (n) => n + 1),
     };
 
-    if (isEffectComponent(errorComp)) {
+    // RouteComponent can be Component.Type or Effect<Element>
+    if (Component.isEffectComponent(errorComp)) {
       const element = errorComp({});
       if (element._tag === "Component") {
         const originalRun = element.run;
@@ -358,10 +374,16 @@ function renderError(
       return element;
     }
 
-    return componentElement(() =>
-      (errorComp as Effect.Effect<Element, unknown, never>).pipe(
-        Effect.locally(CurrentRouteError, Option.some(errorInfo)),
-      ),
+    // Error component is an Effect<Element> - wrap it
+    if (isEffectElement(errorComp)) {
+      return componentElement(() =>
+        errorComp.pipe(Effect.locally(CurrentRouteError, Option.some(errorInfo))),
+      );
+    }
+
+    // Should never reach here if RouteComponent type is correct
+    return yield* Effect.die(
+      new Error("Invalid RouteComponent: expected Component or Effect<Element>"),
     );
   });
 }

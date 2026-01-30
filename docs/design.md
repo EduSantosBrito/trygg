@@ -5,14 +5,14 @@
 **trygg** is a UI framework built entirely on Effect, providing:
 
 - **JSX as the authoring format** - Custom runtime, no React dependency
-- **Components are Effects** - `Effect<Element, E, R>`; app entrypoint must have `R = never`
+- **Components use Component.gen** - `Component.Type` with explicit props and DI; app entrypoint must have `R = never`
 - **Reactive state via Signal** - Built on SubscriptionRef, position-based identity like React hooks
-- **Dependency injection via Component.provide** - Use `Component.provide(layer)` on parent effects
+- **Dependency injection via .provide() method** - Use `.provide()` method on components
 - **Explicit side-effect handling** - Event handlers return Effects, executed by the renderer
 
 ### Core Principles
 
-1. **Effect-Native**: Everything is an Effect. Use `Component.provide` for DI, not special components.
+1. **Effect-Native**: Everything is an Effect. Use `.provide()` method for DI, not special components.
 2. **Type-Safe**: Errors tracked at type level. R=never enforced - no type casts.
 3. **Testable**: Components can be rendered with test layers in isolation.
 4. **Explicit**: Side effects are visible in the type signature.
@@ -105,6 +105,14 @@ export const jsx = <Props extends JSXProps>(
 export const jsxs = jsx
 export const Fragment = (props: { children?: unknown }): Element
 ```
+
+**Valid component types:**
+- **String**: Intrinsic HTML elements (`<div>`, `<span>`, etc.)
+- **Component.Type**: Components created with `Component.gen`
+
+**Invalid component types** (fail with `InvalidComponentError`):
+- Plain functions not wrapped in `Component.gen`
+- Direct `Effect<Element>` values
 
 Development mode (`jsx-dev-runtime.ts`) adds source location info for debugging.
 
@@ -345,17 +353,22 @@ const Pure: Component.Type<{ title: string }, never, never>  // no requirements
 
 ### 5.3 Component.provide
 
-```tsx
-// Apply layers to satisfy child service requirements
-Effect.gen(function* () {
-  return <Card title="Hello" />
-}).pipe(Component.provide(themeLayer))
+Components have a `.provide()` method for dependency injection:
 
-// Multiple layers
-Component.provide(Layer.mergeAll(themeLayer, loggerLayer))
+```tsx
+// Apply layers to satisfy component service requirements
+const ThemedCard = Card.provide(themeLayer)
+
+// Multiple layers via chaining
+const FullyProvidedCard = Card
+  .provide(themeLayer)
+  .provide(loggerLayer)
+
+// Multiple layers via array
+const FullyProvidedCard = Card.provide([themeLayer, loggerLayer])
 ```
 
-Captures the current context and wraps the child Element in a `Provide` node.
+The `.provide()` method returns a new component with the layer applied. When rendered, it builds a context from the layer and provides it to the component's generator, satisfying service requirements.
 
 ---
 
@@ -605,10 +618,10 @@ const users = yield* client.users.listUsers()
 ```typescript
 // vite.config.ts
 import { defineConfig } from "vite"
-import effectUI from "trygg/vite-plugin"
+import { trygg } from "trygg/vite-plugin"
 
 export default defineConfig({
-  plugins: [effectUI({ routes: "./app/routes.ts" })]
+  plugins: [trygg()]
 })
 ```
 
@@ -670,13 +683,13 @@ const className = cx("base", isActive && "active", isDisabled && "disabled")
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Component type | `Effect<Element, E, never>` | R=never enforced, use `yield*` to compose |
+| Component type | `Component.Type` via `Component.gen` | Tagged components, explicit props, R=never enforced |
 | Reactivity | `Signal` on SubscriptionRef | Effect-native, fine-grained updates |
 | Subscription | Only `Signal.get()` subscribes | Fine-grained by default, opt-in re-render |
 | Conditional rendering | `Signal.derive` -> `SignalElement` | DOM swap without component re-render |
 | List rendering | `Signal.each` with LIS reconciliation | Minimal DOM moves, stable scopes per key |
 | Event handlers | Return `Effect` | Renderer handles execution via `Runtime.runFork` |
-| DI pattern | `Component.provide(layer)` | No Provider component, Effect-native |
+| DI pattern | `.provide(layer)` method | No Provider component, Effect-native |
 | Head management | JSX hoisting to `document.head` | Stack-based dedup, scope-based cleanup |
 | Rendering target | Browser DOM first | SSR planned via same Layer pattern |
 | Entrypoint | `mount()` / `mountDocument()` | Simple start, document-level for full apps |
