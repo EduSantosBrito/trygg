@@ -7,3 +7,12 @@ Started: 2026-01-31
 
 ---
 <!-- Task logs below - APPEND ONLY -->
+
+## Task - pr1-d1
+- Fixed .provide regression in ErrorBoundary
+- Removed manual copying of ._layers and ._requirements from original component
+- Replaced manual safeComponentFn with tagComponent using runFn parameter
+- Merged handler requirements properly in tagComponent call
+- Created error-boundary.test.tsx with 6 passing tests
+- Files changed: error-boundary.ts, error-boundary.test.tsx
+- **Learnings:** tagComponent accepts runFn parameter which enables proper .provide() chaining. When wrapping components, pass the Effect run function to tagComponent rather than manually copying metadata.

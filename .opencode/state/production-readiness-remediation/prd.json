@@ -10,7 +10,7 @@
       "description": "Build wrapped component using Component.gen instead of manual function. Remove copying of ._layers and ._requirements from original. Let tagComponent attach proper .provide method to wrapper.",
       "files": ["packages/core/src/primitives/error-boundary.ts", "packages/core/src/primitives/__tests__/error-boundary.test.tsx"],
       "priority": "P0",
-      "passes": false
+      "passes": true
     },
     {
       "id": "pr1-d2",

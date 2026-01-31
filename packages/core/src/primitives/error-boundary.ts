@@ -193,48 +193,50 @@ function createBuilder<Props, E, R, RHandlers = never>(
           return handler(cause as Cause.Cause<E>);
         };
 
-        // Get the original component's metadata
-        const originalLayers = (component as any)._layers || [];
-        const originalRequirements = (component as any)._requirements || [];
+        // Create wrapped component using componentGen
+        // This ensures proper .provide() behavior through tagComponent
+        // We create a component that accepts reactive props and wraps with error boundary
+        const safeComponentRunFn = (
+          _props: [Props] extends [never] ? {} : ReactiveProps<Props>,
+        ): Effect.Effect<Element, never, R> =>
+          Effect.gen(function* () {
+            const unwrappedProps: Record<string, unknown> = {};
+            for (const key of Object.keys(_props as Record<string, unknown>)) {
+              const value = (_props as Record<string, unknown>)[key];
+              if (Signal.isSignal(value)) {
+                unwrappedProps[key] = yield* Signal.get(value);
+              } else {
+                unwrappedProps[key] = value;
+              }
+            }
+            // Call the original component with unwrapped props
+            const childElement = component(
+              unwrappedProps as [Props] extends [never] ? {} : Props,
+            );
+            return ElementEnum.ErrorBoundaryElement({
+              child: childElement,
+              fallback: fallbackHandler,
+              onError: null,
+            });
+          });
 
-        // Create a component that wraps the original with error boundary
-        // Accepts ReactiveProps to allow SignalOrValue for fine-grained reactivity
         const safeComponentFn = (
           _props: [Props] extends [never] ? {} : ReactiveProps<Props>,
-        ): Element => {
-          // Unwrap signals from props before passing to the original component
-          const run = (): Effect.Effect<Element, never, R> =>
-            Effect.gen(function* () {
-              const unwrappedProps: Record<string, unknown> = {};
-              for (const key of Object.keys(_props as Record<string, unknown>)) {
-                const value = (_props as Record<string, unknown>)[key];
-                if (Signal.isSignal(value)) {
-                  unwrappedProps[key] = yield* Signal.get(value);
-                } else {
-                  unwrappedProps[key] = value;
-                }
-              }
-              // Call the original component with unwrapped props
-              const childElement = component(
-                unwrappedProps as [Props] extends [never] ? {} : Props,
-              );
-              return ElementEnum.ErrorBoundaryElement({
-                child: childElement,
-                fallback: fallbackHandler,
-                onError: null,
-              });
-            });
+        ): Element => componentElement(() => safeComponentRunFn(_props));
 
-          return componentElement(run);
-        };
+        // Merge requirements: original component requirements + handler requirements
+        const mergedRequirements = [
+          ...((component as any)._requirements || []),
+          ...state.handlerRequirements,
+        ];
 
-        // Use tagComponent to create a proper Component.Type with working .provide()
-        // Explicitly specify ReactiveProps<Props> to allow SignalOrValue in props
+        // Use tagComponent to create proper Component.Type with working .provide()
+        // Pass runFn so .provide() can wrap it properly
         const safeComponent = tagComponent<
           ReactiveProps<Props>,
           never,
           R | RHandlers | NormalizeRequirements<RHandler>
-        >(safeComponentFn, originalLayers, [...originalRequirements, ...state.handlerRequirements]);
+        >(safeComponentFn, [], mergedRequirements, safeComponentRunFn);
 
         return safeComponent;
       });
