@@ -284,7 +284,7 @@ export type Element = Data.TaggedEnum<{
    */
   readonly ErrorBoundaryElement: {
     readonly child: Element;
-    readonly fallback: Element | ((cause: Cause.Cause<unknown>) => Element);
+    readonly fallback: (cause: Cause.Cause<unknown>) => Effect.Effect<Element, never, unknown>;
     readonly onError: ((cause: Cause.Cause<unknown>) => Effect.Effect<void, never, unknown>) | null;
   };
 }>;

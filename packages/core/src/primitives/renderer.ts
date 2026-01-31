@@ -1443,16 +1443,19 @@ const renderElement = (
                 yield* Effect.provide(onError(cause), context ?? emptyContext);
               }
 
-              // Compute fallback element
-              const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
+              const fallbackScope = yield* Scope.make();
+              const activeContext = context ?? emptyContext;
+              const fallbackElement = yield* fallback(cause).pipe(
+                Effect.provide(activeContext),
+                Effect.provideService(Scope.Scope, fallbackScope),
+              );
 
               // Render fallback with a new scope (no error handler - don't catch fallback errors)
-              const fallbackScope = yield* Scope.make();
               const fallbackResult = yield* renderElement(
                 fallbackElement,
                 parent,
                 runtime,
-                context,
+                activeContext,
                 defaultRenderOptions,
               ).pipe(
                 Effect.provideService(Scope.Scope, fallbackScope),
@@ -1503,16 +1506,19 @@ const renderElement = (
             yield* Effect.provide(onError(cause), context ?? emptyContext);
           }
 
-          // Compute fallback element
-          const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
+          const fallbackScope = yield* Scope.make();
+          const activeContext = context ?? emptyContext;
+          const fallbackElement = yield* fallback(cause).pipe(
+            Effect.provide(activeContext),
+            Effect.provideService(Scope.Scope, fallbackScope),
+          );
 
           // Render fallback with a new scope (no error handler - don't catch fallback errors)
-          const fallbackScope = yield* Scope.make();
           const fallbackResult = yield* renderElement(
             fallbackElement,
             parent,
             runtime,
-            context,
+            activeContext,
             defaultRenderOptions,
           ).pipe(
             Effect.provideService(Scope.Scope, fallbackScope),

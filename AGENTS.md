@@ -39,6 +39,47 @@ You are not just writing code. You are shaping the future of this project. The p
 | `bun run typecheck` | Type check |
 | `bun run test` | Run tests |
 | `bun run examples` | Dev server at localhost:5173 |
+| `os task list --ready` | List ready Overseer tasks |
+| `os task start <id>` | Start task (auto bookmark) |
+| `os task complete <id>` | Complete task (auto commit) |
+| `ryu` | View jj bookmark stack |
+| `ryu submit` | Submit stack as chained PRs |
+| `/restack` | Rebase onto main + resubmit |
+
+## Workflow: Overseer + jj-ryu
+
+**1. Plan & Track:**
+```bash
+/plan-spec "Feature description"          # Creates specs/feature.md
+/overseer-plan specs/feature.md            # Creates Overseer tasks
+```
+
+**2. Work:**
+```bash
+os task start <id>                         # Creates jj bookmark
+# ... implement ...
+bun run typecheck && bun run test          # Verify
+os task complete <id> --result "..."       # Squash & commit
+```
+
+**3. Submit:**
+```bash
+ryu track --all                            # Track bookmarks
+ryu submit --draft                         # Submit as stacked PRs
+```
+
+**4. Iterate:**
+```bash
+# After review feedback:
+jj commit -m "Address feedback"
+ryu submit
+
+# After parent PR merges:
+jj rebase -d main
+ryu submit
+```
+
+Each Overseer task becomes a chained PR. Dependencies are explicit in the stack.
 
 ## Core Rules
 
