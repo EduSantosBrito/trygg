@@ -1,0 +1,166 @@
+{
+  "prdName": "production-readiness-remediation",
+  "title": "Production Readiness Remediation",
+  "tasks": [
+    {
+      "id": "pr1-d1",
+      "pr": 1,
+      "deliverable": "D1",
+      "title": "Fix .provide regression in ErrorBoundary",
+      "description": "Build wrapped component using Component.gen instead of manual function. Remove copying of ._layers and ._requirements from original. Let tagComponent attach proper .provide method to wrapper.",
+      "files": ["packages/core/src/primitives/error-boundary.ts", "packages/core/src/primitives/__tests__/error-boundary.test.tsx"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr1-d2",
+      "pr": 1,
+      "deliverable": "D2",
+      "title": "Propagate handler requirements in ErrorBoundary",
+      "description": "Track handler requirements in builder state at runtime. Merge requirements: original component R + all handler requirements. Update tagComponent call to include merged requirements.",
+      "files": ["packages/core/src/primitives/error-boundary.ts", "packages/core/src/primitives/__tests__/error-boundary.test.tsx"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr1-d3",
+      "pr": 1,
+      "deliverable": "D3",
+      "title": "Replace sync throws with tagged errors in ErrorBoundary",
+      "description": "Replace throw new Error with Effect.fail using ErrorBoundaryBuilderError tagged error for invalid chains (after-catchall, duplicate-handler, multiple-catchall).",
+      "files": ["packages/core/src/primitives/error-boundary.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr2-d1",
+      "pr": 2,
+      "deliverable": "D1",
+      "title": "Remove type casting from component.ts",
+      "description": "Replace 'as' with proper type narrowing or explicit type parameters at line 92.",
+      "files": ["packages/core/src/primitives/component.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr2-d2",
+      "pr": 2,
+      "deliverable": "D2",
+      "title": "Fix Signal.suspend fallback",
+      "description": "Remove _textElementImpl! non-null assertion at line 935. Return Effect.fail with SignalInitError or safe sentinel element.",
+      "files": ["packages/core/src/primitives/signal.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr2-d3",
+      "pr": 2,
+      "deliverable": "D3",
+      "title": "Remove cast from resource.ts",
+      "description": "Remove 'error as E' cast at line 421. Widen Failure to unknown or decode errors explicitly.",
+      "files": ["packages/core/src/primitives/resource.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr2-d4",
+      "pr": 2,
+      "deliverable": "D4",
+      "title": "Remove casts from router files",
+      "description": "Replace 'as' assertions with proper type guards or tagged errors in outlet.ts:679 and outlet-services.ts:291.",
+      "files": ["packages/core/src/router/outlet.ts", "packages/core/src/router/outlet-services.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr3-d1",
+      "pr": 3,
+      "deliverable": "D1",
+      "title": "Restore key propagation for Components",
+      "description": "Wrap component elements with keyed() in jsx-runtime.ts after line 127. Ensure <MyComponent key=\"x\" /> yields element where getKey(element) === \"x\".",
+      "files": ["packages/core/src/jsx-runtime.ts", "packages/core/src/primitives/__tests__/renderer.test.tsx"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr3-d2",
+      "pr": 3,
+      "deliverable": "D2",
+      "title": "Fix Component namespace export",
+      "description": "Merge value and namespace properly in index.ts. Ensure Component.gen and Component.Type can be used together.",
+      "files": ["packages/core/src/index.ts", "packages/core/src/primitives/component.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr3-d3",
+      "pr": 3,
+      "deliverable": "D3",
+      "title": "Fix Provide context merging",
+      "description": "Merge parent context with provided context in renderer.ts line 597. Use Context.merge with parent winning on conflicts.",
+      "files": ["packages/core/src/primitives/renderer.ts"],
+      "priority": "P0",
+      "passes": false
+    },
+    {
+      "id": "pr4-d1",
+      "pr": 4,
+      "deliverable": "D1",
+      "title": "Replace decodeUnknownSync in router",
+      "description": "Replace Schema.decodeUnknownSync with Schema.decodeUnknown + Effect.mapError in outlet.ts:121 and outlet-services.ts toRouteParams.",
+      "files": ["packages/core/src/router/outlet.ts", "packages/core/src/router/outlet-services.ts"],
+      "priority": "P1",
+      "passes": false
+    },
+    {
+      "id": "pr4-d2",
+      "pr": 4,
+      "deliverable": "D2",
+      "title": "Replace Effect.die/dieMessage in router",
+      "description": "Replace 6 occurrences of Effect.die/dieMessage with tagged errors (InvalidRouteComponentError).",
+      "files": ["packages/core/src/router/outlet.ts", "packages/core/src/router/outlet-services.ts"],
+      "priority": "P1",
+      "passes": false
+    },
+    {
+      "id": "pr5-d1",
+      "pr": 5,
+      "deliverable": "D1",
+      "title": "Add missing tests",
+      "description": "Add tests for: SafeComponent.provide retains error boundary, handler requirements propagation, SignalInitError/fallback paths, key propagation on Component JSX, invalid route params handling, context merge in nested Provide.",
+      "files": ["packages/core/src/primitives/__tests__/error-boundary.test.tsx", "packages/core/src/primitives/__tests__/renderer.test.tsx", "packages/core/src/router/__tests__/outlet.test.tsx"],
+      "priority": "P1",
+      "passes": false
+    },
+    {
+      "id": "pr5-d2",
+      "pr": 5,
+      "deliverable": "D2",
+      "title": "Fix scope leaks in tests",
+      "description": "Convert it(...) to it.scoped(...) where render is used. Fix at packages/core/src/primitives/__tests__/component.test.tsx:540.",
+      "files": ["packages/core/src/primitives/__tests__/component.test.tsx"],
+      "priority": "P1",
+      "passes": false
+    },
+    {
+      "id": "pr5-d3",
+      "pr": 5,
+      "deliverable": "D3",
+      "title": "Fix oxlint portability",
+      "description": "Use relative path in .oxlintrc.json. Add packages/oxlint-plugin/dist/ and packages/oxlint-plugin/node_modules/ to .gitignore.",
+      "files": [".oxlintrc.json", ".gitignore"],
+      "priority": "P1",
+      "passes": false
+    },
+    {
+      "id": "pr5-d4",
+      "pr": 5,
+      "deliverable": "D4",
+      "title": "Remove effect-ui naming",
+      "description": "Search and replace effect-ui with trygg in all docs, templates, README files, CLI output.",
+      "files": ["docs/*.md", "README.md"],
+      "priority": "P1",
+      "passes": false
+    }
+  ]
+}
