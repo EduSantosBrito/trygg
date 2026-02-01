@@ -64,10 +64,7 @@
   },
   "dependencies": {
     "@effect-atom/atom": "^0.4.13",
-    "@effect/platform": "^0.94.1",
-    "@effect/platform-browser": "^0.74.0",
-    "consola": "^3.4.2",
-    "effect": "^3.19.15"
+    "consola": "^3.4.2"
   },
   "devDependencies": {
     "@effect/language-service": "^0.72.0",
@@ -83,19 +80,25 @@
     "vitest": "^3.2.0"
   },
   "peerDependencies": {
+    "@effect/platform": "^0.94.1",
+    "@effect/platform-browser": "^0.74.0",
     "@effect/platform-bun": "^0.87.0",
     "@effect/platform-node": "^0.87.0",
+    "effect": "^3.19.15",
     "typescript": "^5",
     "vite": "^5.0.0 || ^6.0.0"
   },
   "peerDependenciesMeta": {
-    "vite": {
+    "@effect/platform-browser": {
       "optional": true
     },
     "@effect/platform-bun": {
       "optional": true
     },
     "@effect/platform-node": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   }

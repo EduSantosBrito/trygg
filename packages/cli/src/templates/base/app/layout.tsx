@@ -1,15 +1,15 @@
 import "../styles.css";
-import { Effect } from "effect";
 import { Component, DevMode } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
 
 export default Component.gen(function* () {
-  return Effect.succeed(
+  return (
     <html lang="en">
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>trygg app</title>
         <meta name="description" content="Built with trygg - Effect-native UI framework" />
       </head>
@@ -49,6 +49,6 @@ export default Component.gen(function* () {
           </div>
         </main>
       </body>
-    </html>,
-  ).pipe(Component.provide(ApiClientLive));
-});
+    </html>
+  );
+}).provide(ApiClientLive);

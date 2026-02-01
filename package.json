@@ -1,11 +1,11 @@
 {
   "name": "trygg-workspace",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
+  "type": "module",
   "scripts": {
     "build": "bun run --cwd packages/core build",
     "typecheck": "bun run --cwd packages/core typecheck",
@@ -21,6 +21,9 @@
     "check": "bun run lint && bun run format && bun run typecheck && bun run effect:check"
   },
   "devDependencies": {
+    "@effect/cli": "^0.73.1",
+    "@effect/platform-node": "^0.87.0",
+    "effect": "^3.19.15",
     "@rollup/plugin-typescript": "^12.3.0",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",

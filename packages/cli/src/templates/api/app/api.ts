@@ -1,5 +1,5 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 
 const Hello = Schema.Struct({ message: Schema.String });
 
@@ -13,5 +13,6 @@ export const HelloLive = HttpApiBuilder.group(Api, "hello", (handlers) =>
   handlers.handle("greet", () => Effect.succeed({ message: "Hello from trygg!" })),
 );
 
-// Framework auto-detects Api + handler Layers and composes them.
-// No need to export a combined ApiLive layer.
+// Pre-composed layer ensures Router.Live identity consistency
+// across bundled plugin and SSR module boundaries.
+export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(HelloLive));

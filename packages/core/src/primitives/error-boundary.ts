@@ -27,11 +27,7 @@
  */
 import { Cause, Data, Effect } from "effect";
 import { Component, tagComponent } from "./component.js";
-import {
-  type Element,
-  Element as ElementEnum,
-  componentElement,
-} from "./element.js";
+import { type Element, Element as ElementEnum, componentElement } from "./element.js";
 import * as Signal from "./signal.js";
 import type { SignalOrValue } from "./resource.js";
 
@@ -45,7 +41,7 @@ type ErrorForTag<E, Tag extends ErrorTags<E>> = Extract<E, { readonly _tag: Tag 
  * CatchAll handler function type.
  * @internal
  */
-export type CatchAllHandler<E> = (cause: Cause.Cause<unknown>) => Element;
+export type CatchAllHandler<_E> = (cause: Cause.Cause<unknown>) => Element;
 
 /**
  * Union of error tags from an error type.
@@ -64,7 +60,6 @@ type AllErrorTags<E> = E extends { _tag: infer Tag } ? (Tag extends string ? Tag
  * @internal
  */
 type RemainingTags<E, HandledTags extends string> = Exclude<AllErrorTags<E>, HandledTags>;
-
 
 /**
  * Transform component props to accept SignalOrValue for each field.
@@ -98,7 +93,7 @@ export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError
 // Builder State (Mutable, per instance)
 // =============================================================================
 
-interface BuilderState<E> {
+interface BuilderState<_E> {
   handlers: Map<string, (error: unknown, cause: Cause.Cause<unknown>) => Element>;
   error: BuilderError | null;
   hasCatchAll: boolean;
@@ -201,8 +196,7 @@ class ErrorBoundaryBuilderImpl<
   R,
   RHandlers,
   HandledTags extends string,
-> implements ErrorBoundaryBuilderBase<Props, E, R, RHandlers, HandledTags>
-{
+> implements ErrorBoundaryBuilderBase<Props, E, R, RHandlers, HandledTags> {
   constructor(
     private readonly component: Component.Type<Props, E, R>,
     private readonly state: BuilderState<E>,
@@ -214,13 +208,7 @@ class ErrorBoundaryBuilderImpl<
   ): ErrorBoundaryBuilder<Props, E, R, RHandlers | RHandler, HandledTags | Tag> {
     if (this.state.hasCatchAll) {
       const nextState = this.withError(new BuilderError({ reason: "on-after-catchAll" }));
-      return new ErrorBoundaryBuilderImpl<
-        Props,
-        E,
-        R,
-        RHandlers | RHandler,
-        HandledTags | Tag
-      >(
+      return new ErrorBoundaryBuilderImpl<Props, E, R, RHandlers | RHandler, HandledTags | Tag>(
         this.component,
         nextState,
       );
@@ -228,13 +216,7 @@ class ErrorBoundaryBuilderImpl<
 
     if (this.state.handlers.has(tag)) {
       const nextState = this.withError(new BuilderError({ reason: "duplicate-handler", tag }));
-      return new ErrorBoundaryBuilderImpl<
-        Props,
-        E,
-        R,
-        RHandlers | RHandler,
-        HandledTags | Tag
-      >(
+      return new ErrorBoundaryBuilderImpl<Props, E, R, RHandlers | RHandler, HandledTags | Tag>(
         this.component,
         nextState,
       );
@@ -255,13 +237,7 @@ class ErrorBoundaryBuilderImpl<
       hasCatchAll: this.state.hasCatchAll,
     };
 
-    return new ErrorBoundaryBuilderImpl<
-      Props,
-      E,
-      R,
-      RHandlers | RHandler,
-      HandledTags | Tag
-    >(
+    return new ErrorBoundaryBuilderImpl<Props, E, R, RHandlers | RHandler, HandledTags | Tag>(
       this.component,
       nextState,
     );
@@ -285,10 +261,8 @@ class ErrorBoundaryBuilderImpl<
     this.state.hasCatchAll = true;
 
     return Effect.gen(this, function* () {
-      const fallbackHandler = (
-        cause: Cause.Cause<unknown>,
-      ): Effect.Effect<Element, never, unknown> =>
-        Effect.succeed(this.resolveHandler(handler, cause));
+      const fallbackHandler = (cause: Cause.Cause<unknown>): Element =>
+        this.resolveHandler(handler, cause);
 
       return yield* this.buildComponent(fallbackHandler);
     });
@@ -317,10 +291,8 @@ class ErrorBoundaryBuilderImpl<
     this.state.hasCatchAll = true;
 
     return Effect.gen(this, function* () {
-      const fallbackHandler = (
-        cause: Cause.Cause<unknown>,
-      ): Effect.Effect<Element, never, unknown> =>
-        Effect.succeed(this.resolveExhaustiveHandler(cause));
+      const fallbackHandler = (cause: Cause.Cause<unknown>): Element =>
+        this.resolveExhaustiveHandler(cause);
 
       return yield* this.buildComponent(fallbackHandler);
     });
@@ -368,13 +340,11 @@ class ErrorBoundaryBuilderImpl<
   }
 
   private buildComponent(
-    fallbackHandler: (cause: Cause.Cause<unknown>) => Effect.Effect<Element, never, unknown>,
+    fallbackHandler: (cause: Cause.Cause<unknown>) => Element,
   ): Effect.Effect<Component.Type<ReactiveProps<Props>, never, R>, never> {
     return Effect.sync(() => {
       const component = this.component;
-      const safeComponentRunFn = (
-        _props: PropsInput<Props>,
-      ): Effect.Effect<Element, never, R> =>
+      const safeComponentRunFn = (_props: PropsInput<Props>): Effect.Effect<Element, never, R> =>
         Effect.gen(function* () {
           const propKeys = Reflect.ownKeys(_props).filter((key): key is PropsKey<Props> =>
             isPropKey<Props>(key, _props),

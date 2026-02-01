@@ -1,28 +1,32 @@
 /**
  * Generate package.json based on user selections
+ * Uses PlatformConfig service for platform-specific values
  * @since 1.0.0
  */
 import { Effect } from "effect";
+import { PlatformConfig } from "../platform-config.js";
 
 export interface PackageJsonOptions {
   readonly name: string;
-  readonly platform: "node" | "bun";
   readonly output: "server" | "static";
 }
 
-export const generatePackageJson = (options: PackageJsonOptions): Effect.Effect<string> =>
+export const generatePackageJson = (
+  options: PackageJsonOptions,
+): Effect.Effect<string, never, PlatformConfig> =>
   Effect.gen(function* () {
-    const { name, platform, output } = options;
+    const { name, output } = options;
+    const platform = yield* PlatformConfig;
 
     const scripts: Record<string, string> = {
-      dev: "vite",
+      dev: platform.devScript,
       build: "vite build",
       typecheck: "tsc --noEmit",
     };
 
-    // Add platform-specific scripts
+    // Add platform-specific scripts for server output
     if (output === "server") {
-      const runtime = platform === "bun" ? "bun" : "node";
+      const runtime = platform.name;
       scripts.preview = `${runtime} dist/server.js`;
       scripts.start = `${runtime} dist/server.js`;
     } else {
@@ -33,15 +37,8 @@ export const generatePackageJson = (options: PackageJsonOptions): Effect.Effect<
       effect: "^3.19.15",
       "@effect/platform": "^0.94.1",
       "@effect/platform-browser": "^0.74.0",
-      trygg: "^0.0.1",
+      trygg: "workspace:*",
     };
-
-    // Add platform-specific runtime (needed by vite plugin for dev server)
-    if (platform === "bun") {
-      dependencies["@effect/platform-bun"] = "^0.87.0";
-    } else {
-      dependencies["@effect/platform-node"] = "^0.87.0";
-    }
 
     const devDependencies: Record<string, string> = {
       typescript: "^5.7.0",
@@ -49,6 +46,17 @@ export const generatePackageJson = (options: PackageJsonOptions): Effect.Effect<
       "@tailwindcss/vite": "^4.0.0",
       tailwindcss: "^4.0.0",
     };
+
+    // Add platform devDependencies only for static output (dev-only)
+    // For server output, platform package goes in dependencies instead
+    if (output === "static") {
+      Object.assign(devDependencies, platform.devDependencies);
+    }
+
+    // Add runtime dependency for server output
+    if (output === "server") {
+      dependencies[platform.runtimeDependencyName] = platform.runtimeVersion;
+    }
 
     const pkg = {
       name,

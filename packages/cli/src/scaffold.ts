@@ -3,7 +3,7 @@
  * @since 1.0.0
  */
 import { FileSystem } from "@effect/platform";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import * as path from "node:path";
 import type { ProjectOptions } from "./prompts";
 import { generatePackageJson } from "./generators/package-json";
@@ -11,6 +11,8 @@ import { generateViteConfig } from "./generators/vite-config";
 import { generateTryggConfig } from "./generators/trygg-config";
 import { generateTsConfig } from "./generators/tsconfig";
 import { generateGitignore } from "./generators/gitignore";
+import { PlatformConfig } from "./platform-config";
+import { BunPlatformConfig, NodePlatformConfig } from "./platforms";
 
 /**
  * Copy a directory recursively
@@ -38,6 +40,12 @@ const copyDir: (
 });
 
 /**
+ * Get the platform configuration layer based on user selection
+ */
+const getPlatformLayer = (platform: "node" | "bun"): Layer.Layer<PlatformConfig> =>
+  platform === "bun" ? BunPlatformConfig : NodePlatformConfig;
+
+/**
  * Scaffold a new effect-ui project
  */
 export const scaffoldProject = (targetDir: string, options: ProjectOptions, templatesDir: string) =>
@@ -63,12 +71,12 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     const apiDir = path.join(templatesDir, "api");
     yield* copyDir(fs, apiDir, targetDir);
 
-    // 6. Generate package.json
+    // 6. Generate package.json with platform-specific configuration
+    const platformLayer = getPlatformLayer(options.platform);
     const packageJson = yield* generatePackageJson({
       name: options.name,
-      platform: options.platform,
       output: options.output,
-    });
+    }).pipe(Effect.provide(platformLayer));
     yield* fs.writeFileString(path.join(targetDir, "package.json"), packageJson);
 
     // 7. Generate trygg.config.ts

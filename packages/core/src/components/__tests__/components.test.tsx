@@ -198,7 +198,9 @@ describe("ErrorBoundary", () => {
       });
 
       const builder = ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div data-testid="fallback">Fallback</div>);
+      const SafeComponent = yield* builder.catchAll(() => (
+        <div data-testid="fallback">Fallback</div>
+      ));
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent mode={mode} />);
 
