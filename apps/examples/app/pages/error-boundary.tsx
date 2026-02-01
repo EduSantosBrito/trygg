@@ -32,28 +32,15 @@ const ErrorBoundaryPage = Component.gen(function* () {
 
   // Create error-boundary-wrapped component with specific handlers + catchAll
   const SafeRiskyComponent = yield* ErrorBoundary.catch(RiskyComponent)
-    .on("NetworkError", (cause) => {
-      const error = Cause.squash(cause) as NetworkError;
-      return <NetworkErrorDisplay error={error} />;
-    })
-    .on("ValidationError", (cause) => {
-      const error = Cause.squash(cause) as ValidationError;
-      return <ValidationErrorDisplay error={error} />;
-    })
-    .on("UnknownError", (cause) => {
-      const error = Cause.squash(cause) as UnknownError;
-      return <UnknownErrorDisplay error={error} />;
-    })
-    .catchAll((cause) => {
-      // Fallback for any other errors
-      const error = Cause.squash(cause);
-      return (
-        <div className="p-4 rounded bg-red-100 text-red-800">
-          <h3 className="mt-0">Unexpected Error</h3>
-          <pre>{String(error)}</pre>
-        </div>
-      );
-    });
+    .on("NetworkError", NetworkErrorDisplay)
+    .on("ValidationError", ValidationErrorDisplay)
+    .on("UnknownError", UnknownErrorDisplay)
+    .catchAll((cause) => (
+      <div className="p-4 rounded bg-red-100 text-red-800">
+        <h3 className="mt-0">Unexpected Error</h3>
+        <pre>{String(Cause.squash(cause))}</pre>
+      </div>
+    ));
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      "effect/**",
+      ".effect/**",
+      ".trygg/**",
+      "dist/**",
+      "out/**",
+      "*.db",
+      "*.sqlite",
+      "*.sqlite3",
+      ".jj/**",
+      ".git/**",
+      "coverage/**"
+    ]
+  }
+}

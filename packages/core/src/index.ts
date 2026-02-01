@@ -161,7 +161,6 @@ export { DevMode, type DevModeProps } from "./components/dev-mode.js";
 
 // ErrorBoundary
 export * as ErrorBoundary from "./primitives/error-boundary.js";
-export { type ErrorHandler } from "./primitives/error-boundary.js";
 
 // Portal
 export * as Portal from "./primitives/portal.js";
