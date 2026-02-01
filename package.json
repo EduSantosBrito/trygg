@@ -25,5 +25,10 @@
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.73.1",
+    "@effect/platform-node": "0.104.1",
+    "effect": "^3.19.15"
   }
 }

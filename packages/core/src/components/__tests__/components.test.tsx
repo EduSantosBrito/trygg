@@ -48,8 +48,8 @@ describe("ErrorBoundary", () => {
         return <div>Success</div>;
       });
 
-      const builder = yield* ErrorBoundary.catch(SuccessComponent);
-      const SafeComponent = yield* builder.catchAll(() => Effect.succeed(<div>Error</div>));
+      const builder = ErrorBoundary.catch(SuccessComponent);
+      const SafeComponent = yield* builder.catchAll(() => <div>Error</div>);
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -63,10 +63,8 @@ describe("ErrorBoundary", () => {
         return yield* new TestError({ message: "Test error" });
       });
 
-      const builder = yield* ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() =>
-        Effect.succeed(<div>Fallback shown</div>),
-      );
+      const builder = ErrorBoundary.catch(FailingComponent);
+      const SafeComponent = yield* builder.catchAll(() => <div>Fallback shown</div>);
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -80,19 +78,16 @@ describe("ErrorBoundary", () => {
         return yield* new TestError({ message: "Specific error" });
       });
 
-      const builder = yield* ErrorBoundary.catch(FailingComponent);
-      const withHandler = yield* builder.on("TestError", (cause) =>
-        Effect.gen(function* () {
-          const error = Cause.squash(cause);
-          if (error instanceof TestError) {
-            return <div>Error: {error.message}</div>;
-          }
-          return <div>Error: Unknown</div>;
-        }),
-      );
-      const SafeComponent = yield* withHandler.catchAll(() =>
-        Effect.succeed(<div>Generic error</div>),
-      );
+      const TestErrorView = Component.gen(function* (
+        Props: Component.ComponentProps<{ error: TestError }>,
+      ) {
+        const { error } = yield* Props;
+        return <div>Error: {error.message}</div>;
+      });
+
+      const builder = ErrorBoundary.catch(FailingComponent);
+      const withHandler = builder.on("TestError", TestErrorView);
+      const SafeComponent = yield* withHandler.catchAll(() => <div>Generic error</div>);
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -106,10 +101,10 @@ describe("ErrorBoundary", () => {
         return yield* new OtherError();
       });
 
-      const builder = yield* ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll((cause) =>
-        Effect.succeed(<div data-testid="catch-all">Catch-all: {String(Cause.squash(cause))}</div>),
-      );
+      const builder = ErrorBoundary.catch(FailingComponent);
+      const SafeComponent = yield* builder.catchAll((cause) => (
+        <div data-testid="catch-all">Catch-all: {String(Cause.squash(cause))}</div>
+      ));
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -125,8 +120,8 @@ describe("ErrorBoundary", () => {
 
       const staticFallback = <div data-testid="static-fallback">Static fallback content</div>;
 
-      const builder = yield* ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => Effect.succeed(staticFallback));
+      const builder = ErrorBoundary.catch(FailingComponent);
+      const SafeComponent = yield* builder.catchAll(() => staticFallback);
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -140,15 +135,11 @@ describe("ErrorBoundary", () => {
         return yield* new TestError({ message: "Inner error" });
       });
 
-      const innerBuilder = yield* ErrorBoundary.catch(InnerFailing);
-      const InnerSafe = yield* innerBuilder.catchAll(() =>
-        Effect.succeed(<div>Inner fallback</div>),
-      );
+      const innerBuilder = ErrorBoundary.catch(InnerFailing);
+      const InnerSafe = yield* innerBuilder.catchAll(() => <div>Inner fallback</div>);
 
-      const outerBuilder = yield* ErrorBoundary.catch(InnerSafe);
-      const OuterSafe = yield* outerBuilder.catchAll(() =>
-        Effect.succeed(<div>Outer fallback</div>),
-      );
+      const outerBuilder = ErrorBoundary.catch(InnerSafe);
+      const OuterSafe = yield* outerBuilder.catchAll(() => <div>Outer fallback</div>);
 
       const { getByText, queryByText } = yield* render(<OuterSafe />);
 
@@ -171,10 +162,10 @@ describe("ErrorBoundary", () => {
         return <div data-testid="child">Child content</div>;
       });
 
-      const builder = yield* ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() =>
-        Effect.succeed(<div data-testid="fallback">Error caught!</div>),
-      );
+      const builder = ErrorBoundary.catch(ChildComponent);
+      const SafeComponent = yield* builder.catchAll(() => (
+        <div data-testid="fallback">Error caught!</div>
+      ));
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
@@ -206,10 +197,8 @@ describe("ErrorBoundary", () => {
         return <div data-testid="ok">OK</div>;
       });
 
-      const builder = yield* ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() =>
-        Effect.succeed(<div data-testid="fallback">Fallback</div>),
-      );
+      const builder = ErrorBoundary.catch(ChildComponent);
+      const SafeComponent = yield* builder.catchAll(() => <div data-testid="fallback">Fallback</div>);
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent mode={mode} />);
 
@@ -230,10 +219,8 @@ describe("ErrorBoundary", () => {
         return <div data-testid="static-child">Static content</div>;
       });
 
-      const builder = yield* ErrorBoundary.catch(StaticComponent);
-      const SafeComponent = yield* builder.catchAll(() =>
-        Effect.succeed(<div>Error fallback</div>),
-      );
+      const builder = ErrorBoundary.catch(StaticComponent);
+      const SafeComponent = yield* builder.catchAll(() => <div>Error fallback</div>);
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -253,10 +240,10 @@ describe("ErrorBoundary", () => {
         return <div data-testid="content">Good content</div>;
       });
 
-      const builder = yield* ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() =>
-        Effect.succeed(<div data-testid="fallback">Signal error caught</div>),
-      );
+      const builder = ErrorBoundary.catch(ChildComponent);
+      const SafeComponent = yield* builder.catchAll(() => (
+        <div data-testid="fallback">Signal error caught</div>
+      ));
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
@@ -280,15 +267,21 @@ describe("ErrorBoundary", () => {
         return yield* new TestError({ message: "fail" });
       });
 
-      const builder = yield* ErrorBoundary.catch(Component_);
+      const builder = ErrorBoundary.catch(Component_);
+
+      const TestErrorView = Component.gen(function* (
+        Props: Component.ComponentProps<{ error: TestError }>,
+      ) {
+        yield* Props;
+        return <div>Test</div>;
+      });
 
       // First add catchAll
-      yield* builder.catchAll(() => Effect.succeed(<div>Error</div>));
+      yield* builder.catchAll(() => <div>Error</div>);
 
-      // Then try to add .on() - should fail
-      const exit = yield* Effect.exit(
-        builder.on("TestError", () => Effect.succeed(<div>Test</div>)),
-      );
+      // Then try to add .on() - should fail on finalization
+      const badBuilder = builder.on("TestError", TestErrorView);
+      const exit = yield* Effect.exit(badBuilder.catchAll(() => <div>Fallback</div>));
 
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
@@ -307,13 +300,24 @@ describe("ErrorBoundary", () => {
         return yield* new TestError({ message: "fail" });
       });
 
-      const builder = yield* ErrorBoundary.catch(Component_);
-      const withHandler = yield* builder.on("TestError", () => Effect.succeed(<div>Test</div>));
+      const builder = ErrorBoundary.catch(Component_);
+      const TestErrorView = Component.gen(function* (
+        Props: Component.ComponentProps<{ error: TestError }>,
+      ) {
+        yield* Props;
+        return <div>Test</div>;
+      });
+      const DuplicateErrorView = Component.gen(function* (
+        Props: Component.ComponentProps<{ error: TestError }>,
+      ) {
+        yield* Props;
+        return <div>Test 2</div>;
+      });
+      const withHandler = builder.on("TestError", TestErrorView);
 
-      // Try to add duplicate handler
-      const exit = yield* Effect.exit(
-        withHandler.on("TestError", () => Effect.succeed(<div>Test 2</div>)),
-      );
+      // Try to add duplicate handler - should fail on finalization
+      const badBuilder = withHandler.on("TestError", DuplicateErrorView);
+      const exit = yield* Effect.exit(badBuilder.catchAll(() => <div>Fallback</div>));
 
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {

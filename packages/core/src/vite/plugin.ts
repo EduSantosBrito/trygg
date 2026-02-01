@@ -43,7 +43,7 @@ import * as nodePath from "node:path";
 import type { TryggConfig, Platform } from "../config.js";
 import { DevPlatform, type DevApiHandle, ApiInitError, ImportError } from "./dev-platform.js";
 import { NodeDevPlatformLive } from "./dev-platform-node.js";
-import { BunDevPlatformLive } from "./dev-platform-bun.js";
+// BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
 // =============================================================================
 // Constants
@@ -178,6 +178,20 @@ const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
 });
 
 /**
+ * Dynamically import BunDevPlatformLive to avoid loading @effect/platform-bun in Node.js.
+ * @internal
+ */
+const importBunDevPlatform = Effect.tryPromise({
+  try: () => import("./dev-platform-bun.js").then((m) => m.BunDevPlatformLive),
+  catch: (cause) =>
+    new ImportError({
+      module: "./dev-platform-bun.js",
+      message: "Failed to import BunDevPlatformLive",
+      cause,
+    }),
+});
+
+/**
  * Create plugin layer for given platform.
  * Uses DevPlatform to get platform-specific FileSystem.
  * @internal
@@ -185,7 +199,10 @@ const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
 const makePluginLayer = (
   platform: Platform,
 ): Layer.Layer<FileSystem.FileSystem | DevPlatform, ImportError> => {
-  const platformLayer = platform === "bun" ? BunDevPlatformLive : NodeDevPlatformLive;
+  const platformLayer =
+    platform === "bun"
+      ? Layer.unwrapEffect(importBunDevPlatform)
+      : NodeDevPlatformLive;
 
   return Layer.mergeAll(
     platformLayer,
@@ -1239,11 +1256,15 @@ export interface TryggOptions extends TryggConfig {}
  * @since 1.0.0
  */
 export const trygg = (tryggConfig?: TryggConfig): Plugin => {
-  const platform = tryggConfig?.platform ?? "node";
+  const configPlatform = tryggConfig?.platform ?? "node";
   const output = tryggConfig?.output ?? "server";
 
-  // Create platform-specific plugin layer
-  const pluginLayer = makePluginLayer(platform);
+  // Dev server always runs in Node.js (Vite), so use node platform for dev
+  // regardless of config platform which is for production runtime
+  const devPlatform = typeof Bun === "undefined" ? "node" : configPlatform;
+
+  // Create platform-specific plugin layer for dev server
+  const pluginLayer = makePluginLayer(devPlatform);
 
   let config: ResolvedConfig;
   // Initialize with process.cwd() as fallback for early hooks
@@ -1314,7 +1335,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           yield* Effect.logInfo("trygg configured");
           yield* Effect.logDebug(`  App directory: ${appDir}`);
           yield* Effect.logDebug(`  Generated directory: ${generatedDir}`);
-          yield* Effect.logDebug(`  Platform: ${platform}`);
+          yield* Effect.logDebug(`  Platform: ${configPlatform}`);
           yield* Effect.logDebug(`  Output: ${output}`);
           if (routesFilePath !== undefined) {
             yield* Effect.logDebug(`  Routes: ${routesFilePath}`);
@@ -1344,7 +1365,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           });
 
         // Validate API imports and exports
-        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+        yield* validateApiPlatform(apiPath, configPlatform).pipe(Effect.tapError(logApiValidationError));
         yield* validateApiExports(apiPath, loadModule).pipe(Effect.tapError(logApiValidationError));
 
         // Generate route types from routes file
@@ -1518,7 +1539,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
         const entryPath = nodePath.join(generatedDir, "entry.tsx");
         const apiPath = nodePath.join(appDir, "api.ts");
 
-        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+        yield* validateApiPlatform(apiPath, configPlatform).pipe(Effect.tapError(logApiValidationError));
 
         // Always regenerate entry when routes file is configured
         const hasEntry = yield* pathExists(entryPath);
@@ -1557,7 +1578,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
 
         // Generate server entry
         const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
-        const serverEntryContent = yield* generateServerEntry(platform, hasApi);
+        const serverEntryContent = yield* generateServerEntry(configPlatform, hasApi);
         yield* writeFileSafe(serverEntryPath, serverEntryContent);
 
         yield* Effect.logInfo("Building production server...");

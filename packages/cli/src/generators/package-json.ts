@@ -33,15 +33,8 @@ export const generatePackageJson = (options: PackageJsonOptions): Effect.Effect<
       effect: "^3.19.15",
       "@effect/platform": "^0.94.1",
       "@effect/platform-browser": "^0.74.0",
-      trygg: "^0.0.1",
+      trygg: "workspace:*",
     };
-
-    // Add platform-specific runtime (needed by vite plugin for dev server)
-    if (platform === "bun") {
-      dependencies["@effect/platform-bun"] = "^0.87.0";
-    } else {
-      dependencies["@effect/platform-node"] = "^0.87.0";
-    }
 
     const devDependencies: Record<string, string> = {
       typescript: "^5.7.0",

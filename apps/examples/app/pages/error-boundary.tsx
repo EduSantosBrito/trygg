@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import { Signal, ErrorBoundary, Component } from "trygg";
 import { ErrorTheme } from "../services/error-boundary";
 import {
@@ -31,45 +31,16 @@ const ErrorBoundaryPage = Component.gen(function* () {
     Signal.set(errorType, type);
 
   // Create error-boundary-wrapped component with specific handlers + catchAll
-  const builder = yield* ErrorBoundary.catch(RiskyComponent);
-  const withNetwork = yield* builder.on("NetworkError", (cause) =>
-    Effect.gen(function* () {
-      const error = Cause.squash(cause);
-      yield* ErrorTheme;
-      if (error instanceof NetworkError) {
-        return <NetworkErrorDisplay error={error} />;
-      }
-      return <UnknownErrorDisplay error={new UnknownError({ cause: error })} />;
-    }),
-  );
-  const withValidation = yield* withNetwork.on("ValidationError", (cause) =>
-    Effect.gen(function* () {
-      const error = Cause.squash(cause);
-      yield* ErrorTheme;
-      if (error instanceof ValidationError) {
-        return <ValidationErrorDisplay error={error} />;
-      }
-      return <UnknownErrorDisplay error={new UnknownError({ cause: error })} />;
-    }),
-  );
-  const withUnknown = yield* withValidation.on("UnknownError", (cause) =>
-    Effect.gen(function* () {
-      const error = Cause.squash(cause);
-      yield* ErrorTheme;
-      if (error instanceof UnknownError) {
-        return <UnknownErrorDisplay error={error} />;
-      }
-      return <UnknownErrorDisplay error={new UnknownError({ cause: error })} />;
-    }),
-  );
-  const SafeRiskyComponent = yield* withUnknown.catchAll((cause) =>
-    Effect.succeed(
+  const SafeRiskyComponent = yield* ErrorBoundary.catch(RiskyComponent)
+    .on("NetworkError", NetworkErrorDisplay)
+    .on("ValidationError", ValidationErrorDisplay)
+    .on("UnknownError", UnknownErrorDisplay)
+    .catchAll((cause) => (
       <div className="p-4 rounded bg-red-100 text-red-800">
         <h3 className="mt-0">Unexpected Error</h3>
         <pre>{String(Cause.squash(cause))}</pre>
-      </div>,
-    ),
-  );
+      </div>
+    ));
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">

@@ -2,26 +2,36 @@
  * @since 1.0.0
  * ErrorBoundary - Effect-native error handling with pattern matching
  *
- * Provides functional composition for error handling, similar to Resource.match.
- * Wraps components with error boundaries that catch errors and render fallback UIs.
+ * Provides chainable builder API for error handling. Wraps components with
+ * error boundaries that catch errors and render fallback UIs.
+ *
+ * Handlers return Elements (JSX). Effects are wrapped internally.
  *
  * @example
  * ```tsx
- * // With catchAll for flexible matching
- * const builder = yield* ErrorBoundary.catch(RiskyComponent)
- * const withNetwork = yield* builder.on("NetworkError", (cause) =>
- *   Effect.succeed(<NetworkErrorView cause={cause} />),
- * )
- * const SafeComponent = yield* withNetwork.catchAll((cause) =>
- *   Effect.succeed(<GenericError cause={cause} />),
- * )
+ * // With catchAll for non-exhaustive matching
+ * const SafeComponent = yield* ErrorBoundary
+ *   .catch(RiskyComponent)
+ *   .on("NetworkError", NetworkErrorView)
+ *   .catchAll((cause) => <GenericError cause={cause} />)
+ *
+ * // With exhaustive matching (all errors handled)
+ * const SafeComponent = yield* ErrorBoundary
+ *   .catch(RiskyComponent)
+ *   .on("NetworkError", NetworkErrorView)
+ *   .on("ValidationError", ValidationErrorView)
+ *   .exhaustive()
  *
  * return <SafeComponent userId={userId} />
  * ```
  */
-import { Cause, Data, Effect, Ref } from "effect";
+import { Cause, Data, Effect } from "effect";
 import { Component, tagComponent } from "./component.js";
-import { type Element, Element as ElementEnum, componentElement } from "./element.js";
+import {
+  type Element,
+  Element as ElementEnum,
+  componentElement,
+} from "./element.js";
 import * as Signal from "./signal.js";
 import type { SignalOrValue } from "./resource.js";
 
@@ -29,24 +39,35 @@ import type { SignalOrValue } from "./resource.js";
 // Types
 // =============================================================================
 
+type ErrorForTag<E, Tag extends ErrorTags<E>> = Extract<E, { readonly _tag: Tag }>;
+
 /**
- * Error handler function type - receives Cause and returns Element effect.
- * @since 1.0.0
+ * CatchAll handler function type.
+ * @internal
  */
-export type ErrorHandler<E = unknown, R = never> = (
-  cause: Cause.Cause<unknown>,
-) => Effect.Effect<Element, never, R>;
+export type CatchAllHandler<E> = (cause: Cause.Cause<unknown>) => Element;
 
 /**
  * Union of error tags from an error type.
- * Returns string when error type is unknown or has no _tag.
  * @internal
  */
 type ErrorTags<E> = E extends { _tag: infer Tag } ? (Tag extends string ? Tag : string) : string;
 
 /**
+ * Union of all known error tags from an error type.
+ * @internal
+ */
+type AllErrorTags<E> = E extends { _tag: infer Tag } ? (Tag extends string ? Tag : string) : string;
+
+/**
+ * Remaining tags after handling.
+ * @internal
+ */
+type RemainingTags<E, HandledTags extends string> = Exclude<AllErrorTags<E>, HandledTags>;
+
+
+/**
  * Transform component props to accept SignalOrValue for each field.
- * This allows wrapped components to accept reactive signals as props.
  * @internal
  */
 type ReactiveProps<P> = { readonly [K in keyof P]: SignalOrValue<P[K]> };
@@ -56,37 +77,42 @@ type PropsInput<Props extends object> = ReactiveProps<PropsOutput<Props>>;
 type PropsKey<Props extends object> = Extract<keyof PropsOutput<Props>, string | symbol>;
 type PropsValue<Props extends object> = PropsOutput<Props>[PropsKey<Props>];
 
+/**
+ * Errors that can occur during error boundary building.
+ * @since 1.0.0
+ */
 export class BuilderError extends Data.TaggedError("BuilderError")<{
-  readonly reason:
-    | "on-after-catchAll"
-    | "duplicate-handler"
-    | "catchAll-multiple"
-    | "props-incomplete";
-  readonly tag?: string | undefined;
+  readonly reason: "duplicate-handler" | "catchAll-multiple" | "on-after-catchAll";
+  readonly tag?: string;
+}> {}
+
+/**
+ * Error when unhandled errors remain at render time.
+ * @since 1.0.0
+ */
+export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError")<{
+  readonly unhandledTags: ReadonlyArray<string>;
 }> {}
 
 // =============================================================================
-// Builder State
+// Builder State (Mutable, per instance)
 // =============================================================================
 
-/**
- * Internal mutable state for the error boundary builder.
- * Shared across all builders in a chain to track if catchAll was called.
- * @internal
- */
 interface BuilderState<E> {
-  readonly handlers: Map<string, ErrorHandler<E, unknown>>;
-  readonly hasCatchAll: boolean;
+  handlers: Map<string, (error: unknown, cause: Cause.Cause<unknown>) => Element>;
+  error: BuilderError | null;
+  hasCatchAll: boolean;
 }
 
-/**
- * Create initial builder state.
- * @internal
- */
 const createState = <E>(): BuilderState<E> => ({
-  handlers: new Map<string, ErrorHandler<E, unknown>>(),
+  handlers: new Map(),
+  error: null,
   hasCatchAll: false,
 });
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 const isTaggedError = (value: unknown): value is { readonly _tag: string } => {
   if (typeof value !== "object" || value === null) {
@@ -95,6 +121,11 @@ const isTaggedError = (value: unknown): value is { readonly _tag: string } => {
   const tag = Reflect.get(value, "_tag");
   return typeof tag === "string";
 };
+
+const isErrorTag = <E, Tag extends ErrorTags<E>>(
+  tag: Tag,
+  error: unknown,
+): error is ErrorForTag<E, Tag> => isTaggedError(error) && error._tag === tag;
 
 const isSignalValue = <A>(value: SignalOrValue<A>): value is Signal.Signal<A> =>
   Signal.isSignal(value);
@@ -112,180 +143,284 @@ const hasAllProps = <Props extends object>(
   keys: ReadonlyArray<keyof Props>,
 ): value is Props => keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 
+const unhandledErrorElement = (cause: Cause.Cause<unknown>): Element =>
+  componentElement(() =>
+    Effect.gen(function* () {
+      const message = String(Cause.squash(cause));
+      return yield* new UnhandledErrorsError({
+        unhandledTags: [message],
+      });
+    }),
+  );
+
 // =============================================================================
-// ErrorBoundary Builder Interface
+// Builder Interface
 // =============================================================================
 
-/**
- * Error boundary builder with .on() and .catchAll() methods.
- *
- * @since 1.0.0
- */
-export interface ErrorBoundaryBuilder<Props extends object, E, R, RHandlers = never> {
-  /**
-   * Add a handler for a specific error tag.
-   * Cannot be called after catchAll, and cannot add duplicate handlers.
-   *
-   * @since 1.0.0
-   */
+interface ErrorBoundaryBuilderBase<
+  Props extends object,
+  E,
+  R,
+  RHandlers,
+  HandledTags extends string,
+> {
   on<Tag extends ErrorTags<E>, RHandler>(
     tag: Tag,
-    handler: ErrorHandler<E, RHandler>,
-  ): Effect.Effect<ErrorBoundaryBuilder<Props, E, R, RHandlers | RHandler>, BuilderError>;
+    component: Component.Type<{ error: ErrorForTag<E, Tag> }, any, RHandler>,
+  ): ErrorBoundaryBuilder<Props, E, R, RHandlers | RHandler, HandledTags | Tag>;
 
-  /**
-   * Add a catch-all handler for any remaining errors.
-   * Finalizes the builder and returns the wrapped component.
-   *
-   * The wrapped component accepts SignalOrValue for all props, enabling
-   * fine-grained reactivity when passing signals to error-boundary-wrapped
-   * components.
-   *
-   * @since 1.0.0
-   */
-  catchAll<RHandler>(
-    handler: ErrorHandler<E, RHandler>,
+  catchAll(
+    handler: CatchAllHandler<E>,
+  ): Effect.Effect<Component.Type<ReactiveProps<Props>, never, R | RHandlers>, BuilderError>;
+
+  exhaustive(
+    this: [RemainingTags<E, HandledTags>] extends [never]
+      ? ErrorBoundaryBuilderImpl<Props, E, R, RHandlers, HandledTags>
+      : never,
   ): Effect.Effect<
-    Component.Type<ReactiveProps<Props>, BuilderError, R | RHandlers | RHandler>,
-    BuilderError
+    Component.Type<ReactiveProps<Props>, never, R | RHandlers>,
+    BuilderError | UnhandledErrorsError
   >;
 }
+
+export type ErrorBoundaryBuilder<
+  Props extends object,
+  E,
+  R,
+  RHandlers = never,
+  HandledTags extends string = never,
+> = ErrorBoundaryBuilderBase<Props, E, R, RHandlers, HandledTags>;
 
 // =============================================================================
 // Builder Implementation
 // =============================================================================
 
-/**
- * Create a builder implementation for a component.
- * @internal
- */
-function createBuilder<Props extends object, E, R, RHandlers = never>(
-  component: Component.Type<Props, E, R>,
-  stateRef: Ref.Ref<BuilderState<E>>,
-): ErrorBoundaryBuilder<Props, E, R, RHandlers> {
-  return {
-    on<Tag extends ErrorTags<E>, RHandler>(
-      tag: Tag,
-      handler: ErrorHandler<E, RHandler>,
-    ): Effect.Effect<ErrorBoundaryBuilder<Props, E, R, RHandlers | RHandler>, BuilderError> {
-      return Effect.gen(function* () {
-        const state = yield* Ref.get(stateRef);
-        if (state.hasCatchAll) {
-          return yield* new BuilderError({ reason: "on-after-catchAll" });
-        }
-        if (state.handlers.has(tag)) {
-          return yield* new BuilderError({ reason: "duplicate-handler", tag });
-        }
+class ErrorBoundaryBuilderImpl<
+  Props extends object,
+  E,
+  R,
+  RHandlers,
+  HandledTags extends string,
+> implements ErrorBoundaryBuilderBase<Props, E, R, RHandlers, HandledTags>
+{
+  constructor(
+    private readonly component: Component.Type<Props, E, R>,
+    private readonly state: BuilderState<E>,
+  ) {}
 
-        const handlers: Map<string, ErrorHandler<E, unknown>> = new Map();
-        for (const [existingTag, existingHandler] of state.handlers) {
-          handlers.set(existingTag, existingHandler);
-        }
-        handlers.set(tag, handler);
+  on<Tag extends ErrorTags<E>, RHandler>(
+    tag: Tag,
+    component: Component.Type<{ error: ErrorForTag<E, Tag> }, any, RHandler>,
+  ): ErrorBoundaryBuilder<Props, E, R, RHandlers | RHandler, HandledTags | Tag> {
+    if (this.state.hasCatchAll) {
+      const nextState = this.withError(new BuilderError({ reason: "on-after-catchAll" }));
+      return new ErrorBoundaryBuilderImpl<
+        Props,
+        E,
+        R,
+        RHandlers | RHandler,
+        HandledTags | Tag
+      >(
+        this.component,
+        nextState,
+      );
+    }
 
-        const nextState: BuilderState<E> = {
-          handlers,
-          hasCatchAll: state.hasCatchAll,
-        };
-        yield* Ref.set(stateRef, nextState);
+    if (this.state.handlers.has(tag)) {
+      const nextState = this.withError(new BuilderError({ reason: "duplicate-handler", tag }));
+      return new ErrorBoundaryBuilderImpl<
+        Props,
+        E,
+        R,
+        RHandlers | RHandler,
+        HandledTags | Tag
+      >(
+        this.component,
+        nextState,
+      );
+    }
 
-        return createBuilder<Props, E, R, RHandlers | RHandler>(component, stateRef);
+    const handlers = new Map(this.state.handlers);
+    const handle = (error: unknown, cause: Cause.Cause<unknown>): Element => {
+      if (isErrorTag<E, Tag>(tag, error)) {
+        return component({ error });
+      }
+      return unhandledErrorElement(cause);
+    };
+    handlers.set(tag, handle);
+
+    const nextState: BuilderState<E> = {
+      handlers,
+      error: this.state.error,
+      hasCatchAll: this.state.hasCatchAll,
+    };
+
+    return new ErrorBoundaryBuilderImpl<
+      Props,
+      E,
+      R,
+      RHandlers | RHandler,
+      HandledTags | Tag
+    >(
+      this.component,
+      nextState,
+    );
+  }
+
+  catchAll(
+    handler: CatchAllHandler<E>,
+  ): Effect.Effect<Component.Type<ReactiveProps<Props>, never, R | RHandlers>, BuilderError> {
+    // Validate and mutate state synchronously before entering Effect context
+    if (this.state.error !== null) {
+      const error = this.state.error;
+      return Effect.gen(this, function* () {
+        return yield* error;
       });
-    },
+    }
+    if (this.state.hasCatchAll) {
+      return Effect.gen(this, function* () {
+        return yield* new BuilderError({ reason: "catchAll-multiple" });
+      });
+    }
+    this.state.hasCatchAll = true;
 
-    catchAll<RHandler>(
-      handler: ErrorHandler<E, RHandler>,
-    ): Effect.Effect<
-      Component.Type<ReactiveProps<Props>, BuilderError, R | RHandlers | RHandler>,
-      BuilderError
-    > {
-      return Effect.gen(function* () {
-        const state = yield* Ref.get(stateRef);
-        if (state.hasCatchAll) {
-          return yield* new BuilderError({ reason: "catchAll-multiple" });
-        }
+    return Effect.gen(this, function* () {
+      const fallbackHandler = (
+        cause: Cause.Cause<unknown>,
+      ): Effect.Effect<Element, never, unknown> =>
+        Effect.succeed(this.resolveHandler(handler, cause));
 
-        yield* Ref.set(stateRef, {
-          handlers: state.handlers,
-          hasCatchAll: true,
+      return yield* this.buildComponent(fallbackHandler);
+    });
+  }
+
+  exhaustive(
+    this: [RemainingTags<E, HandledTags>] extends [never]
+      ? ErrorBoundaryBuilderImpl<Props, E, R, RHandlers, HandledTags>
+      : never,
+  ): Effect.Effect<
+    Component.Type<ReactiveProps<Props>, never, R | RHandlers>,
+    BuilderError | UnhandledErrorsError
+  > {
+    // Validate and mutate state synchronously before entering Effect context
+    if (this.state.error !== null) {
+      const error = this.state.error;
+      return Effect.gen(this, function* () {
+        return yield* error;
+      });
+    }
+    if (this.state.hasCatchAll) {
+      return Effect.gen(this, function* () {
+        return yield* new BuilderError({ reason: "catchAll-multiple" });
+      });
+    }
+    this.state.hasCatchAll = true;
+
+    return Effect.gen(this, function* () {
+      const fallbackHandler = (
+        cause: Cause.Cause<unknown>,
+      ): Effect.Effect<Element, never, unknown> =>
+        Effect.succeed(this.resolveExhaustiveHandler(cause));
+
+      return yield* this.buildComponent(fallbackHandler);
+    });
+  }
+
+  private withError(error: BuilderError): BuilderState<E> {
+    if (this.state.error !== null) {
+      return this.state;
+    }
+
+    return {
+      handlers: this.state.handlers,
+      error,
+      hasCatchAll: this.state.hasCatchAll,
+    };
+  }
+
+  private resolveHandler(
+    catchAllHandler: CatchAllHandler<E>,
+    cause: Cause.Cause<unknown>,
+  ): Element {
+    const error = Cause.squash(cause);
+
+    if (isTaggedError(error)) {
+      const specificHandler = this.state.handlers.get(error._tag);
+      if (specificHandler !== undefined) {
+        return specificHandler(error, cause);
+      }
+    }
+
+    return catchAllHandler(cause);
+  }
+
+  private resolveExhaustiveHandler(cause: Cause.Cause<unknown>): Element {
+    const error = Cause.squash(cause);
+
+    if (isTaggedError(error)) {
+      const specificHandler = this.state.handlers.get(error._tag);
+      if (specificHandler !== undefined) {
+        return specificHandler(error, cause);
+      }
+    }
+
+    return unhandledErrorElement(cause);
+  }
+
+  private buildComponent(
+    fallbackHandler: (cause: Cause.Cause<unknown>) => Effect.Effect<Element, never, unknown>,
+  ): Effect.Effect<Component.Type<ReactiveProps<Props>, never, R>, never> {
+    return Effect.sync(() => {
+      const component = this.component;
+      const safeComponentRunFn = (
+        _props: PropsInput<Props>,
+      ): Effect.Effect<Element, never, R> =>
+        Effect.gen(function* () {
+          const propKeys = Reflect.ownKeys(_props).filter((key): key is PropsKey<Props> =>
+            isPropKey<Props>(key, _props),
+          );
+
+          const entries = yield* Effect.forEach(
+            propKeys,
+            (key): Effect.Effect<[PropsKey<Props>, PropsValue<Props>], never> =>
+              Effect.gen(function* () {
+                const value: SignalOrValue<PropsValue<Props>> = _props[key];
+                const resolved = yield* unwrapSignalValue(value);
+                return [key, resolved];
+              }),
+            { concurrency: "inherit" },
+          );
+
+          const unwrappedProps: Partial<PropsOutput<Props>> = {};
+          for (const [key, value] of entries) {
+            unwrappedProps[key] = value;
+          }
+
+          if (!hasAllProps<PropsOutput<Props>>(unwrappedProps, propKeys)) {
+            return ElementEnum.Text({ content: "Error: props incomplete" });
+          }
+
+          const childElement = component(unwrappedProps);
+          return ElementEnum.ErrorBoundaryElement({
+            child: childElement,
+            fallback: fallbackHandler,
+            onError: null,
+          });
         });
 
-        const fallbackHandler = (
-          cause: Cause.Cause<unknown>,
-        ): Effect.Effect<Element, never, unknown> =>
-          Effect.gen(function* () {
-            const error = Cause.squash(cause);
+      const safeComponentFn = (_props: PropsInput<Props>): Element =>
+        componentElement(() => safeComponentRunFn(_props));
 
-            if (isTaggedError(error)) {
-              const specificHandler = state.handlers.get(error._tag);
-              if (specificHandler !== undefined) {
-                return yield* specificHandler(cause);
-              }
-            }
+      const safeComponent: Component.Type<ReactiveProps<Props>, never, R> = tagComponent(
+        safeComponentFn,
+        this.component._layers,
+        this.component._requirements,
+        safeComponentRunFn,
+      );
 
-            return yield* handler(cause);
-          });
-
-        // Create wrapped component using componentGen
-        // This ensures proper .provide() behavior through tagComponent
-        // We create a component that accepts reactive props and wraps with error boundary
-        const safeComponentRunFn = (
-          _props: PropsInput<Props>,
-        ): Effect.Effect<Element, BuilderError, R> =>
-          Effect.gen(function* () {
-            const propKeys = Reflect.ownKeys(_props).filter((key): key is PropsKey<Props> =>
-              isPropKey<Props>(key, _props),
-            );
-            const entries = yield* Effect.forEach(
-              propKeys,
-              (key): Effect.Effect<[PropsKey<Props>, PropsValue<Props>], never> => {
-                return Effect.gen(function* () {
-                  const value: SignalOrValue<PropsValue<Props>> = _props[key];
-                  const resolved = yield* unwrapSignalValue(value);
-                  const entry: [PropsKey<Props>, PropsValue<Props>] = [key, resolved];
-                  return entry;
-                });
-              },
-              { concurrency: "inherit" },
-            );
-
-            const unwrappedProps: Partial<PropsOutput<Props>> = {};
-            for (const [key, value] of entries) {
-              unwrappedProps[key] = value;
-            }
-
-            if (!hasAllProps<PropsOutput<Props>>(unwrappedProps, propKeys)) {
-              return yield* new BuilderError({ reason: "props-incomplete" });
-            }
-
-            const childElement = component(unwrappedProps);
-            return ElementEnum.ErrorBoundaryElement({
-              child: childElement,
-              fallback: fallbackHandler,
-              onError: null,
-            });
-          });
-
-        const safeComponentFn = (_props: PropsInput<Props>): Element =>
-          componentElement(() => safeComponentRunFn(_props));
-
-        const mergedRequirements = [...component._requirements];
-
-        // Preserve original component layers for .provide() chaining
-        const originalLayers = component._layers;
-
-        // Use tagComponent to create proper Component.Type with working .provide()
-        // Pass runFn so .provide() can wrap it properly
-        const safeComponent: Component.Type<
-          ReactiveProps<Props>,
-          BuilderError,
-          R | RHandlers | RHandler
-        > = tagComponent(safeComponentFn, originalLayers, mergedRequirements, safeComponentRunFn);
-
-        return safeComponent;
-      });
-    },
-  };
+      return safeComponent;
+    });
+  }
 }
 
 // =============================================================================
@@ -295,31 +430,15 @@ function createBuilder<Props extends object, E, R, RHandlers = never>(
 /**
  * Create an error boundary builder for a component.
  *
- * Returns a builder that tracks which error cases have been handled.
- * The builder must be completed with .catchAll() to finalize.
- *
- * @example
- * ```tsx
- * // With catchAll
- * const builder = yield* ErrorBoundary.catch(RiskyComponent)
- * const withNetwork = yield* builder.on("NetworkError", (cause) =>
- *   Effect.succeed(<NetworkErrorView cause={cause} />),
- * )
- * const SafeComponent = yield* withNetwork.catchAll((cause) =>
- *   Effect.succeed(<GenericError cause={cause} />),
- * )
- *
- * return <SafeComponent userId={userId} />
- * ```
+ * Returns a synchronous builder - no yield* needed to start chaining.
+ * Finalize with .catchAll() or .exhaustive() when done.
  *
  * @since 1.0.0
  */
 export function catch_<Props extends object, E, R>(
   component: Component.Type<Props, E, R>,
-): Effect.Effect<ErrorBoundaryBuilder<Props, E, R>, never> {
-  return Effect.map(Ref.make(createState<E>()), (stateRef) =>
-    createBuilder<Props, E, R>(component, stateRef),
-  );
+): ErrorBoundaryBuilder<Props, E, R, never, never> {
+  return new ErrorBoundaryBuilderImpl<Props, E, R, never, never>(component, createState<E>());
 }
 
 // Export catch_ as catch (reserved word workaround)
