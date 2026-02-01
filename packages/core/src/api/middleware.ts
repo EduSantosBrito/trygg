@@ -17,6 +17,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { Data, Effect, Exit, Layer, Option, Ref, Runtime, Schema, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
+import * as Debug from "../debug/debug.js";
 
 // =============================================================================
 // Error Types - Yieldable via Data.TaggedError
@@ -62,26 +63,40 @@ const ComposedApiLayerSchema = Schema.declare(
 );
 
 /**
- * Detect and compose the API layer from a dynamically imported module.
+ * Detect the API layer from a dynamically imported module.
  *
- * Scans all exports for:
- * - Exactly one HttpApi definition (detected via HttpApi.isHttpApi)
- * - Zero or more handler Layers (detected via Layer.isLayer)
- *
- * Composes them into a single Layer<HttpApi.Api> using HttpApiBuilder.api.
+ * Resolution order:
+ * 1. If module exports an `ApiLive` that is a Layer, use it directly.
+ *    This avoids cross-module composition issues where the plugin's
+ *    `@effect/platform` instance differs from the user module's instance,
+ *    causing Router.Live reference identity mismatches.
+ * 2. Otherwise, auto-detect: scan exports for exactly one HttpApi definition
+ *    and zero or more handler Layers, compose them via HttpApiBuilder.api.
+ *    (Works in same-process but breaks across bundled plugin ↔ SSR module boundary.)
  * @internal
  */
 const detectApiLayer = (
   mod: Record<string, unknown>,
 ): Effect.Effect<Layer.Layer<HttpApi.Api>, ApiInitError> =>
   Effect.gen(function* () {
+    // Priority 1: Pre-composed ApiLive export — avoids cross-module identity issues
+    if ("ApiLive" in mod && Layer.isLayer(mod.ApiLive)) {
+      return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(mod.ApiLive).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ApiInitError({ message: "ApiLive export is not a valid API layer", cause }),
+        ),
+      );
+    }
+
+    // Priority 2: Auto-detect HttpApi + handler Layers
     const values = Object.values(mod);
 
-    // Find all HttpApi definitions
     const httpApis = values.filter(HttpApi.isHttpApi);
     if (httpApis.length === 0) {
       return yield* new ApiInitError({
-        message: "API module must export an HttpApi definition (created via HttpApi.make)",
+        message:
+          "API module must export ApiLive or an HttpApi definition (created via HttpApi.make)",
       });
     }
     if (httpApis.length > 1) {
@@ -91,25 +106,16 @@ const detectApiLayer = (
       });
     }
 
-    // Narrow the HttpApi to the type expected by HttpApiBuilder.api
     const api = yield* Schema.decodeUnknown(HttpApiValueSchema)(httpApis[0]).pipe(
       Effect.mapError(
         (cause) => new ApiInitError({ message: "Failed to validate HttpApi export", cause }),
       ),
     );
 
-    // Find all handler Layers (exclude the HttpApi itself — HttpApi is a function, not a Layer)
     const handlerLayers = values.filter(
       (v): v is Layer.Layer<unknown, unknown, unknown> => Layer.isLayer(v) && !HttpApi.isHttpApi(v),
     );
 
-    // Compose: HttpApiBuilder.api creates base layer requiring handler group services.
-    // Layer.provide eliminates requirements satisfied by each handler layer.
-    // Layer<never, unknown, unknown> is the "any layer" type via variance:
-    //   - ROut=never (contravariant): any output is assignable
-    //   - E=unknown (covariant): widest error
-    //   - RIn=unknown (covariant): widest requirement
-    // ComposedApiLayerSchema narrows the result to Layer<HttpApi.Api> after composition.
     const baseLayer = HttpApiBuilder.api(api);
     const composed = handlerLayers.reduce<Layer.Layer<never, unknown, unknown>>(
       (acc, layer) => Layer.provide(acc, layer),
@@ -225,11 +231,34 @@ const initHandler = (
     });
 
     // Load API module
+    yield* Debug.log({ event: "api.handler.loading", module_path: "app/api.ts" });
     const mod = yield* options.loadApiModule().pipe(
-      Effect.tapError((error) => setErrorState(state, options, error)),
+      Effect.tapError((error) =>
+        Effect.gen(function* () {
+          yield* Debug.log({
+            event: "api.handler.load_error",
+            module_path: "app/api.ts",
+            error: error instanceof Error ? error.message : String(error),
+          });
+          yield* setErrorState(state, options, error);
+        }),
+      ),
       Effect.option,
     );
-    if (Option.isNone(mod)) return;
+    if (Option.isNone(mod)) {
+      yield* Debug.log({
+        event: "api.handler.load_error",
+        module_path: "app/api.ts",
+        error: "Module load failed",
+      });
+      return;
+    }
+
+    yield* Debug.log({
+      event: "api.handler.loaded",
+      module_path: "app/api.ts",
+      exports: Object.keys(mod.value),
+    });
 
     // Detect HttpApi + handler Layers from module exports and compose
     const apiLive = yield* detectApiLayer(mod.value).pipe(
@@ -315,6 +344,8 @@ export const createApiMiddleware = (
   options: ApiMiddlewareOptions,
 ): Effect.Effect<ApiMiddleware, ApiInitError, Scope.Scope> =>
   Effect.gen(function* () {
+    yield* Debug.log({ event: "api.middleware.init" });
+
     // Capture runtime for use in middleware callback (Vite boundary)
     const runtime = yield* Effect.runtime<never>();
 
@@ -343,6 +374,12 @@ export const createApiMiddleware = (
       }
 
       const effect = Effect.gen(function* () {
+        yield* Debug.log({
+          event: "api.request.received",
+          method: req.method ?? "GET",
+          url: req.url ?? "",
+        });
+
         const currentState = yield* Ref.get(state);
 
         if (Option.isNone(currentState.handler)) {
@@ -350,10 +387,20 @@ export const createApiMiddleware = (
             onNone: () => "Check console for errors",
             onSome: (e) => (e instanceof Error ? e.message : String(e)),
           });
+          yield* Debug.log({
+            event: "api.request.handler_missing",
+            url: req.url ?? "",
+            last_error: errorMessage,
+          });
           yield* options.onError(new ApiInitError({ message: "Handler not available" }));
           yield* sendErrorResponse(res, 500, "API handler not available", errorMessage);
           return;
         }
+
+        yield* Debug.log({
+          event: "api.request.handler_available",
+          url: req.url ?? "",
+        });
 
         // Effect's NodeHttpServer.makeHandler handles all request/response streaming
         currentState.handler.value(req, res);

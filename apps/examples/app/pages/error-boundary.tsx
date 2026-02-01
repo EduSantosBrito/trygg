@@ -1,18 +1,9 @@
 import { Layer } from "effect";
 import { Signal, ErrorBoundary, Component } from "trygg";
 import { ErrorTheme } from "../services/error-boundary";
-import {
-  NetworkError,
-  NetworkErrorDisplay,
-} from "../components/error-boundary/network-error-display";
-import {
-  ValidationError,
-  ValidationErrorDisplay,
-} from "../components/error-boundary/validation-error-display";
-import {
-  UnknownError,
-  UnknownErrorDisplay,
-} from "../components/error-boundary/unknown-error-display";
+import { NetworkErrorDisplay } from "../components/error-boundary/network-error-display";
+import { ValidationErrorDisplay } from "../components/error-boundary/validation-error-display";
+import { UnknownErrorDisplay } from "../components/error-boundary/unknown-error-display";
 import { RiskyComponent } from "../components/error-boundary/risky-component";
 import { TriggerButton } from "../components/error-boundary/trigger-button";
 import { Cause } from "effect";

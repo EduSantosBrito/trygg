@@ -228,16 +228,13 @@ describe("ErrorBoundary builder validation", () => {
         return <div>test-error</div>;
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent)
-        .on("TestError", TestErrorView);
+      const builder = ErrorBoundary.catch(FailingComponent).on("TestError", TestErrorView);
 
       // First catchAll should succeed
       yield* builder.catchAll(() => <div>fallback1</div>);
 
       // Second catchAll should fail with catchAll-multiple
-      const exit = yield* Effect.exit(
-        builder.catchAll(() => <div>fallback2</div>),
-      );
+      const exit = yield* Effect.exit(builder.catchAll(() => <div>fallback2</div>));
 
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {

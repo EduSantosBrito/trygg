@@ -41,9 +41,16 @@ import {
 } from "effect";
 import * as nodePath from "node:path";
 import type { TryggConfig, Platform } from "../config.js";
-import { DevPlatform, type DevApiHandle, ApiInitError, ImportError } from "./dev-platform.js";
+import {
+  DevPlatform,
+  type DevApiHandle,
+  type HandlerFactory,
+  ApiInitError,
+  ImportError,
+} from "./dev-platform.js";
+import * as Debug from "../debug/debug.js";
 import { NodeDevPlatformLive } from "./dev-platform-node.js";
-import { BunDevPlatformLive } from "./dev-platform-bun.js";
+// BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
 // =============================================================================
 // Constants
@@ -55,6 +62,105 @@ const GENERATED_DIR = ".trygg";
 const VIRTUAL_CLIENT_ID = "virtual:trygg/client";
 const RESOLVED_VIRTUAL_CLIENT_ID = "\0" + VIRTUAL_CLIENT_ID;
 const EFFECT_UI_API_ID = "trygg/api";
+const VIRTUAL_HANDLER_FACTORY_ID = "virtual:trygg/handler-factory";
+const RESOLVED_HANDLER_FACTORY_ID = "\0" + VIRTUAL_HANDLER_FACTORY_ID;
+
+/**
+ * Shared detection + composition logic for all virtual handler factories.
+ * No platform-specific imports — only @effect/platform and effect.
+ * @internal
+ */
+const SHARED_FACTORY_CODE = `
+import { HttpApiBuilder, HttpApi, HttpApiGroup, HttpServer } from "@effect/platform";
+import { Data, Effect, Layer, Schema, Scope, Exit } from "effect";
+
+class FactoryError extends Data.TaggedError("FactoryError") {}
+
+const HttpApiValueSchema = Schema.declare(
+  (u) => HttpApi.isHttpApi(u),
+  { identifier: "HttpApiValue", description: "An HttpApi definition" },
+);
+
+const ComposedApiLayerSchema = Schema.declare(
+  (u) => Layer.isLayer(u),
+  { identifier: "ComposedApiLayer", description: "A composed Layer providing HttpApi.Api" },
+);
+
+export const detectAndComposeLayer = (mod) =>
+  Effect.gen(function* () {
+    if ("ApiLive" in mod && Layer.isLayer(mod.ApiLive)) {
+      return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(mod.ApiLive).pipe(
+        Effect.mapError((cause) => new FactoryError({ message: "ApiLive export is not a valid API layer", cause })),
+      );
+    }
+
+    const values = Object.values(mod);
+    const httpApis = values.filter(HttpApi.isHttpApi);
+    if (httpApis.length === 0) {
+      return yield* new FactoryError({ message: "API module must export ApiLive or an HttpApi definition" });
+    }
+    if (httpApis.length > 1) {
+      return yield* new FactoryError({ message: "API module must export exactly one HttpApi definition, found " + httpApis.length });
+    }
+
+    const api = yield* Schema.decodeUnknown(HttpApiValueSchema)(httpApis[0]).pipe(
+      Effect.mapError((cause) => new FactoryError({ message: "Failed to validate HttpApi export", cause })),
+    );
+
+    const handlerLayers = values.filter((v) => Layer.isLayer(v) && !HttpApi.isHttpApi(v));
+    const baseLayer = HttpApiBuilder.api(api);
+    const composed = handlerLayers.reduce((acc, layer) => Layer.provide(acc, layer), baseLayer);
+
+    return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(composed).pipe(
+      Effect.mapError((cause) => new FactoryError({ message: "Failed to compose API layer", cause })),
+    );
+  });
+
+export const createWebHandler = (apiLive) => {
+  const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerContext);
+  return HttpApiBuilder.toWebHandler(apiLayer);
+};
+`;
+
+/**
+ * Node handler factory — extends shared code with NodeHttpServer.makeHandler.
+ * @internal
+ */
+const NODE_HANDLER_FACTORY_CODE =
+  SHARED_FACTORY_CODE +
+  `
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+
+export const createNodeHandler = (apiLive) =>
+  Effect.gen(function* () {
+    const apiLayer = Layer.mergeAll(
+      apiLive,
+      HttpApiBuilder.Router.Live,
+      HttpApiBuilder.Middleware.layer,
+      HttpServer.layerContext,
+    );
+
+    const handlerScope = yield* Scope.make();
+    const runtime = yield* Layer.toRuntime(apiLayer).pipe(Scope.extend(handlerScope));
+    const httpApp = yield* Effect.provide(HttpApiBuilder.httpApp, runtime);
+    const handler = yield* NodeHttpServer.makeHandler(httpApp).pipe(
+      Effect.provide(runtime),
+      Scope.extend(handlerScope),
+    );
+
+    return {
+      handler,
+      dispose: Scope.close(handlerScope, Exit.void).pipe(Effect.ignore),
+    };
+  });
+`;
+
+/**
+ * Bun handler factory — shared code only (no @effect/platform-node).
+ * Uses createWebHandler for handler creation.
+ * @internal
+ */
+const BUN_HANDLER_FACTORY_CODE = SHARED_FACTORY_CODE;
 
 // =============================================================================
 // Types
@@ -178,6 +284,20 @@ const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
 });
 
 /**
+ * Dynamically import BunDevPlatformLive to avoid loading @effect/platform-bun in Node.js.
+ * @internal
+ */
+const importBunDevPlatform = Effect.tryPromise({
+  try: () => import("./dev-platform-bun.js").then((m) => m.BunDevPlatformLive),
+  catch: (cause) =>
+    new ImportError({
+      module: "./dev-platform-bun.js",
+      message: "Failed to import BunDevPlatformLive",
+      cause,
+    }),
+});
+
+/**
  * Create plugin layer for given platform.
  * Uses DevPlatform to get platform-specific FileSystem.
  * @internal
@@ -185,7 +305,8 @@ const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
 const makePluginLayer = (
   platform: Platform,
 ): Layer.Layer<FileSystem.FileSystem | DevPlatform, ImportError> => {
-  const platformLayer = platform === "bun" ? BunDevPlatformLive : NodeDevPlatformLive;
+  const platformLayer =
+    platform === "bun" ? Layer.unwrapEffect(importBunDevPlatform) : NodeDevPlatformLive;
 
   return Layer.mergeAll(
     platformLayer,
@@ -1028,12 +1149,12 @@ export const generateServerEntry = (
     const platformImport =
       platform === "bun"
         ? 'import { BunHttpServer, BunRuntime } from "@effect/platform-bun"'
-        : 'import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"';
+        : 'import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"\nimport { createServer } from "node:http"';
 
     const platformServerLayer =
       platform === "bun"
         ? "BunHttpServer.layer({ port: PORT, hostname: HOST })"
-        : "NodeHttpServer.layer({ port: PORT, hostname: HOST })";
+        : "NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST })";
 
     const platformRuntime = platform === "bun" ? "BunRuntime" : "NodeRuntime";
 
@@ -1052,7 +1173,12 @@ if (httpApis.length === 0) {
 }
 const Api = httpApis[0];
 const handlerLayers = apiValues.filter(Layer.isLayer);
-const ApiLive = handlerLayers.reduce((acc, layer) => Layer.merge(acc, layer), HttpApiBuilder.api(Api));
+const baseApiLayer = HttpApiBuilder.api(Api);
+const handlersLayer = handlerLayers.reduce<Layer.Layer<never, unknown, unknown>>(
+  (acc, layer) => Layer.merge(acc, layer),
+  Layer.empty
+);
+const ApiLive = Layer.provide(baseApiLayer, handlersLayer);
 
 // Build server layer with API
 const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
@@ -1239,11 +1365,15 @@ export interface TryggOptions extends TryggConfig {}
  * @since 1.0.0
  */
 export const trygg = (tryggConfig?: TryggConfig): Plugin => {
-  const platform = tryggConfig?.platform ?? "node";
+  const configPlatform = tryggConfig?.platform ?? "node";
   const output = tryggConfig?.output ?? "server";
 
-  // Create platform-specific plugin layer
-  const pluginLayer = makePluginLayer(platform);
+  // Dev server always runs in Node.js (Vite), so use node platform for dev
+  // regardless of config platform which is for production runtime
+  const devPlatform = typeof Bun === "undefined" ? "node" : configPlatform;
+
+  // Create platform-specific plugin layer for dev server
+  const pluginLayer = makePluginLayer(devPlatform);
 
   let config: ResolvedConfig;
   // Initialize with process.cwd() as fallback for early hooks
@@ -1272,6 +1402,19 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           alias: {
             [EFFECT_UI_API_ID]: VIRTUAL_CLIENT_ID,
           },
+        },
+        // Ensure effect packages are externalized in SSR so that both the
+        // bundled plugin code and user modules loaded via ssrLoadModule
+        // resolve to the same module instances. Without this, Layer
+        // memoization fails across module boundaries (e.g. Router.Live).
+        ssr: {
+          external: [
+            "effect",
+            "@effect/platform",
+            "@effect/platform-node",
+            "@effect/platform-bun",
+            "@effect/platform-browser",
+          ],
         },
         build: {
           outDir: output === "server" ? "dist/client" : "dist",
@@ -1314,7 +1457,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           yield* Effect.logInfo("trygg configured");
           yield* Effect.logDebug(`  App directory: ${appDir}`);
           yield* Effect.logDebug(`  Generated directory: ${generatedDir}`);
-          yield* Effect.logDebug(`  Platform: ${platform}`);
+          yield* Effect.logDebug(`  Platform: ${configPlatform}`);
           yield* Effect.logDebug(`  Output: ${output}`);
           if (routesFilePath !== undefined) {
             yield* Effect.logDebug(`  Routes: ${routesFilePath}`);
@@ -1344,7 +1487,9 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           });
 
         // Validate API imports and exports
-        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+        yield* validateApiPlatform(apiPath, configPlatform).pipe(
+          Effect.tapError(logApiValidationError),
+        );
         yield* validateApiExports(apiPath, loadModule).pipe(Effect.tapError(logApiValidationError));
 
         // Generate route types from routes file
@@ -1379,6 +1524,35 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           // Create scope for API lifecycle
           const scope = yield* Scope.make();
 
+          // SSR-load handler factory — resolves @effect/platform from project root,
+          // same module instance as user's api.ts, preventing Router.Live identity mismatches.
+          const rawFactoryMod = yield* Effect.tryPromise({
+            try: () => server.ssrLoadModule(VIRTUAL_HANDLER_FACTORY_ID),
+            catch: (cause) =>
+              new ApiInitError({
+                message: "Failed to SSR-load handler factory",
+                cause,
+              }),
+          });
+          // Validate factory shape at runtime instead of using `as` cast
+          if (
+            typeof rawFactoryMod.detectAndComposeLayer !== "function" ||
+            typeof rawFactoryMod.createWebHandler !== "function"
+          ) {
+            return yield* new ApiInitError({
+              message:
+                "Handler factory module missing required exports (detectAndComposeLayer, createWebHandler)",
+            });
+          }
+          const factoryMod: HandlerFactory = {
+            detectAndComposeLayer: rawFactoryMod.detectAndComposeLayer,
+            createWebHandler: rawFactoryMod.createWebHandler,
+            createNodeHandler:
+              typeof rawFactoryMod.createNodeHandler === "function"
+                ? rawFactoryMod.createNodeHandler
+                : undefined,
+          };
+
           // Create dev API using platform-specific implementation
           const handle = yield* Scope.extend(
             devPlatform.createDevApi({
@@ -1392,8 +1566,11 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
                       }),
                   ),
                 ),
-              onError: (error) => Effect.logError(`API handler error: ${error}`),
-              baseUrl: "",
+              onError: (error) =>
+                Effect.logError(
+                  `[api] middleware.error: ${error instanceof Error ? error.message : String(error)}`,
+                ),
+              handlerFactory: factoryMod,
             }),
             scope,
           );
@@ -1404,6 +1581,10 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           yield* Effect.logInfo("API handlers loaded").pipe(
             Effect.annotateLogs("style", "success"),
           );
+          yield* Debug.log({
+            event: "api.middleware.mounted",
+            platform: configPlatform,
+          });
         }
 
         // Vite boundary: file watcher callbacks use extracted runtime
@@ -1441,8 +1622,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
         // Vite boundary: close scope when server closes (triggers finalizer)
         server.httpServer?.on("close", () => {
           if (Option.isSome(apiScope)) {
-            // Properly fork the scope close effect to avoid floating effects
-            Runtime.runFork(runtime)(Scope.close(apiScope.value, Exit.void));
+            void Runtime.runPromise(runtime)(Scope.close(apiScope.value, Exit.void));
           }
         });
 
@@ -1484,6 +1664,9 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       if (id === VIRTUAL_CLIENT_ID || id === EFFECT_UI_API_ID) {
         return RESOLVED_VIRTUAL_CLIENT_ID;
       }
+      if (id === VIRTUAL_HANDLER_FACTORY_ID) {
+        return RESOLVED_HANDLER_FACTORY_ID;
+      }
       if (id === "trygg/jsx-runtime" || id === "trygg/jsx-dev-runtime") {
         return null;
       }
@@ -1497,6 +1680,9 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           throw new Error("[trygg] Plugin not properly initialized - configResolved not called");
         }
         return Effect.runPromise(generateClientModule(appDir).pipe(Effect.provide(pluginLayer)));
+      }
+      if (id === RESOLVED_HANDLER_FACTORY_ID) {
+        return devPlatform === "node" ? NODE_HANDLER_FACTORY_CODE : BUN_HANDLER_FACTORY_CODE;
       }
       return null;
     },
@@ -1518,7 +1704,9 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
         const entryPath = nodePath.join(generatedDir, "entry.tsx");
         const apiPath = nodePath.join(appDir, "api.ts");
 
-        yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+        yield* validateApiPlatform(apiPath, configPlatform).pipe(
+          Effect.tapError(logApiValidationError),
+        );
 
         // Always regenerate entry when routes file is configured
         const hasEntry = yield* pathExists(entryPath);
@@ -1557,7 +1745,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
 
         // Generate server entry
         const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
-        const serverEntryContent = yield* generateServerEntry(platform, hasApi);
+        const serverEntryContent = yield* generateServerEntry(configPlatform, hasApi);
         yield* writeFileSafe(serverEntryPath, serverEntryContent);
 
         yield* Effect.logInfo("Building production server...");

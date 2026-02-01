@@ -2,22 +2,24 @@
  * @since 1.0.0
  * Bun implementation of DevPlatform service
  *
- * Uses dynamic imports to avoid hard dependencies on @effect/platform-bun
+ * Uses SSR-loaded handler factory for @effect/platform layer composition,
+ * with web-standard Request/Response bridged to Node.js Connect middleware.
+ *
+ * Dynamic imports avoid hard dependencies on @effect/platform-bun
  * when running in Node mode.
  */
-import { FileSystem, HttpApi, HttpApiBuilder, HttpApiGroup, HttpServer } from "@effect/platform";
-import { Effect, Exit, Layer, Option, Ref, Runtime, Scope, Schema } from "effect";
-import type { Connect } from "vite";
+import { FileSystem } from "@effect/platform";
+import { Effect, Layer, Option, Ref, Runtime, Schema, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Connect } from "vite";
 import {
+  ApiInitError,
+  type DevApiErrors,
+  type DevApiHandle,
+  type DevApiOptions,
   DevPlatform,
   type DevPlatformService,
-  type DevApiOptions,
-  type DevApiHandle,
   ImportError,
-  ApiInitError,
-  ProxyError,
-  type DevApiErrors,
 } from "./dev-platform.js";
 
 // =============================================================================
@@ -34,203 +36,120 @@ const importBunFileSystem = Effect.tryPromise({
     }),
 });
 
-const importBunHttpServer = Effect.tryPromise({
-  try: () => import("@effect/platform-bun/BunHttpServer"),
-  catch: (cause) =>
-    new ImportError({
-      module: "@effect/platform-bun/BunHttpServer",
-      message: "Failed to import BunHttpServer. Is @effect/platform-bun installed?",
-      cause,
-    }),
-});
-
 // =============================================================================
-// HttpApi Detection
+// Node IncomingMessage → Web Request bridge
 // =============================================================================
 
-const HttpApiValueSchema = Schema.declare(
-  (
-    u: unknown,
-  ): u is HttpApi.HttpApi<string, HttpApiGroup.HttpApiGroup.AnyWithProps, never, never> =>
-    HttpApi.isHttpApi(u),
-  { identifier: "HttpApiValue", description: "An HttpApi definition" },
-);
-
-const ComposedApiLayerSchema = Schema.declare(
-  (u: unknown): u is Layer.Layer<HttpApi.Api> => Layer.isLayer(u),
-  { identifier: "ComposedApiLayer", description: "A composed Layer providing HttpApi.Api" },
-);
-
-const detectApiLayer = (
-  mod: Record<string, unknown>,
-): Effect.Effect<Layer.Layer<HttpApi.Api>, ApiInitError> =>
-  Effect.gen(function* () {
-    const values = Object.values(mod);
-    const httpApis = values.filter(HttpApi.isHttpApi);
-
-    if (httpApis.length === 0) {
-      return yield* new ApiInitError({
-        message: "API module must export an HttpApi definition",
-      });
-    }
-
-    if (httpApis.length > 1) {
-      return yield* new ApiInitError({
-        message: `API module must export exactly one HttpApi, found ${httpApis.length}`,
-      });
-    }
-
-    const api = yield* Schema.decodeUnknown(HttpApiValueSchema)(httpApis[0]).pipe(
-      Effect.mapError((cause) => new ApiInitError({ message: "Invalid HttpApi type", cause })),
-    );
-
-    const handlerLayers = values.filter(
-      (v): v is Layer.Layer<unknown, unknown, unknown> => Layer.isLayer(v) && !HttpApi.isHttpApi(v),
-    );
-
-    const baseLayer = HttpApiBuilder.api(api);
-    const composed = handlerLayers.reduce<Layer.Layer<never, unknown, unknown>>(
-      (acc, layer) => Layer.provide(acc, layer),
-      baseLayer,
-    );
-
-    return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(composed).pipe(
-      Effect.mapError(
-        (cause) => new ApiInitError({ message: "Failed to compose API layer", cause }),
-      ),
-    );
-  });
-
-// =============================================================================
-// Proxy Helpers
-// =============================================================================
-
-const readRequestBody = (req: IncomingMessage): Effect.Effect<Uint8Array, ProxyError> =>
-  Effect.async((resume) => {
+/**
+ * Read the full body of a Node.js IncomingMessage as a Uint8Array.
+ * Returns Option.none for bodyless methods.
+ * @internal
+ */
+const collectBody = (req: IncomingMessage): Promise<Option.Option<Uint8Array>> => {
+  const method = req.method ?? "GET";
+  if (method === "GET" || method === "HEAD") {
+    return Promise.resolve(Option.none());
+  }
+  return new Promise((resolve, reject) => {
     const chunks: Array<Uint8Array> = [];
-
-    req.on("data", (chunk: Uint8Array) => {
-      chunks.push(chunk);
-    });
-
+    req.on("data", (chunk: Uint8Array) => chunks.push(chunk));
     req.on("end", () => {
-      const total = chunks.reduce((size, chunk) => size + chunk.length, 0);
-      const buffer = new Uint8Array(total);
+      const total = chunks.reduce((n, c) => n + c.length, 0);
+      const buf = new Uint8Array(total);
       let offset = 0;
-
       for (const chunk of chunks) {
-        buffer.set(chunk, offset);
+        buf.set(chunk, offset);
         offset += chunk.length;
       }
-
-      resume(Effect.succeed(buffer));
+      resolve(Option.some(buf));
     });
-
-    req.on("error", (error) => {
-      resume(
-        Effect.fail(
-          new ProxyError({
-            message: "Failed to read request body",
-            cause: error,
-          }),
-        ),
-      );
-    });
+    req.on("error", reject);
   });
-
-const toHeaders = (headers: IncomingMessage["headers"]): Record<string, string> => {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (value === undefined) continue;
-    if (typeof value === "string") {
-      result[key] = value;
-    } else {
-      result[key] = value.join(",");
-    }
-  }
-  return result;
 };
 
-const streamResponseBody = (
-  response: Response,
-  res: ServerResponse,
-): Effect.Effect<void, ProxyError> =>
-  Effect.async((resume) => {
-    if (!response.body) {
-      res.end();
-      resume(Effect.void);
-      return;
+/**
+ * Convert Node.js IncomingMessage headers to a Headers object.
+ * @internal
+ */
+const toWebHeaders = (nodeHeaders: IncomingMessage["headers"]): Headers => {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(nodeHeaders)) {
+    if (value === undefined) continue;
+    if (typeof value === "string") {
+      headers.set(key, value);
+    } else {
+      headers.set(key, value.join(", "));
     }
+  }
+  return headers;
+};
 
-    const reader = response.body.getReader();
+/**
+ * Convert Node.js IncomingMessage to a web-standard Request.
+ * @internal
+ */
+const toWebRequest = async (req: IncomingMessage): Promise<Request> => {
+  const protocol = "http";
+  const host = req.headers.host ?? "localhost";
+  const url = `${protocol}://${host}${req.url ?? "/"}`;
+  const method = req.method ?? "GET";
+  const headers = toWebHeaders(req.headers);
+  const body = await collectBody(req);
 
-    const pump = (): void => {
-      reader
-        .read()
-        .then(({ done, value }) => {
-          if (done) {
-            res.end();
-            resume(Effect.void);
-            return;
-          }
+  const init: RequestInit = { method, headers };
+  if (Option.isSome(body)) {
+    const bytes = body.value;
+    init.body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+  }
+  return new Request(url, init);
+};
 
-          res.write(value, (error) => {
-            if (error) {
-              resume(
-                Effect.fail(
-                  new ProxyError({ message: "Failed to write response chunk", cause: error }),
-                ),
-              );
-              return;
-            }
-            pump();
-          });
-        })
-        .catch((error) => {
-          resume(
-            Effect.fail(new ProxyError({ message: "Failed to read response body", cause: error })),
-          );
-        });
-    };
-
-    pump();
+/**
+ * Write a web-standard Response to a Node.js ServerResponse.
+ * @internal
+ */
+const writeWebResponse = async (webRes: Response, nodeRes: ServerResponse): Promise<void> => {
+  nodeRes.statusCode = webRes.status;
+  webRes.headers.forEach((value, key) => {
+    nodeRes.setHeader(key, value);
   });
 
-const proxyRequest = (
-  targetUrl: string,
-  method: string,
-  headers: IncomingMessage["headers"],
-  body: Option.Option<Uint8Array>,
-  res: ServerResponse,
-): Effect.Effect<void, ProxyError> =>
-  Effect.gen(function* () {
-    const fetchInit: RequestInit = {
-      method,
-      headers: toHeaders(headers),
-    };
+  if (!webRes.body) {
+    nodeRes.end();
+    return;
+  }
 
-    if (Option.isSome(body)) {
-      const safeBody = new Uint8Array(body.value.byteLength);
-      safeBody.set(body.value);
-      fetchInit.body = safeBody;
-    }
-
-    const response = yield* Effect.tryPromise({
-      try: () => fetch(targetUrl, fetchInit),
-      catch: (cause) =>
-        new ProxyError({
-          message: `Failed to proxy request to ${targetUrl}`,
-          cause,
-        }),
+  const reader = webRes.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    await new Promise<void>((resolve, reject) => {
+      nodeRes.write(value, (err) => (err ? reject(err) : resolve()));
     });
+  }
+  nodeRes.end();
+};
 
-    res.statusCode = response.status;
-    response.headers.forEach((value, key) => {
-      res.setHeader(key, value);
-    });
+// =============================================================================
+// Internal State
+// =============================================================================
 
-    yield* streamResponseBody(response, res);
-  });
+interface HandlerState {
+  readonly handler: Option.Option<(request: Request) => Promise<Response>>;
+  readonly dispose: Option.Option<() => void>;
+  readonly lastError: Option.Option<unknown>;
+}
+
+const emptyState: HandlerState = {
+  handler: Option.none(),
+  dispose: Option.none(),
+  lastError: Option.none(),
+};
 
 // =============================================================================
 // Bun DevPlatform Implementation
@@ -240,70 +159,74 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
   Layer.unwrapEffect(
     Effect.gen(function* () {
       const bunFs = yield* importBunFileSystem;
-      const bunHttp = yield* importBunHttpServer;
       const fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = bunFs.layer;
 
       const createDevApi = (
         options: DevApiOptions,
       ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
         Effect.gen(function* () {
-          const scopeRef = yield* Ref.make<Option.Option<Scope.CloseableScope>>(Option.none());
-          const baseUrlRef = yield* Ref.make("");
+          const stateRef = yield* Ref.make<HandlerState>(emptyState);
 
-          const closeCurrentScope = Effect.gen(function* () {
-            const current = yield* Ref.get(scopeRef);
-            if (Option.isSome(current)) {
-              yield* Scope.close(current.value, Exit.void);
+          /** Dispose previous handler. */
+          const disposeHandler = Effect.gen(function* () {
+            const { dispose } = yield* Ref.get(stateRef);
+            if (Option.isSome(dispose)) {
+              yield* Effect.try({
+                try: () => dispose.value(),
+                catch: () => new ApiInitError({ message: "Failed to dispose previous handler" }),
+              }).pipe(Effect.ignore);
             }
-            yield* Ref.set(scopeRef, Option.none());
-            yield* Ref.set(baseUrlRef, "");
+            yield* Ref.set(stateRef, emptyState);
           });
 
-          const startServer = Effect.gen(function* () {
-            const scope = yield* Scope.make();
+          /** Build handler from API module using SSR-loaded factory. */
+          const initHandler = Effect.gen(function* () {
+            yield* disposeHandler;
 
-            const apiModule = yield* options.loadApiModule();
-            const apiLayer = yield* detectApiLayer(apiModule);
-
-            const serverLayer = bunHttp.layer({ port: 0, hostname: "127.0.0.1" });
-            const fullLayer = Layer.mergeAll(
-              apiLayer,
-              HttpApiBuilder.Router.Live,
-              HttpApiBuilder.Middleware.layer,
-              HttpServer.layerContext,
-              serverLayer,
+            const mod = yield* options.loadApiModule().pipe(
+              Effect.tapError((error) =>
+                Effect.gen(function* () {
+                  yield* Ref.set(stateRef, { ...emptyState, lastError: Option.some(error) });
+                  yield* options.onError(error);
+                }),
+              ),
+              Effect.option,
             );
+            if (Option.isNone(mod)) return;
 
-            const runtime = yield* Layer.toRuntime(fullLayer).pipe(Scope.extend(scope));
-            const httpApp = yield* Effect.provide(HttpApiBuilder.httpApp, runtime);
-
-            yield* HttpServer.serveEffect(httpApp).pipe(
-              Effect.provide(runtime),
-              Scope.extend(scope),
+            // Use SSR-loaded factory for layer detection and web handler creation
+            const factory = options.handlerFactory;
+            const apiLive = yield* factory.detectAndComposeLayer(mod.value).pipe(
+              Effect.mapError(
+                (cause) => new ApiInitError({ message: "Failed to detect API layer", cause }),
+              ),
+              Effect.tapError((error) =>
+                Effect.gen(function* () {
+                  yield* Ref.set(stateRef, { ...emptyState, lastError: Option.some(error) });
+                  yield* options.onError(error);
+                }),
+              ),
+              Effect.option,
             );
+            if (Option.isNone(apiLive)) return;
 
-            const address = yield* HttpServer.addressWith((addr) => Effect.succeed(addr)).pipe(
-              Effect.provide(runtime),
-            );
+            const result = yield* Effect.try({
+              try: () => factory.createWebHandler(apiLive.value),
+              catch: (cause) =>
+                new ApiInitError({ message: "Failed to create web handler", cause }),
+            }).pipe(Effect.option);
 
-            if (address._tag !== "TcpAddress") {
-              yield* Scope.close(scope, Exit.void);
-              return yield* new ApiInitError({
-                message: "Expected TCP address for Bun HTTP server",
-              });
-            }
+            if (Option.isNone(result)) return;
 
-            const hostname = address.hostname === "0.0.0.0" ? "127.0.0.1" : address.hostname;
-            const baseUrl = `http://${hostname}:${address.port}`;
-
-            yield* Ref.set(scopeRef, Option.some(scope));
-            yield* Ref.set(baseUrlRef, baseUrl);
+            yield* Ref.set(stateRef, {
+              handler: Option.some(result.value.handler),
+              dispose: Option.some(result.value.dispose),
+              lastError: Option.none(),
+            });
           });
 
-          yield* closeCurrentScope;
-          yield* startServer;
-
-          yield* Effect.addFinalizer(() => closeCurrentScope);
+          yield* initHandler;
+          yield* Effect.addFinalizer(() => disposeHandler);
 
           const runtime = yield* Effect.runtime<never>();
 
@@ -313,41 +236,61 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
             }
 
             const effect = Effect.gen(function* () {
-              const baseUrl = yield* Ref.get(baseUrlRef);
-              if (baseUrl.length === 0) {
-                res.statusCode = 503;
-                res.end("API server not ready");
+              const state = yield* Ref.get(stateRef);
+              if (Option.isNone(state.handler)) {
+                const errorMessage = Option.match(state.lastError, {
+                  onNone: () => "Check console for errors",
+                  onSome: (e) => (e instanceof Error ? e.message : String(e)),
+                });
+                yield* options.onError(new ApiInitError({ message: "Handler not available" }));
+                const ErrorResponseJson = Schema.parseJson(
+                  Schema.Struct({ error: Schema.String, message: Schema.String }),
+                );
+                const body = yield* Schema.encode(ErrorResponseJson)({
+                  error: "API handler not available",
+                  message: errorMessage,
+                });
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(body);
                 return;
               }
 
-              const method = req.method ?? "GET";
-              const body =
-                method === "GET" || method === "HEAD"
-                  ? Option.none<Uint8Array>()
-                  : Option.some(yield* readRequestBody(req));
-
-              yield* proxyRequest(`${baseUrl}${req.url}`, method, req.headers, body, res);
+              // Bridge: Node IncomingMessage → Web Request → handler → Web Response → Node ServerResponse
+              const { value: handler } = state.handler;
+              yield* Effect.tryPromise({
+                try: async () => {
+                  const webReq = await toWebRequest(req);
+                  const webRes = await handler(webReq);
+                  await writeWebResponse(webRes, res);
+                },
+                catch: (cause) => new ApiInitError({ message: "Request handling failed", cause }),
+              });
             }).pipe(
               Effect.catchAll((error) =>
                 Effect.gen(function* () {
+                  yield* Effect.logError(`[trygg] API handler failed: ${String(error)}`);
                   yield* options.onError(error);
-                  res.statusCode = 500;
-                  res.end("Internal Server Error");
+                  if (!res.headersSent) {
+                    res.statusCode = 500;
+                    res.end("Internal Server Error");
+                  }
                 }),
               ),
             );
 
-            // Fork the effect into the parent scope to avoid floating effects
-            Runtime.runFork(runtime)(effect.pipe(Effect.scoped));
+            void Runtime.runPromise(runtime)(effect).catch((_error: unknown) => {
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.end("Internal Server Error");
+              }
+            });
           };
 
           return {
             middleware,
-            reload: Effect.gen(function* () {
-              yield* closeCurrentScope;
-              yield* startServer;
-            }),
-            dispose: closeCurrentScope,
+            reload: initHandler,
+            dispose: disposeHandler,
           };
         });
 

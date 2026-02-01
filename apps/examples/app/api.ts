@@ -4,7 +4,7 @@
  * Single file defining all API endpoints and handlers.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 
 // =============================================================================
 // Schemas
@@ -102,5 +102,6 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
     ),
 );
 
-// Framework auto-detects Api + handler Layers and composes them.
-// No need to export a combined ApiLive layer.
+// Pre-composed layer avoids cross-module Router.Live identity issues
+// between the bundled vite plugin and SSR-loaded user code.
+export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));

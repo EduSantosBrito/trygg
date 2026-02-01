@@ -401,6 +401,61 @@ type ResourceFetchUnhandledEvent = BaseEvent & {
   readonly cause: string;
 };
 
+/** API middleware events */
+type ApiMiddlewareInitEvent = BaseEvent & {
+  readonly event: "api.middleware.init";
+};
+
+type ApiMiddlewareMountedEvent = BaseEvent & {
+  readonly event: "api.middleware.mounted";
+  readonly platform: string;
+};
+
+type ApiMiddlewareErrorEvent = BaseEvent & {
+  readonly event: "api.middleware.error";
+  readonly reason: string;
+};
+
+type ApiRequestReceivedEvent = BaseEvent & {
+  readonly event: "api.request.received";
+  readonly method: string;
+  readonly url: string;
+};
+
+type ApiRequestHandlerAvailableEvent = BaseEvent & {
+  readonly event: "api.request.handler_available";
+  readonly url: string;
+};
+
+type ApiRequestHandlerMissingEvent = BaseEvent & {
+  readonly event: "api.request.handler_missing";
+  readonly url: string;
+  readonly last_error?: string;
+};
+
+type ApiRequestErrorEvent = BaseEvent & {
+  readonly event: "api.request.error";
+  readonly url: string;
+  readonly error: string;
+};
+
+type ApiHandlerLoadingEvent = BaseEvent & {
+  readonly event: "api.handler.loading";
+  readonly module_path: string;
+};
+
+type ApiHandlerLoadedEvent = BaseEvent & {
+  readonly event: "api.handler.loaded";
+  readonly module_path: string;
+  readonly exports: ReadonlyArray<string>;
+};
+
+type ApiHandlerLoadErrorEvent = BaseEvent & {
+  readonly event: "api.handler.load_error";
+  readonly module_path: string;
+  readonly error: string;
+};
+
 /** Router events */
 type RouterNavigateEvent = BaseEvent & {
   readonly event: "router.navigate";
@@ -702,6 +757,17 @@ export type DebugEvent =
   | ResourceFetchCompleteEvent
   | ResourceFetchDefectEvent
   | ResourceFetchUnhandledEvent
+  // API middleware events
+  | ApiMiddlewareInitEvent
+  | ApiMiddlewareMountedEvent
+  | ApiMiddlewareErrorEvent
+  | ApiRequestReceivedEvent
+  | ApiRequestHandlerAvailableEvent
+  | ApiRequestHandlerMissingEvent
+  | ApiRequestErrorEvent
+  | ApiHandlerLoadingEvent
+  | ApiHandlerLoadedEvent
+  | ApiHandlerLoadErrorEvent
   // Router events
   | RouterNavigateEvent
   | RouterNavigateCompleteEvent
@@ -876,11 +942,11 @@ export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function*
   const spanId = yield* FiberRef.get(CurrentSpanId);
   const parentSpanId = yield* FiberRef.get(CurrentParentSpanId);
 
-  const ctx: TraceContext = {};
-  if (traceId !== undefined) (ctx as { traceId: string }).traceId = traceId;
-  if (spanId !== undefined) (ctx as { spanId: string }).spanId = spanId;
-  if (parentSpanId !== undefined) (ctx as { parentSpanId: string }).parentSpanId = parentSpanId;
-  return ctx;
+  return {
+    ...(traceId !== undefined ? { traceId } : {}),
+    ...(spanId !== undefined ? { spanId } : {}),
+    ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+  };
 });
 
 /**
@@ -1081,6 +1147,7 @@ const categoryColors: Record<string, { bg: string; fg: string }> = {
   resource: { bg: "#fbbf24", fg: "#451a03" },
   router: { bg: "#a78bfa", fg: "#2e1065" },
   trace: { bg: "#f472b6", fg: "#500724" },
+  api: { bg: "#60a5fa", fg: "#172554" },
 };
 
 const badgeStyle = (bg: string, fg: string) =>
