@@ -21,11 +21,11 @@
     "paths": {
       "#jsx/jsx-runtime": ["./src/jsx-runtime.ts"],
       "#jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
-      "effect-ui": ["./src/index.ts"],
-      "effect-ui/router": ["./src/router/index.ts"],
-      "effect-ui/vite-plugin": ["./src/vite/plugin.ts"],
-      "effect-ui/jsx-runtime": ["./src/jsx-runtime.ts"],
-      "effect-ui/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
+      "trygg": ["./src/index.ts"],
+      "trygg/router": ["./src/router/index.ts"],
+      "trygg/vite-plugin": ["./src/vite/plugin.ts"],
+      "trygg/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "trygg/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     },
 
     // Best practices

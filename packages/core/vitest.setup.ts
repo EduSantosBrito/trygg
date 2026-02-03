@@ -1,5 +1,5 @@
 /**
- * Vitest setup for effect-ui tests
+ * Vitest setup for trygg tests
  *
  * Configures custom equality testers for Effect data types.
  */

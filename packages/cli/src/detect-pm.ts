@@ -16,7 +16,7 @@ export const detectPackageManager = (): Effect.Effect<PackageManager> =>
 
     if (!userAgent) {
       // Fallback: check if we're running under Bun runtime
-      // This handles direct execution like: bun create effect-ui
+      // This handles direct execution like: bun create trygg
       const execPath = process.argv[0];
       if (execPath?.includes("bun")) return "bun";
       return "npm";
