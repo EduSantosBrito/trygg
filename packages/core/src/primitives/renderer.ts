@@ -595,7 +595,13 @@ const renderElement = (
     ),
 
     Match.tag("Provide", ({ context: providedContext, child }) =>
-      renderElement(child, parent, runtime, providedContext, options),
+      renderElement(
+        child,
+        parent,
+        runtime,
+        context !== null ? Context.merge(context, providedContext) : providedContext,
+        options,
+      ),
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children }) =>
