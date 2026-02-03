@@ -11,11 +11,11 @@
     "typescript",
     "ui"
   ],
-  "homepage": "https://github.com/EduSantosBrito/effect-ui#readme",
+  "homepage": "https://github.com/EduSantosBrito/trygg#readme",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EduSantosBrito/effect-ui.git"
+    "url": "https://github.com/EduSantosBrito/trygg.git"
   },
   "files": [
     "dist",

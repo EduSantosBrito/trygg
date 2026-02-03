@@ -46,7 +46,7 @@ const getPlatformLayer = (platform: "node" | "bun"): Layer.Layer<PlatformConfig>
   platform === "bun" ? BunPlatformConfig : NodePlatformConfig;
 
 /**
- * Scaffold a new effect-ui project
+ * Scaffold a new trygg project
  */
 export const scaffoldProject = (targetDir: string, options: ProjectOptions, templatesDir: string) =>
   Effect.gen(function* () {
@@ -63,7 +63,7 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     const staticDir = path.join(templatesDir, "static");
     yield* copyDir(fs, staticDir, targetDir);
 
-    // 4. Always copy router template (routes are core to effect-ui)
+    // 4. Always copy router template (routes are core to trygg)
     const routerDir = path.join(templatesDir, "router");
     yield* copyDir(fs, routerDir, targetDir);
 

@@ -1,5 +1,5 @@
 /**
- * effect-ui Counter Example
+ * trygg Counter Example
  *
  * This example demonstrates:
  * - Signal.make for reactive state
@@ -7,7 +7,7 @@
  * - Event handlers that return Effects
  */
 import { Effect } from "effect";
-import { mount, Signal } from "effect-ui";
+import { mount, Signal } from "trygg";
 
 // Counter component using Signal for state
 const Counter = Effect.gen(function* () {
@@ -21,7 +21,7 @@ const Counter = Effect.gen(function* () {
 
   return (
     <div>
-      <h1>effect-ui Counter</h1>
+      <h1>trygg Counter</h1>
       <div className="counter">
         <button onClick={decrement}>-</button>
         <span className="count">{count}</span>

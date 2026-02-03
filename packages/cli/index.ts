@@ -173,7 +173,7 @@ const create = Command.make(
       clack.note(nextSteps.join("\n"), "Next steps");
       clack.outro(`Done! Created ${name}`);
     }),
-).pipe(Command.withDescription("Create a new effect-ui project"));
+).pipe(Command.withDescription("Create a new trygg project"));
 
 // =============================================================================
 // Run
