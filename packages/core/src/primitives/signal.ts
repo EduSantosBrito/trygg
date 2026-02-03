@@ -786,6 +786,16 @@ export const suspend: <Props, E>(
     const componentScope = yield* FiberRef.get(CurrentComponentScope);
     const scope = componentScope ?? (yield* Effect.scope);
 
+    // Validate element.ts initialized the lazy impls before entering sync code
+    if (!_signalElementImpl || !_textElementImpl) {
+      return yield* Effect.die(
+        new SignalInitError({
+          message: "Signal module not initialized - element.ts must be imported first",
+        }),
+      );
+    }
+    const signalElementFn = _signalElementImpl;
+
     // Cache: dep-key -> last successful Element for that dep-key
     const cache = new Map<string, SuspendElement>();
 
@@ -934,16 +944,8 @@ export const suspend: <Props, E>(
 
     // Return a ComponentType that renders the signal as a SignalElement
     // This allows usage as <SuspendedView /> in JSX
-    const suspendedComponent = (_props: {}): SuspendElement => {
-      if (!_signalElementImpl || !_textElementImpl) {
-        // Return a text element with error message instead of throwing
-        // This avoids synchronous throw while still surfacing the error
-        return _textElementImpl!({
-          content: "[Error: Signal module not initialized - element.ts must be imported first]",
-        });
-      }
-      return _signalElementImpl(viewSignal as Signal<SuspendElement>) as SuspendElement;
-    };
+    const suspendedComponent = (_props: {}): SuspendElement =>
+      signalElementFn(viewSignal as Signal<SuspendElement>) as SuspendElement;
 
     // Tag as EffectComponent and expose signal for testing
     return Object.assign(suspendedComponent, {

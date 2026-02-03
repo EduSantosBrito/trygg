@@ -20,8 +20,10 @@
  * - Tests are unbiased (no assumptions about internal implementation)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, FiberRef, Ref, Scope, TestClock } from "effect";
+import { Data, Deferred, Effect, Exit, Fiber, FiberRef, Ref, Scope, TestClock } from "effect";
 import * as Signal from "../signal.js";
+// Import element.js to initialize _signalElementImpl/_textElementImpl
+import { Element, text, componentElement } from "../element.js";
 
 // =============================================================================
 // Signal.make - Create reactive state
@@ -1014,6 +1016,84 @@ describe("Signal memory management", () => {
       yield* TestClock.adjust(20);
 
       assert.isTrue(fiberStillRunning);
+    }),
+  );
+});
+
+// =============================================================================
+// Signal.suspend - Component suspension with async state tracking
+// =============================================================================
+// Scope: suspend creates a SuspendedComponent that wraps async component lifecycle
+// Regression: _textElementImpl! crash when module not initialized (now validated in Effect body)
+
+describe("Signal.suspend", () => {
+  const isText = Element.$is("Text");
+
+  /** Assert element is Text and return content */
+  const textContent = (el: Element): string => {
+    assert.isTrue(isText(el), `expected Text, got ${el._tag}`);
+    if (isText(el)) return el.content;
+    throw new Error("unreachable");
+  };
+
+  /**
+   * Build a mock component matching SuspendComponentType shape.
+   * suspend only uses the first arg for type inference, so shape is sufficient.
+   */
+  const mockComponent = (effect: Effect.Effect<Element, unknown>) => {
+    const comp = (_props: {}): Element => componentElement(() => effect, null);
+    return Object.assign(comp, { _tag: "EffectComponent" as const });
+  };
+
+  it.scoped("should produce SuspendedComponent that returns SignalElement", () =>
+    Effect.gen(function* () {
+      const comp = mockComponent(Effect.succeed(text("hello")));
+
+      const suspended = yield* Signal.suspend(comp, {
+        Pending: text("loading"),
+        Failure: () => text("error"),
+        Success: componentElement(() => Effect.succeed(text("hello")), null),
+      });
+
+      assert.strictEqual(suspended._tag, "EffectComponent");
+      // Calling the component must not crash (regression: _textElementImpl! null deref)
+      const element = suspended({});
+      assert.strictEqual(element._tag, "SignalElement");
+    }),
+  );
+
+  it.scoped("should initialize view signal with Pending element", () =>
+    Effect.gen(function* () {
+      const comp = mockComponent(Effect.succeed(text("done")));
+
+      const suspended = yield* Signal.suspend(comp, {
+        Pending: text("loading..."),
+        Failure: () => text("error"),
+        Success: componentElement(() => Effect.succeed(text("done")), null),
+      });
+
+      const initial = yield* Signal.get(suspended._signal);
+      assert.strictEqual(textContent(initial), "loading...");
+    }),
+  );
+
+  it.scoped("should update view signal to Failure on render error", () =>
+    Effect.gen(function* () {
+      class RenderError extends Data.TaggedError("RenderError")<{}> {}
+      const comp = mockComponent(Effect.fail(new RenderError()));
+
+      const suspended = yield* Signal.suspend(comp, {
+        Pending: text("loading"),
+        Failure: () => text("failed"),
+        Success: componentElement(() => Effect.fail(new RenderError()), null),
+      });
+
+      // Let the render fiber run
+      yield* TestClock.adjust(0);
+      yield* Effect.yieldNow();
+
+      const view = yield* Signal.get(suspended._signal);
+      assert.strictEqual(textContent(view), "failed");
     }),
   );
 });
