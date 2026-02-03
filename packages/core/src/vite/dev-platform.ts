@@ -65,7 +65,7 @@ export interface DevApiHandle {
  * @since 1.0.0
  */
 export interface HandlerFactory {
-  /** Detect ApiLive or auto-detect Api + handlers, compose into an opaque API layer */
+  /** Extract default export from api module, validate as API layer */
   readonly detectAndComposeLayer: (
     mod: Record<string, unknown>,
   ) => Effect.Effect<Layer.Layer<unknown>, unknown>;

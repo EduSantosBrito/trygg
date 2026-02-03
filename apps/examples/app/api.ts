@@ -3,8 +3,15 @@
  *
  * Single file defining all API endpoints and handlers.
  */
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
-import { Effect, Layer, Schema } from "effect";
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiBuilder,
+  HttpApiClient,
+  FetchHttpClient,
+} from "@effect/platform";
+import { Context, Effect, Layer, Schema } from "effect";
 
 // =============================================================================
 // Schemas
@@ -70,13 +77,13 @@ class UsersGroup extends HttpApiGroup.make("users")
 // API Definition
 // =============================================================================
 
-export class Api extends HttpApi.make("app").add(UsersGroup) {}
+class Api extends HttpApi.make("app").add(UsersGroup) {}
 
 // =============================================================================
 // Handlers
 // =============================================================================
 
-export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
+const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
   handlers
     .handle("listUsers", () =>
       Effect.gen(function* () {
@@ -102,6 +109,21 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
     ),
 );
 
-// Pre-composed layer avoids cross-module Router.Live identity issues
-// between the bundled vite plugin and SSR-loaded user code.
-export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+// Default export: composed Layer<HttpApi.Api> — the framework reads this.
+export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+
+// =============================================================================
+// Typed API Client
+// =============================================================================
+
+const client = HttpApiClient.make(Api, { baseUrl: "" });
+type ApiClientService = Effect.Effect.Success<typeof client>;
+
+/** Tag for the typed API client. Yield in effects to get the client. */
+export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
+
+/** Layer that creates the ApiClient using FetchHttpClient. */
+export const ApiClientLive = Layer.effect(
+  ApiClient,
+  client.pipe(Effect.provide(FetchHttpClient.layer)),
+);

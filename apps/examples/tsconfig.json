@@ -13,7 +13,6 @@
     "baseUrl": ".",
     "paths": {
       "trygg": ["../../packages/core/src/index.ts"],
-      "trygg/api": ["./.trygg/api-types.ts"],
       "trygg/router": ["../../packages/core/src/router/index.ts"],
       "trygg/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
       "trygg/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],

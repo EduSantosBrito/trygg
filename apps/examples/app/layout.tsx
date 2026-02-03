@@ -8,7 +8,7 @@ import "../styles.css";
 
 import { Component, DevMode } from "trygg";
 import * as Router from "trygg/router";
-import { ApiClientLive } from "trygg/api";
+import { ApiClientLive } from "./api";
 
 export default Component.gen(function* () {
   return (

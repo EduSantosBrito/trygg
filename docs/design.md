@@ -596,18 +596,26 @@ type Handlers = Api.GroupHandlers<typeof group>
 ### 11.3 Vite Plugin Integration
 
 The plugin:
-1. Validates `app/api.ts` exports (`api`/`Api` and `ApiLive`)
-2. Generates `.trygg/api.d.ts` type declarations
-3. Resolves `virtual:trygg/client` virtual module
-4. Creates dev server middleware using `HttpApiBuilder.toWebHandler`
+1. Requires `app/api.ts` to have a `default` export — a pre-composed `Layer<HttpApi.Api>`
+2. Creates dev server middleware via SSR-loaded handler factory
+3. Uses `Layer.isLayer` runtime check at module boundary (type params are phantom)
 
 ### 11.4 Client Usage
 
-```typescript
-import { api } from "virtual:trygg/client"
-import { HttpApiClient } from "@effect/platform"
+Users define `ApiClient` and `ApiClientLive` in `app/api.ts`:
 
-const client = yield* HttpApiClient.make(api, { baseUrl: "/api" })
+```typescript
+import { HttpApiClient, FetchHttpClient } from "@effect/platform"
+import { Context, Effect, Layer } from "effect"
+
+const _client = HttpApiClient.make(Api, { baseUrl: "" })
+type ApiClientService = Effect.Effect.Success<typeof _client>
+
+export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
+export const ApiClientLive = Layer.effect(ApiClient, _client.pipe(Effect.provide(FetchHttpClient.layer)))
+
+// In components:
+const client = yield* ApiClient
 const users = yield* client.users.listUsers()
 ```
 

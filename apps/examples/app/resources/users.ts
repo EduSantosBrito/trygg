@@ -7,7 +7,7 @@
  */
 import { Effect } from "effect";
 import { Resource } from "trygg";
-import { ApiClient } from "trygg/api";
+import { ApiClient } from "../api";
 import type { User, Post } from "../api";
 
 export { type User, type Post };
