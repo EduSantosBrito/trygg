@@ -7,7 +7,7 @@
  */
 import { Effect } from "effect";
 import { Resource } from "trygg";
-import { ApiClient } from "trygg/api";
+import { ApiClient } from "../api";
 
 /**
  * Resource for fetching hello message.

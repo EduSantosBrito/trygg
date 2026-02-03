@@ -8,7 +8,7 @@
  * @example
  * ```tsx
  * import { Resource } from "trygg"
- * import { ApiClient } from "trygg/api"
+ * import { ApiClient } from "./api"
  * import { Effect } from "effect"
  *
  * // Define a no-params resource

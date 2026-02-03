@@ -36,7 +36,6 @@ import {
   Match,
   Option,
   Runtime,
-  Schema,
   Scope,
 } from "effect";
 import * as nodePath from "node:path";
@@ -59,61 +58,33 @@ import { NodeDevPlatformLive } from "./dev-platform-node.js";
 const APP_DIR = "app";
 const GENERATED_DIR = ".trygg";
 
-const VIRTUAL_CLIENT_ID = "virtual:trygg/client";
-const RESOLVED_VIRTUAL_CLIENT_ID = "\0" + VIRTUAL_CLIENT_ID;
-const EFFECT_UI_API_ID = "trygg/api";
 const VIRTUAL_HANDLER_FACTORY_ID = "virtual:trygg/handler-factory";
 const RESOLVED_HANDLER_FACTORY_ID = "\0" + VIRTUAL_HANDLER_FACTORY_ID;
 
 /**
- * Shared detection + composition logic for all virtual handler factories.
+ * Shared handler factory logic for virtual modules.
+ * Requires the user module to have a default export that is a composed Layer.
  * No platform-specific imports — only @effect/platform and effect.
  * @internal
  */
 const SHARED_FACTORY_CODE = `
-import { HttpApiBuilder, HttpApi, HttpApiGroup, HttpServer } from "@effect/platform";
-import { Data, Effect, Layer, Schema, Scope, Exit } from "effect";
+import { HttpApiBuilder, HttpServer } from "@effect/platform";
+import { Data, Effect, Layer, Scope, Exit } from "effect";
 
 class FactoryError extends Data.TaggedError("FactoryError") {}
 
-const HttpApiValueSchema = Schema.declare(
-  (u) => HttpApi.isHttpApi(u),
-  { identifier: "HttpApiValue", description: "An HttpApi definition" },
-);
-
-const ComposedApiLayerSchema = Schema.declare(
-  (u) => Layer.isLayer(u),
-  { identifier: "ComposedApiLayer", description: "A composed Layer providing HttpApi.Api" },
-);
-
+// Trust boundary: TypeScript enforces Layer<HttpApi.Api> in user code.
+// At the SSR module boundary types are erased — Layer.isLayer is the
+// strongest runtime check possible (Layer type params are phantom).
 export const detectAndComposeLayer = (mod) =>
   Effect.gen(function* () {
-    if ("ApiLive" in mod && Layer.isLayer(mod.ApiLive)) {
-      return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(mod.ApiLive).pipe(
-        Effect.mapError((cause) => new FactoryError({ message: "ApiLive export is not a valid API layer", cause })),
-      );
+    if (!("default" in mod) || !Layer.isLayer(mod.default)) {
+      return yield* new FactoryError({
+        message: "app/api.ts must have a default export that is a composed Layer (e.g. export default HttpApiBuilder.api(Api).pipe(Layer.provide(handlers)))",
+      });
     }
 
-    const values = Object.values(mod);
-    const httpApis = values.filter(HttpApi.isHttpApi);
-    if (httpApis.length === 0) {
-      return yield* new FactoryError({ message: "API module must export ApiLive or an HttpApi definition" });
-    }
-    if (httpApis.length > 1) {
-      return yield* new FactoryError({ message: "API module must export exactly one HttpApi definition, found " + httpApis.length });
-    }
-
-    const api = yield* Schema.decodeUnknown(HttpApiValueSchema)(httpApis[0]).pipe(
-      Effect.mapError((cause) => new FactoryError({ message: "Failed to validate HttpApi export", cause })),
-    );
-
-    const handlerLayers = values.filter((v) => Layer.isLayer(v) && !HttpApi.isHttpApi(v));
-    const baseLayer = HttpApiBuilder.api(api);
-    const composed = handlerLayers.reduce((acc, layer) => Layer.provide(acc, layer), baseLayer);
-
-    return yield* Schema.decodeUnknown(ComposedApiLayerSchema)(composed).pipe(
-      Effect.mapError((cause) => new FactoryError({ message: "Failed to compose API layer", cause })),
-    );
+    return mod.default;
   });
 
 export const createWebHandler = (apiLive) => {
@@ -369,15 +340,6 @@ const logApiValidationError = (
     Match.tag("PluginFileSystemError", logFileSystemError),
     Match.exhaustive,
   );
-
-// =============================================================================
-// Schema for API Module Validation
-// =============================================================================
-
-const ApiModuleSchema = Schema.Struct({
-  Api: Schema.optional(Schema.Unknown),
-  api: Schema.optional(Schema.Unknown),
-});
 
 // =============================================================================
 // Pure Helper Effects
@@ -913,39 +875,6 @@ const writeFileSafe = (
 // =============================================================================
 
 /**
- * Validate API exports using Schema.
- * @since 1.0.0
- */
-export const validateApiExports = (
-  apiPath: string,
-  loadModule: (path: string) => Effect.Effect<Record<string, unknown>, PluginParseError>,
-): Effect.Effect<void, PluginValidationErrors | PluginParseError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const hasApi = yield* pathExists(apiPath);
-    if (!hasApi) {
-      return;
-    }
-
-    const mod = yield* loadModule(apiPath);
-    const decoded = Schema.decodeUnknownOption(ApiModuleSchema)(mod);
-    if (Option.isNone(decoded)) {
-      return;
-    }
-
-    const errors: Array<PluginValidationError> = [];
-    const { Api, api } = decoded.value;
-
-    // API module must export an HttpApi definition (named Api or api)
-    if (Api === undefined && api === undefined) {
-      errors.push(PluginValidationError.missingExport(apiPath, "Api"));
-    }
-
-    if (Array.isNonEmptyArray(errors)) {
-      return yield* new PluginValidationErrors({ errors });
-    }
-  });
-
-/**
  * Validate that api.ts does not import @effect/platform-node when platform is bun.
  * @since 1.0.0
  */
@@ -987,100 +916,6 @@ export const validateApiPlatform = (
 // =============================================================================
 // Code Generation
 // =============================================================================
-
-/**
- * Generate API types file.
- *
- * Uses function-call inference (HttpApiClient.make(Api)) to correctly resolve
- * the client type. This avoids TypeScript's limitation with nested conditional
- * types in declare module blocks, which cause Client method return types to
- * degrade to unknown.
- *
- * @since 1.0.0
- */
-export const generateApiTypes = (
-  appDir: string,
-  generatedDir: string,
-): Effect.Effect<string, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const apiPath = nodePath.join(appDir, "api.ts");
-    const hasApi = yield* pathExists(apiPath);
-
-    if (!hasApi) {
-      return `// Auto-generated by trygg
-// No API file found
-import { Context } from "effect"
-
-export interface ApiClient extends never {}
-export class ApiClient extends Context.Tag("trygg/ApiClient")<ApiClient, never>() {}
-export const ApiClientLive: Layer.Layer<ApiClient> = Layer.fail(ApiClient, new Error("No API file found"))
-`;
-    }
-
-    // Compute path relative from generated .ts location to the API source
-    const rel = nodePath.relative(generatedDir, apiPath).replace(/\\/g, "/").replace(/\.ts$/, "");
-    const importPath = rel.startsWith(".") ? rel : `./${rel}`;
-
-    return `// Auto-generated by trygg
-import { Context, Effect, Layer } from "effect"
-import { HttpApiClient, FetchHttpClient } from "@effect/platform"
-import { Api } from "${importPath}"
-
-const _makeEffect = HttpApiClient.make(Api, { baseUrl: "" })
-
-/** The typed HttpApi client service. */
-export type ApiClientService = Effect.Effect.Success<typeof _makeEffect>
-
-/** Tag for the typed API client. Yield this in effects to get the client. */
-export class ApiClient extends Context.Tag("trygg/ApiClient")<ApiClient, ApiClientService>() {}
-
-/** Layer that creates the ApiClient using FetchHttpClient. */
-export const ApiClientLive: Layer.Layer<ApiClient> = Layer.effect(
-  ApiClient,
-  _makeEffect.pipe(Effect.provide(FetchHttpClient.layer))
-)
-`;
-  });
-
-/**
- * Generate client module.
- * @since 1.0.0
- */
-export const generateClientModule = (
-  appDir: string,
-): Effect.Effect<string, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const apiPath = nodePath.join(appDir, "api.ts");
-    const hasApi = yield* pathExists(apiPath);
-
-    if (!hasApi) {
-      return `// Auto-generated by trygg
-import { Context } from "effect"
-
-// Export for compatibility
-export class ApiClient extends Context.Tag("trygg/ApiClient")() {}
-export const ApiClientLive = Layer.succeed(ApiClient, undefined);
-`;
-    }
-
-    // Virtual modules have no filesystem location — use absolute path for Vite resolution
-    const importPath = apiPath.replace(/\\/g, "/").replace(/\.ts$/, "");
-
-    return `// Auto-generated by trygg
-import { Context, Effect, Layer } from "effect"
-import { HttpApiClient, FetchHttpClient } from "@effect/platform"
-import { Api } from "${importPath}"
-
-export class ApiClient extends Context.Tag("trygg/ApiClient")() {}
-
-export const ApiClientLive = Layer.effect(
-  ApiClient,
-  HttpApiClient.make(Api, { baseUrl: "" }).pipe(
-    Effect.provide(FetchHttpClient.layer)
-  )
-);
-`;
-  });
 
 /**
  * Generate entry module.
@@ -1158,29 +993,11 @@ export const generateServerEntry = (
 
     const platformRuntime = platform === "bun" ? "BunRuntime" : "NodeRuntime";
 
-    const apiImport = hasApi
-      ? `import { HttpApi } from "@effect/platform"
-import * as ApiModule from "../app/api.js"`
-      : "";
+    const apiImport = hasApi ? `import ApiLive from "../app/api.js"` : "";
 
     // Build server composition based on whether API exists
     const serverLive = hasApi
-      ? `// Auto-detect and compose API layer (same logic as dev middleware)
-const apiValues = Object.values(ApiModule);
-const httpApis = apiValues.filter(HttpApi.isHttpApi);
-if (httpApis.length === 0) {
-  throw new Error("API module must export an HttpApi definition");
-}
-const Api = httpApis[0];
-const handlerLayers = apiValues.filter(Layer.isLayer);
-const baseApiLayer = HttpApiBuilder.api(Api);
-const handlersLayer = handlerLayers.reduce<Layer.Layer<never, unknown, unknown>>(
-  (acc, layer) => Layer.merge(acc, layer),
-  Layer.empty
-);
-const ApiLive = Layer.provide(baseApiLayer, handlersLayer);
-
-// Build server layer with API
+      ? `// Build server layer with API
 const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
   Layer.provide(ApiLive),
   Layer.provide(
@@ -1398,11 +1215,6 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
             jsxImportSource: "trygg",
           },
         },
-        resolve: {
-          alias: {
-            [EFFECT_UI_API_ID]: VIRTUAL_CLIENT_ID,
-          },
-        },
         // Ensure effect packages are externalized in SSR so that both the
         // bundled plugin code and user modules loaded via ssrLoadModule
         // resolve to the same module instances. Without this, Layer
@@ -1475,22 +1287,13 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
         const devPlatform = yield* DevPlatform;
 
         const routeTypesPath = nodePath.join(generatedDir, "routes.d.ts");
-        const apiTypesPath = nodePath.join(generatedDir, "api-types.ts");
         const entryPath = nodePath.join(generatedDir, "entry.tsx");
         const apiPath = nodePath.join(appDir, "api.ts");
 
-        // Effect-based module loader for validation
-        const loadModule = (path: string) =>
-          Effect.tryPromise({
-            try: () => server.ssrLoadModule(path),
-            catch: (err) => new PluginParseError({ message: String(err), input: path }),
-          });
-
-        // Validate API imports and exports
+        // Validate API imports
         yield* validateApiPlatform(apiPath, configPlatform).pipe(
           Effect.tapError(logApiValidationError),
         );
-        yield* validateApiExports(apiPath, loadModule).pipe(Effect.tapError(logApiValidationError));
 
         // Generate route types from routes file
         if (routesFilePath !== undefined) {
@@ -1505,9 +1308,6 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
             yield* Effect.logDebug("Generated route types");
           }
         }
-
-        const apiTypesContent = yield* generateApiTypes(appDir, generatedDir);
-        yield* writeFileSafe(apiTypesPath, apiTypesContent);
 
         const entryContent = yield* generateEntryModule(appDir, generatedDir, routesFilePath);
         yield* writeFileSafe(entryPath, entryContent);
@@ -1557,15 +1357,14 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
           const handle = yield* Scope.extend(
             devPlatform.createDevApi({
               loadApiModule: () =>
-                loadModule(apiPath).pipe(
-                  Effect.mapError(
-                    (err) =>
-                      new ApiInitError({
-                        message: "Failed to load API module",
-                        cause: err,
-                      }),
-                  ),
-                ),
+                Effect.tryPromise({
+                  try: () => server.ssrLoadModule(apiPath),
+                  catch: (cause) =>
+                    new ApiInitError({
+                      message: "Failed to load API module",
+                      cause,
+                    }),
+                }),
               onError: (error) =>
                 Effect.logError(
                   `[api] middleware.error: ${error instanceof Error ? error.message : String(error)}`,
@@ -1605,15 +1404,9 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
                 }
               }
 
-              if (file.endsWith("api.ts")) {
-                const content = yield* generateApiTypes(appDir, generatedDir);
-                yield* writeFileSafe(apiTypesPath, content);
-                yield* Effect.logDebug("Regenerated api-types.ts");
-
-                if (Option.isSome(apiHandle)) {
-                  yield* apiHandle.value.reload;
-                  yield* Effect.logDebug("Reloaded API handlers");
-                }
+              if (file.endsWith("api.ts") && Option.isSome(apiHandle)) {
+                yield* apiHandle.value.reload;
+                yield* Effect.logDebug("Reloaded API handlers");
               }
             }),
           );
@@ -1661,9 +1454,6 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
     },
 
     resolveId(id) {
-      if (id === VIRTUAL_CLIENT_ID || id === EFFECT_UI_API_ID) {
-        return RESOLVED_VIRTUAL_CLIENT_ID;
-      }
       if (id === VIRTUAL_HANDLER_FACTORY_ID) {
         return RESOLVED_HANDLER_FACTORY_ID;
       }
@@ -1674,13 +1464,6 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
     },
 
     async load(id) {
-      if (id === RESOLVED_VIRTUAL_CLIENT_ID) {
-        // Ensure appDir is initialized (configResolved might not have run yet during pre-bundling)
-        if (!appDir) {
-          throw new Error("[trygg] Plugin not properly initialized - configResolved not called");
-        }
-        return Effect.runPromise(generateClientModule(appDir).pipe(Effect.provide(pluginLayer)));
-      }
       if (id === RESOLVED_HANDLER_FACTORY_ID) {
         return devPlatform === "node" ? NODE_HANDLER_FACTORY_CODE : BUN_HANDLER_FACTORY_CODE;
       }
@@ -1766,14 +1549,12 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
                 },
               },
             }),
-          catch: (err) => {
-            console.error("Server build error:", err);
-            return new PluginFileSystemError({
+          catch: (err) =>
+            new PluginFileSystemError({
               operation: "transform",
               path: serverEntryPath,
               cause: err,
-            });
-          },
+            }),
         });
 
         yield* Effect.logInfo("Server build complete").pipe(

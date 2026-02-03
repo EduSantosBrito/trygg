@@ -4,7 +4,6 @@
  *
  * Uses SSR-loaded handler factory for @effect/platform layer composition,
  * ensuring Router.Live identity matches between plugin and user code.
- * Falls back to bundled createApiMiddleware when no factory is provided.
  */
 import { FileSystem } from "@effect/platform";
 import { Effect, Exit, Layer, Option, Ref, Runtime, Schema, Scope } from "effect";

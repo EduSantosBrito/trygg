@@ -11,7 +11,6 @@ import {
   trygg,
   extractParamNames,
   generateParamType,
-  generateApiTypes,
   parseRoutes,
   generateRouteTypes,
   transformRoutesForBuild,
@@ -156,40 +155,6 @@ describe("Vite Plugin", () => {
         const type = yield* generateParamType("/users/:userId/posts/:postId");
         assert.strictEqual(type, "{ readonly userId: string; readonly postId: string }");
       }),
-    );
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: API types generation
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("generateApiTypes", () => {
-    it.scoped("should generate placeholder when no api.ts exists", () =>
-      Effect.gen(function* () {
-        const dir = yield* makeTempDir({});
-        const genDir = path.join(dir, ".trygg");
-        const types = yield* generateApiTypes(dir, genDir);
-        assert.isTrue(types.includes("No API file found"));
-        assert.isTrue(types.includes("export class ApiClient"));
-        assert.isTrue(types.includes("export const ApiClientLive:"));
-      }).pipe(Effect.provide(NodeFileSystemLayer)),
-    );
-
-    it.scoped("should generate types with function-call inference when api.ts exists", () =>
-      Effect.gen(function* () {
-        const dir = yield* makeTempDir({
-          "api.ts": "export class Api {}",
-        });
-        const genDir = path.join(dir, ".trygg");
-        const types = yield* generateApiTypes(dir, genDir);
-        assert.isTrue(
-          types.includes('import { HttpApiClient, FetchHttpClient } from "@effect/platform"'),
-        );
-        assert.isTrue(types.includes('import { Api } from "../api"'));
-        assert.isTrue(types.includes("HttpApiClient.make(Api"));
-        assert.isTrue(types.includes("ApiClientService"));
-        assert.isTrue(types.includes("export class ApiClient"));
-        assert.isTrue(types.includes("export const ApiClientLive:"));
-      }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
 

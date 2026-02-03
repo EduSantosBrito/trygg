@@ -14,10 +14,10 @@ class UsersGroup extends HttpApiGroup.make("users")
   .add(HttpApiEndpoint.get("listUsers", "/users").addSuccess(Schema.Array(User)))
   .prefix("/api") {}
 
-export class Api extends HttpApi.make("app").add(UsersGroup) {}
+class Api extends HttpApi.make("app").add(UsersGroup) {}
 
-export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
+const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
   handlers.handle("listUsers", () => Effect.succeed([{ id: "1", name: "Alice" }])),
 );
 
-export const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
