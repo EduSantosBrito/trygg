@@ -16,6 +16,7 @@ import FormPage from "./pages/form";
 import ErrorBoundaryPage from "./pages/error-boundary";
 import ErrorDemoPage from "./pages/error-demo";
 import PortalPage from "./pages/portal";
+import NestedProvidePage from "./pages/nested-provide";
 import DashboardPage from "./pages/dashboard";
 import ResourcePage from "./pages/resource";
 import LoginPage from "./pages/login";
@@ -52,6 +53,7 @@ export const routes = Routes.make()
       .loading(LoadingFallback)
       .error(ErrorFallback),
   )
+  .add(Route.make("/nested-provide").component(NestedProvidePage).loading(LoadingFallback))
   .add(Route.make("/portal").component(PortalPage).loading(LoadingFallback))
   .add(Route.make("/dashboard").component(DashboardPage).loading(LoadingFallback))
   .add(Route.make("/resource").component(ResourcePage).loading(LoadingFallback))

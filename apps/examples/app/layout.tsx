@@ -94,6 +94,9 @@ export default Component.gen(function* () {
 
             <div>
               <h3 className="nav-heading">Advanced</h3>
+              <Router.Link to="/nested-provide" className="nav-link">
+                Nested Provide
+              </Router.Link>
               <Router.Link to="/portal" className="nav-link">
                 Portal
               </Router.Link>
