@@ -13,6 +13,7 @@ import {
   normalizeChildren,
   componentElement,
   empty,
+  keyed,
   type ComponentElementWithRequirements,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
@@ -124,7 +125,8 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
     ) as ElementFor<Type>;
   }
 
-  return type(resolvedProps) as ElementFor<Type>;
+  const element = type(resolvedProps);
+  return (resolvedKey !== null ? keyed(resolvedKey, element) : element) as ElementFor<Type>;
 };
 
 /**
