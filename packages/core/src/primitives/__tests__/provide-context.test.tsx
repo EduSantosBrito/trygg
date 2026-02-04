@@ -19,8 +19,14 @@ import { Element } from "../element.js";
 import { click, render } from "../../testing/index.js";
 
 // Two distinct services
-class ThemeService extends Context.Tag("test/ThemeService")<ThemeService, { readonly color: string }>() {}
-class AuthService extends Context.Tag("test/AuthService")<AuthService, { readonly user: string }>() {}
+class ThemeService extends Context.Tag("test/ThemeService")<
+  ThemeService,
+  { readonly color: string }
+>() {}
+class AuthService extends Context.Tag("test/AuthService")<
+  AuthService,
+  { readonly user: string }
+>() {}
 
 // Create a Provide element wrapping a child with a partial context.
 // Uses Context.unsafeMake<unknown> (same pattern as renderer.ts:52) to bypass
@@ -51,8 +57,11 @@ describe("Provide context merging", () => {
       // Manually nest two Provide elements with PARTIAL contexts.
       // Inner provides Theme only, outer provides Auth only.
       // The renderer must merge them so the button handler sees both.
-      const tree = wrapProvide(AuthService.key, { user: "alice" },
-        wrapProvide(ThemeService.key, { color: "blue" }, button));
+      const tree = wrapProvide(
+        AuthService.key,
+        { user: "alice" },
+        wrapProvide(ThemeService.key, { color: "blue" }, button),
+      );
 
       const { getByTestId } = yield* render(tree);
       const btn = yield* getByTestId("btn");
@@ -88,8 +97,11 @@ describe("Provide context merging", () => {
 
       // Outer provides Theme=blue, inner provides Theme=red
       // Inner should win (last-write-wins / closer scope)
-      const tree = wrapProvide(ThemeService.key, { color: "blue" },
-        wrapProvide(ThemeService.key, { color: "red" }, button));
+      const tree = wrapProvide(
+        ThemeService.key,
+        { color: "blue" },
+        wrapProvide(ThemeService.key, { color: "red" }, button),
+      );
 
       const { getByTestId } = yield* render(tree);
       const btn = yield* getByTestId("btn");

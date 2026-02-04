@@ -1,5 +1,7 @@
 # trygg
 
+[![PR Check](https://github.com/EduSantosBrito/trygg/actions/workflows/pr.yml/badge.svg)](https://github.com/EduSantosBrito/trygg/actions/workflows/pr.yml)
+
 An Effect-native UI framework with JSX support.
 
 Build composable, type-safe UIs using [Effect](https://effect.website) with fine-grained reactivity and explicit side-effect handling.

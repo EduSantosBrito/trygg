@@ -54,6 +54,9 @@
       "import": "./dist/config.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
@@ -87,9 +90,6 @@
     "effect": "^3.19.15",
     "typescript": "^5",
     "vite": "^5.0.0 || ^6.0.0"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "peerDependenciesMeta": {
     "@effect/platform-browser": {
