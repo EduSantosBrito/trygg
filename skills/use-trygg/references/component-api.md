@@ -201,7 +201,7 @@ const Modal = Component.gen(function* () {
 })
 ```
 
-`Portal.make(content, options)` returns `Effect<Component.Type<PortalProps>>`. Target: `HTMLElement` or CSS selector string.
+`Portal.make(content, options?)` returns `Effect<Component.Type<PortalProps, never, Scope>, PortalTargetNotFoundError, Scope>`. Options is optional (creates dynamic container on `document.body` if omitted). Target: `HTMLElement` or CSS selector string.
 
 The `visible` prop accepts `boolean | Signal<boolean>` -- when false, portal content is unmounted.
 
@@ -224,7 +224,10 @@ Hoistable tags: `title`, `meta`, `link`, `style`, `script`, `base`.
 
 Dedup rules:
 - `title` -- singleton, deepest component wins
+- `base` -- singleton, deepest component wins
 - `meta[name]` / `meta[property]` -- deepest wins per name
+- `meta[httpEquiv]` -- deepest wins per value
+- `meta[charset]` -- singleton
 - `link`, `style`, `script` -- allow duplicates, cleanup on unmount
 
 ## cx (Class Names)
@@ -232,6 +235,18 @@ Dedup rules:
 ```tsx
 import { cx } from "trygg"
 
-const className = cx("base", isActive && "active", isDisabled && "disabled")
-// => "base active" when isActive=true, isDisabled=false
+// cx() returns an Effect — the renderer resolves it internally in JSX props
+<div className={cx("base", isActive && "active", isDisabled && "disabled")} />
+
+// With Signal inputs — returns Signal<string> for reactive class updates
+const variant = yield* Signal.make("primary")
+<button className={cx("btn", variant)} />
 ```
+
+---
+
+## See Also
+
+- [signals-api.md](signals-api.md) — Signal.make, derive, each, subscribe (used in component bodies)
+- [effect-patterns.md](effect-patterns.md) — Event handlers, services/layers, testing, routing
+- [common-errors.md](common-errors.md) — MissingServiceError, InvalidComponentError, troubleshooting

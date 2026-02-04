@@ -1,4 +1,4 @@
-# Effect UI Router
+# trygg Router
 
 Declarative routing with Schema-validated params, middleware composition, and Layer-based rendering strategies.
 
@@ -10,6 +10,18 @@ Declarative routing with Schema-validated params, middleware composition, and La
 4. **Layer-based rendering** - Lazy/eager rendering via `RenderStrategy` Layer
 5. **Type-safe navigation** - `RouteMap` augmented by vite plugin
 6. **Trie-based matching** - Priority: static > param > wildcard
+
+---
+
+## Import Patterns
+
+```tsx
+// Named imports for types and builders
+import { Route, Routes, RenderStrategy, ScrollStrategy } from "trygg/router"
+
+// Namespace import for runtime API (params, navigate, isActive, etc.)
+import * as Router from "trygg/router"
+```
 
 ---
 
@@ -54,7 +66,7 @@ Route.make("/users/:id")
 - `.component()` and `.children()` are mutually exclusive
 - `.params()` only available when path has param segments
 - Schema keys must exactly match path params (type-enforced)
-- `.component()` only accepts `Component.gen` components (not plain `Effect.gen` or functions)
+- `.component()` accepts `ComponentInput`: `Component.gen` results, `Effect<Element>`, or loader functions (from vite transform)
 
 ---
 
@@ -105,7 +117,8 @@ Route.make("/files/:filepath+")
 ```tsx
 const UserProfile = Component.gen(function* () {
   const { id } = yield* Router.params("/users/:id")
-  // id: number (decoded via Schema.NumberFromString)
+  // id: string — Router.params returns raw string values
+  // Schema decoding happens internally at match time but params are strings
   return <div>User {id}</div>
 })
 ```
@@ -166,8 +179,10 @@ const requireAdmin = Effect.gen(function* () {
 Route.make("/admin")
   .middleware(requireAuth)      // R = AuthService
   .component(AdminDashboard)
-  .pipe(Route.provide(AuthLive))  // R = never
+  .pipe(Route.provide(AuthLive))  // Runtime layer — R not narrowed at type level
 ```
+
+> **Note:** `Route.provide` applies layers at runtime but does not narrow the R type parameter. Use middleware that resolves its own services (e.g., via FiberRef) to keep R = never.
 
 ---
 
@@ -190,11 +205,13 @@ const DashboardError = Component.gen(function* () {
     <div>
       <h1>Error on {path}</h1>
       <pre>{String(Cause.squash(cause))}</pre>
-      <button onClick={reset}>Try Again</button>
+      <button onClick={() => reset}>Try Again</button>
     </div>
   )
 })
 ```
+
+> **Note:** `reset` is currently unimplemented. The reset signal exists but has no subscribers.
 
 ### Not Found
 
@@ -235,10 +252,15 @@ The vite plugin transforms `.component(X)` to `.component(() => import("./X"))` 
 ### RenderStrategy Service
 
 ```typescript
-interface RenderStrategyService {
-  readonly _tag: "RenderStrategy"
-  readonly isEager: boolean
-  readonly load: <A>(loader: () => Promise<{ default: A }>) => Effect<A, RenderLoadError>
+// Discriminated union — pure data, no methods
+type Eager = { readonly _tag: "Eager" }
+type Lazy = { readonly _tag: "Lazy" }
+type RenderStrategyType = Eager | Lazy
+
+// Context.Tag with Layer factories
+class RenderStrategy extends Context.Tag("trygg/RenderStrategy")<...>() {
+  static readonly Eager: Layer.Layer<RenderStrategy>
+  static readonly Lazy: Layer.Layer<RenderStrategy>
 }
 ```
 
@@ -259,7 +281,9 @@ Route.make("/settings")
   .pipe(Route.provide(ScrollStrategy.None))
 ```
 
-Storage uses `sessionStorage` keyed by `history.state.key`. Survives page refresh.
+Storage uses `sessionStorage` keyed by navigation entry key. Survives page refresh.
+
+Both `RenderStrategy` and `ScrollStrategy` follow the same pattern: Layer-based, provided via `Route.provide()`, nearest-wins inheritance (child overrides parent). Both are pure-data discriminated unions.
 
 ---
 
@@ -362,7 +386,7 @@ const isExact = yield* Router.isActive("/settings", { exact: true })
 <Router.Link to="/admin" prefetch={false}>Admin</Router.Link>
 ```
 
-Modules are cached for 30 seconds. Navigation to prefetched routes skips loading state.
+Browser `import()` cache handles dedup natively. Navigation to prefetched routes skips loading state.
 
 ### Programmatic Prefetch
 
@@ -468,7 +492,7 @@ This provides autocomplete for `Router.Link`, `Router.params`, `Router.navigate`
 ## Testing
 
 ```tsx
-import { Router } from "trygg/router"
+import * as Router from "trygg/router"
 
 // testLayer provides in-memory router (no DOM)
 const layer = Router.testLayer("/initial/path")
@@ -518,6 +542,7 @@ export const routes = Routes.make()
           .component(SettingsSecurity),
       )
       .pipe(Route.provide(AuthLive, ScrollStrategy.None))
+      // Note: Route.provide applies layers at runtime but does not narrow R
   )
   .notFound(NotFound)
   .forbidden(Forbidden)
@@ -535,7 +560,7 @@ src/router/
   matching.ts          # Trie-based matcher, boundary resolution
   outlet.ts            # Outlet component
   outlet-services.ts   # OutletRenderer, BoundaryResolver, AsyncLoader
-  router-service.ts    # Router tag, browserLayer, testLayer
+  service.ts           # Router tag, browserLayer, testLayer
   link.ts              # Link component with prefetch
   render-strategy.ts   # RenderStrategy (Lazy, Eager)
   scroll-strategy.ts   # ScrollStrategy (Auto, None)
@@ -543,3 +568,11 @@ src/router/
   types.ts             # Core types, RouteMap, TypeSafeLinkProps
   utils.ts             # parsePath, buildPath
 ```
+
+---
+
+## See Also
+
+- [use-trygg/references/component-api.md](../../use-trygg/references/component-api.md) — Component.gen, .provide(), ErrorBoundary
+- [use-trygg/references/effect-patterns.md](../../use-trygg/references/effect-patterns.md) — Event handlers, services/layers, routing basics
+- [trygg-architecture/references/design.md](../../trygg-architecture/references/design.md) — Element types, Renderer, Vite plugin internals

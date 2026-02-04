@@ -93,7 +93,7 @@ const fetchUser = (id: string) => Effect.gen(function* () {
 ```tsx
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, typeInput, waitFor, testLayer } from "trygg"
+import { testRender, click, type, waitFor } from "trygg"
 ```
 
 ### Render and Query
@@ -103,12 +103,16 @@ it.scoped("renders content", () =>
   Effect.gen(function* () {
     const { getByText, getByTestId, getByRole, querySelector } = yield* testRender(<MyComp />)
 
-    // Query methods:
+    // Query methods (return Effect — yield* to unwrap):
     const el = yield* getByText("Hello")          // exact text match
     const btn = yield* getByTestId("submit-btn")  // data-testid attribute
     const heading = yield* getByRole("heading")    // ARIA role (implicit for h1-h6)
     const input = yield* querySelector<HTMLInputElement>("input[type=email]")
-  }).pipe(Effect.provide(testLayer))
+
+    // Non-Effect queries (return HTMLElement | null):
+    // queryByText, queryByTestId, queryByRole — no Effect, no yield*
+    // querySelectorAll — returns ReadonlyArray<HTMLElement>
+  })
 )
 ```
 
@@ -124,7 +128,7 @@ it.scoped("handles user interaction", () =>
       const el = document.querySelector("[data-testid='count']")
       expect(el?.textContent).toBe("1")
     })
-  }).pipe(Effect.provide(testLayer))
+  })
 )
 ```
 
@@ -137,7 +141,7 @@ it.scoped("renders with mock service", () =>
     const Comp = MyComponent.provide(mockTheme)
     const { getByText } = yield* testRender(<Comp />)
     yield* getByText("red")
-  }).pipe(Effect.provide(testLayer))
+  })
 )
 ```
 
@@ -145,12 +149,19 @@ it.scoped("renders with mock service", () =>
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `testRender` | `(element) => Effect<TestRenderResult, _, Scope>` | Render and get query helpers |
-| `renderElement` | `(element: Element) => Effect<TestRenderResult>` | Render raw Element |
+| `testRender` | `(element) => Effect<TestRenderResult, _, Scope>` | Render and get query helpers; auto-provides `testLayer` |
+| `renderElement` | `(element: Element) => Effect<TestRenderResult, _, Renderer \| Scope>` | Render raw Element (requires Renderer + Scope) |
 | `click` | `(el: HTMLElement) => Effect<void>` | Simulate click |
-| `typeInput` | `(el, value: string) => Effect<void>` | Simulate typing (fires input+change) |
+| `type` | `(el, value: string) => Effect<void>` | Simulate typing (fires input+change) |
 | `waitFor` | `(fn, opts?) => Effect<T, WaitForTimeoutError>` | Poll until assertion passes |
+| `queryByText` | `(text: string) => HTMLElement \| null` | Query by text content (no Effect) |
+| `queryByTestId` | `(testId: string) => HTMLElement \| null` | Query by data-testid (no Effect) |
+| `queryByRole` | `(role: string) => HTMLElement \| null` | Query by ARIA role (no Effect) |
+| `querySelectorAll` | `(selector: string) => ReadonlyArray<HTMLElement>` | Query all matching elements |
 | `testLayer` | `Layer<Renderer>` | Provides Renderer + test Router |
+
+> Note: `testRender` (exported as `render` internally, re-exported as `testRender`) auto-provides `testLayer`. No need to `.pipe(Effect.provide(testLayer))`.
+> The `queryBy*` and `querySelectorAll` functions are methods on `TestRenderResult`, not standalone exports.
 
 ## Routing
 
@@ -210,3 +221,11 @@ export default defineConfig({
 ```
 
 Handles: JSX config, route type generation, code splitting, entry generation, API middleware, SPA fallback.
+
+---
+
+## See Also
+
+- [component-api.md](component-api.md) — Component.gen, .provide(), Resource, ErrorBoundary, Portal
+- [signals-api.md](signals-api.md) — Signal.make, derive, each, subscribe
+- [common-errors.md](common-errors.md) — Error types, anti-patterns, troubleshooting
