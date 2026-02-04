@@ -6,6 +6,7 @@
  *        bunx create-trygg-app [project-name] [options]
  */
 import { Args, Command, Options } from "@effect/cli";
+import pkg from "./package.json";
 import { BunContext, BunRuntime } from "@effect/platform-bun";
 import { FileSystem } from "@effect/platform";
 import { Effect, Layer, Option } from "effect";
@@ -51,7 +52,7 @@ const create = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const prompts = yield* Prompts;
 
-      clack.intro("create-trygg-app v0.2.0");
+      clack.intro(`create-trygg v${pkg.version}`);
 
       // Get project name (args.projectName is Option<string>)
       let name: string;
@@ -181,7 +182,7 @@ const create = Command.make(
 
 const cli = Command.run(create, {
   name: "create-trygg-app",
-  version: "0.2.0",
+  version: pkg.version,
 });
 
 // Application layer with prompts
