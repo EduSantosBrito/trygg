@@ -1,6 +1,10 @@
 ---
 name: trygg-router
 description: trygg declarative router — Route builder, Schema-validated params/query, middleware composition, layouts, render/scroll strategies, link prefetching, data prefetching, trie-based matching, type-safe navigation, and Outlet component. Use when defining routes, adding middleware/guards, configuring lazy/eager loading, implementing layouts with nested Outlet, prefetching modules or data, handling 404/forbidden/error boundaries on routes, working with Router.Link or programmatic navigation, debugging route matching priority, or testing with Router.testLayer.
+license: MIT
+metadata:
+  author: EduSantosBrito
+  version: "0.1.0-canary.0"
 ---
 
 # trygg Router

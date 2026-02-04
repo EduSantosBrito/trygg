@@ -1,6 +1,10 @@
 ---
 name: trygg-architecture
 description: trygg framework internals — Element tagged enum, Renderer, Component.gen, Signal reactivity, head management, portals, error boundaries, security, Resource data fetching, API routes, Vite plugin, and design decisions. Use when debugging renderer behavior, understanding element variants, tracing how Components/Signals/Layers compose, investigating head hoisting or portal rendering, reviewing error boundary semantics, working with Resource cache/dedup, configuring the Vite plugin, or making architecture decisions.
+license: MIT
+metadata:
+  author: EduSantosBrito
+  version: "0.1.0-canary.0"
 ---
 
 # trygg Architecture
