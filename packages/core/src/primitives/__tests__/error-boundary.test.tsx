@@ -16,7 +16,7 @@
  * - Verify handler requirements are propagated
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Context, Data, Effect, Exit, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -214,36 +214,28 @@ describe("ErrorBoundary basic functionality", () => {
 // =============================================================================
 
 describe("ErrorBoundary builder validation", () => {
-  it.scoped("calling catchAll multiple times yields BuilderError", () =>
+  it.scoped("calling catchAll independently on same builder succeeds (immutable)", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         yield* new TestError();
         return <div />;
       });
 
-      const TestErrorView = Component.gen(function* (
-        Props: Component.ComponentProps<{ error: TestError }>,
-      ) {
-        yield* Props;
-        return <div>test-error</div>;
-      });
+      const builder = ErrorBoundary.catch(FailingComponent);
 
-      const builder = ErrorBoundary.catch(FailingComponent).on("TestError", TestErrorView);
+      // Both calls succeed independently — immutable builder semantics
+      const Safe1 = yield* builder.catchAll(() => <div data-testid="fb1">fallback1</div>);
+      const Safe2 = yield* builder.catchAll(() => <div data-testid="fb2">fallback2</div>);
 
-      // First catchAll should succeed
-      yield* builder.catchAll(() => <div>fallback1</div>);
+      assert.isTrue(Component.isEffectComponent(Safe1));
+      assert.isTrue(Component.isEffectComponent(Safe2));
 
-      // Second catchAll should fail with catchAll-multiple
-      const exit = yield* Effect.exit(builder.catchAll(() => <div>fallback2</div>));
+      // Verify they render distinct fallbacks
+      const r1 = yield* render(<Safe1 />);
+      assert.isDefined(yield* r1.getByTestId("fb1"));
 
-      assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit)) {
-        const error = Cause.squash(exit.cause);
-        assert.isTrue(error instanceof ErrorBoundary.BuilderError);
-        if (error instanceof ErrorBoundary.BuilderError) {
-          assert.strictEqual(error.reason, "catchAll-multiple");
-        }
-      }
+      const r2 = yield* render(<Safe2 />);
+      assert.isDefined(yield* r2.getByTestId("fb2"));
     }),
   );
 });
