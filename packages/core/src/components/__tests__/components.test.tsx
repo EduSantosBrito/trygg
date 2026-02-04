@@ -9,7 +9,7 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Exit, TestClock } from "effect";
+import { Cause, Data, Effect, TestClock } from "effect";
 import * as Signal from "../../primitives/signal.js";
 import * as ErrorBoundary from "../../primitives/error-boundary.js";
 import { DevMode } from "../dev-mode.js";
@@ -263,7 +263,7 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should throw if adding handler after catchAll", () =>
+  it.scoped("on() after catchAll on same builder succeeds (immutable state)", () =>
     Effect.gen(function* () {
       const Component_ = Component.gen(function* () {
         return yield* new TestError({ message: "fail" });
@@ -278,60 +278,19 @@ describe("ErrorBoundary", () => {
         return <div>Test</div>;
       });
 
-      // First add catchAll
+      // Builder is immutable — catchAll doesn't mutate original builder
       yield* builder.catchAll(() => <div>Error</div>);
 
-      // Then try to add .on() - should fail on finalization
-      const badBuilder = builder.on("TestError", TestErrorView);
-      const exit = yield* Effect.exit(badBuilder.catchAll(() => <div>Fallback</div>));
+      // .on() after catchAll on the same builder still works (independent state)
+      const nextBuilder = builder.on("TestError", TestErrorView);
+      const safe = yield* nextBuilder.catchAll(() => <div>Fallback</div>);
 
-      assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit)) {
-        const error = Cause.squash(exit.cause);
-        assert.isTrue(error instanceof ErrorBoundary.BuilderError);
-        if (error instanceof ErrorBoundary.BuilderError) {
-          assert.strictEqual(error.reason, "on-after-catchAll");
-        }
-      }
+      assert.isTrue(Component.isEffectComponent(safe));
     }),
   );
 
-  it.scoped("should throw on duplicate handler", () =>
-    Effect.gen(function* () {
-      const Component_ = Component.gen(function* () {
-        return yield* new TestError({ message: "fail" });
-      });
-
-      const builder = ErrorBoundary.catch(Component_);
-      const TestErrorView = Component.gen(function* (
-        Props: Component.ComponentProps<{ error: TestError }>,
-      ) {
-        yield* Props;
-        return <div>Test</div>;
-      });
-      const DuplicateErrorView = Component.gen(function* (
-        Props: Component.ComponentProps<{ error: TestError }>,
-      ) {
-        yield* Props;
-        return <div>Test 2</div>;
-      });
-      const withHandler = builder.on("TestError", TestErrorView);
-
-      // Try to add duplicate handler - should fail on finalization
-      const badBuilder = withHandler.on("TestError", DuplicateErrorView);
-      const exit = yield* Effect.exit(badBuilder.catchAll(() => <div>Fallback</div>));
-
-      assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit)) {
-        const error = Cause.squash(exit.cause);
-        assert.isTrue(error instanceof ErrorBoundary.BuilderError);
-        if (error instanceof ErrorBoundary.BuilderError) {
-          assert.strictEqual(error.reason, "duplicate-handler");
-          assert.strictEqual(error.tag, "TestError");
-        }
-      }
-    }),
-  );
+  // duplicate-handler is now a compile error via Exclude<ErrorTags<E>, HandledTags>
+  // — .on("TestError", v1).on("TestError", v2) won't typecheck
 });
 
 // =============================================================================
