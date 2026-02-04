@@ -46,7 +46,6 @@ export type EventHandler<A = void, E = never, R = never> =
  * assignable to Signal<unknown> because the type parameter is invariant.
  * @internal
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySignal = Signal<any>;
 
 /**

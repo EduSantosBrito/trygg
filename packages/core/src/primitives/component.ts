@@ -28,6 +28,7 @@
  * ```
  */
 import { Context, Data, Effect, Layer } from "effect";
+import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
 import { YieldWrap } from "effect/Utils";
 import {
   Element,
@@ -96,34 +97,8 @@ type ComponentResult = Element | Effect.Effect<Element, unknown, unknown>;
 
 const effectComponentTag = "EffectComponent" as const;
 
-/**
- * Build a context from an array of layers by merging them
- * Uses Layer.mergeAll for proper precedence handling (last layer wins)
- * @internal
- */
-const buildContextFromLayers = <A>(
-  layers: ReadonlyArray<Layer.Layer.Any>,
-): Effect.Effect<Context.Context<A>, never, never> => {
-  if (layers.length === 0) {
-    return Effect.succeed(Context.unsafeMake(new Map()));
-  }
-
-  // Use Layer.mergeAll - it handles multiple layers with correct precedence
-  // We cast through unknown to handle the Layer.Any type
-  const mergedLayer =
-    layers.length === 1
-      ? (layers[0] as unknown as Layer.Layer<A, never, never>)
-      : (Layer.mergeAll(
-          layers[0] as unknown as Layer.Layer<A, never, never>,
-          ...(layers.slice(1) as unknown as Array<Layer.Layer<A, never, never>>),
-        ) as Layer.Layer<A, never, never>);
-
-  // Build context by providing a dummy effect and extracting the context
-  return Effect.gen(function* () {
-    const context = yield* Effect.context<A>().pipe(Effect.provide(mergedLayer));
-    return context;
-  }) as Effect.Effect<Context.Context<A>, never, never>;
-};
+// buildContextFromLayers moved to internal/unsafe.ts as unsafeBuildContext
+// Handles heterogeneous Layer.Any[] merging at a type system boundary
 
 /**
  * Deduplicate layers by keeping only the last occurrence of each service
@@ -150,17 +125,10 @@ export const tagComponent = <Props, E, R>(
   runFn?: (props: any) => Effect.Effect<Element, E, unknown>,
   displayName?: string,
 ): Component.Type<Props, E, R> => {
-  // Create the base tagged function
-  const tagged = Object.assign(fn, {
-    _tag: effectComponentTag,
-    _layers: layers,
-    _requirements: requirements,
-    _runFn: runFn,
-    _displayName: displayName,
-  }) as Component.Type<Props, E, R>;
-
-  // Attach the .provide() method that creates a new component with merged layers
-  tagged.provide = ((layerOrLayers: Layer.Layer.Any | ReadonlyArray<Layer.Layer.Any>): any => {
+  // Build provide as a standalone function, then pass to unsafeTagCallable
+  // The provide implementation serves multiple overloads — the overload
+  // signatures on Component.Type ensure type safety at call sites
+  const provide = (layerOrLayers: Layer.Layer.Any | ReadonlyArray<Layer.Layer.Any>) => {
     const newLayers = Array.isArray(layerOrLayers) ? layerOrLayers : [layerOrLayers];
     // Append new layers - Layer.mergeAll applies left-to-right with last-write-wins
     // When we call .provide(A).provide(B), mergedLayers = [A, B], B wins
@@ -175,7 +143,7 @@ export const tagComponent = <Props, E, R>(
           // Build context from layers
           // Layer.mergeAll applies layers left-to-right with last-write-wins semantics
           // mergedLayers is ordered chronologically, so last layer wins correctly
-          const context = yield* buildContextFromLayers(mergedLayers);
+          const context = yield* unsafeBuildContext(mergedLayers);
 
           // Execute the stored runFn directly to get the element
           // Provide the context to satisfy service requirements
@@ -190,9 +158,16 @@ export const tagComponent = <Props, E, R>(
 
     // Tag the new component with merged layers and preserve the runFn and displayName
     return tagComponent(newComponent, mergedLayers, requirements, runFn, displayName);
-  }) as Component.Type<Props, E, R>["provide"];
+  };
 
-  return tagged;
+  return unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
+    _tag: effectComponentTag,
+    _layers: layers,
+    _requirements: requirements,
+    _runFn: runFn,
+    _displayName: displayName,
+    provide,
+  });
 };
 
 const normalizeResult = <E, R>(
@@ -305,11 +280,8 @@ const hasTag = (value: unknown): value is { _tag: unknown } =>
  * Check if a value is an EffectComponent
  * @since 1.0.0
  */
-export const isEffectComponent = (value: unknown): value is Component.Type<unknown> => {
-  const hasTagResult = hasTag(value);
-  const tagValue = hasTagResult ? (value as any)._tag : undefined;
-  return hasTagResult && tagValue === effectComponentTag;
-};
+export const isEffectComponent = (value: unknown): value is Component.Type<unknown> =>
+  hasTag(value) && value._tag === effectComponentTag;
 
 // =============================================================================
 // Component.gen API

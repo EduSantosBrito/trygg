@@ -50,6 +50,7 @@ import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import type { RouteComponent, RouteErrorInfo, RouteParams } from "./types.js";
 import * as Metrics from "../debug/metrics.js";
+import { unsafeMergeLayers } from "../internal/unsafe.js";
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -120,22 +121,18 @@ const resolveComponent = (
 };
 
 /**
- * Schema for validating route params - ensures all values are strings.
+ * Extract only string-valued entries from a decoded params object.
+ * Route params are always strings (URL path segments). Non-string values
+ * (e.g. from NumberFromString transforms) are silently dropped.
  * @internal
  */
-const RouteParamsSchema = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
-
-/**
- * Convert decoded params to RouteParams using Schema validation.
- * Returns the params if valid, or an empty object if validation fails.
- * This is safe because decodeRouteParams should only produce string values.
- * @internal
- */
-const toRouteParams = (decodedParams: Record<string, unknown>): RouteParams => {
-  const result = Schema.decodeUnknownSync(RouteParamsSchema)(decodedParams);
+const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(decoded)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    }
+  }
   return result;
 };
 
@@ -377,14 +374,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       // Provide service layers from Route.provide() to the render effect
       const renderRoute: Effect.Effect<Element, unknown, never> =
         allLayers.length > 0
-          ? renderRouteBase.pipe(
-              Effect.provide(
-                (
-                  Layer.mergeAll as (
-                    ...layers: ReadonlyArray<Layer.Layer.Any>
-                  ) => Layer.Layer<unknown, unknown, never>
-                )(...allLayers),
-              ),
+          ? Effect.flatMap(unsafeMergeLayers(allLayers), (merged) =>
+              renderRouteBase.pipe(Effect.provide(merged)),
             )
           : renderRouteBase;
 

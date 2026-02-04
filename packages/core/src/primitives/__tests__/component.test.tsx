@@ -400,6 +400,26 @@ describe("isEffectComponent", () => {
 
     assert.isTrue(Component.isEffectComponent(MyComponent));
   });
+
+  it("should return false for arrow functions without _tag", () => {
+    const arrow = () => Effect.succeed("hi");
+    assert.isFalse(Component.isEffectComponent(arrow));
+  });
+
+  it("should return false for Effect objects (have _tag but wrong value)", () => {
+    const eff = Effect.succeed(42);
+    assert.isFalse(Component.isEffectComponent(eff));
+  });
+
+  it("should return false for objects with _tag: 'EffectComponent' that are not functions", () => {
+    const fakeComponent = { _tag: "EffectComponent" };
+    assert.isFalse(Component.isEffectComponent(fakeComponent));
+  });
+
+  it("should return false for strings and numbers", () => {
+    assert.isFalse(Component.isEffectComponent("EffectComponent"));
+    assert.isFalse(Component.isEffectComponent(42));
+  });
 });
 
 // =============================================================================

@@ -23,6 +23,7 @@ import {
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
+import { unsafeTagCallable, unsafeEraseR } from "../internal/unsafe.js";
 
 /**
  * Error raised when Signal module is not properly initialized.
@@ -63,7 +64,6 @@ export interface Signal<A> {
  * Internal signal storage type - uses any to work around invariance.
  * @internal
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySignal = Signal<any>;
 
 /**
@@ -176,7 +176,13 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
         value: initial,
         component: "standalone",
       });
-      return { _tag: "Signal", _ref: ref, _listeners: new Set(), _debugId: debugId } as Signal<A>;
+      const signal: Signal<A> = {
+        _tag: "Signal",
+        _ref: ref,
+        _listeners: new Set(),
+        _debugId: debugId,
+      };
+      return signal;
     }
 
     // In component render - use position-based identity
@@ -186,9 +192,12 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
     const signals = yield* Ref.get(phase.signals);
 
     let signal: Signal<A>;
-    if (index < signals.length) {
-      // Reuse existing signal from previous render
-      signal = signals[index] as Signal<A>;
+    const existing = signals[index];
+    if (index < signals.length && existing !== undefined) {
+      // Reuse existing signal from previous render.
+      // AnySignal = Signal<any> — position-based identity guarantees
+      // the signal at this index was created with the same type A.
+      signal = existing;
       yield* Debug.log({
         event: "signal.create",
         signal_id: signal._debugId,
@@ -605,10 +614,7 @@ export function deriveAll(
  * @since 1.0.0
  */
 export const isSignal = (value: unknown): value is Signal<unknown> =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { _tag: unknown })._tag === "Signal";
+  typeof value === "object" && value !== null && "_tag" in value && value._tag === "Signal";
 
 /**
  * Notify all listeners that a signal has changed.
@@ -728,7 +734,7 @@ export interface SuspendedComponent<_E = never> {
  * Handlers for Signal.suspend to define what to show during async states.
  * @since 1.0.0
  */
-export interface SuspendHandlers<E> {
+export interface SuspendHandlers<_E> {
   /**
    * What to show while the component is doing async work.
    * Receives the stale Element if this dep-key was previously rendered.
@@ -736,9 +742,10 @@ export interface SuspendHandlers<E> {
   readonly Pending: SuspendElement | ((stale: SuspendElement | null) => SuspendElement);
   /**
    * What to show if the component fails.
-   * Receives the Cause and optionally the stale Element.
+   * Receives the Cause (unknown because the Element union erases E)
+   * and optionally the stale Element from a previous successful render.
    */
-  readonly Failure: (cause: Cause.Cause<E>, stale: SuspendElement | null) => SuspendElement;
+  readonly Failure: (cause: Cause.Cause<unknown>, stale: SuspendElement | null) => SuspendElement;
   /**
    * The component to render. May do async work (Effect.sleep, fetch, etc).
    * While async is in progress, Pending is shown.
@@ -855,13 +862,16 @@ export const suspend: <Props, E>(
      * extract and run its effect. Otherwise just return it.
      * @internal
      */
-    const renderSuccess: Effect.Effect<SuspendElement, unknown, never> = Effect.suspend(() =>
+    const renderSuccess = Effect.suspend(() =>
       Effect.gen(function* () {
         const element = handlers.Success;
         // Check if it's a Component element that needs to be run
         if (typeof element === "object" && element !== null && element._tag === "Component") {
-          const componentEffect = element.run() as Effect.Effect<SuspendElement, unknown, never>;
-          return yield* componentEffect.pipe(Effect.locally(CurrentRenderPhase, renderPhase));
+          // element.run() has R = unknown (Element union type erasure).
+          // At render time all services are already in the fiber context.
+          return yield* unsafeEraseR(element.run()).pipe(
+            Effect.locally(CurrentRenderPhase, renderPhase),
+          );
         }
         // For non-Component elements, just return them
         return element;
@@ -883,16 +893,16 @@ export const suspend: <Props, E>(
         const depKey = computeDepKey(renderPhase.accessed);
 
         if (Exit.isSuccess(exit)) {
-          const element = exit.value as SuspendElement;
-
           // Cache the successful render for this dep-key
-          cache.set(depKey, element);
+          cache.set(depKey, exit.value);
 
-          yield* set(viewSignal, element);
+          yield* set(viewSignal, exit.value);
         } else {
           // Failure - show error handler with stale from cache (if this dep-key succeeded before)
           const stale = cache.get(depKey) ?? null;
-          const errorElement = handlers.Failure(exit.cause as Cause.Cause<E>, stale);
+          // exit.cause is Cause<unknown> — renderSuccess erases E to unknown.
+          // SuspendHandlers.Failure accepts Cause<unknown> so no cast needed.
+          const errorElement = handlers.Failure(exit.cause, stale);
           yield* set(viewSignal, errorElement);
         }
 
@@ -944,14 +954,14 @@ export const suspend: <Props, E>(
 
     // Return a ComponentType that renders the signal as a SignalElement
     // This allows usage as <SuspendedView /> in JSX
-    const suspendedComponent = (_props: {}): SuspendElement =>
-      signalElementFn(viewSignal as Signal<SuspendElement>) as SuspendElement;
+    const suspendedComponent = (_props: {}): SuspendElement => signalElementFn(viewSignal);
 
     // Tag as EffectComponent and expose signal for testing
-    return Object.assign(suspendedComponent, {
-      _tag: "EffectComponent" as const,
+    const tagged = "EffectComponent" as const;
+    return unsafeTagCallable<SuspendedComponent<E>>(suspendedComponent, {
+      _tag: tagged,
       _signal: viewSignal,
-    }) as SuspendedComponent<E>;
+    });
   },
 );
 
@@ -977,13 +987,10 @@ export interface EachOptions<T> {
 // We use a lazy getter to avoid circular dependency issues.
 // The actual implementation is in _setEachImpl, called by Element.ts
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EachFn = <T, E>(
   source: Signal<ReadonlyArray<T>>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderFn: (item: T, index: number) => Effect.Effect<any, E, unknown>,
   options: EachOptions<T>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ) => any;
 
 let _eachImpl: EachFn | null = null;

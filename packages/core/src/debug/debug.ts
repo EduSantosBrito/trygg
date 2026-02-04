@@ -688,6 +688,17 @@ type TraceSpanEndEvent = BaseEvent & {
   readonly error?: string;
 };
 
+/** Unsafe quarantine events — observability for type-boundary crossings */
+type UnsafeMergeLayersEvent = BaseEvent & {
+  readonly event: "unsafe.mergeLayers";
+  readonly layer_count: number;
+};
+
+type UnsafeBuildContextEvent = BaseEvent & {
+  readonly event: "unsafe.buildContext";
+  readonly layer_count: number;
+};
+
 /** All debug events as discriminated union */
 export type DebugEvent =
   // Signal events
@@ -809,7 +820,10 @@ export type DebugEvent =
   | RouterOutletMatchingEvent
   // Trace events
   | TraceSpanStartEvent
-  | TraceSpanEndEvent;
+  | TraceSpanEndEvent
+  // Unsafe quarantine events
+  | UnsafeMergeLayersEvent
+  | UnsafeBuildContextEvent;
 
 /** Extract event type from DebugEvent */
 export type EventType = DebugEvent["event"];
