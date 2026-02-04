@@ -17,7 +17,7 @@
  * - Tests verify DOM structure and cleanup
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Data, Effect, Exit, Layer, Scope, TestClock } from "effect";
+import { Context, Data, Effect, Exit, Layer, Option, Scope, TestClock } from "effect";
 
 // Tagged errors for testing component failures
 class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
@@ -262,13 +262,13 @@ describe("SignalElement rendering", () => {
       const { getByTestId, queryByTestId } = yield* render(<App />);
 
       assert.strictEqual((yield* getByTestId("view-a")).textContent, "themed");
-      assert.isNull(queryByTestId("view-b"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("view-b")));
 
       yield* Signal.set(viewSignal, <ViewB />);
       yield* TestClock.adjust(20);
 
       assert.strictEqual((yield* getByTestId("view-b")).textContent, "themed");
-      assert.isNull(queryByTestId("view-a"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("view-a")));
     }),
   );
 });

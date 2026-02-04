@@ -491,7 +491,7 @@ describe("Router.currentError", () => {
       yield* TestClock.adjust(20);
 
       // Error boundary should catch and show error component
-      assert.isNotNull(queryByTestId("error-content"));
+      assert.isTrue(Option.isSome(yield* queryByTestId("error-content")));
 
       // Error component should have received error info via Router.currentError
       assert.isTrue(
