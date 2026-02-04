@@ -1,6 +1,6 @@
 # Common Errors and Troubleshooting
 
-## Error Types in trygg
+## Quick Reference
 
 | Error | Module | Cause |
 |-------|--------|-------|
@@ -14,36 +14,117 @@
 | `BuilderError` | error-boundary | Duplicate handler, catchAll called twice, or on() after catchAll |
 | `UnsafeUrlError` | security | URL with blocked scheme (e.g. `javascript:`) |
 
-## Anti-Patterns
+---
 
-### Using plain functions as components
+## Error Details
+
+### `InvalidComponentError` — plain function
+
+**Cause:** Plain function used as JSX component instead of `Component.gen`
+**Solution:** Wrap in `Component.gen`
 
 ```tsx
-// WRONG: plain function
+// WRONG
 const Bad = () => <div>Hello</div>
-// -> InvalidComponentError { reason: "plain-function" }
 
-// CORRECT: use Component.gen
+// CORRECT
 const Good = Component.gen(function* () {
   return <div>Hello</div>
 })
 ```
 
-### Using raw Effect as JSX element type
+### `InvalidComponentError` — raw Effect
+
+**Cause:** `Effect<Element>` used directly as JSX element type
+**Solution:** Wrap in `Component.gen`
 
 ```tsx
-// WRONG: Effect as component type
+// WRONG
 const bad = Effect.succeed(<div>Hello</div>)
 return <bad />
-// -> InvalidComponentError { reason: "effect" }
 
-// CORRECT: wrap in Component.gen
+// CORRECT
 const Good = Component.gen(function* () {
   return <div>Hello</div>
 })
 ```
 
+### `MissingServiceError`
+
+**Cause:** Component `yield*`s a service tag but no ancestor calls `.provide(layer)` for it
+**Solution:** Provide the layer on a parent; top-level component must have `R = never`
+
+```tsx
+// WRONG: unresolved R at mount
+const App = Component.gen(function* () {
+  const theme = yield* Theme  // R = Theme, not satisfied!
+  return <div>{theme.name}</div>
+})
+mount(root, <App />)
+
+// CORRECT: provide before mount
+const App = Component.gen(function* () {
+  const theme = yield* Theme
+  return <div>{theme.name}</div>
+}).provide(themeLayer)  // R = never
+mount(root, <App />)
+```
+
+### `SignalInitError` — "Signal.each is not initialized"
+
+**Cause:** Importing from internal signal module instead of `trygg`
+**Solution:** Import from `trygg`
+
+```tsx
+// WRONG
+import * as Signal from "trygg/Signal"
+
+// CORRECT
+import { Signal } from "trygg"
+```
+
+### `PortalTargetNotFoundError`
+
+**Cause:** CSS selector passed to `Portal.make` doesn't match any DOM element
+**Solution:** Verify selector matches an existing element, or pass `HTMLElement` directly
+
+### `ElementNotFoundError`
+
+**Cause:** `getByText`, `getByTestId`, or `getByRole` couldn't find a matching element
+**Solution:** Verify the element is rendered; use `waitFor` if it appears asynchronously
+
+> Note: `ElementNotFoundError` is a plain Error subclass with a manual `_tag` field, not a `Data.TaggedError`. It works with try/catch but cannot be yielded directly.
+
+### `WaitForTimeoutError`
+
+**Cause:** Assertion inside `waitFor` didn't pass within the timeout period
+**Solution:** Check that state updates are firing; increase timeout if async operation is slow
+
+> Note: `WaitForTimeoutError` is a plain Error subclass with a manual `_tag` field, not a `Data.TaggedError`. It works with try/catch but cannot be yielded directly.
+
+### `BuilderError`
+
+**Cause:** Invalid `ErrorBoundary` builder state — `.on()` after `.catchAll()`, duplicate tag handlers, or calling `.catchAll()` twice
+**Solution:** Finalize with either `.catchAll(fn)` or `.exhaustive()`, don't mix
+
+### `UnsafeUrlError`
+
+**Cause:** `href` or `src` attribute contains a blocked scheme (e.g. `javascript:`)
+**Solution:** Use allowed schemes (`http`, `https`, `mailto`, `tel`, `sms`, `blob`, `data`) or add custom schemes:
+
+```tsx
+import { SafeUrl } from "trygg"
+SafeUrl.allowSchemes(["myapp", "web+myapp"])
+```
+
+---
+
+## Anti-Patterns
+
 ### Using `as` or `!` type assertions
+
+**Cause:** Bypasses type safety, hides potential null/undefined bugs
+**Solution:** Use null checks, `Option`, or pattern matching
 
 ```tsx
 // WRONG
@@ -58,7 +139,10 @@ if (el) mount(el, <App />)
 const value = Option.fromNullable(something)
 ```
 
-### Using new Error() instead of TaggedError
+### Using `new Error()` instead of `TaggedError`
+
+**Cause:** Untyped errors can't be caught with `catchTag` and aren't yieldable
+**Solution:** Use `Data.TaggedError`
 
 ```tsx
 // WRONG
@@ -69,31 +153,40 @@ Effect.die(new Error("crash"))
 class NotFoundError extends Data.TaggedError("NotFoundError")<{
   readonly id: string
 }> {}
-Effect.fail(new NotFoundError({ id: "123" }))
+yield* new NotFoundError({ id: "123" })
 ```
 
 ### Running Effects synchronously in handlers
 
+**Cause:** Bypasses the runtime's scheduler and error handling
+**Solution:** Return Effect thunk; renderer executes via `Runtime.runFork`
+
 ```tsx
-// WRONG: synchronous execution
+// WRONG
 <button onClick={() => { Effect.runSync(Signal.set(count, 0)) }}>
 
-// CORRECT: return Effect thunk
+// CORRECT
 <button onClick={() => Signal.set(count, 0)}>
 ```
 
-### Forgetting Signal.get subscribes
+### Forgetting `Signal.get` subscribes
+
+**Cause:** Using `Signal.get` when fine-grained reactivity would suffice
+**Solution:** Pass signal directly to JSX for fine-grained updates
 
 ```tsx
-// This re-renders on EVERY count change:
+// Re-renders on EVERY count change:
 const value = yield* Signal.get(count)
 return <span>{value}</span>
 
-// This runs once, only text node updates:
+// Runs once, only text node updates:
 return <span>{count}</span>
 ```
 
 ### Floating Effects (no scope)
+
+**Cause:** `Effect.runFork` without a scope means no cleanup on unmount
+**Solution:** Fork into a scope
 
 ```tsx
 // WRONG: fire-and-forget
@@ -103,38 +196,9 @@ Effect.runFork(someEffect)
 yield* Effect.forkIn(someEffect, scope)
 ```
 
-### Missing .provide() at parent
-
-```tsx
-// WRONG: unresolved R at mount
-const App = Component.gen(function* () {
-  const theme = yield* Theme  // R = Theme, not satisfied!
-  return <div>{theme.name}</div>
-})
-mount(root, <App />)
-// -> MissingServiceError
-
-// CORRECT: provide before mount
-const App = Component.gen(function* () {
-  const theme = yield* Theme
-  return <div>{theme.name}</div>
-}).provide(themeLayer)  // R = never
-mount(root, <App />)
-```
+---
 
 ## Troubleshooting
-
-### "Signal.each is not initialized"
-
-Import from `trygg`, not from internal signal module:
-
-```tsx
-// WRONG
-import * as Signal from "trygg/Signal"
-
-// CORRECT
-import { Signal } from "trygg"
-```
 
 ### Component doesn't update
 
@@ -144,7 +208,8 @@ import { Signal } from "trygg"
 
 ### "Cannot find module 'trygg'"
 
-Ensure `trygg` is in `dependencies` and the Vite plugin is configured:
+**Cause:** Missing dependency or Vite plugin not configured
+**Solution:** Ensure `trygg` is in `dependencies` and the plugin is active:
 
 ```tsx
 // vite.config.ts
@@ -158,20 +223,17 @@ export default defineConfig({ plugins: [trygg()] })
 - Use `mode="static"` to keep a head element in-place: `<style mode="static">{css}</style>`
 - Deepest component wins for singleton tags (title, base)
 
-### URL blocked by SafeUrl
-
-Default allowed schemes: `http`, `https`, `mailto`, `tel`, `sms`, `blob`, `data`.
-
-Add custom schemes:
-
-```tsx
-import { SafeUrl } from "trygg"
-SafeUrl.allowSchemes(["myapp", "web+myapp"])
-```
-
 ### ErrorBoundary not catching errors
 
-- `ErrorBoundary.catch(Component)` returns an Effect -- must `yield*` it
+- `ErrorBoundary.catch(Component)` returns an Effect — must `yield*` it
 - `.on("Tag", Handler)` matches `Data.TaggedError` `_tag` field
 - Use `.catchAll(fn)` or `.exhaustive()` to finalize the builder
 - Cannot call `.on()` after `.catchAll()` (yields `BuilderError`)
+
+---
+
+## See Also
+
+- [component-api.md](component-api.md) — Component.gen, .provide(), ErrorBoundary, Portal, Resource
+- [signals-api.md](signals-api.md) — Signal.make, derive, each, subscribe
+- [effect-patterns.md](effect-patterns.md) — Event handlers, services/layers, testing, routing

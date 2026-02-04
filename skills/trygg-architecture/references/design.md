@@ -1,4 +1,4 @@
-# Effect UI - Design Document
+# trygg - Design Document
 
 ## 1. Overview
 
@@ -45,6 +45,7 @@ export type Element = Data.TaggedEnum<{
   /** Reactive element - swaps DOM nodes when signal changes */
   SignalElement: {
     readonly signal: Signal<Element>
+    readonly onSwap: Effect.Effect<void> | undefined
   }
   /** Context boundary - provides captured context to child (internal) */
   Provide: {
@@ -96,14 +97,14 @@ TypeScript compiles JSX to function calls. We provide a custom runtime:
 
 ```typescript
 // src/jsx-runtime.ts
-export const jsx = <Props extends JSXProps>(
+export const jsx = <Props extends Record<string, unknown>>(
   type: JSXElementType<Props>,
   props: Props | null,
   key?: ElementKey
-): Element
+): ElementFor<Type>
 
 export const jsxs = jsx
-export const Fragment = (props: { children?: unknown }): Element
+export const Fragment: Component.Type<{ children?: unknown }>
 ```
 
 **Valid component types:**
@@ -226,7 +227,6 @@ export interface Signal<A> {
 |----------|-----------|-------------|
 | `derive` | `<A, B>(source: Signal<A>, f: (a: A) => B) => Effect<Signal<B>, never, Scope>` | Derived signal. Updates eagerly on source change. |
 | `deriveAll` | `(sources: [...Signals], f: (...values) => R) => Effect<Signal<R>, never, Scope>` | Derive from multiple sources (up to 6). |
-| `chain` | `<A, B>(source: Signal<A>, f: (a: A) => Effect<Signal<B>>) => Effect<Signal<B>, never, Scope>` | Signal flatMap. Switches to new inner signal on change. |
 
 ### 4.4 Fine-Grained Reactivity
 
@@ -234,7 +234,7 @@ export interface Signal<A> {
 
 ```tsx
 // Fine-grained: component runs ONCE, only text node updates
-const Counter = Effect.gen(function* () {
+const Counter = Component.gen(function* () {
   const count = yield* Signal.make(0)
   return (
     <button onClick={() => Signal.update(count, n => n + 1)}>
@@ -244,7 +244,7 @@ const Counter = Effect.gen(function* () {
 })
 
 // For conditional rendering, use Signal.derive (no component re-render):
-const View = Effect.gen(function* () {
+const View = Component.gen(function* () {
   const editText = yield* Signal.make<Option<string>>(Option.none())
   const content = yield* Signal.derive(editText, (value) =>
     Option.isSome(value) ? <input /> : <span />
@@ -253,7 +253,7 @@ const View = Effect.gen(function* () {
 })
 
 // When you need full re-render (use sparingly):
-const View = Effect.gen(function* () {
+const View = Component.gen(function* () {
   const submitted = yield* Signal.make(false)
   const submittedValue = yield* Signal.get(submitted)  // Subscribes!
   return submittedValue ? <Success /> : <Form />
@@ -297,16 +297,13 @@ Each item gets a stable scope. Nested signals persist across list updates. Uses 
 Component suspension with async state management:
 
 ```tsx
-const SuspendedView = yield* Signal.suspend(
-  MyAsyncComponent,
-  {
-    Pending: <Spinner />,
-    Failure: (cause, stale) => <ErrorView cause={cause} />,
-    Success: <div />,  // replaced by component output
-  }
-)
+const SuspendedProfile = yield* Signal.suspend(UserProfile, {
+  Pending: (stale) => stale ?? <Spinner />,
+  Failure: (cause, stale) => stale ?? <ErrorView cause={cause} />,
+  Success: <UserProfile userId={userId} />
+})
 
-return <SuspendedView />
+return <SuspendedProfile />
 ```
 
 ### 4.8 Listener Behavior
@@ -398,6 +395,8 @@ Hoistable tags: `title`, `meta`, `link`, `style`, `script`, `base`.
 | `title` | `"title"` (singleton) | Deepest component wins, restores on unmount |
 | `meta[name]` | `"meta:name:{name}"` | Deepest wins per name |
 | `meta[property]` | `"meta:property:{property}"` | Deepest wins (Open Graph) |
+| `meta[httpEquiv]` | `"meta:http-equiv:{value}"` | Deepest wins per value |
+| `meta[charset]` | `"meta:charset"` (singleton) | Deepest wins |
 | `base` | `"base"` (singleton) | Deepest wins |
 | `link`, `style`, `script` | None | Allow duplicates, cleanup on unmount |
 
@@ -441,32 +440,55 @@ const RootLayout = Component.gen(function* () {
 import { Portal } from "trygg"
 
 const Modal = Component.gen(function* () {
+  const isOpen = yield* Signal.make(false)
+
+  const PortalledDialog = yield* Portal.make(
+    <div class="modal-overlay">
+      <div class="modal">Content</div>
+    </div>,
+    { target: document.body }
+  )
+
   return (
-    <Portal target={document.body}>
-      <div class="modal-overlay">
-        <div class="modal">Content</div>
-      </div>
-    </Portal>
+    <div>
+      <button onClick={() => Signal.update(isOpen, v => !v)}>Toggle</button>
+      <PortalledDialog visible={isOpen} />
+    </div>
   )
 })
 ```
 
-Target can be an `HTMLElement` or a CSS selector string.
+`Portal.make(content, options?)` returns `Effect<Component.Type<PortalProps, never, Scope>, PortalTargetNotFoundError, Scope>`.
+- Target: `HTMLElement`, CSS selector string, or omit for dynamic container on `document.body`
+- Returned component accepts optional `visible` prop (`boolean | Signal<boolean>`)
 
 ---
 
 ## 8. Error Boundary
 
+Chainable builder pattern for typed error handling:
+
 ```tsx
 import { ErrorBoundary } from "trygg"
 
-<ErrorBoundary
-  fallback={(cause) => <div>Error: {Cause.squash(cause)}</div>}
-  onError={(cause) => Effect.log("Error caught", cause)}
->
-  <RiskyComponent />
-</ErrorBoundary>
+// With catchAll
+const SafeComponent = yield* ErrorBoundary
+  .catch(RiskyComponent)
+  .on("NetworkError", NetworkErrorView)
+  .on("ValidationError", ValidationErrorView)
+  .catchAll((cause) => <GenericError cause={cause} />)
+
+// Exhaustive (compile-time check — all error tags must be handled)
+const SafeComponent = yield* ErrorBoundary
+  .catch(RiskyComponent)
+  .on("NetworkError", NetworkErrorView)
+  .on("ValidationError", ValidationErrorView)
+  .exhaustive()
+
+return <SafeComponent userId={userId} />
 ```
+
+`.on(tag, component)` takes a `Component.Type<{ error: E }>`. `.catchAll(handler)` takes `(cause: Cause<unknown>) => Element`. Props passed to the wrapped component can be `SignalOrValue<T>` (reactive).
 
 ---
 
@@ -515,20 +537,26 @@ type ResourceState<A, E> =
 ### 10.2 Creating Resources
 
 ```typescript
-// Simple
-const userResource = Resource.make({
-  key: "user:123",
-  fetch: fetchUser("123")
-})
-
-// Parameterized endpoint (auto-generates cache key)
-const getUser = Resource.endpoint("user", (id: string) =>
-  Effect.gen(function* () { /* fetch */ })
+// No params — returns Resource directly
+const usersResource = Resource.make(
+  () => fetchUsers(),
+  { key: "users.list" }
 )
-// Usage: getUser("123") -> Resource with key "user:\"123\""
 
-// No-param endpoint
-const config = Resource.endpointNoParams("app-config", fetchConfig)
+// With params — returns factory function (params) => Resource
+const getUser = Resource.make(
+  (params: { id: string }) => fetchUser(params.id),
+  { key: (params) => Resource.hash("user", params) }
+)
+// Usage: getUser({ id: "123" }) -> Resource with key "user:1234567"
+```
+
+### 10.2.1 Cache Key Generation
+
+```typescript
+// Resource.hash generates deterministic keys from prefix + params
+Resource.hash("users.getUser", { id: "123" })
+// => "users.getUser:1234567"
 ```
 
 ### 10.3 Fetching and Rendering
@@ -650,26 +678,35 @@ export default defineConfig({
 ```typescript
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, waitFor, testLayer } from "trygg"
+import { render, click, waitFor } from "trygg"
 
 describe("Counter", () => {
   it.scoped("increments on click", () =>
     Effect.gen(function* () {
-      const { getByTestId } = yield* testRender(Counter)
-      expect(getByTestId("btn").textContent).toBe("0")
-      yield* click(getByTestId("btn"))
-      yield* waitFor(() => expect(getByTestId("btn").textContent).toBe("1"))
-    }).pipe(Effect.provide(testLayer))
+      const { getByTestId } = yield* render(<Counter />)
+      const btn = yield* getByTestId("btn")
+      expect(btn.textContent).toBe("0")
+      yield* click(btn)
+      yield* waitFor(() => {
+        const el = document.querySelector("[data-testid='btn']")
+        expect(el?.textContent).toBe("1")
+      })
+    })
   )
 })
 ```
 
 **Test utilities:**
-- `testRender(component)` - Renders component, returns query helpers
+- `render(element)` - Renders component/element, returns query helpers. Auto-provides `testLayer`.
 - `renderElement(element)` - Renders raw Element
 - `click(element)` - Simulates click event
 - `typeInput(element, value)` - Simulates input
 - `waitFor(fn)` - Polls until assertion passes
+- `getByTestId(id)` - Returns `Effect<HTMLElement>` (effectful)
+- `queryByText(text)` - Sync, returns `HTMLElement | null`
+- `queryByTestId(id)` - Sync, returns `HTMLElement | null`
+- `queryByRole(role)` - Sync, returns `HTMLElement | null`
+- `querySelectorAll(selector)` - Sync, returns `NodeListOf<HTMLElement>`
 - `testLayer` - Provides Renderer + test Router
 
 ---
@@ -701,3 +738,12 @@ const className = cx("base", isActive && "active", isDisabled && "disabled")
 | Head management | JSX hoisting to `document.head` | Stack-based dedup, scope-based cleanup |
 | Rendering target | Browser DOM first | SSR planned via same Layer pattern |
 | Entrypoint | `mount()` / `mountDocument()` | Simple start, document-level for full apps |
+
+---
+
+## See Also
+
+- [use-trygg/references/component-api.md](../../use-trygg/references/component-api.md) — Component.gen usage, .provide(), Resource, Portal
+- [use-trygg/references/signals-api.md](../../use-trygg/references/signals-api.md) — Signal API reference
+- [trygg-router/references/router.md](../../trygg-router/references/router.md) — Router architecture, route matching, navigation
+- [trygg-observability/references/observability.md](../../trygg-observability/references/observability.md) — Debug events, metrics, trace correlation

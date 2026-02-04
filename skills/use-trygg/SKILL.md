@@ -51,7 +51,7 @@ What are you building?
 |   See: references/common-errors.md
 |
 +-- Testing?
-|   +-- Render component? -> yield* testRender(<Comp />)
+|   +-- Render component? -> yield* testRender(<Comp />)  (auto-provides testLayer)
 |   +-- Simulate click? -> yield* click(element)
 |   +-- Assert async? -> yield* waitFor(() => expect(...))
 |   See: references/effect-patterns.md
@@ -90,7 +90,7 @@ The Vite plugin auto-generates the entry, handles `mountDocument`, routing, and 
 ## Core Rules
 
 1. **Components use `Component.gen`** -- never plain functions or raw `Effect.gen`
-2. **Event handlers are `() => Effect<void>`** -- never run Effects synchronously
+2. **Event handlers are `() => Effect<void>` or plain `Effect<void>`** -- the renderer accepts both; never run Effects synchronously
 3. **No type casts** -- no `as`, no `!`, use `Option` and pattern matching
 4. **Errors are `Data.TaggedError`** -- never `new Error()` or `Effect.die`
 5. **R = never at top** -- `mount()` requires no unresolved service requirements
@@ -177,7 +177,7 @@ const onInput = (e: Event) =>
 ```tsx
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, waitFor, testLayer } from "trygg"
+import { testRender, click, waitFor } from "trygg"
 
 describe("Counter", () => {
   it.scoped("increments", () =>
@@ -188,7 +188,7 @@ describe("Counter", () => {
         const el = document.querySelector("button")
         expect(el?.textContent).toContain("1")
       })
-    }).pipe(Effect.provide(testLayer))
+    })
   )
 })
 ```

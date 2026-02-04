@@ -1,4 +1,4 @@
-# Effect UI - Observability
+# trygg - Observability
 
 trygg follows the **wide events** approach to observability, inspired by [loggingsucks.com](https://loggingsucks.com/).
 
@@ -38,23 +38,13 @@ mount(container, <>
 <DevMode enabled={import.meta.env.DEV} />
 ```
 
-### Escape Hatches (Development Only)
 
-```js
-// URL parameter
-http://localhost:5173/?trygg_debug
-http://localhost:5173/?trygg_debug=signal
-
-// localStorage (persists across reloads)
-localStorage.setItem("trygg_debug", "true")
-localStorage.setItem("trygg_debug", "signal,render")
-```
-
-These only work when `import.meta.env.DEV === true` or `NODE_ENV === "development"`.
 
 ---
 
 ## Event Reference
+
+> **Implementation note:** Some events below are typed in the debug system but not yet emitted by any code path. These are marked with *(reserved)* and may be instrumented in future versions. Events without this marker are actively emitted.
 
 ### Signal Events
 
@@ -75,9 +65,6 @@ These only work when `import.meta.env.DEV === true` or `NODE_ENV === "developmen
 | `signal.derive.cleanup` | Derived signal cleaned up | `signal_id`, `source_id` |
 | `signal.deriveAll.create` | Multi-source derived created | `signal_id`, `source_count`, `value` |
 | `signal.deriveAll.cleanup` | Multi-source derived cleaned up | `signal_id`, `source_count` |
-| `signal.chain.create` | Chain signal created | `signal_id`, `source_id`, `initial_inner_id` |
-| `signal.chain.switch` | Chain switched inner signal | `signal_id`, `inner_id` |
-| `signal.chain.cleanup` | Chain signal cleaned up | `signal_id`, `source_id` |
 
 ### Render Events
 
@@ -85,9 +72,9 @@ These only work when `import.meta.env.DEV === true` or `NODE_ENV === "developmen
 |-------|-------------|------------|
 | `render.component.initial` | Component first render | `accessed_signals` |
 | `render.component.rerender` | Component re-rendered | `trigger`, `accessed_signals` |
-| `render.component.cleanup` | Component unmounted | - |
-| `render.component.error` | Component render failed | `reason` |
-| `render.component.rerender.error` | Re-render failed | `reason` |
+| `render.component.cleanup` | Component unmounted *(reserved)* | - |
+| `render.component.error` | Component render failed *(reserved)* | `reason` |
+| `render.component.rerender.error` | Re-render failed *(type exists but emitted as `render.component.rerender` with `trigger: "error"`)* | `reason` |
 | `render.signaltext.initial` | Signal text node created | `signal_id`, `value` |
 | `render.signaltext.update` | Signal text updated (fine-grained) | `signal_id`, `value` |
 | `render.signalelement.initial` | Signal element created | `signal_id` |
@@ -102,10 +89,10 @@ These only work when `import.meta.env.DEV === true` or `NODE_ENV === "developmen
 | `render.signalelement.insert` | Element inserted into DOM | `signal_id`, `inserted_children` |
 | `render.signalelement.cleanup` | Signal element cleaned up | `signal_id` |
 | `render.intrinsic` | HTML element rendered | `element_tag` |
-| `render.intrinsic.cleanup.start` | Intrinsic cleanup started | `element_tag`, `child_count` |
-| `render.intrinsic.cleanup.remove` | Intrinsic removed from DOM | `element_tag`, `in_dom` |
+| `render.intrinsic.cleanup.start` | Intrinsic cleanup started *(reserved)* | `element_tag`, `child_count` |
+| `render.intrinsic.cleanup.remove` | Intrinsic removed from DOM *(reserved)* | `element_tag`, `in_dom` |
 | `render.document` | Document element mapped | `element_tag`, `target` |
-| `render.schedule` | Re-render scheduled | `is_rerendering`, `pending_rerender` |
+| `render.schedule` | Re-render scheduled *(reserved)* | `is_rerendering`, `pending_rerender` |
 | `render.errorboundary.initial` | Error boundary mounted | - |
 | `render.errorboundary.caught` | Error boundary caught error | `reason` |
 | `render.errorboundary.fallback` | Fallback rendered | - |
@@ -135,12 +122,12 @@ These only work when `import.meta.env.DEV === true` or `NODE_ENV === "developmen
 | `resource.fetch.start` | Fetch effect executing | `key` |
 | `resource.fetch.fork_running` | Fetch forked | `key` |
 | `resource.fetch.success` | Fetch succeeded | `key`, `value_type`, `is_array`, `length` |
-| `resource.fetch.error` | Fetch failed | `key`, `cause` |
+| `resource.fetch.error` | Fetch failed | `key`, `error`, `error_message` |
 | `resource.fetch.set_success` | State set to Success | `key` |
 | `resource.fetch.set_failure` | State set to Failure | `key`, `error` |
 | `resource.fetch.complete` | Fetch cleanup done | `key` |
 | `resource.fetch.defect` | Unexpected defect | `key`, `defect` |
-| `resource.fetch.unhandled` | Unhandled cause | `key`, `cause` |
+| `resource.fetch.unhandled` | Unhandled cause | `key`, `error`, `error_message` |
 
 ### Router Events
 
@@ -148,49 +135,69 @@ These only work when `import.meta.env.DEV === true` or `NODE_ENV === "developmen
 |-------|-------------|------------|
 | `router.navigate` | Navigation started | `from_path`, `to_path`, `replace` |
 | `router.navigate.complete` | Navigation completed | `path` |
-| `router.match` | Route matched | `path`, `route_pattern`, `params` |
-| `router.match.notfound` | No route matched | `path` |
-| `router.guard.start` | Guard check started | `route_pattern`, `has_guard` |
-| `router.guard.allow` | Guard allowed | `route_pattern` |
-| `router.guard.redirect` | Guard redirected | `route_pattern`, `redirect_to` |
-| `router.guard.skip` | Guard skipped | `route_pattern`, `reason` |
-| `router.render.start` | Route render started | `route_pattern`, `params`, `has_layout` |
-| `router.render.complete` | Route render completed | `route_pattern`, `has_layout` |
+| `router.match` | Route matched *(reserved)* | `path`, `route_pattern`, `params` |
+| `router.match.notfound` | No route matched *(reserved)* | `path` |
+| `router.guard.start` | Guard check started *(reserved)* | `route_pattern`, `has_guard` |
+| `router.guard.allow` | Guard allowed *(reserved)* | `route_pattern` |
+| `router.guard.redirect` | Guard redirected *(reserved)* | `route_pattern`, `redirect_to` |
+| `router.guard.skip` | Guard skipped *(reserved)* | `route_pattern`, `reason` |
+| `router.render.start` | Route render started *(reserved)* | `route_pattern`, `params`, `has_layout` |
+| `router.render.complete` | Route render completed *(reserved)* | `route_pattern`, `has_layout` |
 | `router.link.click` | Link clicked | `to_path`, `replace`, `reason` |
-| `router.error` | Route error caught | `route_pattern`, `error` |
+| `router.error` | Route error caught *(reserved)* | `route_pattern`, `error` |
 | `router.popstate.added` | Popstate listener added | - |
 | `router.popstate.removed` | Popstate listener removed | - |
-| `router.load.cancelled` | Stale route load cancelled | `from_key`, `to_key` |
+| `router.load.cancelled` | Stale route load cancelled *(reserved)* | `from_key`, `to_key` |
 | `router.outlet.start` | Outlet initialized | `routes_count` |
 | `router.outlet.nested` | Nested outlet detected | - |
 | `router.outlet.no_routes` | No routes manifest | - |
 | `router.outlet.matching` | Outlet matching path | `path` |
-| `router.matcher.compile` | Trie compiled | `route_count`, `is_recompile` |
-| `router.matcher.cached` | Matcher from cache | `route_count` |
-| `router.404.render` | 404 component rendered | `path`, `has_custom_404` |
-| `router.404.fallback` | Default 404 shown | `path`, `has_custom_404` |
-| `router.tracker.interrupt` | Load interrupted | - |
-| `router.tracker.loading` | Loading state shown | - |
-| `router.tracker.refreshing` | Refreshing with stale | - |
-| `router.tracker.ready` | Route ready | - |
-| `router.tracker.error` | Tracker error | - |
+| `router.matcher.compile` | Trie compiled *(reserved)* | `route_count`, `is_recompile` |
+| `router.matcher.cached` | Matcher from cache *(reserved)* | `route_count` |
+| `router.404.render` | 404 component rendered *(reserved)* | `path`, `has_custom_404` |
+| `router.404.fallback` | Default 404 shown *(reserved)* | `path`, `has_custom_404` |
+| `router.tracker.interrupt` | Load interrupted *(reserved)* | - |
+| `router.tracker.loading` | Loading state shown *(reserved)* | - |
+| `router.tracker.refreshing` | Refreshing with stale *(reserved)* | - |
+| `router.tracker.ready` | Route ready *(reserved)* | - |
+| `router.tracker.error` | Tracker error *(reserved)* | - |
+| `router.scroll.top` | Scrolled to top | - |
+| `router.scroll.restore` | Scroll position restored | `key`, `x`, `y` |
+| `router.scroll.save` | Scroll position saved | `key`, `x`, `y` |
 
 ### Module Loading Events
 
 | Event | Description | Key Fields |
 |-------|-------------|------------|
-| `router.module.load.start` | Module load started | `path`, `kind`, `is_prefetch`, `attempt` |
-| `router.module.load.complete` | Module load completed | `path`, `kind`, `duration_ms`, `is_prefetch`, `attempt` |
-| `router.module.load.timeout` | Module load timed out | `path`, `kind`, `timeout_ms`, `is_prefetch`, `attempt` |
-| `router.module.load.cache_hit` | Module from cache | `path`, `kind`, `is_prefetch` |
-| `router.prefetch.start` | Prefetch started | `path`, `route_pattern`, `module_count` |
-| `router.prefetch.complete` | Prefetch completed | `path` |
-| `router.prefetch.no_match` | Prefetch path unmatched | `path` |
+| `router.module.load.start` | Module load started *(reserved)* | `path`, `kind`, `is_prefetch`, `attempt` |
+| `router.module.load.complete` | Module load completed *(reserved)* | `path`, `kind`, `duration_ms`, `is_prefetch`, `attempt` |
+| `router.module.load.timeout` | Module load timed out *(reserved)* | `path`, `kind`, `timeout_ms`, `is_prefetch`, `attempt` |
+| `router.module.load.cache_hit` | Module from cache *(reserved)* | `path`, `kind`, `is_prefetch` |
+| `router.prefetch.start` | Prefetch started | `path` |
+| `router.prefetch.complete` | Prefetch completed *(reserved)* | `path` |
+| `router.prefetch.no_match` | Prefetch path unmatched *(reserved)* | `path` |
 | `router.prefetch.viewport` | Viewport prefetch triggered | `path` |
 | `router.viewport.observer.added` | Viewport observer setup | - |
-| `router.viewport.observer.removed` | Viewport observer removed | - |
+| `router.viewport.observer.removed` | Viewport observer removed *(reserved)* | - |
 
 Module kinds: `component`, `layout`, `guard`, `loading`, `error`, `not_found`
+
+### API Events
+
+| Event | Description | Key Fields |
+|-------|-------------|------------|
+| `api.middleware.init` | API middleware initializing | - |
+| `api.middleware.mounted` | API middleware mounted | `routes_count` |
+| `api.middleware.error` | API middleware error | `error` |
+| `api.request.received` | API request received | `method`, `url` |
+| `api.request.handler_available` | Handler found for request | `method`, `url` |
+| `api.request.handler_missing` | No handler for request | `method`, `url` |
+| `api.request.error` | Request handling error | `method`, `url`, `error` |
+| `api.handler.loading` | Loading API handler module | - |
+| `api.handler.loaded` | API handler module loaded | - |
+| `api.handler.load_error` | Failed to load handler | `error` |
+
+> **Note:** Many API events are typed but not yet emitted. Events marked without key fields may be reserved for future instrumentation.
 
 ### Trace Events
 
@@ -203,7 +210,7 @@ Module kinds: `component`, `layout`, `guard`, `loading`, `error`, `not_found`
 
 ## Wide Event Structure
 
-Every event includes:
+Every event is a member of the `DebugEvent` discriminated union (not a loose interface). The `event` field is a string literal type, enabling precise pattern matching:
 
 ```typescript
 interface DebugEvent {
@@ -354,16 +361,16 @@ Spans nest: child spans reference parent via `parentSpanId`.
 
 | Metric | Name |
 |--------|------|
-| `navigationCounter` | `effectui.router.navigate.count` |
-| `routeErrorCounter` | `effectui.router.error.count` |
-| `signalUpdateCounter` | `effectui.signal.update.count` |
-| `componentRenderCounter` | `effectui.render.component.count` |
+| `navigationCounter` | `trygg.router.navigate.count` |
+| `routeErrorCounter` | `trygg.router.error.count` |
+| `signalUpdateCounter` | `trygg.signal.update.count` |
+| `componentRenderCounter` | `trygg.render.component.count` |
 
 ### Built-in Histogram
 
 | Metric | Name | Boundaries |
 |--------|------|------------|
-| `renderDurationHistogram` | `effectui.render.duration_ms` | 0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 |
+| `renderDurationHistogram` | `trygg.render.duration_ms` | 0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 |
 
 ### Recording
 
@@ -470,7 +477,16 @@ Debug.serverLayer({
 
 ## Production Safety
 
-- `<DevMode />` does nothing in production
-- URL params and localStorage escape hatches disabled in production
-- Debug output never emitted in production builds
-- Use `<DevMode enabled={true} />` explicitly for production debugging (not recommended)
+- `<DevMode />` enables debug unconditionally when mounted (defaults `enabled={true}`)
+- **Caller must gate**: `<DevMode enabled={import.meta.env.DEV} />` to disable in production
+- No automatic environment detection — if you mount DevMode without `enabled={false}`, debug events fire in production
+- Debug.enable() has no auto-disable mechanism
+- **Known issue**: DevMode does not call Debug.disable() or unregister plugins on unmount
+
+---
+
+## See Also
+
+- [use-trygg/references/signals-api.md](../../use-trygg/references/signals-api.md) — Signal operations referenced in signal.* events
+- [trygg-router/references/router.md](../../trygg-router/references/router.md) — Router internals referenced in router.* events
+- [trygg-architecture/references/design.md](../../trygg-architecture/references/design.md) — Element types, Renderer pipeline

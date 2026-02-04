@@ -155,3 +155,11 @@ const unsubscribe = yield* Signal.subscribe(count, () =>
 ```
 
 Listeners run in parallel with error isolation. Failing listeners don't crash others.
+
+---
+
+## See Also
+
+- [component-api.md](component-api.md) — Component.gen, .provide(), Resource, Portal, Head
+- [effect-patterns.md](effect-patterns.md) — Event handlers, services/layers, testing
+- [common-errors.md](common-errors.md) — Signal-related errors, anti-patterns

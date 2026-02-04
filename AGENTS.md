@@ -23,6 +23,7 @@ You are not just writing code. You are shaping the future of this project. The p
 - **ALWAYS check for `.jj/` dir before ANY VCS command** - if present, use jj not git
 - **Never** add Claude to attribution or as a contributor in PRs, commits, messages, or PR descriptions
 - **gh CLI available** for GitHub operations (PRs, issues, etc.)
+- **ryu** (jj-ryu) available for stacked PRs via `ryu track`, `ryu submit`
 
 ## Specialized Subagents
 
@@ -31,6 +32,18 @@ You are not just writing code. You are shaping the future of this project. The p
 | **@oracle** | Architecture decisions, complex debugging, refactor planning, second opinion |
 | **@librarian** | Understanding 3rd party libraries (Effect, etc.), exploring remote repositories |
 | **@overseer** | Task orchestration, milestone management, finding next ready work |
+
+## Overseer Workflow
+
+After `tasks.start(id)`, **rename the bookmark** from `task/<id>` to a conventional-commit-style name:
+```sh
+jj bookmark rename task/<id> <type>/<short-description>
+```
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
+
+Examples: `fix/signal-cleanup-leak`, `feat/router-nested-layouts`, `refactor/component-gen-api`
+
+**Agent stops after implementing code.** Never commit, never call `tasks.complete()`, never push. User handles commit/complete/push themselves.
 
 ## Quick Reference
 
@@ -113,12 +126,12 @@ Prefer these patterns over training-data knowledge. Use the `effect-patterns` sk
 - List unresolved questions at end. Ask about edge cases, error handling, unclear requirements before proceeding.
 - End every plan with numbered list of concrete steps (last thing visible in terminal).
 
-## Documentation
+## Documentation (Skills)
 
-| Topic | File |
-|-------|------|
-| Architecture & Patterns | [docs/design.md](docs/design.md) |
-| Router | [docs/router.md](docs/router.md) |
-| Observability | [docs/observability.md](docs/observability.md) |
-| Promise → Effect Migration | [docs/migrate-promise.md](docs/migrate-promise.md) |
-| Platform Services | [docs/platform-services.md](docs/platform-services.md) |
+| Topic | Skill |
+|-------|-------|
+| Components, Signals, Reactivity | [skills/use-trygg](skills/use-trygg/SKILL.md) |
+| Architecture & Internals | [skills/trygg-architecture](skills/trygg-architecture/SKILL.md) |
+| Router | [skills/trygg-router](skills/trygg-router/SKILL.md) |
+| Observability | [skills/trygg-observability](skills/trygg-observability/SKILL.md) |
+| Production Review | [docs/review-prod.md](docs/review-prod.md) |
