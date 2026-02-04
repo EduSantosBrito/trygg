@@ -59,6 +59,7 @@ import {
   unsafeAsError,
   unsafeCallNoArgs,
   unsafeNarrowContext,
+  unsafeAsOverload,
 } from "../internal/unsafe.js";
 
 // =============================================================================
@@ -503,15 +504,22 @@ export const fetch: {
     never,
     ResourceRegistryTag | R | Scope.Scope
   >;
-} = (resourceOrFactory: any, params?: any): any => {
-  if (typeof resourceOrFactory === "function") {
-    if (params === undefined) {
-      return Effect.die("Resource.fetch: params required when using a factory");
+} = unsafeAsOverload(
+  (
+    resourceOrFactory:
+      | Resource<unknown, unknown, unknown>
+      | ((params: Record<string, unknown>) => Resource<unknown, unknown, unknown>),
+    params?: ReactiveParams<Record<string, unknown>>,
+  ) => {
+    if (typeof resourceOrFactory === "function") {
+      if (params === undefined) {
+        return Effect.die("Resource.fetch: params required when using a factory");
+      }
+      return fetchReactive(resourceOrFactory, params);
     }
-    return fetchReactive(resourceOrFactory, params);
-  }
-  return fetchStatic(resourceOrFactory);
-};
+    return fetchStatic(resourceOrFactory);
+  },
+);
 
 /**
  * Static fetch implementation.
@@ -767,7 +775,7 @@ export const match = <A, E>(
     });
 
     // Return SignalElement for fine-grained updates
-    return Element.SignalElement({ signal: elementSignal });
+    return Element.SignalElement({ signal: elementSignal, onSwap: undefined });
   }).pipe(Effect.withSpan("Resource.match"));
 
 /**

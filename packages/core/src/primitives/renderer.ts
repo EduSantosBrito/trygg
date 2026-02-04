@@ -453,7 +453,7 @@ const renderElement = (
       }),
     ),
 
-    Match.tag("SignalElement", ({ signal }) =>
+    Match.tag("SignalElement", ({ signal, onSwap }) =>
       Effect.gen(function* () {
         // Create anchor comment for positioning
         const anchor = document.createComment("signal-element");
@@ -553,6 +553,11 @@ const renderElement = (
                 const actualParent = anchor.parentNode;
                 if (actualParent !== null) {
                   actualParent.insertBefore(tempFragment, anchor);
+                }
+
+                // Notify post-swap listeners (e.g. router scroll synchronization)
+                if (onSwap !== undefined) {
+                  yield* onSwap;
                 }
 
                 yield* Debug.log({
