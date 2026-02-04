@@ -326,7 +326,8 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
   readonly lastError: unknown;
 }> {
   override get message() {
-    const errorMsg = this.lastError instanceof Error ? this.lastError.message : String(this.lastError);
+    const errorMsg =
+      this.lastError instanceof Error ? this.lastError.message : String(this.lastError);
     return `waitFor timed out after ${this.timeout}ms: ${errorMsg}`;
   }
 }
