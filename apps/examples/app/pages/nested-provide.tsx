@@ -136,8 +136,8 @@ const NestedProvidePage = Component.gen(function* () {
     <div>
       <h2 className="m-0 mb-1 text-xl font-semibold">Nested Provide</h2>
       <p className="text-gray-500 m-0 mb-6 text-sm">
-        Three layers of Context.Tag with dynamic layer switching. Locale swaps at runtime via signal —
-        each click rebuilds the component tree with a new layer. The "Greet from handler" button
+        Three layers of Context.Tag with dynamic layer switching. Locale swaps at runtime via signal
+        — each click rebuilds the component tree with a new layer. The "Greet from handler" button
         accesses Locale at click time via Effect.gen, proving the ancestor context propagates
         through nested Provide elements into event handlers.
       </p>
@@ -201,7 +201,9 @@ const NestedProvidePage = Component.gen(function* () {
         <p className="m-0">Layout → ApiClientLive (grandparent)</p>
         <p className="m-0 ml-4">→ Locale [{locale.label}] (parent — switchable)</p>
         <p className="m-0 ml-8">→ CardStyle [Ocean|Sunset|Forest] (child — per section)</p>
-        <p className="m-0 ml-12">→ GreetingCard reads both + handler accesses Locale at click time</p>
+        <p className="m-0 ml-12">
+          → GreetingCard reads both + handler accesses Locale at click time
+        </p>
       </div>
     </div>
   );

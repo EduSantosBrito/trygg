@@ -18,7 +18,7 @@
     "format": "oxfmt packages apps '!**/dist/**' --check",
     "format:fix": "oxfmt packages apps '!**/dist/**' --write",
     "effect:check": "bun run --cwd packages/core effect:check",
-    "check": "bun run lint && bun run format && bun run typecheck && bun run effect:check"
+    "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check"
   },
   "devDependencies": {
     "@effect/cli": "^0.73.1",
