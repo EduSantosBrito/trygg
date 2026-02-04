@@ -74,6 +74,10 @@ npx skills add EduSantosBrito/trygg
 | `trygg-architecture` | Debugging internals, renderer, element variants, design decisions |
 | `trygg-observability` | Debug events, metrics, traces, DevMode, LLM test server |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, PR process, and code standards.
+
 ## License
 
 [MIT](LICENSE)
