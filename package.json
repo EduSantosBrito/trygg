@@ -12,6 +12,7 @@
     "test": "bun run --cwd packages/core test",
     "test:watch": "bun run --cwd packages/core test:watch",
     "examples": "bun run build && bun run --cwd apps/examples dev",
+    "examples:preview": "bun run build && bun run --cwd apps/examples build && bun run --cwd apps/examples preview",
     "examples:install": "bun install --cwd apps/examples",
     "lint": "oxlint packages apps",
     "lint:fix": "oxlint packages apps --fix",

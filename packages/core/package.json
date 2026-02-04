@@ -58,6 +58,7 @@
     "access": "public"
   },
   "scripts": {
+    "prepublishOnly": "bun run build",
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
