@@ -58,7 +58,7 @@ export type {
   RoutePath,
 } from "./types.js";
 
-export { buildPathWithParams, NavigationError } from "./types.js";
+export { buildPathWithParams, InvalidRouteComponent, NavigationError } from "./types.js";
 
 // Router service
 export {

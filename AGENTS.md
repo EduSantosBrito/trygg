@@ -87,6 +87,26 @@ Test the system under hostile conditions:
 - Test both success AND failure paths for every operation.
 - Test boundary values — empty, zero, negative, max, undefined.
 
+## Effect TypeScript
+
+Prefer these patterns over training-data knowledge. Use the `effect-patterns` skill for detailed examples.
+
+**Services**: `Context.Tag` + `Layer`. Wire deps with `Layer.provide` at layer definition. `Layer.scoped` for resource-owning services. `Effect.fn("Name.method")` for traced methods.
+
+**Errors**: Always `Data.TaggedError` or `Schema.TaggedError`. Errors are yieldable — `yield* new NotFound({ id })`, never `yield* Effect.fail(new NotFound(...))`. `catchTag`/`catchTags` for precise handling.
+
+**Resources**: `acquireRelease` for guaranteed cleanup. Release must be infallible. Timeout async releases. `Layer.scoped` for resource-owning services.
+
+**Schema**: `Schema.Class` for domain types. `Schema.brand` for branded primitives. `Schema.TaggedError` for serializable errors. Decode at boundaries with `Schema.decodeUnknown`.
+
+**Testing**: `@effect/vitest` — `it.effect`, `it.scoped`, `it.layer`. Swap services via `Layer.succeed(Tag, impl)`. Assert errors with `Effect.runPromiseExit`.
+
+**Concurrency**: `Effect.all`/`forEach` with `{ concurrency }`. `withPermits(n)` not `withPermit`. `Queue.bounded` for producer-consumer.
+
+**Streams**: `paginateChunkEffect` for array-returning paginated APIs. `SubscriptionRef.changes` for reactive streams.
+
+**HTTP**: `HttpClient.mapRequest` + `flow(prependUrl, bearerToken)`. `filterStatusOk`. `retryTransient`. `schemaBodyJson` for typed responses.
+
 ## Planning
 
 - Be extremely concise. Sacrifice grammar for concision.

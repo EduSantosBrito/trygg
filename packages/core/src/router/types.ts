@@ -35,6 +35,16 @@ export class NavigationError extends Data.TaggedError("NavigationError")<{
   readonly cause: unknown;
 }> {}
 
+/**
+ * RouteComponent value was neither a Component.Type nor Effect<Element>.
+ * Indicates a bug in route definition or schema validation.
+ *
+ * @since 1.0.0
+ */
+export class InvalidRouteComponent extends Data.TaggedError("InvalidRouteComponent")<{
+  readonly actual: unknown;
+}> {}
+
 // ==========================================
 // Route Map (augmented by vite plugin)
 // ==========================================

@@ -48,7 +48,12 @@ import {
 import { CurrentRouteQuery } from "./route.js";
 import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
-import type { RouteComponent, RouteErrorInfo, RouteParams } from "./types.js";
+import {
+  InvalidRouteComponent,
+  type RouteComponent,
+  type RouteErrorInfo,
+  type RouteParams,
+} from "./types.js";
 import * as Metrics from "../debug/metrics.js";
 import { unsafeMergeLayers } from "../internal/unsafe.js";
 
@@ -667,7 +672,7 @@ function renderComponent(
     );
   }
   // Should never reach here if RouteComponentSchema validation is working
-  return Effect.dieMessage("Invalid RouteComponent: expected Component or Effect<Element>");
+  return new InvalidRouteComponent({ actual: component });
 }
 
 function renderLayout(
@@ -724,14 +729,14 @@ function renderLayout(
     );
   }
   // Should never reach here if RouteComponentSchema validation is working
-  return Effect.dieMessage("Invalid RouteComponent: expected Component or Effect<Element>");
+  return new InvalidRouteComponent({ actual: layout });
 }
 
 function renderError(
   errorComp: RouteComponent,
   cause: Cause.Cause<unknown>,
   path: string,
-): Effect.Effect<Element, never, never> {
+): Effect.Effect<Element, InvalidRouteComponent, never> {
   return Effect.gen(function* () {
     yield* Metrics.recordRouteError;
     const resetSignal = yield* Signal.make(0);
@@ -757,8 +762,6 @@ function renderError(
       );
     }
     // Should never reach here if RouteComponentSchema validation is working
-    return yield* Effect.dieMessage(
-      "Invalid RouteComponent: expected Component or Effect<Element>",
-    );
+    return yield* new InvalidRouteComponent({ actual: errorComp });
   });
 }
