@@ -4,6 +4,9 @@
  *
  * Add this component to your app to enable wide event logging in the console.
  *
+ * **Singleton:** Mount only ONE DevMode per app. Multiple instances share
+ * global debug state — unmounting one disables debugging for all.
+ *
  * @example
  * ```tsx
  * import { mount, DevMode } from "trygg"
@@ -124,15 +127,27 @@ export const DevMode = Component.gen(function* (Props: ComponentProps<DevModePro
     return empty;
   }
 
-  return Effect.sync(() => {
-    Debug.enable(filter);
+  // Enable debug with filter
+  Debug.enable(filter);
 
-    if (plugins !== undefined && plugins.length > 0) {
-      for (const plugin of plugins) {
-        Debug.registerPlugin(plugin);
-      }
+  // Register plugins and track names for cleanup
+  const registeredPluginNames: Array<string> = [];
+  if (plugins !== undefined && plugins.length > 0) {
+    for (const plugin of plugins) {
+      Debug.registerPlugin(plugin);
+      registeredPluginNames.push(plugin.name);
     }
+  }
 
-    return empty;
-  });
+  // Cleanup on unmount: unregister plugins and disable debug
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      for (const name of registeredPluginNames) {
+        Debug.unregisterPlugin(name);
+      }
+      Debug.disable();
+    }),
+  );
+
+  return empty;
 });

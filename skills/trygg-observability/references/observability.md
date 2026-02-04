@@ -411,77 +411,12 @@ Metrics.createCollectorSink(name, snapshots[])  // For testing
 
 ---
 
-## Debug Layers
-
-```typescript
-// Default: registers consolePlugin
-Effect.provide(Debug.defaultLayer)
-
-// Server: starts TestServer + registers plugin
-Effect.provide(Debug.serverLayer({ port: 4567 }))
-```
-
----
-
-## LLM Test Observability
-
-Tests can use `Debug.serverLayer` for HTTP-queryable debug events:
-
-```typescript
-const layer = Layer.mergeAll(testLayer, Debug.serverLayer({ port: 4567 }))
-
-it.scoped("increments", () =>
-  Effect.gen(function* () {
-    Debug.enable()
-    const { getByText } = yield* renderElement(<Counter />)
-    getByText("Increment").click()
-  }).pipe(Effect.provide(layer))
-)
-```
-
-### HTTP Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /` | API documentation |
-| `GET /health` | Health check |
-| `GET /logs` | Query events with filters |
-| `GET /stats` | Event counts by level |
-
-### Query Parameters for /logs
-
-- `level`: `"debug"` | `"info"` | `"warn"` | `"error"`
-- `eventType`: prefix match (e.g., `"router"` matches `"router.navigate"`)
-- `traceId`: exact match
-- `after` / `before`: ISO timestamp bounds
-- `limit`: max results (default: 1000)
-
-### Level Derivation
-
-- Contains `"error"` or `"fail"` -> `error`
-- Contains `"skip"` or `"timeout"` -> `warn`
-- Starts with `"router.navigate"`, `"trace.span"`, or contains `"complete"`/`"create"` -> `info`
-- Everything else -> `debug`
-
-### Server Configuration
-
-```typescript
-Debug.serverLayer({
-  port: 4567,                              // HTTP port (default: 4567)
-  dbPath: ".effect/debug-events.db",       // SQLite path
-  connectionInfoPath: ".effect/llm-test-server.json"
-})
-```
-
----
-
 ## Production Safety
 
 - `<DevMode />` enables debug unconditionally when mounted (defaults `enabled={true}`)
 - **Caller must gate**: `<DevMode enabled={import.meta.env.DEV} />` to disable in production
 - No automatic environment detection — if you mount DevMode without `enabled={false}`, debug events fire in production
-- Debug.enable() has no auto-disable mechanism
-- **Known issue**: DevMode does not call Debug.disable() or unregister plugins on unmount
+- DevMode properly cleans up on unmount: calls `Debug.disable()` and unregisters all plugins
 
 ---
 

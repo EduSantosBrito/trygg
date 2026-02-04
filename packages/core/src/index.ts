@@ -200,15 +200,3 @@ export * as Head from "./primitives/head.js";
 // Validates URLs against a configurable scheme allowlist
 export * as SafeUrl from "./security/safe-url.js";
 export { UnsafeUrlError } from "./security/safe-url.js";
-
-// Test server for LLM observability
-// Use Debug.serverLayer() to start server with debug plugin integration
-// Access the server via TestServer context tag
-export {
-  TestServer,
-  type TestServerService,
-  type TestServerConfig,
-  type StoredLogEvent,
-  type LogLevel,
-  type QueryOptions,
-} from "./debug/test-server.js";

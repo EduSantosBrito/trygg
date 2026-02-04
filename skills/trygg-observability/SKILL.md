@@ -1,6 +1,6 @@
 ---
 name: trygg-observability
-description: trygg observability — DevMode component, wide debug events, console output, event filtering, debug plugins, trace correlation, metrics counters/histograms/sinks, and LLM test server. Use when enabling debug output, filtering events by category, understanding why a component re-rendered, diagnosing fine-grained reactivity, debugging navigation performance, checking Resource cache behavior, writing custom debug plugins, correlating traces across navigation flows, recording/exporting metrics, or setting up the HTTP debug server for LLM-driven testing.
+description: trygg observability — DevMode component, wide debug events, console output, event filtering, debug plugins, trace correlation, metrics counters/histograms/sinks. Use when enabling debug output, filtering events by category, understanding why a component re-rendered, diagnosing fine-grained reactivity, debugging navigation performance, checking Resource cache behavior, writing custom debug plugins, correlating traces across navigation flows, or recording/exporting metrics.
 license: MIT
 metadata:
   author: EduSantosBrito
@@ -49,17 +49,11 @@ What are you debugging?
 |   See: references/observability.md §Plugin System
 |
 +-- Metrics?
-|   +-- Built-in: navigation, route error, signal update, component render counters
-|   +-- Histogram: render duration
-|   +-- Snapshot: Metrics.snapshot
-|   +-- Sinks: Metrics.createSink, consoleSink, createCollectorSink
-|   See: references/observability.md §Metrics
-|
-+-- LLM test server?
-|   +-- Debug.serverLayer({ port: 4567 })
-|   +-- HTTP endpoints: /health, /logs, /stats
-|   +-- Query: level, eventType, traceId, after/before, limit
-|   See: references/observability.md §LLM Test Observability
+    +-- Built-in: navigation, route error, signal update, component render counters
+    +-- Histogram: render duration
+    +-- Snapshot: Metrics.snapshot
+    +-- Sinks: Metrics.createSink, consoleSink, createCollectorSink
+    See: references/observability.md §Metrics
 ```
 
 ## Event Categories
@@ -77,4 +71,4 @@ What are you debugging?
 
 | File | When to Read |
 |------|-------------|
-| [observability.md](references/observability.md) | Full event reference, plugins, metrics, debug server, debugging scenarios |
+| [observability.md](references/observability.md) | Full event reference, plugins, metrics, debugging scenarios |

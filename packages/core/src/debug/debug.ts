@@ -16,9 +16,7 @@
  * ```
  */
 
-import { Effect, FiberRef, GlobalValue, Layer, Runtime } from "effect";
-import type { TestServerConfig } from "./test-server.js";
-import { TestServer } from "./test-server.js";
+import { Effect, FiberRef, GlobalValue, Layer } from "effect";
 
 /** Base fields for all events */
 interface BaseEvent {
@@ -1387,55 +1385,3 @@ export const defaultLayer: Layer.Layer<never> = Layer.scopedDiscard(
     );
   }),
 );
-
-/**
- * Server layer that starts TestServer and registers its debug plugin.
- *
- * TestServer captures all debug events to SQLite and exposes an HTTP API
- * for querying logs. LLMs can query this server to observe application behavior.
- *
- * The TestServer is automatically stopped when the scope closes.
- *
- * @example
- * ```typescript
- * import { Effect } from "effect"
- * import * as Debug from "trygg/debug"
- * import { TestServer } from "trygg/test-server"
- *
- * const program = Effect.gen(function* () {
- *   const server = yield* TestServer
- *   console.log(`Server running at ${server.url}`)
- *
- *   // Debug.log calls are now captured by TestServer
- *   yield* Debug.log({ event: "signal.set", signal_id: "sig_1", prev_value: 0, value: 1, listener_count: 1 })
- * })
- *
- * Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(Debug.serverLayer()))))
- * ```
- *
- * @since 1.0.0
- */
-export const serverLayer = (config: TestServerConfig = {}): Layer.Layer<TestServer> =>
-  Layer.scoped(
-    TestServer,
-    Effect.gen(function* () {
-      // Dynamic import to avoid bundling test-server in production
-      const { startInternal } = yield* Effect.promise(() => import("./test-server.js"));
-      const server = yield* startInternal(config);
-      const runtime = yield* Effect.runtime<never>();
-
-      // Create and register debug plugin
-      const plugin = createPlugin("test-server", (event) => {
-        Runtime.runSync(runtime)(server.store(event));
-      });
-      registerPlugin(plugin);
-
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          unregisterPlugin(plugin.name);
-        }),
-      );
-
-      return server;
-    }),
-  );
