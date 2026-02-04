@@ -15,7 +15,7 @@
  * ```
  */
 import { Data, Effect, FiberRef, Layer, Pipeable, Schema } from "effect";
-import type { RouteComponent } from "./types.js";
+import type { RouteComponent, ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 
@@ -70,12 +70,12 @@ export type IndexMarker = typeof IndexMarker;
 export interface RouteDefinition {
   readonly _tag: "RouteDefinition";
   readonly path: string | IndexMarker;
-  readonly component: RouteComponent | undefined;
-  readonly layout: RouteComponent | undefined;
-  readonly loading: RouteComponent | undefined;
-  readonly error: RouteComponent | undefined;
-  readonly notFound: RouteComponent | undefined;
-  readonly forbidden: RouteComponent | undefined;
+  readonly component: ComponentInput | undefined;
+  readonly layout: ComponentInput | undefined;
+  readonly loading: ComponentInput | undefined;
+  readonly error: ComponentInput | undefined;
+  readonly notFound: ComponentInput | undefined;
+  readonly forbidden: ComponentInput | undefined;
   readonly middleware: ReadonlyArray<Effect.Effect<void, unknown, unknown>>;
   readonly prefetch: ReadonlyArray<(ctx: unknown) => Effect.Effect<unknown, unknown, never>>;
   readonly children: ReadonlyArray<RouteDefinition>;

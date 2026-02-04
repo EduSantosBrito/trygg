@@ -15,7 +15,7 @@
  * ```
  */
 import { FiberRef, Option } from "effect";
-import type { RouteComponent } from "./types.js";
+import type { RouteComponent, ComponentInput } from "./types.js";
 import type { RouteBuilder, RouteDefinition } from "./route.js";
 
 // =============================================================================
@@ -29,8 +29,8 @@ import type { RouteBuilder, RouteDefinition } from "./route.js";
  */
 export interface RoutesManifest {
   readonly routes: ReadonlyArray<RouteDefinition>;
-  readonly notFound: RouteComponent | undefined;
-  readonly forbidden: RouteComponent | undefined;
+  readonly notFound: ComponentInput | undefined;
+  readonly forbidden: ComponentInput | undefined;
 }
 
 // =============================================================================

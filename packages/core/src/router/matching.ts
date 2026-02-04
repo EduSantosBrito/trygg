@@ -16,7 +16,7 @@ import {
   QueryDecodeError,
 } from "./route.js";
 import type { RoutesManifest } from "./routes.js";
-import type { RouteComponent, RouteParams } from "./types.js";
+import type { ComponentInput, RouteParams } from "./types.js";
 
 // =============================================================================
 // Resolved Route
@@ -537,8 +537,8 @@ export const runRouteMiddleware = (
  */
 export const resolveErrorBoundary = (
   route: ResolvedRoute,
-  rootError: RouteComponent | undefined,
-): Option.Option<RouteComponent> => {
+  rootError: ComponentInput | undefined,
+): Option.Option<ComponentInput> => {
   if (route.definition.error !== undefined) {
     return Option.some(route.definition.error);
   }
@@ -561,8 +561,8 @@ export const resolveErrorBoundary = (
  */
 export const resolveNotFoundBoundary = (
   route: ResolvedRoute,
-  rootNotFound: RouteComponent | undefined,
-): Option.Option<RouteComponent> => {
+  rootNotFound: ComponentInput | undefined,
+): Option.Option<ComponentInput> => {
   if (route.definition.notFound !== undefined) {
     return Option.some(route.definition.notFound);
   }
@@ -585,8 +585,8 @@ export const resolveNotFoundBoundary = (
  */
 export const resolveForbiddenBoundary = (
   route: ResolvedRoute,
-  rootForbidden: RouteComponent | undefined,
-): Option.Option<RouteComponent> => {
+  rootForbidden: ComponentInput | undefined,
+): Option.Option<ComponentInput> => {
   if (route.definition.forbidden !== undefined) {
     return Option.some(route.definition.forbidden);
   }
@@ -607,7 +607,7 @@ export const resolveForbiddenBoundary = (
  *
  * @since 1.0.0
  */
-export const resolveLoadingBoundary = (route: ResolvedRoute): Option.Option<RouteComponent> => {
+export const resolveLoadingBoundary = (route: ResolvedRoute): Option.Option<ComponentInput> => {
   if (route.definition.loading !== undefined) {
     return Option.some(route.definition.loading);
   }

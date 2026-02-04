@@ -74,6 +74,7 @@ const features = [
     description: "Error boundary demo - trigger and catch route errors",
     concepts: ["Error boundary", "currentError", "Error recovery", "Reset effect"],
   },
+
 ];
 
 const HomePage = Component.gen(function* () {

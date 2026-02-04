@@ -83,6 +83,21 @@ export type RouteComponent =
   | Effect.Effect<Element, unknown, unknown>;
 
 /**
+ * Lazy loader function produced by the vite transform.
+ * At build time, `.component(X)` becomes `.component(() => import("./X"))`.
+ * The default export must be a RouteComponent.
+ * @since 1.0.0
+ */
+export type ComponentLoader = () => Promise<{ readonly default: unknown }>;
+
+/**
+ * Value stored in RouteDefinition component fields.
+ * Either a direct RouteComponent (dev/eager) or a ComponentLoader (vite transform/lazy).
+ * @since 1.0.0
+ */
+export type ComponentInput = RouteComponent | ComponentLoader;
+
+/**
  * Get all route paths from RouteMap.
  * Uses `(string & Record<never, never>)` pattern for autocomplete with string fallback.
  * @since 1.0.0
