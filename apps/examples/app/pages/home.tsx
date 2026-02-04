@@ -74,7 +74,12 @@ const features = [
     description: "Error boundary demo - trigger and catch route errors",
     concepts: ["Error boundary", "currentError", "Error recovery", "Reset effect"],
   },
-
+  {
+    title: "Prefetch",
+    path: "/prefetch",
+    description: "Link prefetch strategies — intent, viewport, render, disabled",
+    concepts: ["Router.Link", "prefetch", "data-trygg-prefetch", "IntersectionObserver"],
+  },
 ];
 
 const HomePage = Component.gen(function* () {
