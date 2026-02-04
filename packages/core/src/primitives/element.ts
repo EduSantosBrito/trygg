@@ -236,6 +236,13 @@ export type Element = Data.TaggedEnum<{
    */
   readonly SignalElement: {
     readonly signal: Signal<Element>;
+    /**
+     * Optional Effect invoked synchronously after the renderer's `insertBefore`
+     * during a DOM swap. Used by the router outlet to synchronize scroll
+     * restoration with the actual DOM update.
+     * @internal
+     */
+    readonly onSwap: Effect.Effect<void> | undefined;
   };
   /**
    * Context boundary - provides a captured context to child components.
@@ -438,8 +445,10 @@ export const signalText = (signal: Signal<unknown>): Element => Element.SignalTe
  * Updates DOM directly when signal changes without component re-render.
  * @since 1.0.0
  */
-export const signalElement = (signal: Signal<Element>): Element =>
-  Element.SignalElement({ signal });
+export const signalElement = (
+  signal: Signal<Element>,
+  options?: { readonly onSwap?: Effect.Effect<void> },
+): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
 
 // Initialize signalElement implementation in signal.ts to break circular dependency
 _setSignalElementImpl(signalElement);
