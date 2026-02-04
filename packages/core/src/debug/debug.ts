@@ -16,9 +16,6 @@
  * ```
  */
 
-// Ambient declaration for Node.js process (allows typechecking in browser environments)
-declare const process: { env: Record<string, string | undefined> } | undefined;
-
 import { Effect, FiberRef, GlobalValue, Layer, Runtime } from "effect";
 import type { TestServerConfig } from "./test-server.js";
 import { TestServer } from "./test-server.js";
@@ -370,7 +367,8 @@ type ResourceFetchSuccessEvent = BaseEvent & {
 type ResourceFetchErrorEvent = BaseEvent & {
   readonly event: "resource.fetch.error";
   readonly key: string;
-  readonly cause: string;
+  readonly error: unknown;
+  readonly error_message: string;
 };
 
 type ResourceFetchSetSuccessEvent = BaseEvent & {
@@ -688,6 +686,31 @@ type TraceSpanEndEvent = BaseEvent & {
   readonly error?: string;
 };
 
+/** Router scroll events */
+type RouterScrollTopEvent = BaseEvent & {
+  readonly event: "router.scroll.top";
+};
+
+type RouterScrollRestoreEvent = BaseEvent & {
+  readonly event: "router.scroll.restore";
+  readonly key: string;
+  readonly x: number;
+  readonly y: number;
+};
+
+type RouterScrollSaveEvent = BaseEvent & {
+  readonly event: "router.scroll.save";
+  readonly key: string;
+  readonly x: number;
+  readonly y: number;
+};
+
+/** Router outlet error — processRoute catchAllCause */
+type RouterOutletErrorEvent = BaseEvent & {
+  readonly event: "router.outlet.error";
+  readonly error: string;
+};
+
 /** Unsafe quarantine events — observability for type-boundary crossings */
 type UnsafeMergeLayersEvent = BaseEvent & {
   readonly event: "unsafe.mergeLayers";
@@ -818,6 +841,11 @@ export type DebugEvent =
   | RouterOutletNestedEvent
   | RouterOutletNoRoutesEvent
   | RouterOutletMatchingEvent
+  | RouterOutletErrorEvent
+  // Scroll events
+  | RouterScrollTopEvent
+  | RouterScrollRestoreEvent
+  | RouterScrollSaveEvent
   // Trace events
   | TraceSpanStartEvent
   | TraceSpanEndEvent
@@ -1062,79 +1090,6 @@ export const hasPlugin = (name: string): boolean => {
 
 // --- Environment Detection ---
 
-/**
- * Check if we're in development mode.
- * Uses import.meta.env.DEV (Vite) or process.env.NODE_ENV.
- * Returns false if we can't determine - fail secure.
- */
-const isDevelopment = (): boolean => {
-  // Check Vite's import.meta.env.DEV
-  try {
-    // @ts-expect-error - import.meta.env may not be typed
-    if (typeof import.meta !== "undefined" && import.meta.env?.DEV === true) {
-      return true;
-    }
-  } catch {
-    // import.meta not available
-  }
-
-  // Check Node.js process.env.NODE_ENV
-  try {
-    if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
-      return true;
-    }
-  } catch {
-    // process not available
-  }
-
-  // Default to false (secure by default)
-  return false;
-};
-
-/**
- * Initialize debug state from environment (URL params, localStorage).
- * Called automatically on module load in browser.
- *
- * SECURITY: Only works in development mode. In production, debug must be
- * enabled explicitly via the <DevMode /> component with `enabled` prop.
- */
-export const initFromEnvironment = (): void => {
-  if (typeof window === "undefined") return;
-
-  // SECURITY: Only allow environment-based debug in development
-  if (!isDevelopment()) return;
-
-  // Check URL params first
-  const url = new URL(window.location.href);
-  const urlDebug = url.searchParams.get("effectui_debug");
-
-  if (urlDebug !== null) {
-    // URL param present
-    if (urlDebug === "" || urlDebug === "true") {
-      enable();
-    } else {
-      enable(urlDebug.split(","));
-    }
-    // Persist to localStorage for convenience
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("effectui_debug", urlDebug || "true");
-    }
-    return;
-  }
-
-  // Check localStorage
-  if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem("effectui_debug");
-    if (stored !== null) {
-      if (stored === "true" || stored === "") {
-        enable();
-      } else {
-        enable(stored.split(","));
-      }
-    }
-  }
-};
-
 // --- Logging ---
 
 /**
@@ -1201,8 +1156,13 @@ const formatEvent = (event: DebugEvent): void => {
   const details = formatDetails(event);
   const duration = event.duration_ms !== undefined ? `${event.duration_ms.toFixed(2)}ms` : "";
 
-  const parts = [`%c${category}%c ${subtype}`];
-  const styles: Array<string> = [badgeStyle(colors.bg, colors.fg), subtypeStyle];
+  const parts = [`%ctrygg%c %c${category}%c ${subtype}`];
+  const styles: Array<string> = [
+    badgeStyle("#1e293b", "#94a3b8"),
+    resetStyle,
+    badgeStyle(colors.bg, colors.fg),
+    subtypeStyle,
+  ];
 
   if (details) {
     parts.push(`%c${details}`);
@@ -1479,10 +1439,3 @@ export const serverLayer = (config: TestServerConfig = {}): Layer.Layer<TestServ
       return server;
     }),
   );
-
-// --- Auto-initialize from environment ---
-
-// Only auto-init in browser and only once
-if (typeof window !== "undefined") {
-  initFromEnvironment();
-}

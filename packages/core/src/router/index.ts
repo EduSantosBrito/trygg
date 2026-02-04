@@ -77,6 +77,7 @@ export {
   params,
   isActive,
   link,
+  prefetch,
   browserLayer,
   testLayer,
   currentError,
@@ -115,6 +116,8 @@ export {
   resolveNotFoundBoundary,
   resolveForbiddenBoundary,
   resolveLoadingBoundary,
+  resolveRenderStrategy,
+  resolveScrollStrategy,
   decodeRouteParams,
   decodeRouteQuery,
 } from "./matching.js";
@@ -148,18 +151,11 @@ export type { RoutesCollection, RoutesManifest } from "./routes.js";
 
 // Render Strategy
 export { RenderStrategy, RenderLoadError } from "./render-strategy.js";
-export type { RenderStrategyService } from "./render-strategy.js";
+export type { RenderStrategyType, Eager, Lazy } from "./render-strategy.js";
 
 // Scroll Strategy
-export {
-  ScrollStrategy,
-  saveScrollPosition,
-  restoreScrollPosition,
-  scrollToTop,
-  scrollToHash,
-  applyScrollBehavior,
-} from "./scroll-strategy.js";
-export type { ScrollStrategyService, ScrollLocation } from "./scroll-strategy.js";
+export { ScrollStrategy } from "./scroll-strategy.js";
+export type { ScrollStrategyType, ScrollAuto, ScrollNone } from "./scroll-strategy.js";
 
 // Prefetch
 export { runPrefetch } from "./prefetch.js";

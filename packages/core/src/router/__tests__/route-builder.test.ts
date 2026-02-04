@@ -388,14 +388,7 @@ describe("Route.provide", () => {
 
   it("should store unknown layers in layers array", () => {
     // Use a fresh layer not in the known sets (Layer.effect creates a new instance)
-    const FreshLayer = Layer.effect(
-      RenderStrategy,
-      Effect.succeed({
-        _tag: "RenderStrategy" as const,
-        isEager: false,
-        load: () => Effect.die("fresh"),
-      }),
-    );
+    const FreshLayer = Layer.effect(RenderStrategy, Effect.succeed({ _tag: "Lazy" as const }));
 
     const route = Route.make("/").component(component).pipe(Route.provide(FreshLayer));
 
@@ -404,14 +397,7 @@ describe("Route.provide", () => {
   });
 
   it("should combine strategy layers and other layers", () => {
-    const FreshLayer = Layer.effect(
-      RenderStrategy,
-      Effect.succeed({
-        _tag: "RenderStrategy" as const,
-        isEager: false,
-        load: () => Effect.die("fresh"),
-      }),
-    );
+    const FreshLayer = Layer.effect(RenderStrategy, Effect.succeed({ _tag: "Lazy" as const }));
 
     const route = Route.make("/")
       .component(component)

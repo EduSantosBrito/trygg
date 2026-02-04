@@ -16,7 +16,8 @@
  *   )
  * })
  *
- * mount(document.getElementById("root")!, <Counter />)
+ * const root = document.getElementById("root")
+ * if (root) mount(root, <Counter />)
  * ```
  *
  * ## Key Concepts

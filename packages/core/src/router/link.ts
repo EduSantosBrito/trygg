@@ -31,7 +31,8 @@
  * })
  * ```
  */
-import { Duration, Effect, Fiber, Layer, Context } from "effect";
+import { Duration, Effect, Fiber, FiberRef, Layer, Context } from "effect";
+import * as Signal from "../primitives/signal.js";
 import {
   Element,
   intrinsic,
@@ -44,7 +45,7 @@ import {
 import * as Debug from "../debug/debug.js";
 import { get as getRouter, Router } from "./service.js";
 import { buildPath } from "./utils.js";
-import type { RouteParamsFor, RoutePath } from "./types.js";
+import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
 import { buildPathWithParams } from "./types.js";
 
 // F-001: Prefetch constants from framework research
@@ -62,12 +63,6 @@ const PREFETCH_HOVER_DELAY_MS = 50;
  * @since 1.0.0
  */
 export type PrefetchStrategy = "intent" | "viewport" | "render" | false;
-
-/**
- * Check if a type has any keys
- * @internal
- */
-type HasKeys<T> = keyof T extends never ? false : true;
 
 /**
  * Base link props without params
@@ -181,6 +176,11 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
 
       const router = yield* getRouter;
 
+      // Capture component scope — ties prefetch fibers to component lifecycle.
+      // Always set inside a component render. If somehow null (should not happen),
+      // prefetch handlers become no-ops via the guard below.
+      const prefetchScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+
       // F-001: Prefetch state and handlers
       let prefetchTriggered = false;
       let hoverFiber: Fiber.RuntimeFiber<void> | null = null;
@@ -192,15 +192,22 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         yield* router.prefetch(resolvedPath);
       });
 
-      // Mouse enter handler - 50ms debounce via forked fiber
+      // Mouse enter handler — 50ms debounce via scoped fiber.
+      // Uses forkIn(componentScope) so the fiber is tied to the component
+      // lifecycle: auto-interrupted on unmount, no floating fibers.
       const handleMouseEnter =
-        prefetch === "intent"
+        prefetch === "intent" && prefetchScope !== null
           ? Effect.fnUntraced(function* () {
               if (prefetchTriggered) return;
-              const fiber = yield* Effect.fork(
+              // Cancel pending hover fiber before starting a new one
+              if (hoverFiber !== null) {
+                yield* Fiber.interrupt(hoverFiber);
+              }
+              const fiber = yield* Effect.forkIn(
                 Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
                   Effect.flatMap(() => triggerPrefetch),
                 ),
+                prefetchScope,
               );
               hoverFiber = fiber;
             })
@@ -274,8 +281,8 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         // F-001: Viewport prefetch uses data attributes + global observer
         ...(prefetch === "viewport"
           ? {
-              "data-effectui-prefetch": "viewport",
-              "data-effectui-prefetch-path": resolvedPath,
+              "data-trygg-prefetch": "viewport",
+              "data-trygg-prefetch-path": resolvedPath,
             }
           : {}),
       };
