@@ -11,15 +11,16 @@
  * - Cleanup on navigation (different match results)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, FiberRef, Option, Scope } from "effect";
+import { Cause, Effect, Exit, FiberRef, Option, Scope } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
+import { OutletRenderer } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
 import { componentElement, text } from "../../primitives/element.js";
 import type { Element, ElementKey } from "../../primitives/element.js";
-import type { RouteComponent } from "../types.js";
+import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
 import type { Layer, Context } from "effect";
 
@@ -726,5 +727,56 @@ describe("Outlet - Implicit Manifest", () => {
         assert.strictEqual(result.content, "No routes configured");
       }
     }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+});
+
+// =============================================================================
+// InvalidRouteComponent error
+// =============================================================================
+
+describe("OutletRenderer - InvalidRouteComponent", () => {
+  it.effect("renderComponent fails with InvalidRouteComponent on invalid input", () =>
+    Effect.gen(function* () {
+      const renderer = yield* OutletRenderer;
+      const exit = yield* renderer.renderComponent("not-a-component" as any, {}).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.failureOption(exit.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) {
+          assert.strictEqual((error.value as InvalidRouteComponent)._tag, "InvalidRouteComponent");
+        }
+      }
+    }).pipe(Effect.provide(OutletRenderer.Live)),
+  );
+
+  it.effect("renderLayout fails with InvalidRouteComponent on invalid input", () =>
+    Effect.gen(function* () {
+      const renderer = yield* OutletRenderer;
+      const exit = yield* renderer.renderLayout(42 as any, text("child"), {}).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.failureOption(exit.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) {
+          assert.strictEqual((error.value as InvalidRouteComponent)._tag, "InvalidRouteComponent");
+        }
+      }
+    }).pipe(Effect.provide(OutletRenderer.Live)),
+  );
+
+  it.effect("renderError fails with InvalidRouteComponent on invalid input", () =>
+    Effect.gen(function* () {
+      const renderer = yield* OutletRenderer;
+      const exit = yield* renderer.renderError(null as any, Cause.empty, "/test").pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.failureOption(exit.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) {
+          assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+        }
+      }
+    }).pipe(Effect.provide(OutletRenderer.Live)),
   );
 });

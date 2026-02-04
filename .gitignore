@@ -39,4 +39,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 effect/
 .trygg/
 .overseer/
+.opencode/skills/
 specs

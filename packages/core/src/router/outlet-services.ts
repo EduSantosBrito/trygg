@@ -23,7 +23,12 @@ import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
 import type { RoutesManifest } from "./routes.js";
-import type { RouteComponent, RouteErrorInfo, RouteParams } from "./types.js";
+import {
+  InvalidRouteComponent,
+  type RouteComponent,
+  type RouteErrorInfo,
+  type RouteParams,
+} from "./types.js";
 import type { ResolvedRoute } from "./matching.js";
 import {
   resolveErrorBoundary,
@@ -78,7 +83,7 @@ export interface OutletRendererShape {
     errorComp: RouteComponent,
     cause: Cause.Cause<unknown>,
     path: string,
-  ) => Effect.Effect<Element, never, never>;
+  ) => Effect.Effect<Element, InvalidRouteComponent, never>;
 }
 
 /**
@@ -303,7 +308,7 @@ function renderComponent(
   }
 
   // Should never reach here if RouteComponent type is correct
-  return Effect.die(new Error("Invalid RouteComponent: expected Component or Effect<Element>"));
+  return new InvalidRouteComponent({ actual: component });
 }
 
 /**
@@ -354,7 +359,7 @@ function renderLayout(
   }
 
   // Should never reach here if RouteComponent type is correct
-  return Effect.die(new Error("Invalid RouteComponent: expected Component or Effect<Element>"));
+  return new InvalidRouteComponent({ actual: layout });
 }
 
 /**
@@ -365,7 +370,7 @@ function renderError(
   errorComp: RouteComponent,
   cause: Cause.Cause<unknown>,
   path: string,
-): Effect.Effect<Element, never, never> {
+): Effect.Effect<Element, InvalidRouteComponent, never> {
   return Effect.gen(function* () {
     yield* Metrics.recordRouteError;
 
@@ -397,8 +402,6 @@ function renderError(
     }
 
     // Should never reach here if RouteComponent type is correct
-    return yield* Effect.die(
-      new Error("Invalid RouteComponent: expected Component or Effect<Element>"),
-    );
+    return yield* new InvalidRouteComponent({ actual: errorComp });
   });
 }
