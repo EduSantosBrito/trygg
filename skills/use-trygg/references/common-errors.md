@@ -6,12 +6,11 @@
 |-------|--------|-------|
 | `InvalidComponentError` | component | Plain function or raw Effect used as JSX component |
 | `ComponentGenError` | component | `Component.gen` called with non-generator argument |
-| `MissingServiceError` | component | Component rendered without required service layer |
+
 | `SignalInitError` | signal | `Signal.each` used before main `trygg` module imported |
 | `PortalTargetNotFoundError` | portal | Portal target selector doesn't match any element |
 | `ElementNotFoundError` | testing | Query method couldn't find matching element |
 | `WaitForTimeoutError` | testing | `waitFor` assertion didn't pass within timeout |
-| `BuilderError` | error-boundary | Duplicate handler, catchAll called twice, or on() after catchAll |
 | `UnsafeUrlError` | security | URL with blocked scheme (e.g. `javascript:`) |
 
 ---
@@ -49,27 +48,6 @@ const Good = Component.gen(function* () {
 })
 ```
 
-### `MissingServiceError`
-
-**Cause:** Component `yield*`s a service tag but no ancestor calls `.provide(layer)` for it
-**Solution:** Provide the layer on a parent; top-level component must have `R = never`
-
-```tsx
-// WRONG: unresolved R at mount
-const App = Component.gen(function* () {
-  const theme = yield* Theme  // R = Theme, not satisfied!
-  return <div>{theme.name}</div>
-})
-mount(root, <App />)
-
-// CORRECT: provide before mount
-const App = Component.gen(function* () {
-  const theme = yield* Theme
-  return <div>{theme.name}</div>
-}).provide(themeLayer)  // R = never
-mount(root, <App />)
-```
-
 ### `SignalInitError` — "Signal.each is not initialized"
 
 **Cause:** Importing from internal signal module instead of `trygg`
@@ -101,11 +79,6 @@ import { Signal } from "trygg"
 **Solution:** Check that state updates are firing; increase timeout if async operation is slow
 
 > Note: `WaitForTimeoutError` is a plain Error subclass with a manual `_tag` field, not a `Data.TaggedError`. It works with try/catch but cannot be yielded directly.
-
-### `BuilderError`
-
-**Cause:** Invalid `ErrorBoundary` builder state — `.on()` after `.catchAll()`, duplicate tag handlers, or calling `.catchAll()` twice
-**Solution:** Finalize with either `.catchAll(fn)` or `.exhaustive()`, don't mix
 
 ### `UnsafeUrlError`
 
@@ -228,7 +201,7 @@ export default defineConfig({ plugins: [trygg()] })
 - `ErrorBoundary.catch(Component)` returns an Effect — must `yield*` it
 - `.on("Tag", Handler)` matches `Data.TaggedError` `_tag` field
 - Use `.catchAll(fn)` or `.exhaustive()` to finalize the builder
-- Cannot call `.on()` after `.catchAll()` (yields `BuilderError`)
+- Builder is immutable — each `.on()`, `.catchAll()`, `.exhaustive()` creates independent state
 
 ---
 

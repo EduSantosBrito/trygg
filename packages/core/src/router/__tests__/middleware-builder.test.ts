@@ -17,7 +17,7 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<import("effect").Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<import("effect").Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;

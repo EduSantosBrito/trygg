@@ -54,21 +54,6 @@ export class ComponentGenError extends Data.TaggedError("ComponentGenError")<{
   readonly message: string;
 }> {}
 
-/**
- * Error raised when a component is rendered without required services.
- * @since 1.0.0
- */
-export class MissingServiceError extends Data.TaggedError("MissingServiceError")<{
-  readonly componentName: string;
-  readonly missingServices: ReadonlyArray<string>;
-  readonly example: string;
-}> {
-  override get message(): string {
-    const services = this.missingServices.join(", ");
-    return `Component "${this.componentName}" requires the following services: [${services}]\n${this.example}`;
-  }
-}
-
 // =============================================================================
 // Type Utilities
 // =============================================================================
@@ -121,7 +106,6 @@ const deduplicateLayers = (
 export const tagComponent = <Props, E, R>(
   fn: (props: any) => Element,
   layers: ReadonlyArray<Layer.Layer.Any> = [],
-  requirements: ReadonlyArray<Context.Tag<any, any>> = [],
   runFn?: (props: any) => Effect.Effect<Element, E, unknown>,
   displayName?: string,
 ): Component.Type<Props, E, R> => {
@@ -157,13 +141,12 @@ export const tagComponent = <Props, E, R>(
     };
 
     // Tag the new component with merged layers and preserve the runFn and displayName
-    return tagComponent(newComponent, mergedLayers, requirements, runFn, displayName);
+    return tagComponent(newComponent, mergedLayers, runFn, displayName);
   };
 
   return unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
     _tag: effectComponentTag,
     _layers: layers,
-    _requirements: requirements,
     _runFn: runFn,
     _displayName: displayName,
     provide,
@@ -217,7 +200,6 @@ export interface ComponentInternal {
   readonly _tag: "EffectComponent";
   readonly _layers: ReadonlyArray<Layer.Layer.Any>;
   readonly _baseFn: (props: unknown) => Element;
-  readonly _requirements: ReadonlyArray<Context.Tag<any, any>>;
 }
 
 /**
@@ -229,7 +211,6 @@ export declare namespace Component {
   export interface Type<Props = never, _E = never, _R = never> {
     readonly _tag: "EffectComponent";
     readonly _layers: ReadonlyArray<Layer.Layer.Any>;
-    readonly _requirements: ReadonlyArray<Context.Tag<any, any>>;
     readonly _runFn?: (props: any) => Effect.Effect<Element, unknown, unknown>;
     readonly _displayName?: string;
     (props: [Props] extends [never] ? {} : Props): ComponentElementWithRequirements<_R>;
@@ -329,7 +310,7 @@ function genNoProps<
 
   const componentFn = (_props: {}): Element => componentElement(runFn);
 
-  return tagComponent(componentFn, [], [], runFn);
+  return tagComponent(componentFn, [], runFn);
 }
 
 /**
@@ -360,7 +341,7 @@ function genWithProps<P extends object>(): <
 
     const componentFn = (props: P): Element => componentElement(() => runFn(props));
 
-    return tagComponent(componentFn, [], [], runFn);
+    return tagComponent(componentFn, [], runFn);
   };
 }
 

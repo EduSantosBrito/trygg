@@ -184,14 +184,6 @@ describe("Component Type", () => {
     assert.isArray(MyComponent._layers);
     assert.strictEqual(MyComponent._layers.length, 0);
   });
-
-  it("should have _requirements array", () => {
-    const MyComponent = Component.gen(function* () {
-      return <div>Test</div>;
-    });
-
-    assert.isArray(MyComponent._requirements);
-  });
 });
 
 // =============================================================================
@@ -570,13 +562,14 @@ describe("Immutability", () => {
       });
 
       // Provide ServiceA via .provide; ServiceB via outer layer
-      const VariantA = BaseComponent.provide(
-        Layer.succeed(ServiceA, { value: "A" }),
-      ).provide(Layer.succeed(ServiceB, { value: "B" }));
+      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" })).provide(
+        Layer.succeed(ServiceB, { value: "B" }),
+      );
 
       const { getByTestId: getA } = yield* render(<VariantA />);
       assert.strictEqual((yield* getA("combined")).textContent, "A-B");
-    }));
+    }),
+  );
 
   it.scoped("should fail when partial provision leaves unsatisfied services", () =>
     Effect.gen(function* () {
@@ -598,7 +591,8 @@ describe("Immutability", () => {
 
       const result = yield* Effect.either(render(<VariantA />).pipe(Effect.sandbox));
       assert.strictEqual(result._tag, "Left");
-    }));
+    }),
+  );
 
   it("should create distinct objects on chaining", () => {
     const Step1 = Component.gen(function* () {
