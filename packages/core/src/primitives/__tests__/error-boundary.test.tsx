@@ -16,7 +16,7 @@
  * - Verify handler requirements are propagated
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Option } from "effect";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -55,7 +55,7 @@ describe("ErrorBoundary .provide() preservation", () => {
       const { getByText, queryByText } = yield* render(element);
 
       assert.isDefined(yield* getByText("fallback"));
-      assert.isNull(queryByText("should not render"));
+      assert.isTrue(Option.isNone(yield* queryByText("should not render")));
     }),
   );
 
@@ -181,7 +181,7 @@ describe("ErrorBoundary basic functionality", () => {
       const { getByText, queryByText } = yield* render(<SafeComponent />);
 
       assert.isDefined(yield* getByText("network-error"));
-      assert.isNull(queryByText("generic-error"));
+      assert.isTrue(Option.isNone(yield* queryByText("generic-error")));
     }),
   );
 

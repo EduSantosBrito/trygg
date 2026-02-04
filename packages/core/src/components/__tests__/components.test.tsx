@@ -9,7 +9,7 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, TestClock } from "effect";
+import { Cause, Data, Effect, Option, TestClock } from "effect";
 import * as Signal from "../../primitives/signal.js";
 import * as ErrorBoundary from "../../primitives/error-boundary.js";
 import { DevMode } from "../dev-mode.js";
@@ -145,7 +145,7 @@ describe("ErrorBoundary", () => {
 
       // Inner boundary should catch, outer should not be triggered
       assert.isDefined(yield* getByText("Inner fallback"));
-      assert.isNull(queryByText("Outer fallback"));
+      assert.isTrue(Option.isNone(yield* queryByText("Outer fallback")));
     }),
   );
 
@@ -171,7 +171,7 @@ describe("ErrorBoundary", () => {
 
       // Initial render should show child
       assert.isDefined(yield* getByTestId("child"));
-      assert.isNull(queryByTestId("fallback"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("fallback")));
 
       // Trigger re-render that throws
       yield* Signal.set(shouldThrow, true);
@@ -179,7 +179,7 @@ describe("ErrorBoundary", () => {
 
       // Should show fallback, child should be gone
       assert.isDefined(yield* getByTestId("fallback"));
-      assert.isNull(queryByTestId("child"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("child")));
     }),
   );
 
@@ -205,13 +205,13 @@ describe("ErrorBoundary", () => {
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent mode={mode} />);
 
       assert.isDefined(yield* getByTestId("ok"));
-      assert.isNull(queryByTestId("fallback"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("fallback")));
 
       yield* Signal.set(mode, "error");
       yield* TestClock.adjust(20);
 
       assert.isDefined(yield* getByTestId("fallback"));
-      assert.isNull(queryByTestId("ok"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("ok")));
     }),
   );
 
@@ -251,7 +251,7 @@ describe("ErrorBoundary", () => {
 
       // Initial render
       assert.isDefined(yield* getByTestId("content"));
-      assert.isNull(queryByTestId("fallback"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("fallback")));
 
       // Trigger error via signal change - component will re-render and throw
       yield* Signal.set(contentSignal, "error");
@@ -259,7 +259,7 @@ describe("ErrorBoundary", () => {
 
       // Should catch error and show fallback
       assert.isDefined(yield* getByTestId("fallback"));
-      assert.isNull(queryByTestId("content"));
+      assert.isTrue(Option.isNone(yield* queryByTestId("content")));
     }),
   );
 

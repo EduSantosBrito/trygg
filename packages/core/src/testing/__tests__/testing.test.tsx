@@ -3,7 +3,7 @@
  * @module
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Scope, TestClock } from "effect";
+import { Effect, Exit, Fiber, Option, Scope, TestClock } from "effect";
 import {
   click,
   ElementNotFoundError,
@@ -292,18 +292,20 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.queryByText("Found");
-        assert.isNotNull(found);
-        assert.strictEqual(found?.tagName, "SPAN");
+        const found = yield* result.queryByText("Found");
+        assert.isTrue(Option.isSome(found));
+        if (Option.isSome(found)) {
+          assert.strictEqual(found.value.tagName, "SPAN");
+        }
       }),
     );
 
-    it.scoped("should return null when text not found", () =>
+    it.scoped("should return Option.none when text not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Existing</div>);
 
-        const found = result.queryByText("Missing");
-        assert.isNull(found);
+        const found = yield* result.queryByText("Missing");
+        assert.isTrue(Option.isNone(found));
       }),
     );
   });
@@ -366,18 +368,20 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.queryByTestId("target");
-        assert.isNotNull(found);
-        assert.strictEqual(found?.tagName, "SPAN");
+        const found = yield* result.queryByTestId("target");
+        assert.isTrue(Option.isSome(found));
+        if (Option.isSome(found)) {
+          assert.strictEqual(found.value.tagName, "SPAN");
+        }
       }),
     );
 
-    it.scoped("should return null when testid not found", () =>
+    it.scoped("should return Option.none when testid not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No testid</div>);
 
-        const found = result.queryByTestId("missing");
-        assert.isNull(found);
+        const found = yield* result.queryByTestId("missing");
+        assert.isTrue(Option.isNone(found));
       }),
     );
   });
@@ -538,18 +542,20 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.queryByRole("button");
-        assert.isNotNull(found);
-        assert.strictEqual(found?.tagName, "BUTTON");
+        const found = yield* result.queryByRole("button");
+        assert.isTrue(Option.isSome(found));
+        if (Option.isSome(found)) {
+          assert.strictEqual(found.value.tagName, "BUTTON");
+        }
       }),
     );
 
-    it.scoped("should return null when role not found", () =>
+    it.scoped("should return Option.none when role not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No role</div>);
 
-        const found = result.queryByRole("button");
-        assert.isNull(found);
+        const found = yield* result.queryByRole("button");
+        assert.isTrue(Option.isNone(found));
       }),
     );
   });
@@ -649,7 +655,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelectorAll(".item");
+        const found = yield* result.querySelectorAll(".item");
         assert.strictEqual(found.length, 3);
         assert.strictEqual(found[0]?.textContent, "1");
         assert.strictEqual(found[1]?.textContent, "2");
@@ -661,7 +667,7 @@ describe("Testing Utilities", () => {
       Effect.gen(function* () {
         const result = yield* render(<div>Content</div>);
 
-        const found = result.querySelectorAll(".missing");
+        const found = yield* result.querySelectorAll(".missing");
         assert.strictEqual(found.length, 0);
       }),
     );
@@ -674,7 +680,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const found = result.querySelectorAll("span");
+        const found = yield* result.querySelectorAll("span");
         assert.isArray(found);
       }),
     );
@@ -685,20 +691,20 @@ describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe("ElementNotFoundError", () => {
     it("should include query type and value in message", () => {
-      const error = new ElementNotFoundError("text", "Hello World");
+      const error = new ElementNotFoundError({ queryType: "text", query: "Hello World" });
 
       assert.include(error.message, "text");
       assert.include(error.message, "Hello World");
     });
 
     it("should have _tag property for pattern matching", () => {
-      const error = new ElementNotFoundError("testId", "my-button");
+      const error = new ElementNotFoundError({ queryType: "testId", query: "my-button" });
 
       assert.strictEqual(error._tag, "ElementNotFoundError");
     });
 
     it("should have correct error name", () => {
-      const error = new ElementNotFoundError("role", "button");
+      const error = new ElementNotFoundError({ queryType: "role", query: "button" });
 
       assert.strictEqual(error.name, "ElementNotFoundError");
     });
@@ -1067,26 +1073,26 @@ describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe("WaitForTimeoutError", () => {
     it("should include timeout duration in message", () => {
-      const error = new WaitForTimeoutError(1000, new Error("last"));
+      const error = new WaitForTimeoutError({ timeout: 1000, lastError: new Error("last") });
 
       assert.include(error.message, "1000ms");
     });
 
     it("should have _tag property for pattern matching", () => {
-      const error = new WaitForTimeoutError(500, new Error("test"));
+      const error = new WaitForTimeoutError({ timeout: 500, lastError: new Error("test") });
 
       assert.strictEqual(error._tag, "WaitForTimeoutError");
     });
 
     it("should store lastError property", () => {
       const lastError = new Error("test error");
-      const error = new WaitForTimeoutError(500, lastError);
+      const error = new WaitForTimeoutError({ timeout: 500, lastError });
 
       assert.strictEqual(error.lastError, lastError);
     });
 
     it("should store timeout property", () => {
-      const error = new WaitForTimeoutError(750, new Error("test"));
+      const error = new WaitForTimeoutError({ timeout: 750, lastError: new Error("test") });
 
       assert.strictEqual(error.timeout, 750);
     });
