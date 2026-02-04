@@ -434,11 +434,16 @@ const isRenderStrategyLayer = (layer: Layer.Layer.Any): layer is Layer.Layer<Ren
 const isScrollStrategyLayer = (layer: Layer.Layer.Any): layer is Layer.Layer<ScrollStrategy> =>
   KNOWN_SCROLL_STRATEGIES.has(layer);
 
+/** @internal Distributive helper to extract layer's provided services */
+type LayerSuccess<L> = L extends Layer.Layer<infer A, infer _E, infer _R> ? A : never;
+/** @internal Distributive helper to extract layer's requirements */
+type LayerContext<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : never;
+
 /**
  * Apply Layers to a route. Detects layer type and stores appropriately:
  * - `RenderStrategy` layer -> stored as render strategy
  * - `ScrollStrategy` layer -> stored as scroll strategy
- * - Other layers -> stored for middleware R requirements
+ * - Other layers -> stored for middleware R requirements (narrows R type)
  *
  * Used with `.pipe()`:
  * ```tsx
@@ -454,14 +459,42 @@ const isScrollStrategyLayer = (layer: Layer.Layer.Any): layer is Layer.Layer<Scr
  *
  * @since 1.0.0
  */
-export const provide = (
-  ...layers: ReadonlyArray<Layer.Layer.Any>
-): (<Path extends string, R, HC extends boolean, HCh extends boolean>(
+export function provide<ROut, E2 = never, RIn = never>(
+  layer: Layer.Layer<ROut, E2, RIn>,
+): <Path extends string, R, HC extends boolean, HCh extends boolean>(
   builder: RouteBuilder<Path, R, HC, HCh>,
-) => RouteBuilder<Path, R, HC, HCh>) => {
+) => RouteBuilder<Path, RIn | Exclude<R, ROut>, HC, HCh>;
+
+/**
+ * Apply multiple Layers to a route.
+ * @since 1.0.0
+ */
+export function provide<
+  L1 extends Layer.Layer.Any,
+  L2 extends Layer.Layer.Any,
+  Rest extends Layer.Layer.Any[],
+>(
+  layer1: L1,
+  layer2: L2,
+  ...rest: Rest
+): <Path extends string, R, HC extends boolean, HCh extends boolean>(
+  builder: RouteBuilder<Path, R, HC, HCh>,
+) => RouteBuilder<
+  Path,
+  | LayerContext<L1 | L2 | Rest[number]>
+  | Exclude<R, LayerSuccess<L1 | L2 | Rest[number]>>,
+  HC,
+  HCh
+>;
+
+export function provide(
+  ...layers: ReadonlyArray<Layer.Layer.Any>
+): <Path extends string, R, HC extends boolean, HCh extends boolean>(
+  builder: RouteBuilder<Path, R, HC, HCh>,
+) => RouteBuilder<Path, unknown, HC, HCh> {
   return <Path extends string, R, HC extends boolean, HCh extends boolean>(
     builder: RouteBuilder<Path, R, HC, HCh>,
-  ): RouteBuilder<Path, R, HC, HCh> => {
+  ): RouteBuilder<Path, unknown, HC, HCh> => {
     let renderStrategy: Layer.Layer<RenderStrategy> | undefined = builder.definition.renderStrategy;
     let scrollStrategy: Layer.Layer<ScrollStrategy> | undefined = builder.definition.scrollStrategy;
     const otherLayers: Array<Layer.Layer.Any> = [...builder.definition.layers];
@@ -476,14 +509,14 @@ export const provide = (
       }
     }
 
-    return makeBuilder<Path, R, HC, HCh>({
+    return makeBuilder<Path, unknown, HC, HCh>({
       ...builder.definition,
       renderStrategy,
       scrollStrategy,
       layers: otherLayers,
     });
   };
-};
+}
 
 // =============================================================================
 // Schema Decode at Match Time
