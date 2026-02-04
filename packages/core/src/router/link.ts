@@ -301,7 +301,6 @@ interface LinkComponent {
   <Path extends RoutePath>(props: LinkProps<Path>): Element;
   readonly _tag: "EffectComponent";
   readonly _layers: ReadonlyArray<Layer.Layer.Any>;
-  readonly _requirements: ReadonlyArray<Context.Tag<any, any>>;
   readonly _displayName: "Link";
   provide<RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent;
 }
@@ -312,7 +311,6 @@ const linkComponent: LinkComponent = Object.assign(
   {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [Router] as ReadonlyArray<Context.Tag<any, any>>,
     _displayName: "Link" as const,
     provide: <RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent => {
       const wrappedLink: LinkComponent = Object.assign(
@@ -331,7 +329,6 @@ const linkComponent: LinkComponent = Object.assign(
         {
           _tag: "EffectComponent" as const,
           _layers: [layer] as ReadonlyArray<Layer.Layer.Any>,
-          _requirements: [Router] as ReadonlyArray<Context.Tag<any, any>>,
           _displayName: "Link" as const,
           provide: linkComponent.provide,
         },

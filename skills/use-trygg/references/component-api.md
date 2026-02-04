@@ -249,4 +249,4 @@ const variant = yield* Signal.make("primary")
 
 - [signals-api.md](signals-api.md) — Signal.make, derive, each, subscribe (used in component bodies)
 - [effect-patterns.md](effect-patterns.md) — Event handlers, services/layers, testing, routing
-- [common-errors.md](common-errors.md) — MissingServiceError, InvalidComponentError, troubleshooting
+- [common-errors.md](common-errors.md) — InvalidComponentError, BuilderError, troubleshooting

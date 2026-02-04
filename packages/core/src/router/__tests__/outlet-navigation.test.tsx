@@ -30,7 +30,6 @@ import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Context } from "effect";
 
 // =============================================================================
 // Helpers
@@ -52,7 +51,7 @@ const identifiableComp = (testId: string, content: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;
@@ -74,7 +73,7 @@ const loadingComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;

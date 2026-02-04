@@ -22,7 +22,7 @@ import { componentElement, text } from "../../primitives/element.js";
 import type { Element, ElementKey } from "../../primitives/element.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer, Context } from "effect";
+import type { Layer } from "effect";
 
 // =============================================================================
 // Helper: Create RouteComponent
@@ -34,7 +34,7 @@ const textComp = (content: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;
@@ -56,7 +56,7 @@ const layoutComp = (_name: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;

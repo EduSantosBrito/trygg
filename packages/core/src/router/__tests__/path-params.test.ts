@@ -9,7 +9,7 @@ import { createMatcher } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer, Context } from "effect";
+import type { Layer } from "effect";
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
@@ -17,7 +17,7 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<Layer.Layer.Any>,
-    _requirements: [] as ReadonlyArray<Context.Tag<any, any>>,
+
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
   return comp as RouteComponent;
