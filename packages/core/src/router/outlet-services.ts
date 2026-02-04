@@ -35,6 +35,21 @@ import { CurrentRouteParams, CurrentRouteError, CurrentOutletChild } from "./ser
 import { CurrentRouteQuery } from "./route.js";
 
 /**
+ * Extract only string-valued entries from a decoded params object.
+ * Route params are always strings (URL path segments).
+ * @internal
+ */
+const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(decoded)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    }
+  }
+  return result;
+};
+
+/**
  * Type guard to check if a RouteComponent is an Effect<Element>.
  * Used to narrow the union type after checking !Component.isEffectComponent().
  * @internal
@@ -256,7 +271,7 @@ function renderComponent(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, unknown, never> {
-  const params = decodedParams as unknown as RouteParams;
+  const params = toRouteParams(decodedParams);
 
   // RouteComponent can be Component.Type or Effect<Element>
   if (Component.isEffectComponent(component)) {
@@ -301,7 +316,7 @@ function renderLayout(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, unknown, never> {
-  const params = decodedParams as unknown as RouteParams;
+  const params = toRouteParams(decodedParams);
 
   // RouteComponent can be Component.Type or Effect<Element>
   if (Component.isEffectComponent(layout)) {

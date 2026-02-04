@@ -6,8 +6,6 @@
  * information for better error messages and stack traces.
  */
 import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
-import type { ComponentElementWithRequirements } from "./primitives/element.js";
-import type { Component as ComponentType } from "./primitives/component.js";
 
 export { jsx, Fragment, Element };
 export type { JSXProps, JSXElementType, ElementProps, ElementKey } from "./jsx-runtime.js";
@@ -31,11 +29,6 @@ interface JSXSource {
  *
  * @since 1.0.0
  */
-type ElementFor<Type> =
-  Type extends ComponentType.Type<any, any, infer R>
-    ? ComponentElementWithRequirements<R>
-    : Element;
-
 export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
   type: Type,
   props: Props | null,
@@ -43,10 +36,10 @@ export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXEl
   _isStaticChildren?: boolean,
   _source?: JSXSource,
   _self?: unknown,
-): ElementFor<Type> => {
+): ReturnType<typeof jsx<Props, Type>> => {
   // For now, just delegate to the production jsx
   // In the future, we could store source info for better error messages
-  return jsx(type, props, key) as ElementFor<Type>;
+  return jsx(type, props, key);
 };
 
 // Also export jsxs for dev mode (same as jsxDEV)

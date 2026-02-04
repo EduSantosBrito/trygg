@@ -53,6 +53,13 @@ import {
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import * as Debug from "../debug/debug.js";
+import {
+  unsafeEntrySignal,
+  unsafeAsParams,
+  unsafeAsError,
+  unsafeCallNoArgs,
+  unsafeNarrowContext,
+} from "../internal/unsafe.js";
 
 // =============================================================================
 // ResourceState - Tagged enum for resource fetch states
@@ -204,17 +211,21 @@ export function make<P extends object, A, E, R>(
 ): Resource<A, E, R> | ((params: P) => Resource<A, E, R>) {
   if (typeof options.key === "function") {
     const keyFn = options.key;
-    const factoryFn = factory as (params: P) => Effect.Effect<A, E, R>;
+    // When key is a function, factory accepts params (overload correlation).
+    // Cast the function type — TypeScript can't infer union correlation.
+    const factoryFn: (params: P) => Effect.Effect<A, E, R> = factory;
     return (params: P): Resource<A, E, R> => ({
       _tag: "Resource",
       key: keyFn(params),
       fetch: factoryFn(params),
     });
   }
+  // When key is a string, factory takes no params (overload correlation).
+  // TypeScript can't narrow correlated unions.
   return {
     _tag: "Resource",
     key: options.key,
-    fetch: (factory as () => Effect.Effect<A, E, R>)(),
+    fetch: unsafeCallNoArgs<Effect.Effect<A, E, R>>(factory),
   };
 }
 
@@ -304,7 +315,8 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
               event: "resource.registry.get_existing",
               key,
             });
-            return [existing, map] as const;
+            const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [existing, map];
+            return result;
           }
 
           yield* Debug.log({
@@ -326,7 +338,8 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
           const newMap = new Map(map);
           newMap.set(key, entry);
 
-          return [entry, newMap] as const;
+          const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [entry, newMap];
+          return result;
         }),
       );
 
@@ -338,7 +351,7 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
       });
 
     return {
-      _tag: "ResourceRegistry" as const,
+      _tag: "ResourceRegistry" satisfies ResourceRegistry["_tag"],
       get,
       getOrCreate,
       delete: deleteEntry,
@@ -362,7 +375,7 @@ const fetchInternal = <A, E, R>(
   ctx: Context.Context<R>,
 ): Effect.Effect<Fiber.RuntimeFiber<void, never>> =>
   Effect.gen(function* () {
-    const state = entry.state as Signal.Signal<ResourceState<A, E>>;
+    const state = unsafeEntrySignal<A, E>(entry.state);
 
     yield* Debug.log({
       event: "resource.fetch.start",
@@ -421,7 +434,7 @@ const fetchInternal = <A, E, R>(
             });
             const prev = yield* Signal.get(state);
             const staleValue = prev._tag === "Success" ? Option.some(prev.value) : Option.none();
-            yield* Signal.set(state, Failure<A, E>(error as E, staleValue));
+            yield* Signal.set(state, Failure<A, E>(unsafeAsError<E>(error), staleValue));
           }),
       }),
       Effect.catchAllCause((cause) =>
@@ -490,7 +503,6 @@ export const fetch: {
     never,
     ResourceRegistryTag | R | Scope.Scope
   >;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = (resourceOrFactory: any, params?: any): any => {
   if (typeof resourceOrFactory === "function") {
     if (params === undefined) {
@@ -517,7 +529,7 @@ const fetchStatic = <A, E, R>(
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
-    const state = entry.state as Signal.Signal<ResourceState<A, E>>;
+    const state = unsafeEntrySignal<A, E>(entry.state);
 
     const currentInFlight = yield* Ref.get(entry.inFlight);
 
@@ -577,15 +589,14 @@ const fetchReactive = <P extends object, A, E, R>(
       Effect.locally(
         Effect.gen(function* () {
           const result: Record<string, unknown> = {};
-          for (const key of Object.keys(reactiveParams)) {
-            const value = (reactiveParams as Record<string, unknown>)[key];
+          for (const [key, value] of Object.entries(reactiveParams)) {
             if (Signal.isSignal(value)) {
               result[key] = yield* Signal.get(value);
             } else {
               result[key] = value;
             }
           }
-          return result as unknown as P;
+          return unsafeAsParams<P>(result);
         }),
         Signal.CurrentRenderPhase,
         null,
@@ -593,7 +604,7 @@ const fetchReactive = <P extends object, A, E, R>(
 
     // Collect signal fields for subscription
     const signalFields: Array<Signal.Signal<unknown>> = [];
-    for (const value of Object.values(reactiveParams as Record<string, unknown>)) {
+    for (const value of Object.values(reactiveParams)) {
       if (Signal.isSignal(value)) {
         signalFields.push(value);
       }
@@ -632,7 +643,7 @@ const fetchReactive = <P extends object, A, E, R>(
         const daemon = yield* Effect.gen(function* () {
           const registry = yield* ResourceRegistryTag;
           const entry = yield* registry.getOrCreate(resource.key);
-          const entryState = entry.state as Signal.Signal<ResourceState<A, E>>;
+          const entryState = unsafeEntrySignal<A, E>(entry.state);
 
           // Check if already cached
           const cached = yield* Signal.get(entryState);
@@ -645,7 +656,11 @@ const fetchReactive = <P extends object, A, E, R>(
               yield* Deferred.await(currentInFlight.value);
             } else {
               // Start fetch and wait for completion
-              const fiber = yield* fetchInternal(resource, entry, ctx as Context.Context<R>);
+              const fiber = yield* fetchInternal(
+                resource,
+                entry,
+                unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+              );
               yield* Fiber.join(fiber);
             }
             // Sync resolved state to output
@@ -781,7 +796,7 @@ export const invalidate = <A, E, R>(
     if (Option.isNone(maybeEntry)) return; // Nothing to invalidate
 
     const entry = maybeEntry.value;
-    const state = entry.state as Signal.Signal<ResourceState<A, E>>;
+    const state = unsafeEntrySignal<A, E>(entry.state);
     const currentInFlight = yield* Ref.get(entry.inFlight);
 
     // Dedupe: if already fetching, no-op
@@ -821,7 +836,7 @@ export const refresh = <A, E, R>(
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
-    const state = entry.state as Signal.Signal<ResourceState<A, E>>;
+    const state = unsafeEntrySignal<A, E>(entry.state);
 
     const currentInFlight = yield* Ref.get(entry.inFlight);
 

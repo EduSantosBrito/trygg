@@ -1480,7 +1480,6 @@ const renderElement = (
               // Log any errors during fallback rendering
               Effect.tapErrorCause((fallbackCause) =>
                 Effect.sync(() => {
-                  // eslint-disable-next-line no-console
                   console.error(
                     "[trygg] ErrorBoundary fallback rendering failed:",
                     Cause.pretty(fallbackCause),

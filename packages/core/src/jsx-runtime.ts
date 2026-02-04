@@ -18,6 +18,7 @@ import {
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
+import { unsafeAsElementFor, unsafeAsElementProps } from "./internal/unsafe.js";
 
 /**
  * Props passed to JSX elements
@@ -86,21 +87,22 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
       elementPropsMutable[k] = v;
     }
   }
-  const elementProps = elementPropsMutable as ElementProps;
+  const elementProps = unsafeAsElementProps(elementPropsMutable);
 
   if (typeof type === "string") {
     // Intrinsic element: <div>, <span>, etc.
-    return Element.Intrinsic({
+    const intrinsic = Element.Intrinsic({
       tag: type,
       props: elementProps,
       children: childElements,
       key: resolvedKey,
-    }) as ElementFor<Type>;
+    });
+    return unsafeAsElementFor<Type>(intrinsic);
   }
 
   // Check if it's an Effect being passed directly (invalid - not allowed)
   if (isEffect(type)) {
-    return componentElement(
+    const errorElement = componentElement(
       () =>
         Effect.fail(
           new Component.InvalidComponentError({
@@ -109,11 +111,12 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
           }),
         ),
       resolvedKey,
-    ) as ElementFor<Type>;
+    );
+    return unsafeAsElementFor<Type>(errorElement);
   }
 
   if (!Component.isEffectComponent(type)) {
-    return componentElement(
+    const errorElement = componentElement(
       () =>
         Effect.fail(
           new Component.InvalidComponentError({
@@ -122,11 +125,12 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
           }),
         ),
       resolvedKey,
-    ) as ElementFor<Type>;
+    );
+    return unsafeAsElementFor<Type>(errorElement);
   }
 
   const element = type(resolvedProps);
-  return (resolvedKey !== null ? keyed(resolvedKey, element) : element) as ElementFor<Type>;
+  return unsafeAsElementFor<Type>(resolvedKey !== null ? keyed(resolvedKey, element) : element);
 };
 
 /**

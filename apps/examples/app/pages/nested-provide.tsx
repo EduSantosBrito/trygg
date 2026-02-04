@@ -59,7 +59,6 @@ const GreetingCard = Component.gen(function* (
           // (inner Provide replaced Locale context instead of merging).
           Effect.gen(function* () {
             const loc = yield* Locale;
-            // eslint-disable-next-line no-alert
             globalThis.alert(`[${loc.lang}] ${loc.greeting} from the event handler!`);
           })
         }

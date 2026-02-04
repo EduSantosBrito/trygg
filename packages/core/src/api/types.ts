@@ -67,7 +67,6 @@ export type Handler<E extends HttpApiEndpoint.HttpApiEndpoint.Any> = (
   HttpApiEndpoint.HttpApiEndpoint.Success<E>,
   HttpApiEndpoint.HttpApiEndpoint.Error<E>,
   // R is inferred from implementation - allows any dependencies
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   any
 >;
 
