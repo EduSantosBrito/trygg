@@ -554,7 +554,7 @@ describe("Immutability", () => {
     assert.strictEqual(ProvidedComponent._layers.length, 1);
   });
 
-  it("should create independent variants from base", () =>
+  it.scoped("should create independent variants from base", () =>
     Effect.gen(function* () {
       class ServiceA extends Context.Tag("ServiceA")<ServiceA, { value: string }>() {}
       class ServiceB extends Context.Tag("ServiceB")<ServiceB, { value: string }>() {}
@@ -569,11 +569,35 @@ describe("Immutability", () => {
         );
       });
 
-      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" }));
+      // Provide ServiceA via .provide; ServiceB via outer layer
+      const VariantA = BaseComponent.provide(
+        Layer.succeed(ServiceA, { value: "A" }),
+      ).provide(Layer.succeed(ServiceB, { value: "B" }));
 
-      // VariantA provides ServiceA, and ServiceB comes from outer context
       const { getByTestId: getA } = yield* render(<VariantA />);
       assert.strictEqual((yield* getA("combined")).textContent, "A-B");
+    }));
+
+  it.scoped("should fail when partial provision leaves unsatisfied services", () =>
+    Effect.gen(function* () {
+      class ServiceA extends Context.Tag("ServiceA")<ServiceA, { value: string }>() {}
+      class ServiceB extends Context.Tag("ServiceB")<ServiceB, { value: string }>() {}
+
+      const BaseComponent = Component.gen(function* () {
+        const a = yield* ServiceA;
+        const b = yield* ServiceB;
+        return (
+          <div>
+            {a.value}-{b.value}
+          </div>
+        );
+      });
+
+      // Only provide ServiceA — ServiceB is missing
+      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" }));
+
+      const result = yield* Effect.either(render(<VariantA />).pipe(Effect.sandbox));
+      assert.strictEqual(result._tag, "Left");
     }));
 
   it("should create distinct objects on chaining", () => {
