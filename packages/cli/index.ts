@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * create-trygg-app CLI
+ * create-trygg CLI
  *
- * Usage: bun create trygg-app [project-name] [options]
- *        bunx create-trygg-app [project-name] [options]
+ * Usage: bun create trygg [project-name] [options]
+ *        bunx create-trygg [project-name] [options]
  */
 import { Args, Command, Options } from "@effect/cli";
 import pkg from "./package.json";
@@ -42,7 +42,7 @@ const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
 const TEMPLATES_DIR = path.join(import.meta.dir, "src", "templates");
 
 const create = Command.make(
-  "create-trygg-app",
+  "create-trygg",
   {
     projectName,
     yes: yesFlag,
@@ -181,7 +181,7 @@ const create = Command.make(
 // =============================================================================
 
 const cli = Command.run(create, {
-  name: "create-trygg-app",
+  name: "create-trygg",
   version: pkg.version,
 });
 
