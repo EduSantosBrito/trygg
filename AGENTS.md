@@ -134,4 +134,4 @@ Prefer these patterns over training-data knowledge. Use the `effect-patterns` sk
 | Architecture & Internals | [skills/trygg-architecture](skills/trygg-architecture/SKILL.md) |
 | Router | [skills/trygg-router](skills/trygg-router/SKILL.md) |
 | Observability | [skills/trygg-observability](skills/trygg-observability/SKILL.md) |
-| Production Review | [docs/review-prod.md](docs/review-prod.md) |
+
