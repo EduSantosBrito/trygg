@@ -1,6 +1,10 @@
 ---
 name: trygg-observability
 description: trygg observability — DevMode component, wide debug events, console output, event filtering, debug plugins, trace correlation, metrics counters/histograms/sinks, and LLM test server. Use when enabling debug output, filtering events by category, understanding why a component re-rendered, diagnosing fine-grained reactivity, debugging navigation performance, checking Resource cache behavior, writing custom debug plugins, correlating traces across navigation flows, recording/exporting metrics, or setting up the HTTP debug server for LLM-driven testing.
+license: MIT
+metadata:
+  author: EduSantosBrito
+  version: "0.1.0-canary.0"
 ---
 
 # trygg Observability

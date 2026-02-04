@@ -1,6 +1,10 @@
 ---
 name: use-trygg
 description: Build UI components with trygg, an Effect-native JSX framework with fine-grained reactivity. Use when writing trygg components with Component.gen, managing reactive state with Signal, providing services via .provide(layer), handling events as Effect thunks, rendering lists with Signal.each, fetching data with Resource, catching errors with ErrorBoundary, or testing components with @effect/vitest. Also use when configuring trygg's Vite plugin, debugging rendering issues, understanding fine-grained vs re-render reactivity, or structuring a trygg application with routing, head management, and portals.
+license: MIT
+metadata:
+  author: EduSantosBrito
+  version: "0.1.0-canary.0"
 ---
 
 # trygg
