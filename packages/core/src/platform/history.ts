@@ -25,6 +25,8 @@ export interface HistoryService {
   readonly back: Effect.Effect<void, HistoryError>;
   readonly forward: Effect.Effect<void, HistoryError>;
   readonly state: Effect.Effect<unknown, HistoryError>;
+  /** Set `history.scrollRestoration` to `"manual"` or `"auto"`. */
+  readonly setScrollRestoration: (mode: ScrollRestoration) => Effect.Effect<void, HistoryError>;
 }
 
 // =============================================================================
@@ -74,6 +76,14 @@ export const browser: Layer.Layer<History> = Layer.succeed(
       try: () => window.history.state as unknown,
       catch: (cause) => new HistoryError({ operation: "state", cause }),
     }),
+
+    setScrollRestoration: (mode) =>
+      Effect.try({
+        try: () => {
+          window.history.scrollRestoration = mode;
+        },
+        catch: (cause) => new HistoryError({ operation: "setScrollRestoration", cause }),
+      }),
   }),
 );
 
@@ -114,6 +124,8 @@ export const test: Layer.Layer<History> = Layer.effect(
       }),
 
       state: Effect.sync(() => entries[index]?.state ?? null),
+
+      setScrollRestoration: () => Effect.void,
     });
   }),
 );

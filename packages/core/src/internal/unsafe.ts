@@ -187,6 +187,26 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
 export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Context<R> =>
   ctx as unknown as Context.Context<R>;
 
+// =============================================================================
+// Overloaded Function Dispatch
+// =============================================================================
+
+/**
+ * Cast a function implementation to a specific overloaded callable type.
+ *
+ * SAFETY: Used for overloaded function implementations where TypeScript
+ * cannot verify that a single implementation matches multiple generic
+ * overload signatures. The caller ensures runtime correctness through
+ * discriminant checks (typeof, _tag, etc.) in the implementation body.
+ * Only the overload signatures are visible to callers — the implementation
+ * type is erased.
+ */
+export const unsafeAsOverload = <T>(fn: Function): T => fn as T;
+
+// =============================================================================
+// Effect Requirements Erasure
+// =============================================================================
+
 /**
  * Erase the R (requirements) type from an Effect.
  *
@@ -198,3 +218,51 @@ export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Cont
 export const unsafeEraseR = <A, E>(
   effect: Effect.Effect<A, E, unknown>,
 ): Effect.Effect<A, E, never> => effect as Effect.Effect<A, E, never>;
+
+// =============================================================================
+// Route Params Narrowing
+// =============================================================================
+
+/**
+ * Narrow a generic `RouteParams` Effect to a route-specific params type.
+ *
+ * SAFETY: The Outlet sets `CurrentRouteParams` FiberRef to the matched route's
+ * params before running the route component. The generic `Record<string, string>`
+ * return type of `FiberRef.get` is narrowed to the route-specific params type
+ * derived from the path pattern (e.g. `{ id: string }` for `/users/:id`).
+ * The caller guarantees the path parameter matches the current route.
+ */
+export const unsafeNarrowParams = <P>(
+  effect: Effect.Effect<Record<string, string>>,
+): Effect.Effect<P> => effect as unknown as Effect.Effect<P>;
+
+// =============================================================================
+// Middleware Requirements Erasure
+// =============================================================================
+
+/**
+ * Erase requirements from middleware effects for sequential execution.
+ *
+ * SAFETY: Middleware effects have their requirements provided at the route
+ * level via `Route.provide()`. By the time `runMiddlewareChain` executes,
+ * all services are available in the fiber context. The `R` type parameter
+ * is erased so the chain can be iterated uniformly.
+ */
+export const unsafeEraseMiddlewareR = (
+  effect: Effect.Effect<void, unknown, unknown>,
+): Effect.Effect<void, unknown, never> => effect as Effect.Effect<void, unknown, never>;
+
+// =============================================================================
+// Tagged Error Field Extraction
+// =============================================================================
+
+/**
+ * Extract known fields from a tagged error after `_tag` discrimination.
+ *
+ * SAFETY: The caller has already checked `error._tag` matches the expected
+ * tag (e.g. `"RouterRedirect"`). The error object is structurally guaranteed
+ * to have the extracted fields by the `Data.TaggedError` / `Schema.TaggedError`
+ * constructor. TypeScript cannot prove this after `Cause.squash` since the
+ * error type is widened to `unknown`.
+ */
+export const unsafeExtractFields = <T>(error: object): T => error as unknown as T;

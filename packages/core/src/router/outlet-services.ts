@@ -45,7 +45,7 @@ import { CurrentRouteQuery } from "./route.js";
  * Route params are always strings (URL path segments).
  * @internal
  */
-const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
+export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(decoded)) {
     if (typeof value === "string") {
@@ -272,7 +272,7 @@ export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<AsyncLoader, A
  * RouteComponent must be Component.Type from Component.gen.
  * @internal
  */
-function renderComponent(
+export function renderComponent(
   component: RouteComponent,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
@@ -316,7 +316,7 @@ function renderComponent(
  * Render a layout component wrapping child content.
  * @internal
  */
-function renderLayout(
+export function renderLayout(
   layout: RouteComponent,
   child: Element,
   decodedParams: Record<string, unknown>,
@@ -333,10 +333,18 @@ function renderLayout(
         componentElement(() =>
           Effect.gen(function* () {
             yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-            return yield* originalRun().pipe(
+            const layoutElement = yield* originalRun().pipe(
               Effect.locally(CurrentRouteParams, params),
               Effect.locally(CurrentRouteQuery, decodedQuery),
             );
+            // If layout returns a Provide element, merge its context with parent context
+            // so children retain access to ancestor-provided services.
+            if (layoutElement._tag === "Provide") {
+              const capturedContext = yield* Effect.context<never>();
+              const mergedContext = Context.merge(capturedContext, layoutElement.context);
+              return { ...layoutElement, context: mergedContext };
+            }
+            return layoutElement;
           }),
         ),
       );
@@ -350,10 +358,17 @@ function renderLayout(
       componentElement(() =>
         Effect.gen(function* () {
           yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-          return yield* layout.pipe(
+          const layoutElement = yield* layout.pipe(
             Effect.locally(CurrentRouteParams, params),
             Effect.locally(CurrentRouteQuery, decodedQuery),
           );
+          // If layout returns a Provide element, merge its context with parent context
+          if (layoutElement._tag === "Provide") {
+            const capturedContext = yield* Effect.context<never>();
+            const mergedContext = Context.merge(capturedContext, layoutElement.context);
+            return { ...layoutElement, context: mergedContext };
+          }
+          return layoutElement;
         }),
       ),
     );
@@ -367,7 +382,7 @@ function renderLayout(
  * Render an error boundary component with RouteErrorInfo.
  * @internal
  */
-function renderError(
+export function renderError(
   errorComp: RouteComponent,
   cause: Cause.Cause<unknown>,
   path: string,

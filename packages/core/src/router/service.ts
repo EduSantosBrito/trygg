@@ -8,6 +8,7 @@ import { CurrentRouteQuery } from "./route.js";
 import * as Signal from "../primitives/signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
+import { unsafeNarrowParams } from "../internal/unsafe.js";
 import type {
   Route,
   RouteParams,
@@ -29,7 +30,16 @@ import { History } from "../platform/history.js";
 import { Location } from "../platform/location.js";
 import { PlatformEventTarget } from "../platform/event-target.js";
 import { Observer } from "../platform/observer.js";
-import { ScrollPositionJson } from "./scroll-strategy.js";
+import type { ScrollStrategyType } from "./scroll-strategy.js";
+
+/** @internal */
+const ScrollPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+/** @internal */
+const ScrollPositionJson = Schema.parseJson(ScrollPosition);
+/** @internal Schema for history.state scroll key — replaces unsafe `as` casts. */
+const ScrollState = Schema.Struct({ _scrollKey: Schema.String });
+/** @internal */
+const decodeScrollState = Schema.decodeUnknownOption(ScrollState);
 
 // F-001: Viewport prefetch constants from framework research
 /** IntersectionObserver threshold - 10% visible triggers prefetch */
@@ -37,9 +47,9 @@ const INTERSECTION_THRESHOLD = 0.1;
 /** IntersectionObserver rootMargin for slight lookahead */
 const INTERSECTION_ROOT_MARGIN = "100px";
 /** Data attribute for viewport prefetch links */
-const PREFETCH_ATTR = "data-effectui-prefetch";
+const PREFETCH_ATTR = "data-trygg-prefetch";
 /** Data attribute for prefetch path */
-const PREFETCH_PATH_ATTR = "data-effectui-prefetch-path";
+const PREFETCH_PATH_ATTR = "data-trygg-prefetch-path";
 
 /**
  * Setup global viewport prefetch observer.
@@ -123,7 +133,8 @@ const setupViewportPrefetch = (
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes) {
             if (node.nodeType !== 1) continue; // ELEMENT_NODE
-            const el = node as globalThis.Element;
+            if (!(node instanceof globalThis.Element)) continue;
+            const el = node;
 
             // Check if the node itself is a viewport prefetch link
             const isMatch = yield* dom.matches(el, `[${PREFETCH_ATTR}="viewport"]`);
@@ -307,7 +318,7 @@ export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(Router
  * @since 1.0.0
  */
 export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<RouteParamsFor<Path>> =>
-  FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>;
+  unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams));
 
 /**
  * Check if a path is currently active.
@@ -417,6 +428,10 @@ export const browserLayer: Layer.Layer<
     const location = yield* Location;
     const eventTarget = yield* PlatformEventTarget;
 
+    // Disable browser's automatic scroll restoration — trygg manages scroll
+    // manually via sessionStorage + ScrollStrategy per route.
+    yield* history.setScrollRestoration("manual").pipe(Effect.ignore);
+
     // Get initial location from Location service
     const initialPath = yield* location.fullPath.pipe(
       Effect.mapError((cause) => new NavigationError({ operation: "init.fullPath", cause })),
@@ -432,12 +447,9 @@ export const browserLayer: Layer.Layer<
     const existingState = yield* history.state.pipe(
       Effect.mapError((cause) => new NavigationError({ operation: "init.state", cause })),
     );
-    if (
-      existingState !== null &&
-      typeof existingState === "object" &&
-      "_scrollKey" in (existingState as object)
-    ) {
-      currentNavKey = (existingState as { _scrollKey: string })._scrollKey;
+    const existingScrollState = decodeScrollState(existingState);
+    if (Option.isSome(existingScrollState)) {
+      currentNavKey = existingScrollState.value._scrollKey;
     } else {
       yield* history
         .replaceState({ _scrollKey: currentNavKey }, initialPath)
@@ -464,6 +476,9 @@ export const browserLayer: Layer.Layer<
       scrollKey: currentNavKey,
     });
 
+    // Prefetch resolver — starts as no-op, outlet registers real resolver
+    const prefetchRef = yield* Ref.make<(path: string) => Effect.Effect<void>>(() => Effect.void);
+
     // Update signals from a path
     const updateFromPath = (fullPath: string) =>
       Effect.gen(function* () {
@@ -480,19 +495,39 @@ export const browserLayer: Layer.Layer<
     const doSaveScroll = () =>
       Effect.gen(function* () {
         const pos = yield* scroll.getPosition;
+        yield* Debug.log({
+          event: "router.scroll.save",
+          key: currentNavKey,
+          x: pos.x,
+          y: pos.y,
+        });
         const encoded = yield* Schema.encode(ScrollPositionJson)(pos);
         yield* storage.set(`trygg:scroll:${currentNavKey}`, encoded);
       }).pipe(Effect.ignore);
 
-    // Apply scroll behavior using captured services (best-effort)
+    // Yield to requestAnimationFrame — lets forked render fibers (microtasks)
+    // complete DOM updates before we scroll. Effect.async suspends the current
+    // fiber, draining the microtask queue, then rAF fires after layout/paint.
+    const afterFrame: Effect.Effect<void> = Effect.async((resume) => {
+      requestAnimationFrame(() => resume(Effect.void));
+    });
+
+    // Apply scroll behavior using captured services (best-effort).
+    // Dispatches on ScrollStrategyType._tag — no sentinel strings.
     const doApplyScroll = (opts: {
-      key: string;
+      strategy: ScrollStrategyType;
       hash: string;
       isPopstate: boolean;
-      strategyKey: string;
     }) =>
       Effect.gen(function* () {
-        if (opts.strategyKey === "__none__") return;
+        if (opts.strategy._tag === "None") return;
+
+        // Defer until after DOM update — signal element swap runs in a forked
+        // fiber (microtask). Without this, scrollTo fires before the new page
+        // content has been inserted into the DOM.
+        yield* afterFrame;
+
+        const storageKey = currentNavKey;
 
         // Hash takes priority
         if (opts.hash !== "" && opts.hash !== "#") {
@@ -506,15 +541,22 @@ export const browserLayer: Layer.Layer<
 
         // Popstate: restore saved position
         if (opts.isPopstate) {
-          const stored = yield* storage.get(`trygg:scroll:${opts.key}`);
+          const stored = yield* storage.get(`trygg:scroll:${storageKey}`);
           if (stored !== null) {
             const pos = yield* Schema.decode(ScrollPositionJson)(stored);
+            yield* Debug.log({
+              event: "router.scroll.restore",
+              key: storageKey,
+              x: pos.x,
+              y: pos.y,
+            });
             yield* scroll.scrollTo(pos.x, pos.y);
           }
           return;
         }
 
         // New navigation: scroll to top
+        yield* Debug.log({ event: "router.scroll.top" });
         yield* scroll.scrollTo(0, 0);
       }).pipe(Effect.ignore);
 
@@ -527,8 +569,9 @@ export const browserLayer: Layer.Layer<
 
         // Update key from history state
         const state = yield* history.state;
-        if (state !== null && typeof state === "object" && "_scrollKey" in (state as object)) {
-          currentNavKey = (state as { _scrollKey: string })._scrollKey;
+        const popScrollState = decodeScrollState(state);
+        if (Option.isSome(popScrollState)) {
+          currentNavKey = popScrollState.value._scrollKey;
         }
 
         // Set navigation context for outlet scroll handling
@@ -627,7 +670,7 @@ export const browserLayer: Layer.Layer<
       forward: () => Effect.ignore(history.forward),
 
       params: <Path extends RoutePath>(_path: Path) =>
-        FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>,
+        unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
 
       isActive: Effect.fn("RouterService.isActive")(function* (
         targetPath: string,
@@ -644,14 +687,12 @@ export const browserLayer: Layer.Layer<
       }),
 
       prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
-        // Prefetch is handled at the route level via .prefetch() chains.
-        // This method is a best-effort hint for link-level prefetching.
         yield* Debug.log({
           event: "router.prefetch.start",
           path: targetPath,
-          route_pattern: targetPath,
-          module_count: 0,
         });
+        const resolver = yield* Ref.get(prefetchRef);
+        yield* resolver(targetPath);
       }),
 
       _navigationContext: navContextRef,
@@ -660,14 +701,15 @@ export const browserLayer: Layer.Layer<
         Effect.gen(function* () {
           const navCtx = yield* Ref.get(navContextRef);
           yield* doApplyScroll({
-            key: navCtx.scrollKey,
+            strategy: opts.strategy,
             hash: navCtx.hash,
             isPopstate: navCtx.isPopstate,
-            strategyKey: opts.strategyKey,
           });
         }),
 
       _saveScroll: doSaveScroll(),
+
+      _prefetchRef: prefetchRef,
     };
 
     // Store router in FiberRef during layer building.
@@ -712,6 +754,9 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
         hash: "",
         scrollKey: "",
       });
+
+      // Prefetch resolver — starts as no-op, outlet registers real resolver
+      const prefetchRef = yield* Ref.make<(path: string) => Effect.Effect<void>>(() => Effect.void);
 
       // History stack for back/forward (in-memory)
       const historyStack: Array<string> = [initialPath];
@@ -805,7 +850,7 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
           }),
 
         params: <Path extends RoutePath>(_path: Path) =>
-          FiberRef.get(CurrentRouteParams) as Effect.Effect<RouteParamsFor<Path>>,
+          unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
 
         isActive: Effect.fn("RouterService.isActive")(function* (
           targetPath: string,
@@ -822,18 +867,18 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
         }),
 
         prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
-          // Routing handles prefetch at the route level via .prefetch() chains.
           yield* Debug.log({
             event: "router.prefetch.start",
             path: targetPath,
-            route_pattern: targetPath,
-            module_count: 0,
           });
+          const resolver = yield* Ref.get(prefetchRef);
+          yield* resolver(targetPath);
         }),
 
         _navigationContext: navContextRef,
         _applyScroll: () => Effect.void,
         _saveScroll: Effect.void,
+        _prefetchRef: prefetchRef,
       };
 
       // Store router in FiberRef

@@ -15,9 +15,10 @@
  * ```
  */
 import { Data, Effect, FiberRef, Layer, Pipeable, Schema } from "effect";
-import type { RouteComponent, ComponentInput } from "./types.js";
+import type { ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
+import { unsafeEraseMiddlewareR, unsafeExtractFields } from "../internal/unsafe.js";
 
 // =============================================================================
 // Type-Level Path Param Extraction
@@ -166,36 +167,42 @@ export interface RouteBuilder<
 
   /**
    * Set the component for this route.
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    * Mutually exclusive with `.children()`.
    */
   component: HasChildren extends true
     ? never
-    : (c: RouteComponent) => RouteBuilder<Path, R, true, HasChildren>;
+    : (c: ComponentInput) => RouteBuilder<Path, R, true, HasChildren>;
 
   /**
    * Set the layout component (renders Outlet for children).
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  layout: (c: RouteComponent) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  layout: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
 
   /**
    * Set the loading fallback component.
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  loading: (c: RouteComponent) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  loading: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
 
   /**
    * Set the error boundary component.
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  error: (c: RouteComponent) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  error: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
 
   /**
    * Set the not-found boundary component.
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  notFound: (c: RouteComponent) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  notFound: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
 
   /**
    * Set the forbidden boundary component.
+   * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  forbidden: (c: RouteComponent) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  forbidden: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
 
   /**
    * Add middleware to this route.
@@ -267,37 +274,37 @@ const makeBuilder = <
         querySchema: schema,
       })) as unknown as RouteBuilder<Path, R, HasComponent, HasChildren>["query"],
 
-    component: ((c: RouteComponent) =>
+    component: ((c: ComponentInput) =>
       makeBuilder<Path, R, true, HasChildren>({
         ...def,
         component: c,
       })) as RouteBuilder<Path, R, HasComponent, HasChildren>["component"],
 
-    layout: (c: RouteComponent) =>
+    layout: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren>({
         ...def,
         layout: c,
       }),
 
-    loading: (c: RouteComponent) =>
+    loading: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren>({
         ...def,
         loading: c,
       }),
 
-    error: (c: RouteComponent) =>
+    error: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren>({
         ...def,
         error: c,
       }),
 
-    notFound: (c: RouteComponent) =>
+    notFound: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren>({
         ...def,
         notFound: c,
       }),
 
-    forbidden: (c: RouteComponent) =>
+    forbidden: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren>({
         ...def,
         forbidden: c,
@@ -388,7 +395,7 @@ export const make = <Path extends string>(path: Path): RouteBuilder<Path, never,
  *
  * @since 1.0.0
  */
-export const index = (component: RouteComponent): RouteBuilder<"__index__", never, true, false> =>
+export const index = (component: ComponentInput): RouteBuilder<"__index__", never, true, false> =>
   makeBuilder<"__index__", never, true, false>({
     ...emptyDefinition(IndexMarker),
     component,
@@ -486,14 +493,11 @@ export const provide = (
  * Error produced when path params fail schema decode.
  * @since 1.0.0
  */
-export class ParamsDecodeError {
-  readonly _tag = "ParamsDecodeError";
-  constructor(
-    readonly path: string,
-    readonly rawParams: Record<string, string>,
-    readonly cause: unknown,
-  ) {}
-}
+export class ParamsDecodeError extends Data.TaggedError("ParamsDecodeError")<{
+  readonly path: string;
+  readonly rawParams: Record<string, string>;
+  readonly cause: unknown;
+}> {}
 
 /**
  * Decode raw string params using a Schema.
@@ -507,7 +511,7 @@ export const decodeParams = <A, I>(
   path: string,
 ): Effect.Effect<A, ParamsDecodeError> =>
   Schema.decode(schema)(rawParams as unknown as I).pipe(
-    Effect.mapError((cause) => new ParamsDecodeError(path, rawParams, cause)),
+    Effect.mapError((cause) => new ParamsDecodeError({ path, rawParams, cause })),
   );
 
 // =============================================================================
@@ -518,14 +522,11 @@ export const decodeParams = <A, I>(
  * Error produced when query params fail schema decode.
  * @since 1.0.0
  */
-export class QueryDecodeError {
-  readonly _tag = "QueryDecodeError";
-  constructor(
-    readonly path: string,
-    readonly rawQuery: Record<string, string>,
-    readonly cause: unknown,
-  ) {}
-}
+export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
+  readonly path: string;
+  readonly rawQuery: Record<string, string>;
+  readonly cause: unknown;
+}> {}
 
 /**
  * FiberRef holding the decoded query params for the current route.
@@ -554,7 +555,7 @@ export const decodeQuery = <A, I>(
   });
 
   return Schema.decode(schema)(raw as unknown as I).pipe(
-    Effect.mapError((cause) => new QueryDecodeError(path, raw, cause)),
+    Effect.mapError((cause) => new QueryDecodeError({ path, rawQuery: raw, cause })),
   );
 };
 
@@ -655,7 +656,7 @@ export const runMiddlewareChain = (
 
   return Effect.gen(function* () {
     for (const m of middleware) {
-      const result = yield* (m as Effect.Effect<void, unknown, never>).pipe(
+      const result = yield* unsafeEraseMiddlewareR(m).pipe(
         Effect.matchCauseEffect({
           onSuccess: () => Effect.succeed(continueResult),
           onFailure: (cause) => {
@@ -683,7 +684,7 @@ const extractMiddlewareError = (cause: unknown): MiddlewareResult => {
 
   if (error !== null && typeof error === "object" && "_tag" in error) {
     if (error._tag === "RouterRedirect") {
-      const redirect = error as unknown as { path: string; replace: boolean };
+      const redirect = unsafeExtractFields<{ path: string; replace: boolean }>(error);
       return { _tag: "Redirect", path: redirect.path, replace: redirect.replace };
     }
     if (error._tag === "RouterForbidden") {

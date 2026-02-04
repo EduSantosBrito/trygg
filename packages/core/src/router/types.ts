@@ -146,7 +146,7 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {};
  * Check if a type has any keys
  * @internal
  */
-type HasKeys<T> = keyof T extends never ? false : true;
+export type HasKeys<T> = keyof T extends never ? false : true;
 
 /**
  * Get route params type for a path.
@@ -383,7 +383,9 @@ export interface RouterService {
    * Called by the outlet after matching a route and determining the strategy.
    * @internal
    */
-  readonly _applyScroll: (options: { readonly strategyKey: string }) => Effect.Effect<void>;
+  readonly _applyScroll: (options: {
+    readonly strategy: import("./scroll-strategy.js").ScrollStrategyType;
+  }) => Effect.Effect<void>;
 
   /**
    * Save current scroll position (best-effort, errors ignored).
@@ -391,4 +393,13 @@ export interface RouterService {
    * @internal
    */
   readonly _saveScroll: Effect.Effect<void>;
+
+  /**
+   * Prefetch resolver function registered by the Outlet.
+   * Takes a path, matches it against the route trie, and triggers lazy
+   * module loading for all ComponentLoader values (component + layouts).
+   * Starts as a no-op; replaced when the Outlet mounts and builds its matcher.
+   * @internal
+   */
+  readonly _prefetchRef: Ref.Ref<(path: string) => Effect.Effect<void>>;
 }

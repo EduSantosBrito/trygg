@@ -16,6 +16,8 @@ import {
   QueryDecodeError,
 } from "./route.js";
 import type { RoutesManifest } from "./routes.js";
+import type { RenderStrategy } from "./render-strategy.js";
+import type { ScrollStrategy } from "./scroll-strategy.js";
 import type { ComponentInput, RouteParams } from "./types.js";
 
 // =============================================================================
@@ -358,7 +360,7 @@ const walkTrie = (
  * Build a trie-based match function from resolved routes.
  * @internal
  */
-const buildTrieMatcher = (
+export const buildTrieMatcher = (
   resolved: ReadonlyArray<ResolvedRoute>,
 ): ((path: string) => Option.Option<RouteMatch>) => {
   const compiled: CompiledRoute[] = [];
@@ -623,6 +625,62 @@ export const resolveLoadingBoundary = (route: ResolvedRoute): Option.Option<Comp
 };
 
 // =============================================================================
+// Render Strategy Resolution (nearest-wins ancestor walk)
+// =============================================================================
+
+/**
+ * Resolve render strategy for a route: nearest-wins (leaf → ancestors).
+ * Returns undefined if no strategy is set in the chain (= default Lazy).
+ *
+ * Used by the outlet for future strategy-aware dispatch (Server, Island).
+ * For Eager/Lazy, the outlet dispatches structurally — this is preparatory.
+ *
+ * @since 1.0.0
+ */
+export const resolveRenderStrategy = (
+  route: ResolvedRoute,
+): Layer.Layer<RenderStrategy> | undefined => {
+  if (route.definition.renderStrategy !== undefined) {
+    return route.definition.renderStrategy;
+  }
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.renderStrategy !== undefined) {
+      return ancestor.definition.renderStrategy;
+    }
+  }
+  return undefined;
+};
+
+// =============================================================================
+// Scroll Strategy Resolution (nearest-wins ancestor walk)
+// =============================================================================
+
+/**
+ * Resolve scroll strategy for a route: nearest-wins (leaf → ancestors).
+ * Returns undefined if no strategy is set in the chain (= default Auto).
+ *
+ * Mirrors `resolveRenderStrategy`. Both strategies are Layers provided
+ * via `Route.provide()` and resolved via the same nearest-wins pattern.
+ *
+ * @since 1.0.0
+ */
+export const resolveScrollStrategy = (
+  route: ResolvedRoute,
+): Layer.Layer<ScrollStrategy> | undefined => {
+  if (route.definition.scrollStrategy !== undefined) {
+    return route.definition.scrollStrategy;
+  }
+  for (let i = route.ancestors.length - 1; i >= 0; i--) {
+    const ancestor = route.ancestors[i];
+    if (ancestor !== undefined && ancestor.definition.scrollStrategy !== undefined) {
+      return ancestor.definition.scrollStrategy;
+    }
+  }
+  return undefined;
+};
+
+// =============================================================================
 // Params & Query Decode at Match Time
 // =============================================================================
 
@@ -644,7 +702,7 @@ export const decodeRouteParams = (
 
   return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
     rawParams as unknown,
-  ).pipe(Effect.mapError((cause) => new ParamsDecodeError(route.path, rawParams, cause)));
+  ).pipe(Effect.mapError((cause) => new ParamsDecodeError({ path: route.path, rawParams, cause })));
 };
 
 /**
@@ -670,7 +728,9 @@ export const decodeRouteQuery = (
 
   return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
     raw as unknown,
-  ).pipe(Effect.mapError((cause) => new QueryDecodeError(route.path, raw, cause)));
+  ).pipe(
+    Effect.mapError((cause) => new QueryDecodeError({ path: route.path, rawQuery: raw, cause })),
+  );
 };
 
 // =============================================================================

@@ -3,7 +3,7 @@
  * Metrics for trygg observability
  *
  * Provides counters and histograms for tracking navigation, rendering, and signal updates.
- * Uses Effect Metrics with a prefix `effectui.` for all metric names.
+ * Uses Effect Metrics with a prefix `trygg.` for all metric names.
  *
  * @example
  * ```tsx
@@ -24,12 +24,12 @@
 import { createConsola } from "consola";
 import { Effect, Metric, MetricBoundaries, MetricState } from "effect";
 
-const metricsLogger = createConsola({ defaults: { tag: "effectui" } });
+const metricsLogger = createConsola({ defaults: { tag: "trygg" } });
 
 // --- Naming Convention ---
-// All metrics use `effectui.` prefix
+// All metrics use `trygg.` prefix
 // Categories: router, render, signal
-// Format: effectui.<category>.<metric_name>
+// Format: trygg.<category>.<metric_name>
 
 // --- Counters ---
 
@@ -39,7 +39,7 @@ const metricsLogger = createConsola({ defaults: { tag: "effectui" } });
  * @since 1.0.0
  */
 export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
-  "effectui.router.navigate.count",
+  "trygg.router.navigate.count",
   { description: "Total number of navigation events", incremental: true },
 );
 
@@ -49,7 +49,7 @@ export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
  * @since 1.0.0
  */
 export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
-  "effectui.router.error.count",
+  "trygg.router.error.count",
   { description: "Total number of route errors", incremental: true },
 );
 
@@ -59,7 +59,7 @@ export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
  * @since 1.0.0
  */
 export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter(
-  "effectui.signal.update.count",
+  "trygg.signal.update.count",
   { description: "Total number of signal value changes", incremental: true },
 );
 
@@ -69,7 +69,7 @@ export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter
  * @since 1.0.0
  */
 export const componentRenderCounter: Metric.Metric.Counter<number> = Metric.counter(
-  "effectui.render.component.count",
+  "trygg.render.component.count",
   { description: "Total number of component renders", incremental: true },
 );
 
@@ -89,7 +89,7 @@ export const renderDurationBoundaries: MetricBoundaries.MetricBoundaries =
  * @since 1.0.0
  */
 export const renderDurationHistogram: Metric.Metric.Histogram<number> = Metric.histogram(
-  "effectui.render.duration_ms",
+  "trygg.render.duration_ms",
   renderDurationBoundaries,
   "Distribution of component render durations in milliseconds",
 );

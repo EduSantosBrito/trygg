@@ -78,34 +78,18 @@ describe("runPrefetch", () => {
 // =============================================================================
 
 describe("RenderStrategy", () => {
-  it.effect("should load via Lazy strategy", () =>
+  it.effect("Lazy strategy has _tag 'Lazy'", () =>
     Effect.gen(function* () {
       const strategy = yield* RenderStrategy;
-      const result = yield* strategy.load(() => Promise.resolve({ default: "loaded-component" }));
-
-      assert.strictEqual(result, "loaded-component");
+      assert.strictEqual(strategy._tag, "Lazy");
     }).pipe(Effect.provide(RenderStrategy.Lazy)),
   );
 
-  it.effect("should load via Eager strategy", () =>
+  it.effect("Eager strategy has _tag 'Eager'", () =>
     Effect.gen(function* () {
       const strategy = yield* RenderStrategy;
-      const result = yield* strategy.load(() => Promise.resolve({ default: "eager-component" }));
-
-      assert.strictEqual(result, "eager-component");
+      assert.strictEqual(strategy._tag, "Eager");
     }).pipe(Effect.provide(RenderStrategy.Eager)),
-  );
-
-  it.effect("should fail with RenderLoadError on load failure", () =>
-    Effect.gen(function* () {
-      const strategy = yield* RenderStrategy;
-      const result = yield* strategy.load(() => Promise.reject("load-failed")).pipe(Effect.either);
-
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.strictEqual(result.left._tag, "RenderLoadError");
-      }
-    }).pipe(Effect.provide(RenderStrategy.Lazy)),
   );
 
   it("should have Lazy as a Layer", () => {
@@ -122,41 +106,20 @@ describe("RenderStrategy", () => {
 // =============================================================================
 
 describe("ScrollStrategy", () => {
-  it.effect("should use entry key for Auto strategy", () =>
+  it.effect("Auto has _tag 'Auto' (pure data, no functions)", () =>
     Effect.gen(function* () {
       const strategy = yield* ScrollStrategy;
-      const key = strategy.getKey({ pathname: "/users", key: "abc123" });
-
-      assert.strictEqual(key, "abc123");
+      assert.strictEqual(strategy._tag, "Auto");
+      // Pure data — no function fields
+      assert.deepStrictEqual(Object.keys(strategy), ["_tag"]);
     }).pipe(Effect.provide(ScrollStrategy.Auto)),
   );
 
-  it.effect("should use fixed key for None strategy", () =>
+  it.effect("None has _tag 'None' (pure data)", () =>
     Effect.gen(function* () {
       const strategy = yield* ScrollStrategy;
-      const key = strategy.getKey({ pathname: "/settings", key: "xyz789" });
-
-      assert.strictEqual(key, "__none__");
-    }).pipe(Effect.provide(ScrollStrategy.None)),
-  );
-
-  it.effect("should return different keys for different entries (Auto)", () =>
-    Effect.gen(function* () {
-      const strategy = yield* ScrollStrategy;
-      const key1 = strategy.getKey({ pathname: "/a", key: "entry1" });
-      const key2 = strategy.getKey({ pathname: "/b", key: "entry2" });
-
-      assert.notStrictEqual(key1, key2);
-    }).pipe(Effect.provide(ScrollStrategy.Auto)),
-  );
-
-  it.effect("should return same key for different entries (None)", () =>
-    Effect.gen(function* () {
-      const strategy = yield* ScrollStrategy;
-      const key1 = strategy.getKey({ pathname: "/a", key: "entry1" });
-      const key2 = strategy.getKey({ pathname: "/b", key: "entry2" });
-
-      assert.strictEqual(key1, key2);
+      assert.strictEqual(strategy._tag, "None");
+      assert.deepStrictEqual(Object.keys(strategy), ["_tag"]);
     }).pipe(Effect.provide(ScrollStrategy.None)),
   );
 
