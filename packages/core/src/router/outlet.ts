@@ -50,6 +50,8 @@ import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
   InvalidRouteComponent,
+  type ComponentInput,
+  type ComponentLoader,
   type RouteComponent,
   type RouteErrorInfo,
   type RouteParams,
@@ -91,13 +93,13 @@ const isEffectElement = (u: RouteComponent): u is Effect.Effect<Element, unknown
  * After vite transform: `.component(() => import("./Page"))`
  * @internal
  */
-const isComponentLoader = (value: unknown): value is () => Promise<{ default: unknown }> =>
+const isComponentLoader = (value: ComponentInput): value is ComponentLoader =>
   typeof value === "function" && !Component.isEffectComponent(value) && !Effect.isEffect(value);
 
 /**
  * Resolve a route component — handles both direct references and loader functions.
  * - Direct component (Component.gen or Effect): returns as-is
- * - Loader function (from vite transform): invokes loader via Effect.async
+ * - Loader function (from vite transform): invokes loader via Effect.tryPromise
  *
  * At build time, the vite plugin transforms `.component(X)` to
  * `.component(() => import("./X"))` for Lazy routes. This function
@@ -106,18 +108,20 @@ const isComponentLoader = (value: unknown): value is () => Promise<{ default: un
  * @internal
  */
 const resolveComponent = (
-  component: RouteComponent | unknown,
+  component: ComponentInput,
 ): Effect.Effect<RouteComponent, RenderLoadError, never> => {
   if (isComponentLoader(component)) {
     // Loader function from vite transform: () => Promise<{ default: RouteComponent }>
-    return Effect.async<RouteComponent, RenderLoadError>((resume) => {
-      component()
-        .then((m) => {
-          const decoded = Schema.decodeUnknownSync(RouteComponentSchema)(m.default);
-          resume(Effect.succeed(decoded));
-        })
-        .catch((cause) => resume(Effect.fail(new RenderLoadError({ cause }))));
-    });
+    return Effect.tryPromise({
+      try: () => component(),
+      catch: (cause) => new RenderLoadError({ cause }),
+    }).pipe(
+      Effect.flatMap((m) =>
+        Schema.decodeUnknown(RouteComponentSchema)(m.default).pipe(
+          Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
+        ),
+      ),
+    );
   }
   // Direct component (Component.gen result or Effect<Element>)
   return Schema.decodeUnknown(RouteComponentSchema)(component).pipe(
@@ -396,7 +400,13 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           onSome: (errorComp) =>
             Effect.gen(function* () {
               const resolvedErrorComp = yield* resolveComponent(errorComp);
-              const routeElement = yield* renderRoute;
+              // Catch route resolution failures (e.g. lazy load / decode errors)
+              // so the error boundary renders instead of a blank screen.
+              const routeElement = yield* renderRoute.pipe(
+                Effect.catchAllCause((resolutionCause) =>
+                  renderError(resolvedErrorComp, resolutionCause, route.path),
+                ),
+              );
               return componentElement(() =>
                 Effect.gen(function* () {
                   if (routeElement._tag === "Component") {

@@ -51,6 +51,8 @@ export type {
   RouterService,
   RouteErrorInfo,
   RouteComponent,
+  ComponentLoader,
+  ComponentInput,
   ExtractRouteParams,
   RouteParamsFor,
   TypeSafeLinkProps,

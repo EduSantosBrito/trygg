@@ -25,6 +25,7 @@ import * as Metrics from "../debug/metrics.js";
 import type { RoutesManifest } from "./routes.js";
 import {
   InvalidRouteComponent,
+  type ComponentInput,
   type RouteComponent,
   type RouteErrorInfo,
   type RouteParams,
@@ -107,11 +108,11 @@ export class OutletRenderer extends Context.Tag("trygg/OutletRenderer")<
 
 /** @since 1.0.0 */
 export interface BoundaryResolverShape {
-  readonly resolveError: (route: ResolvedRoute) => Option.Option<RouteComponent>;
-  readonly resolveLoading: (route: ResolvedRoute) => Option.Option<RouteComponent>;
-  readonly resolveNotFound: (route: ResolvedRoute) => Option.Option<RouteComponent>;
-  readonly resolveNotFoundRoot: () => Option.Option<RouteComponent>;
-  readonly resolveForbidden: (route: ResolvedRoute) => Option.Option<RouteComponent>;
+  readonly resolveError: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+  readonly resolveLoading: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+  readonly resolveNotFound: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+  readonly resolveNotFoundRoot: () => Option.Option<ComponentInput>;
+  readonly resolveForbidden: (route: ResolvedRoute) => Option.Option<ComponentInput>;
 }
 
 /**

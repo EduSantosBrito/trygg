@@ -731,6 +731,136 @@ describe("Outlet - Implicit Manifest", () => {
 });
 
 // =============================================================================
+// Lazy loader decode failure (resolveComponent)
+// =============================================================================
+
+/**
+ * Construct a minimal RouteDefinition with a loader function as component.
+ * Simulates post-vite-transform behavior where `.component(X)` becomes
+ * `.component(() => import("./X"))`.
+ * @internal
+ */
+const loaderDefinition = (
+  path: string,
+  loader: () => Promise<{ readonly default: unknown }>,
+): Route.RouteDefinition => ({
+  _tag: "RouteDefinition",
+  path,
+  component: loader,
+  layout: undefined,
+  loading: undefined,
+  error: undefined,
+  notFound: undefined,
+  forbidden: undefined,
+  middleware: [],
+  prefetch: [],
+  children: [],
+  paramsSchema: undefined,
+  querySchema: undefined,
+  renderStrategy: undefined,
+  scrollStrategy: undefined,
+  layers: [],
+});
+
+describe("Outlet - Lazy loader (resolveComponent)", () => {
+  // ---------------------------------------------------------------------------
+  // Happy path: valid loader → Component renders
+  // ---------------------------------------------------------------------------
+
+  it.scoped("should render component from valid lazy loader", () =>
+    Effect.gen(function* () {
+      const PageComp = textComp("Lazy Page");
+      const manifest: Routes.RoutesManifest = {
+        routes: [loaderDefinition("/lazy", () => Promise.resolve({ default: PageComp }))],
+        notFound: undefined,
+        forbidden: undefined,
+      };
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/lazy");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+      assert.strictEqual(result._tag, "Component");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Failure: no error boundary → catchAllCause absorbs, view stays empty
+  // ---------------------------------------------------------------------------
+
+  it.scoped("should not crash when loader returns invalid default export", () =>
+    Effect.gen(function* () {
+      const manifest: Routes.RoutesManifest = {
+        routes: [loaderDefinition("/bad", () => Promise.resolve({ default: "not-a-component" }))],
+        notFound: undefined,
+        forbidden: undefined,
+      };
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/bad");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+      // No error boundary → catchAllCause absorbs; view stays at initial empty text
+      assert.strictEqual(result._tag, "Text");
+      if (result._tag === "Text") {
+        assert.strictEqual(result.content, "");
+      }
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should not crash when loader rejects", () =>
+    Effect.gen(function* () {
+      const manifest: Routes.RoutesManifest = {
+        routes: [loaderDefinition("/fail", () => Promise.reject(new Error("network error")))],
+        notFound: undefined,
+        forbidden: undefined,
+      };
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/fail");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+      // No error boundary → catchAllCause absorbs; view stays at initial empty text
+      assert.strictEqual(result._tag, "Text");
+      if (result._tag === "Text") {
+        assert.strictEqual(result.content, "");
+      }
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Failure with error boundary → error boundary renders
+  // ---------------------------------------------------------------------------
+
+  it.scoped("should render error boundary when loader returns invalid component", () =>
+    Effect.gen(function* () {
+      const ErrorComp = textComp("Error Boundary Hit");
+      const defWithError: Route.RouteDefinition = {
+        ...loaderDefinition("/bad-with-boundary", () => Promise.resolve({ default: 42 })),
+        error: ErrorComp,
+      };
+
+      const manifest: Routes.RoutesManifest = {
+        routes: [defWithError],
+        notFound: undefined,
+        forbidden: undefined,
+      };
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/bad-with-boundary");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+      // Error boundary catches the RenderLoadError and renders error component
+      assert.strictEqual(result._tag, "Component");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+});
+
+// =============================================================================
 // InvalidRouteComponent error
 // =============================================================================
 
