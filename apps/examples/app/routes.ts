@@ -19,6 +19,7 @@ import PortalPage from "./pages/portal";
 import NestedProvidePage from "./pages/nested-provide";
 import DashboardPage from "./pages/dashboard";
 import ResourcePage from "./pages/resource";
+import PrefetchPage from "./pages/prefetch";
 import LoginPage from "./pages/login";
 import ProtectedPage from "./pages/protected";
 import UsersListPage from "./pages/users/list";
@@ -57,6 +58,7 @@ export const routes = Routes.make()
   .add(Route.make("/portal").component(PortalPage).loading(LoadingFallback))
   .add(Route.make("/dashboard").component(DashboardPage).loading(LoadingFallback))
   .add(Route.make("/resource").component(ResourcePage).loading(LoadingFallback))
+  .add(Route.make("/prefetch").component(PrefetchPage).loading(LoadingFallback))
   .add(Route.make("/login").component(LoginPage).loading(LoadingFallback))
   .add(
     Route.make("/protected")

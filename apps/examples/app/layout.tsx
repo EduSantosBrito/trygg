@@ -100,6 +100,9 @@ export default Component.gen(function* () {
               <Router.Link to="/portal" className="nav-link">
                 Portal
               </Router.Link>
+              <Router.Link to="/prefetch" className="nav-link">
+                Prefetch
+              </Router.Link>
             </div>
           </nav>
         </aside>
