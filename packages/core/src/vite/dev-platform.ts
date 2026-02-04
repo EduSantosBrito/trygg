@@ -131,3 +131,52 @@ export class DevPlatform extends Context.Tag("trygg/DevPlatform")<
   DevPlatform,
   DevPlatformService
 >() {}
+
+// =============================================================================
+// ServerPlatform — codegen fragments for the production server entry
+// =============================================================================
+
+/**
+ * Platform-specific code fragments for the generated production server.
+ * Uses subpath imports to avoid barrel re-exports pulling in optional
+ * dependencies (e.g. @effect/cluster via @effect/platform-node barrel).
+ * @since 1.0.0
+ */
+export interface ServerPlatformService {
+  /** Import statements for platform HTTP server + runtime */
+  readonly imports: string;
+  /** Expression: HTTP server layer binding PORT/HOST */
+  readonly serverLayer: string;
+  /** Module namespace for `*.runMain(...)` */
+  readonly runtime: string;
+}
+
+/**
+ * Context.Tag for platform-specific production server codegen.
+ * @since 1.0.0
+ */
+export class ServerPlatform extends Context.Tag("trygg/ServerPlatform")<
+  ServerPlatform,
+  ServerPlatformService
+>() {}
+
+/** Node.js server platform — @effect/platform-node subpath imports */
+export const NodeServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {
+  imports: [
+    'import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"',
+    'import * as NodeRuntime from "@effect/platform-node/NodeRuntime"',
+    'import { createServer } from "node:http"',
+  ].join("\n"),
+  serverLayer: "NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST })",
+  runtime: "NodeRuntime",
+});
+
+/** Bun server platform — @effect/platform-bun subpath imports */
+export const BunServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {
+  imports: [
+    'import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"',
+    'import * as BunRuntime from "@effect/platform-bun/BunRuntime"',
+  ].join("\n"),
+  serverLayer: "BunHttpServer.layer({ port: PORT, hostname: HOST })",
+  runtime: "BunRuntime",
+});

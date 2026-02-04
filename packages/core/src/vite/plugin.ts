@@ -42,6 +42,9 @@ import * as nodePath from "node:path";
 import type { TryggConfig, Platform } from "../config.js";
 import {
   DevPlatform,
+  ServerPlatform,
+  NodeServerPlatform,
+  BunServerPlatform,
   type DevApiHandle,
   type HandlerFactory,
   ApiInitError,
@@ -275,12 +278,14 @@ const importBunDevPlatform = Effect.tryPromise({
  */
 const makePluginLayer = (
   platform: Platform,
-): Layer.Layer<FileSystem.FileSystem | DevPlatform, ImportError> => {
-  const platformLayer =
+): Layer.Layer<FileSystem.FileSystem | DevPlatform | ServerPlatform, ImportError> => {
+  const devLayer =
     platform === "bun" ? Layer.unwrapEffect(importBunDevPlatform) : NodeDevPlatformLive;
+  const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
   return Layer.mergeAll(
-    platformLayer,
+    devLayer,
+    serverLayer,
     Logger.replace(Logger.defaultLogger, PluginLogger),
     Logger.minimumLogLevel(LogLevel.Debug),
   );
@@ -654,32 +659,17 @@ export const transformRoutesForBuild = (
     // 1. Collect all named/default imports with their source paths
     const imports = collectImports(source, routesFilePath);
 
-    // 2. Identify component identifiers used in Eager routes (skip these)
-    const eagerComponents = findEagerRouteComponents(source, imports);
+    // 2. Neutralize strings/comments for position-accurate paren matching
+    const clean = neutralizeSource(source);
 
-    // 3. Find all .component(Identifier) usages and replace with lazy imports
-    //    Skip components that are part of Eager routes.
+    // 3. Transform .component(X) and .layout(X) to lazy imports.
+    //    Each occurrence is checked against Eager context (own chain + ancestors).
+    //    Boundary components (.loading, .error, .notFound, .forbidden) are NOT
+    //    transformed — they must be available synchronously as fallback UI.
     let transformed = source;
 
     for (const imp of imports) {
-      if (eagerComponents.has(imp.localName)) continue;
-
-      const componentRegex = new RegExp(
-        `\\.component\\(\\s*${escapeRegex(imp.localName)}\\s*\\)`,
-        "g",
-      );
-
-      const replacement = imp.isDefault
-        ? `.component(() => import("${imp.importPath}"))`
-        : `.component(() => import("${imp.importPath}").then(m => m.${imp.localName}))`;
-
-      transformed = transformed.replace(componentRegex, replacement);
-    }
-
-    // 4. Also transform .layout(), .loading(), .error(), .notFound(), .forbidden()
-    //    These are always transformed (Eager only affects .component())
-    for (const imp of imports) {
-      for (const method of ["layout", "loading", "error", "notFound", "forbidden"]) {
+      for (const method of ["component", "layout"] as const) {
         const methodRegex = new RegExp(
           `\\.${method}\\(\\s*${escapeRegex(imp.localName)}\\s*\\)`,
           "g",
@@ -687,79 +677,185 @@ export const transformRoutesForBuild = (
         const replacement = imp.isDefault
           ? `.${method}(() => import("${imp.importPath}"))`
           : `.${method}(() => import("${imp.importPath}").then(m => m.${imp.localName}))`;
-        transformed = transformed.replace(methodRegex, replacement);
+
+        // Per-occurrence: only transform if NOT in Eager context
+        transformed = transformed.replace(methodRegex, (fullMatch, offset: number) =>
+          isInEagerContext(clean, offset) ? fullMatch : replacement,
+        );
       }
     }
 
     return transformed;
   });
 
+// =============================================================================
+// Eager Context Detection — Ancestor-Aware
+// =============================================================================
+
 /**
- * Find component identifiers used in routes with RenderStrategy.Eager.
- * Detects `.component(X)` calls in route chains that contain `RenderStrategy.Eager`.
- *
- * Strategy: For each `.component(X)` occurrence, find the enclosing route chain
- * (from the nearest preceding `Route.make(` or `Route.index(` to the chain end)
- * and check if it contains `RenderStrategy.Eager`.
- *
+ * Replace string/comment contents with spaces, preserving character positions.
+ * Prevents parens in strings or `RenderStrategy.Eager` in comments from
+ * causing false matches during balanced-paren scanning.
  * @internal
  */
-const findEagerRouteComponents = (
-  source: string,
-  imports: ReadonlyArray<ImportedComponent>,
-): Set<string> => {
-  const eager = new Set<string>();
-  const importNames = new Set(imports.map((i) => i.localName));
-
-  // Find each .component(X) and check if its route chain has RenderStrategy.Eager
-  const componentCallRegex = /\.component\(\s*(\w+)\s*\)/g;
-  let match: RegExpExecArray | null = componentCallRegex.exec(source);
-
-  while (match !== null) {
-    const name = match[1];
-    if (name !== undefined && importNames.has(name)) {
-      const pos = match.index;
-      if (isInEagerRouteChain(source, pos)) {
-        eager.add(name);
+const neutralizeSource = (source: string): string =>
+  source.replace(
+    /\/\/.*$|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/gm,
+    (m) => {
+      if (m.startsWith("//") || m.startsWith("/*")) {
+        return m.replace(/[^\n]/g, " ");
       }
-    }
-    match = componentCallRegex.exec(source);
-  }
+      if (m.length <= 2) return m;
+      return m.charAt(0) + m.slice(1, -1).replace(/[^\n]/g, " ") + m.charAt(m.length - 1);
+    },
+  );
 
-  return eager;
+/**
+ * Check if the open paren at `openParenPos` belongs to a `.children(` call.
+ * Returns the position of `.` in `.children`, or undefined.
+ * @internal
+ */
+const isChildrenOpenParen = (clean: string, openParenPos: number): number | undefined => {
+  let j = openParenPos - 1;
+  while (j >= 0 && " \t\n\r".includes(clean.charAt(j))) j--;
+  const keyword = ".children";
+  const start = j - keyword.length + 1;
+  if (start >= 0 && clean.slice(start, j + 1) === keyword) {
+    return start;
+  }
+  return undefined;
 };
 
 /**
- * Check if a position in source is within a route chain that contains RenderStrategy.Eager.
- * Looks backward for the start of the route chain (Route.make/Route.index/.add()
- * and forward for the end, checking for RenderStrategy.Eager in the range.
+ * Find the `.children(` call that encloses position `pos`.
+ * Scans backward with balanced paren tracking. When an unmatched `(`
+ * is found, checks if it belongs to `.children(`. Continues if not.
  * @internal
  */
-const isInEagerRouteChain = (source: string, pos: number): boolean => {
-  // Find the start of this route chain - look backward for Route.make( or Route.index( or .add(
-  const before = source.slice(0, pos);
-  const chainStartPatterns = [/Route\.make\s*\(/g, /Route\.index\s*\(/g, /\.add\s*\(/g];
+const findEnclosingChildrenCall = (clean: string, pos: number): number | undefined => {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = clean.charAt(i);
+    if (ch === ")") {
+      depth++;
+    } else if (ch === "(") {
+      if (depth > 0) {
+        depth--;
+      } else {
+        const dotPos = isChildrenOpenParen(clean, i);
+        if (dotPos !== undefined) return dotPos;
+        // Not .children — keep searching outward
+      }
+    }
+  }
+  return undefined;
+};
 
-  let chainStart = 0;
-  for (const pattern of chainStartPatterns) {
+/**
+ * Find the matching close paren for an open paren at `openPos`.
+ * @internal
+ */
+const findMatchingCloseParen = (clean: string, openPos: number): number | undefined => {
+  let depth = 1;
+  for (let i = openPos + 1; i < clean.length; i++) {
+    const ch = clean.charAt(i);
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Find the start of the route chain containing `pos`.
+ * Scans backward for the nearest `Route.make(` or `Route.index(`.
+ * @internal
+ */
+const findRouteChainStart = (clean: string, pos: number): number => {
+  const before = clean.slice(0, pos);
+  let latest = 0;
+  for (const pattern of [/Route\.make\s*\(/g, /Route\.index\s*\(/g]) {
     let m: RegExpExecArray | null = pattern.exec(before);
     while (m !== null) {
-      if (m.index > chainStart) {
-        chainStart = m.index;
-      }
+      if (m.index > latest) latest = m.index;
       m = pattern.exec(before);
     }
   }
+  return latest;
+};
 
-  // Find the end of this route chain - look forward for the next .add( or Route.make(
-  // or end of file. Use a reasonable window (2000 chars) to avoid scanning entire file.
-  const after = source.slice(pos, Math.min(source.length, pos + 2000));
-  const chainEndMatch = after.search(/\.add\s*\(|Routes\.make\s*\(/);
-  const chainEnd = chainEndMatch === -1 ? pos + after.length : pos + chainEndMatch;
+/**
+ * Find the end of a route chain from `pos`.
+ * Chain ends at `,` or `)` at depth 0 (parent argument boundary).
+ * @internal
+ */
+const findRouteChainEnd = (clean: string, pos: number): number => {
+  let depth = 0;
+  for (let i = pos; i < clean.length; i++) {
+    const ch = clean.charAt(i);
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      if (depth === 0) return i;
+      depth--;
+    } else if (ch === "," && depth === 0) {
+      return i;
+    }
+  }
+  return clean.length;
+};
 
-  // Check if RenderStrategy.Eager appears in this range
-  const chainText = source.slice(chainStart, chainEnd);
-  return chainText.includes("RenderStrategy.Eager");
+/**
+ * Extract parent route chain text, EXCLUDING the children body.
+ * Given `.children(` at `childrenDotPos`, concatenates:
+ *   [parentStart..openParen) + [closeParen+1..parentEnd)
+ * This prevents a child's strategy from being attributed to the parent.
+ * @internal
+ */
+const getParentChainText = (clean: string, childrenDotPos: number): string => {
+  const afterKeyword = childrenDotPos + ".children".length;
+  let openParen = afterKeyword;
+  while (openParen < clean.length && clean.charAt(openParen) !== "(") openParen++;
+
+  const closeParen = findMatchingCloseParen(clean, openParen);
+  if (closeParen === undefined) return "";
+
+  const parentStart = findRouteChainStart(clean, childrenDotPos);
+  const parentEnd = findRouteChainEnd(clean, closeParen + 1);
+
+  return clean.slice(parentStart, openParen) + clean.slice(closeParen + 1, parentEnd);
+};
+
+/**
+ * Determine if `.component(X)` at `componentPos` is in an Eager context.
+ *
+ * 1. Check own route chain for explicit strategy (nearest wins).
+ * 2. Walk up ancestor `.children()` calls checking parent chains.
+ * 3. No ancestor strategy → not eager (default = lazy).
+ * @internal
+ */
+const isInEagerContext = (clean: string, componentPos: number): boolean => {
+  // 1. Own route chain
+  const ownStart = findRouteChainStart(clean, componentPos);
+  const ownEnd = findRouteChainEnd(clean, componentPos);
+  const ownChain = clean.slice(ownStart, ownEnd);
+
+  if (ownChain.includes("RenderStrategy.Eager")) return true;
+  if (ownChain.includes("RenderStrategy.Lazy")) return false;
+
+  // 2. Ancestor walk
+  let searchPos = componentPos;
+  for (;;) {
+    const childrenDotPos = findEnclosingChildrenCall(clean, searchPos);
+    if (childrenDotPos === undefined) return false;
+
+    const parentChain = getParentChainText(clean, childrenDotPos);
+    if (parentChain.includes("RenderStrategy.Eager")) return true;
+    if (parentChain.includes("RenderStrategy.Lazy")) return false;
+
+    searchPos = childrenDotPos;
+  }
 };
 
 /**
@@ -974,117 +1070,134 @@ export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
 
 /**
  * Generate server entry point for production builds.
+ *
+ * Produces a single composed middleware that handles:
+ *   1. Static files — serves from `dist/client/` with MIME detection
+ *   2. API routes — delegates to HttpApi handler (when `hasApi`)
+ *   3. SPA fallback — serves `.trygg/index.html` for navigation requests
+ *
  * @since 1.0.0
  */
 export const generateServerEntry = (
-  platform: "node" | "bun",
   hasApi: boolean,
-): Effect.Effect<string> =>
+): Effect.Effect<string, never, ServerPlatform> =>
   Effect.gen(function* () {
-    const platformImport =
-      platform === "bun"
-        ? 'import { BunHttpServer, BunRuntime } from "@effect/platform-bun"'
-        : 'import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"\nimport { createServer } from "node:http"';
-
-    const platformServerLayer =
-      platform === "bun"
-        ? "BunHttpServer.layer({ port: PORT, hostname: HOST })"
-        : "NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST })";
-
-    const platformRuntime = platform === "bun" ? "BunRuntime" : "NodeRuntime";
+    const tpl = yield* ServerPlatform;
 
     const apiImport = hasApi ? `import ApiLive from "../app/api.js"` : "";
 
-    // Build server composition based on whether API exists
+    // Compose ProductionMiddleware (static/SPA/health) with logger.
+    // HttpMiddleware is just (app) => app — compose via flow().
+    // With API: HttpApiBuilder.serve wraps the API HttpApp in middleware.
+    // Without API: HttpServer.serve applies middleware to a 404 fallback app
+    //   (ProductionMiddleware handles all routes before the inner app is reached).
     const serverLive = hasApi
-      ? `// Build server layer with API
-const ServerLive = HttpApiBuilder.serve(HttpMiddleware.logger).pipe(
-  Layer.provide(ApiLive),
-  Layer.provide(
-    Layer.mergeAll(
-      HttpServer.layerContext,
-      Layer.succeed(HttpMiddleware.HttpMiddleware, StaticFilesMiddleware),
-      Layer.succeed(HttpMiddleware.HttpMiddleware, SpaFallbackMiddleware),
-      Layer.succeed(HttpMiddleware.HttpMiddleware, HealthMiddleware)
-    )
-  ),
-  Layer.provide(${platformServerLayer})
-)`
-      : `// Build server layer without API
-const ServerLive = Layer.mergeAll(
-  HttpServer.layerContext,
-  Layer.succeed(HttpMiddleware.HttpMiddleware, StaticFilesMiddleware),
-  Layer.succeed(HttpMiddleware.HttpMiddleware, SpaFallbackMiddleware),
-  Layer.succeed(HttpMiddleware.HttpMiddleware, HealthMiddleware)
+      ? `const ServerLive = HttpApiBuilder.serve(
+  flow(ProductionMiddleware, HttpMiddleware.logger)
 ).pipe(
-  Layer.provide(${platformServerLayer})
+  Layer.provide(ApiLive),
+  Layer.provide(HttpServer.layerContext),
+  Layer.provide(${tpl.serverLayer})
+)`
+      : `const NotFoundApp = Effect.succeed(HttpServerResponse.empty({ status: 404 }))
+
+const ServerLive = HttpServer.serve(
+  flow(ProductionMiddleware, HttpMiddleware.logger)
+)(NotFoundApp).pipe(
+  Layer.provide(${tpl.serverLayer})
 )`;
 
     return `/**
  * Production server entry point
- * Auto-generated by trygg - DO NOT EDIT
+ * Auto-generated by trygg — DO NOT EDIT
  */
-import { HttpApiBuilder, HttpMiddleware, HttpServer, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-${platformImport}
-import { Layer, Effect } from "effect"
+import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
+import * as HttpMiddleware from "@effect/platform/HttpMiddleware"
+import * as HttpServer from "@effect/platform/HttpServer"
+import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
+import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+${tpl.imports}
+import { Layer, Effect, flow } from "effect"
 import * as nodePath from "node:path"
+import * as nodeFs from "node:fs"
 import { fileURLToPath } from "node:url"
 ${apiImport}
 
 const __dirname = nodePath.dirname(fileURLToPath(import.meta.url))
 const clientDir = nodePath.join(__dirname, "client")
 
-const PORT = Number(process.env.PORT ?? 3000)
+const PORT = Number(process.env.PORT ?? 4173)
 const HOST = process.env.HOST ?? "0.0.0.0"
 
-// Static file serving middleware (placeholder - files in client/ directory)
-const StaticFilesMiddleware = HttpMiddleware.make((app) =>
+// SPA shell — read once at startup
+const indexHtml = nodeFs.readFileSync(
+  nodePath.join(clientDir, ".trygg", "index.html"),
+  "utf-8"
+)
+
+// MIME types for static assets
+const MIME = /** @type {Record<string, string>} */ ({
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".map": "application/json",
+})
+
+// Single composed middleware: static → API passthrough → SPA fallback
+const ProductionMiddleware = HttpMiddleware.make((app) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = new URL(request.url, "http://localhost")
     const pathname = url.pathname
 
-    // Skip non-file requests and API routes
-    if (!pathname.includes(".") || pathname.startsWith("/api/")) {
+    // 1. Static files (has extension, not API)
+    if (pathname.includes(".") && !pathname.startsWith("/api/")) {
+      const filePath = nodePath.resolve(clientDir, pathname.slice(1))
+      // Path traversal guard — trailing separator prevents sibling dir bypass
+      if (!filePath.startsWith(clientDir + "/")) {
+        return yield* HttpServerResponse.text("Forbidden", { status: 403 })
+      }
+      return yield* Effect.tryPromise({
+        try: () => nodeFs.promises.readFile(filePath),
+        catch: () => "not-found"
+      }).pipe(
+        Effect.map((buf) => {
+          const ext = nodePath.extname(pathname).toLowerCase()
+          const ct = MIME[ext] ?? "application/octet-stream"
+          const cache = pathname.startsWith("/assets/")
+            ? "public, max-age=31536000, immutable"
+            : "public, max-age=3600"
+          return HttpServerResponse.uint8Array(new Uint8Array(buf), {
+            headers: { "content-type": ct, "cache-control": cache }
+          })
+        }),
+        Effect.catchAll(() => app)
+      )
+    }
+
+    // 2. API routes — delegate to HttpApi handler
+    if (pathname.startsWith("/api/")) {
       return yield* app
     }
 
-    // For now, pass through - static files will be handled by reverse proxy in production
-    // or you can add proper file serving here
-    return yield* app
-  })
-)
-
-// SPA fallback middleware
-const SpaFallbackMiddleware = HttpMiddleware.make((app) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest
-    const url = new URL(request.url, "http://localhost")
-    const pathname = url.pathname
-
-    // Only handle GET requests for non-file, non-API routes
-    if (request.method !== "GET" || pathname.includes(".") || pathname.startsWith("/api/")) {
-      return yield* app
-    }
-
-    // Return a simple HTML response
-    // In production, you would read the actual index.html from clientDir
-    const html = "<!DOCTYPE html><html><body>SPA Placeholder</body></html>"
-    return yield* HttpServerResponse.text(html, { 
-      status: 200,
-      headers: { "content-type": "text/html; charset=utf-8" }
-    })
-  })
-)
-
-// Health check middleware
-const HealthMiddleware = HttpMiddleware.make((app) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest
-    const url = new URL(request.url, "http://localhost")
-
-    if (url.pathname === "/healthz" && request.method === "GET") {
-      return yield* HttpServerResponse.text("OK", { status: 200 })
+    // 3. SPA fallback — serve cached shell for navigation requests
+    if (request.method === "GET") {
+      return yield* HttpServerResponse.text(indexHtml, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" }
+      })
     }
 
     return yield* app
@@ -1094,7 +1207,7 @@ const HealthMiddleware = HttpMiddleware.make((app) =>
 ${serverLive}
 
 // Launch server
-${platformRuntime}.runMain(
+${tpl.runtime}.runMain(
   Effect.gen(function* () {
     yield* Effect.log(\`Server listening on http://\${HOST}:\${PORT}\`)
     yield* Layer.launch(ServerLive)
@@ -1108,7 +1221,7 @@ ${platformRuntime}.runMain(
 // =============================================================================
 
 /**
- * Effect UI Vite plugin
+ * trygg Vite plugin
  *
  * Provides:
  * - JSX configuration for trygg
@@ -1453,6 +1566,36 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       return await Effect.runPromise(effect);
     },
 
+    configurePreviewServer(server) {
+      // `vite preview` is a static file server (sirv). When output is
+      // "server", the production artifact is `dist/server.js` which handles
+      // static files, API routes, and SPA fallback in one process. Warn
+      // users that `vite preview` cannot serve API routes.
+      if (output === "server") {
+        const runtime = configPlatform === "bun" ? "bun" : "node";
+        console.warn(
+          `\n  trygg: output is "server" — use \`${runtime} dist/server.js\` for production preview with API support.` +
+            "\n  `vite preview` serves static files only. API routes will 404.\n",
+        );
+      }
+
+      // Pre-hook (no return): runs BEFORE sirv. Rewrites non-file GET
+      // requests to the SPA shell so sirv serves `.trygg/index.html`.
+      // /api/* routes are NOT rewritten — they 404 via sirv. For API
+      // support in production, run `dist/server.js` instead.
+      server.middlewares.use((req, _res, next) => {
+        if (
+          req.method === "GET" &&
+          req.url &&
+          !req.url.includes(".") &&
+          !req.url.startsWith("/api/")
+        ) {
+          req.url = "/.trygg/index.html";
+        }
+        next();
+      });
+    },
+
     resolveId(id) {
       if (id === VIRTUAL_HANDLER_FACTORY_ID) {
         return RESOLVED_HANDLER_FACTORY_ID;
@@ -1528,7 +1671,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
 
         // Generate server entry
         const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
-        const serverEntryContent = yield* generateServerEntry(configPlatform, hasApi);
+        const serverEntryContent = yield* generateServerEntry(hasApi);
         yield* writeFileSafe(serverEntryPath, serverEntryContent);
 
         yield* Effect.logInfo("Building production server...");

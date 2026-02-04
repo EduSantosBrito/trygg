@@ -589,7 +589,7 @@ Route.make("/settings").layout(SettingsLayout)
       }),
     );
 
-    it.effect("should transform error/loading/notFound/forbidden imports", () =>
+    it.effect("should NOT transform boundary components (loading/error/notFound/forbidden)", () =>
       Effect.gen(function* () {
         const source = `
 import { ErrorComp } from "./components/error"
@@ -597,14 +597,11 @@ import { LoadingComp } from "./components/loading"
 Route.make("/users").error(ErrorComp).loading(LoadingComp)
 `;
         const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
-        assert.isTrue(
-          result.includes('.error(() => import("./components/error").then(m => m.ErrorComp))'),
-        );
-        assert.isTrue(
-          result.includes(
-            '.loading(() => import("./components/loading").then(m => m.LoadingComp))',
-          ),
-        );
+        // Boundary components must stay static — they are fallback UI
+        assert.isTrue(result.includes(".error(ErrorComp)"));
+        assert.isTrue(result.includes(".loading(LoadingComp)"));
+        assert.isFalse(result.includes('import("./components/error")'));
+        assert.isFalse(result.includes('import("./components/loading")'));
       }),
     );
 
@@ -612,6 +609,184 @@ Route.make("/users").error(ErrorComp).loading(LoadingComp)
       Effect.gen(function* () {
         const result = yield* transformRoutesForBuild("", "/app/routes.ts");
         assert.strictEqual(result, "");
+      }),
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RenderStrategy.Eager detection
+    // ─────────────────────────────────────────────────────────────────────────
+
+    it.effect("should NOT transform Eager route components", () =>
+      Effect.gen(function* () {
+        const source = `
+import HomePage from "./pages/home"
+import AboutPage from "./pages/about"
+
+Route.make("/").component(HomePage).pipe(Route.provide(RenderStrategy.Eager))
+Route.make("/about").component(AboutPage)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(HomePage)"));
+        assert.isTrue(result.includes('import("./pages/about")'));
+      }),
+    );
+
+    it.effect("child inherits Eager from parent via .children()", () =>
+      Effect.gen(function* () {
+        const source = `
+import UsersPage from "./pages/users"
+
+Route.make("/admin")
+  .pipe(Route.provide(RenderStrategy.Eager))
+  .children(
+    Route.make("/users").component(UsersPage),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(UsersPage)"));
+        assert.isFalse(result.includes('import("./pages/users")'));
+      }),
+    );
+
+    it.effect("child Lazy override transforms despite Eager parent", () =>
+      Effect.gen(function* () {
+        const source = `
+import AnalyticsPage from "./pages/analytics"
+
+Route.make("/admin")
+  .pipe(Route.provide(RenderStrategy.Eager))
+  .children(
+    Route.make("/analytics")
+      .component(AnalyticsPage)
+      .pipe(Route.provide(RenderStrategy.Lazy)),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes('import("./pages/analytics")'));
+      }),
+    );
+
+    it.effect("detects Eager when .pipe() follows .children()", () =>
+      Effect.gen(function* () {
+        const source = `
+import UsersPage from "./pages/users"
+
+Route.make("/admin")
+  .children(
+    Route.make("/users").component(UsersPage),
+  )
+  .pipe(Route.provide(RenderStrategy.Eager))
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(UsersPage)"));
+      }),
+    );
+
+    it.effect("grandchild inherits Eager through nested .children()", () =>
+      Effect.gen(function* () {
+        const source = `
+import ProfilePage from "./pages/profile"
+
+Route.make("/admin")
+  .pipe(Route.provide(RenderStrategy.Eager))
+  .children(
+    Route.make("/settings")
+      .children(
+        Route.make("/profile").component(ProfilePage),
+      ),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(ProfilePage)"));
+      }),
+    );
+
+    it.effect("sibling Eager does not affect other siblings", () =>
+      Effect.gen(function* () {
+        const source = `
+import UsersPage from "./pages/users"
+import LogsPage from "./pages/logs"
+
+Route.make("/admin")
+  .children(
+    Route.make("/users").component(UsersPage).pipe(Route.provide(RenderStrategy.Eager)),
+    Route.make("/logs").component(LogsPage),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(UsersPage)"));
+        assert.isTrue(result.includes('import("./pages/logs")'));
+      }),
+    );
+
+    it.effect("ignores RenderStrategy.Eager in comments", () =>
+      Effect.gen(function* () {
+        const source = `
+import HomePage from "./pages/home"
+
+// RenderStrategy.Eager was considered but removed
+Route.make("/").component(HomePage)
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes('import("./pages/home")'));
+      }),
+    );
+
+    it.effect("parent Lazy blocks grandparent Eager", () =>
+      Effect.gen(function* () {
+        const source = `
+import ProfilePage from "./pages/profile"
+
+Route.make("/admin")
+  .pipe(Route.provide(RenderStrategy.Eager))
+  .children(
+    Route.make("/settings")
+      .pipe(Route.provide(RenderStrategy.Lazy))
+      .children(
+        Route.make("/profile").component(ProfilePage),
+      ),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes('import("./pages/profile")'));
+      }),
+    );
+
+    it.effect("mixed children: Eager parent, one child overrides to Lazy", () =>
+      Effect.gen(function* () {
+        const source = `
+import UsersPage from "./pages/users"
+import LogsPage from "./pages/logs"
+import AnalyticsPage from "./pages/analytics"
+
+Route.make("/admin")
+  .pipe(Route.provide(RenderStrategy.Eager))
+  .children(
+    Route.make("/users").component(UsersPage),
+    Route.make("/logs").component(LogsPage),
+    Route.make("/analytics")
+      .component(AnalyticsPage)
+      .pipe(Route.provide(RenderStrategy.Lazy)),
+  )
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".component(UsersPage)"));
+        assert.isTrue(result.includes(".component(LogsPage)"));
+        assert.isTrue(result.includes('import("./pages/analytics")'));
+      }),
+    );
+
+    it.effect("layout inherits Eager from parent (not transformed)", () =>
+      Effect.gen(function* () {
+        const source = `
+import AdminLayout from "./layouts/admin"
+
+Route.make("/admin")
+  .layout(AdminLayout)
+  .pipe(Route.provide(RenderStrategy.Eager))
+`;
+        const result = yield* transformRoutesForBuild(source, "/app/routes.ts");
+        assert.isTrue(result.includes(".layout(AdminLayout)"));
       }),
     );
   });
