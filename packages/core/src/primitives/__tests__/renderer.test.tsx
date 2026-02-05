@@ -53,7 +53,7 @@ describe("mount", () => {
 
   it.scoped("should enable reactivity via Component wrapper", () =>
     Effect.gen(function* () {
-      const count = Signal.unsafeMake(0);
+      const count = Signal.makeSync(0);
 
       const app = Effect.gen(function* () {
         const value = yield* Signal.get(count);
@@ -384,7 +384,7 @@ describe("Component element rendering", () => {
 
   it.scoped("should re-render when subscribed signal changes", () =>
     Effect.gen(function* () {
-      const count = Signal.unsafeMake(0);
+      const count = Signal.makeSync(0);
 
       const Counter = Component.gen(function* () {
         const value = yield* Signal.get(count);
@@ -403,7 +403,7 @@ describe("Component element rendering", () => {
 
   it.scoped("should preserve signal identity on re-render", () =>
     Effect.gen(function* () {
-      const trigger = Signal.unsafeMake(0);
+      const trigger = Signal.makeSync(0);
       let signalInstance: Signal.Signal<number> | null = null;
 
       const MyComponent = Component.gen(function* () {
@@ -519,7 +519,7 @@ describe("Component element rendering", () => {
       // This tests the router pattern: Outlet subscribes to router.current
       // When router.current changes, Outlet should re-render
 
-      const outerSignal = Signal.unsafeMake(0);
+      const outerSignal = Signal.makeSync(0);
       let innerRenderCount = 0;
 
       // Inner component that subscribes to outer signal (like Outlet subscribes to router.current)
@@ -1038,8 +1038,8 @@ describe("Scope and cleanup", () => {
 describe("Re-render behavior", () => {
   it.scoped("should only re-render components subscribed to changed signal", () =>
     Effect.gen(function* () {
-      const signal1 = Signal.unsafeMake(0);
-      const signal2 = Signal.unsafeMake(0);
+      const signal1 = Signal.makeSync(0);
+      const signal2 = Signal.makeSync(0);
       let comp1Renders = 0;
       let comp2Renders = 0;
 
@@ -1075,7 +1075,7 @@ describe("Re-render behavior", () => {
 
   it.scoped("should recreate child component on parent re-render (full subtree teardown)", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.unsafeMake(0);
+      const parentTrigger = Signal.makeSync(0);
       let childRenderCount = 0;
 
       const Child = Component.gen(function* () {
@@ -1114,7 +1114,7 @@ describe("Re-render behavior", () => {
       // 2. When navigation happens, the signal updates to new component
       // 3. Old component should be cleaned up before new one renders
 
-      const routeSignal = Signal.unsafeMake<Element>(<div data-testid="route-a">Route A</div>);
+      const routeSignal = Signal.makeSync<Element>(<div data-testid="route-a">Route A</div>);
       let cleanupACalled = false;
 
       // Component A with cleanup tracking
@@ -1171,7 +1171,7 @@ describe("Re-render behavior", () => {
   it.scoped("should not duplicate content on rapid signal changes", () =>
     Effect.gen(function* () {
       // Test that rapid navigation doesn't cause duplicate DOM nodes
-      const routeSignal = Signal.unsafeMake<Element>(<span>Initial</span>);
+      const routeSignal = Signal.makeSync<Element>(<span>Initial</span>);
 
       const { container } = yield* render(<div data-testid="rapid-container">{routeSignal}</div>);
 
@@ -1202,11 +1202,11 @@ describe("Re-render behavior", () => {
         // - Outlet returns a SignalElement (tracker.view) that is UPDATED via Signal.set
         // - When router changes, the view signal is updated with new content
 
-        const routerSignal = Signal.unsafeMake("/page-a");
+        const routerSignal = Signal.makeSync("/page-a");
         let outletRenderCount = 0;
 
         // Create a view signal OUTSIDE the component (like async tracker does)
-        const viewSignal = Signal.unsafeMake<Element>(
+        const viewSignal = Signal.makeSync<Element>(
           <div data-testid="page-a">Page A Content</div>,
         );
 
@@ -1289,7 +1289,7 @@ describe("Re-render behavior", () => {
       });
 
       // Create a signal holding the inner component (like outlet pattern)
-      const contentSignal = Signal.unsafeMake<Element>(<InnerComponent />);
+      const contentSignal = Signal.makeSync<Element>(<InnerComponent />);
 
       // Outer component that reads from the signal
       const OuterComponent = Component.gen(function* () {
@@ -1319,7 +1319,7 @@ describe("Re-render behavior", () => {
     Effect.gen(function* () {
       // More complex case: outer component subscribes to a signal
       // but inner component should still only render once initially
-      const routeSignal = Signal.unsafeMake("/home");
+      const routeSignal = Signal.makeSync("/home");
       let outerRenderCount = 0;
       let innerRenderCount = 0;
 
@@ -1373,7 +1373,7 @@ describe("Re-render behavior", () => {
       let layoutRenderCount = 0;
 
       // Simulated Outlet - a Component that subscribes to a route signal
-      const routeSignal = Signal.unsafeMake("/home");
+      const routeSignal = Signal.makeSync("/home");
       const Outlet = Component.gen(function* () {
         const route = yield* Signal.get(routeSignal);
         outletRenderCount++;
@@ -1517,7 +1517,7 @@ describe("Renderer error handling", () => {
 
   it.scoped("should preserve old content when component re-render fails", () =>
     Effect.gen(function* () {
-      const shouldError = Signal.unsafeMake(false);
+      const shouldError = Signal.makeSync(false);
 
       const ConditionalErrorComponent = Component.gen(function* () {
         const willError = yield* Signal.get(shouldError);
@@ -1573,7 +1573,7 @@ describe("Renderer error handling", () => {
 
   it.scoped("should maintain signal subscriptions after re-render error for retry", () =>
     Effect.gen(function* () {
-      const errorCount = Signal.unsafeMake(0);
+      const errorCount = Signal.makeSync(0);
       let renderCount = 0;
 
       const RetryableComponent = Component.gen(function* () {
@@ -1609,7 +1609,7 @@ describe("Renderer error handling", () => {
   it.scoped("should cleanup properly after re-render error when component unmounts", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
-      const shouldError = Signal.unsafeMake(false);
+      const shouldError = Signal.makeSync(false);
 
       const ErrorOnRerenderComponent = Component.gen(function* () {
         const willError = yield* Signal.get(shouldError);

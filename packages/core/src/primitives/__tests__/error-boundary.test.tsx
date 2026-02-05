@@ -196,7 +196,7 @@ describe("ErrorBoundary basic functionality", () => {
         return <div data-testid="symbol-prop">{props[SymbolKey]}</div>;
       });
 
-      const valueSignal = Signal.unsafeMake("symbol-value");
+      const valueSignal = Signal.makeSync("symbol-value");
       const builder = ErrorBoundary.catch(SymbolComponent);
       const SafeComponent = yield* builder.catchAll(() => <div>fallback</div>);
 

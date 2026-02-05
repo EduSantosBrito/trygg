@@ -152,7 +152,7 @@ describe("ErrorBoundary", () => {
   // Re-render error handling tests
   it.scoped("should catch error when child component throws on re-render", () =>
     Effect.gen(function* () {
-      const shouldThrow = Signal.unsafeMake(false);
+      const shouldThrow = Signal.makeSync(false);
 
       const ChildComponent = Component.gen(function* () {
         const throwNow = yield* Signal.get(shouldThrow);
@@ -232,7 +232,7 @@ describe("ErrorBoundary", () => {
 
   it.scoped("should catch error from SignalElement swap", () =>
     Effect.gen(function* () {
-      const contentSignal = Signal.unsafeMake<"ok" | "error">("ok");
+      const contentSignal = Signal.makeSync<"ok" | "error">("ok");
 
       const ChildComponent = Component.gen(function* () {
         const value = yield* Signal.get(contentSignal);

@@ -5,7 +5,7 @@
  * Built on SubscriptionRef with sync callbacks for fine-grained reactivity.
  *
  * Test Categories:
- * - Creation: make, unsafeMake
+ * - Creation: make, sync
  * - Reading: get, peekSync
  * - Writing: set, update, modify
  * - Subscription: subscribe, notify listeners
@@ -123,20 +123,20 @@ describe("Signal.make", () => {
 });
 
 // =============================================================================
-// Signal.unsafeMake - Sync signal creation
+// Signal.makeSync - Sync signal creation
 // =============================================================================
 // Scope: Synchronous signal creation for global/module-level signals
 
-describe("Signal.unsafeMake", () => {
+describe("Signal.makeSync", () => {
   it("should create signal synchronously without Effect context", () => {
-    const signal = Signal.unsafeMake(42);
+    const signal = Signal.makeSync(42);
 
     assert.strictEqual(signal._tag, "Signal");
     assert.strictEqual(Signal.peekSync(signal), 42);
   });
 
   it("should work for module-level global signals", () => {
-    const globalSignal = Signal.unsafeMake({ initialized: true });
+    const globalSignal = Signal.makeSync({ initialized: true });
 
     assert.deepStrictEqual(Signal.peekSync(globalSignal), { initialized: true });
   });
@@ -187,7 +187,7 @@ describe("Signal.get", () => {
 
 describe("Signal.peekSync", () => {
   it("should return current value synchronously", () => {
-    const signal = Signal.unsafeMake(99);
+    const signal = Signal.makeSync(99);
 
     assert.strictEqual(Signal.peekSync(signal), 99);
   });

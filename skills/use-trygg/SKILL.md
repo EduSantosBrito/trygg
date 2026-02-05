@@ -26,6 +26,7 @@ What are you building?
 |
 +-- State management?
 |   +-- Local state? -> yield* Signal.make(initial)
+|   +-- Global/module-level? -> Signal.makeSync(initial)
 |   +-- Computed value? -> yield* Signal.derive(source, fn)
 |   +-- Multiple sources? -> yield* Signal.deriveAll([a, b], fn)
 |   +-- Fine-grained DOM? -> Pass signal directly to JSX: {count}

@@ -215,7 +215,7 @@ export interface Signal<A> {
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `make` | `<A>(initial: A) => Effect<Signal<A>>` | Create signal. Position-tracked in components. |
-| `unsafeMake` | `<A>(initial: A) => Signal<A>` | Create synchronously (global/module-level). |
+| `makeSync` | `<A>(initial: A) => Signal<A>` | Create synchronously outside Effect context (global/module-level). |
 | `get` | `<A>(signal: Signal<A>) => Effect<A>` | Read value. **Subscribes component to changes.** |
 | `set` | `<A>(signal: Signal<A>, value: A) => Effect<void>` | Set value, notify listeners. Skips if unchanged. |
 | `update` | `<A>(signal: Signal<A>, f: (a: A) => A) => Effect<void>` | Update via function. Skips if unchanged. |

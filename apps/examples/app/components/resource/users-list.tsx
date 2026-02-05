@@ -14,7 +14,7 @@ export const UsersList = Component.gen(function* (
     Pending: () => <Skeleton lines={4} />,
 
     Success: (users, stale) => {
-      const usersSignal = Signal.unsafeMake(users);
+      const usersSignal = Signal.makeSync(users);
 
       return (
         <div

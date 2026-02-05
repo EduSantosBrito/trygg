@@ -5,6 +5,7 @@
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `make` | `<A>(initial: A) => Effect<Signal<A>>` | Create signal. Position-tracked in components (like React hooks). |
+| `makeSync` | `<A>(initial: A) => Signal<A>` | Create synchronously outside Effect context (global/module-level signals). |
 | `get` | `<A>(signal: Signal<A>) => Effect<A>` | Read value. **Subscribes component to changes** (triggers re-render). |
 | `set` | `<A>(signal: Signal<A>, value: A) => Effect<void>` | Set value. Skips if unchanged (uses `Equal.equals`). |
 | `update` | `<A>(signal: Signal<A>, f: (a: A) => A) => Effect<void>` | Update via function. Skips if unchanged. |

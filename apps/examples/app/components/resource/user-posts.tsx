@@ -16,7 +16,7 @@ export const UserPosts = Component.gen(function* (
     Pending: () => <Skeleton lines={6} />,
 
     Success: (posts, stale) => {
-      const postsSignal = Signal.unsafeMake(posts);
+      const postsSignal = Signal.makeSync(posts);
 
       return (
         <div className={cx(stale && "opacity-60")}>
@@ -62,7 +62,7 @@ export const UserPosts = Component.gen(function* (
           />
         ),
         onSome: (posts) => {
-          const postsSignal = Signal.unsafeMake(posts);
+          const postsSignal = Signal.makeSync(posts);
           return (
             <div>
               <div className="bg-red-50 text-red-800 py-3 px-4 rounded-md flex justify-between items-center text-sm">

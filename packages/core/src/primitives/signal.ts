@@ -228,29 +228,33 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
 );
 
 /**
- * Create a Signal synchronously (unsafe).
+ * Create a Signal synchronously, outside of Effect context.
  *
- * Use this only for global/module-level signals that need to be
- * created outside of Effect context. For component state, always
- * use `Signal.make` inside `Effect.gen`.
+ * Use `Signal.makeSync` for global/module-level signals that exist for the
+ * lifetime of the application (e.g. auth state, theme, locale). These
+ * signals are created eagerly at module load time and can be shared
+ * across components via services or direct import.
+ *
+ * Use `Signal.make` inside `Component.gen` for component-local state
+ * that is scoped to the component's lifecycle and cleaned up automatically.
  *
  * @example
  * ```tsx
- * // Global auth state
- * export const authSignal = Signal.unsafeMake<Option<User>>(Option.none())
+ * // Global auth state — created at module load, lives forever
+ * export const authSignal = Signal.makeSync<Option<User>>(Option.none())
  *
- * // In components, use normally
+ * // In components, read/write normally
  * const user = yield* Signal.get(authSignal)
  * yield* Signal.set(authSignal, Option.some(newUser))
  * ```
  *
  * @since 1.0.0
  */
-export const unsafeMake = <A>(initial: A): Signal<A> => {
+export const makeSync = <A>(initial: A): Signal<A> => {
   const ref = Effect.runSync(SubscriptionRef.make(initial));
   const debugId = Debug.nextSignalId();
   // Note: No logging here since we're outside Effect context.
-  // unsafeMake is for global signals created at module load time.
+  // makeSync is for global signals created at module load time.
   return { _tag: "Signal", _ref: ref, _listeners: new Set(), _debugId: debugId };
 };
 
