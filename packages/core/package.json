@@ -1,6 +1,6 @@
 {
   "name": "trygg",
-  "version": "0.1.0-canary.0",
+  "version": "0.1.0-canary.1",
   "description": "Effect-native UI framework with JSX support and fine-grained reactivity",
   "keywords": [
     "effect",
@@ -84,7 +84,7 @@
     "vitest": "^3.2.0"
   },
   "peerDependencies": {
-    "@effect/platform": "^0.94.1",
+    "@effect/platform": "^0.94.3",
     "@effect/platform-browser": "^0.74.0",
     "@effect/platform-bun": "^0.87.0",
     "@effect/platform-node": "^0.87.0",

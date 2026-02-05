@@ -4,7 +4,7 @@
  */
 import { PlatformConfig, layer } from "../platform-config.js";
 
-const BUN_VERSION = "^0.87.0";
+const BUN_VERSION = "^0.87.1";
 
 const config: PlatformConfig = {
   name: "bun",

@@ -4,7 +4,7 @@ description: trygg framework internals — Element tagged enum, Renderer, Compon
 license: MIT
 metadata:
   author: EduSantosBrito
-  version: "0.1.0-canary.0"
+  version: "0.1.0-canary.1"
 ---
 
 # trygg Architecture
