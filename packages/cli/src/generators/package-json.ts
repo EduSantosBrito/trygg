@@ -5,6 +5,16 @@
  */
 import { Effect } from "effect";
 import { PlatformConfig } from "../platform-config.js";
+import {
+  TRYGG_VERSION,
+  EFFECT_VERSION,
+  EFFECT_PLATFORM_VERSION,
+  EFFECT_PLATFORM_BROWSER_VERSION,
+  TYPESCRIPT_VERSION,
+  VITE_VERSION,
+  TAILWIND_VERSION,
+  TAILWIND_VITE_VERSION,
+} from "../versions.js";
 
 export interface PackageJsonOptions {
   readonly name: string;
@@ -34,17 +44,17 @@ export const generatePackageJson = (
     }
 
     const dependencies: Record<string, string> = {
-      effect: "^3.19.15",
-      "@effect/platform": "^0.94.1",
-      "@effect/platform-browser": "^0.74.0",
-      trygg: "workspace:*",
+      effect: EFFECT_VERSION,
+      "@effect/platform": EFFECT_PLATFORM_VERSION,
+      "@effect/platform-browser": EFFECT_PLATFORM_BROWSER_VERSION,
+      trygg: TRYGG_VERSION,
     };
 
     const devDependencies: Record<string, string> = {
-      typescript: "^5.7.0",
-      vite: "^6.0.0",
-      "@tailwindcss/vite": "^4.0.0",
-      tailwindcss: "^4.0.0",
+      typescript: TYPESCRIPT_VERSION,
+      vite: VITE_VERSION,
+      "@tailwindcss/vite": TAILWIND_VITE_VERSION,
+      tailwindcss: TAILWIND_VERSION,
     };
 
     // Add platform devDependencies only for static output (dev-only)

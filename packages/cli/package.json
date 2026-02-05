@@ -1,6 +1,6 @@
 {
   "name": "create-trygg",
-  "version": "0.3.0-canary.0",
+  "version": "0.3.0-canary.1",
   "description": "Create a new trygg project",
   "keywords": [
     "create",
@@ -30,9 +30,9 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.9.0",
-    "@effect/cli": "^0.62.0",
-    "@effect/platform": "^0.94.1",
-    "@effect/platform-bun": "^0.87.0",
+    "@effect/cli": "^0.73.2",
+    "@effect/platform": "^0.94.3",
+    "@effect/platform-bun": "^0.87.1",
     "effect": "^3.19.15"
   },
   "devDependencies": {

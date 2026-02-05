@@ -22,9 +22,9 @@ export const promptProjectOptions = (name: string) =>
 
     // Platform selection
     const platform = yield* prompts.select({
-      message: "Select platform:",
+      message: "Select platform (dev server & production runtime):",
       options: [
-        { value: "bun" as const, label: "Bun", hint: "recommended" },
+        { value: "bun" as const, label: "Bun" },
         { value: "node" as const, label: "Node" },
       ],
     });
@@ -33,12 +33,8 @@ export const promptProjectOptions = (name: string) =>
     const output = yield* prompts.select({
       message: "Select output mode:",
       options: [
-        {
-          value: "server" as const,
-          label: "Server",
-          hint: "full-stack with API routes",
-        },
-        { value: "static" as const, label: "Static", hint: "client-only, CDN deploy" },
+        { value: "server" as const, label: "Server", hint: "full-stack with API routes" },
+        { value: "static" as const, label: "Static", hint: "SPA, deploy to CDN" },
       ],
     });
 
