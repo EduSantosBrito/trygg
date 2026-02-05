@@ -1,54 +1,87 @@
 import "../styles.css";
-import { Component, DevMode } from "trygg";
+import { Component, Signal } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "./api";
+import { AppTheme, AppThemeDark } from "./services/theme";
 
 export default Component.gen(function* () {
+  const { mode, toggle } = yield* AppTheme;
+
+  const toggleLabel = yield* Signal.derive(mode, (m) =>
+    m === "dark" ? "Switch to light theme" : "Switch to dark theme",
+  );
+
+  // Reactive active-state signals — fine-grained DOM updates, no layout re-render
+  const incidentsActive = yield* Router.isActive("/incidents");
+  const settingsActive = yield* Router.isActive("/settings", { exact: true });
+
+  // Derive string attributes from boolean signals for data-active / aria-current
+  const toDataActive = (active: boolean) => (active ? "true" : "");
+  const toAriaCurrent = (active: boolean) => (active ? "page" : "false");
+  const incidentsDataActive = yield* Signal.derive(incidentsActive, toDataActive);
+  const incidentsAriaCurrent = yield* Signal.derive(incidentsActive, toAriaCurrent);
+  const settingsDataActive = yield* Signal.derive(settingsActive, toDataActive);
+  const settingsAriaCurrent = yield* Signal.derive(settingsActive, toAriaCurrent);
+
   return (
-    <html lang="en">
+    <html lang="en" data-theme={mode}>
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>trygg app</title>
-        <meta name="description" content="Built with trygg - Effect-native UI framework" />
+        <meta
+          name="description"
+          content="Built with trygg - Effect-native UI framework"
+        />
       </head>
-      <body className="min-h-screen bg-gray-50 text-gray-800">
-        <DevMode />
+      <body className="min-h-screen bg-[var(--bg)] text-[var(--text-1)]">
+        <header className="border-b border-[var(--border)] bg-[var(--surface)]">
+          <div className="max-w-4xl mx-auto px-4 sm:px-8 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-4 sm:gap-8">
+              <Router.Link
+                to="/"
+                className="text-lg font-semibold no-underline flex items-center gap-1.5"
+              >
+                <span className="text-[var(--signal)]">*</span>
+                <span className="text-[var(--text-1)]">trygg</span>
+              </Router.Link>
 
-        <aside className="fixed top-0 left-0 bottom-0 w-60 bg-white border-r border-gray-200 overflow-y-auto z-40">
-          <div className="px-5 py-5 border-b border-gray-100">
-            <Router.Link
-              to="/"
-              className="text-lg font-semibold text-gray-900 no-underline hover:text-blue-600"
-            >
-              trygg
-            </Router.Link>
-            <p className="m-0 mt-1 text-xs text-gray-400">App</p>
-          </div>
-
-          <nav className="px-3 py-4 flex flex-col gap-5">
-            <div>
-              <h3 className="nav-heading">Pages</h3>
-              <Router.Link to="/" className="nav-link">
-                Home
-              </Router.Link>
-              <Router.Link to="/about" className="nav-link">
-                About
-              </Router.Link>
-              <Router.Link to="/resource" className="nav-link">
-                Resource Demo
-              </Router.Link>
+              <nav className="flex items-center gap-1" aria-label="Main">
+                <Router.Link
+                  to="/incidents"
+                  className="nav-link"
+                  data-active={incidentsDataActive}
+                  aria-current={incidentsAriaCurrent}
+                >
+                  Incidents
+                </Router.Link>
+                <Router.Link
+                  to="/settings"
+                  className="nav-link"
+                  data-active={settingsDataActive}
+                  aria-current={settingsAriaCurrent}
+                >
+                  Settings
+                </Router.Link>
+              </nav>
             </div>
-          </nav>
-        </aside>
 
-        <main className="ml-60 min-h-screen">
-          <div className="max-w-215 px-10 py-8">
-            <Router.Outlet />
+            <button
+              className="theme-toggle"
+              onClick={toggle}
+              aria-label={toggleLabel}
+            >
+              <span className="theme-icon theme-icon-moon" />
+              <span className="theme-icon theme-icon-sun" />
+            </button>
           </div>
+        </header>
+
+        <main className="max-w-4xl mx-auto px-4 sm:px-8 py-8">
+          <Router.Outlet />
         </main>
       </body>
     </html>
   );
-}).provide(ApiClientLive);
+}).provide([AppThemeDark, ApiClientLive]);

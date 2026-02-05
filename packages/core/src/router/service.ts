@@ -321,11 +321,13 @@ export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<Route
   unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams));
 
 /**
- * Check if a path is currently active.
- * Supports param interpolation for exact matching on parameterized routes.
+ * Derive a reactive Signal\<boolean\> that tracks whether a path is active.
+ *
+ * Returns a `Signal<boolean>` that can be passed directly to JSX attributes
+ * for fine-grained DOM updates without component re-render.
  *
  * @example
- * ```ts
+ * ```tsx
  * // Prefix match (default)
  * const usersActive = yield* Router.isActive("/users")
  *
@@ -334,6 +336,13 @@ export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<Route
  *
  * // With params (interpolated before comparison)
  * const userActive = yield* Router.isActive("/users/:id", { params: { id: 123 } })
+ *
+ * // Pass to JSX for fine-grained updates (no component re-render on navigation)
+ * const dataActive = yield* Signal.derive(usersActive, a => a ? "true" : "")
+ * <Router.Link to="/users" data-active={dataActive}>
+ *
+ * // If you need the boolean value (subscribes component to route changes):
+ * const isActive = yield* Signal.get(usersActive)
  * ```
  *
  * @since 1.0.0
@@ -341,7 +350,7 @@ export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<Route
 export const isActive = (
   path: string,
   options?: IsActiveOptions,
-): Effect.Effect<boolean, never, Router> =>
+): Effect.Effect<Signal.Signal<boolean>, never, Router | Scope.Scope> =>
   Effect.flatMap(Router, (router) => router.isActive(path, options));
 
 /**
@@ -672,19 +681,16 @@ export const browserLayer: Layer.Layer<
       params: <Path extends RoutePath>(_path: Path) =>
         unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
 
-      isActive: Effect.fn("RouterService.isActive")(function* (
-        targetPath: string,
-        options?: IsActiveOptions,
-      ) {
-        const resolvedPath = options?.params
-          ? yield* interpolateParams(targetPath, options.params)
-          : targetPath;
-        const route = yield* Signal.get(currentSignal);
-        if (options?.exact) {
-          return route.path === resolvedPath;
-        }
-        return route.path.startsWith(resolvedPath);
-      }),
+      isActive: (targetPath: string, options?: IsActiveOptions) =>
+        Effect.gen(function* () {
+          const resolvedPath = options?.params
+            ? yield* interpolateParams(targetPath, options.params)
+            : targetPath;
+          const matcher = options?.exact
+            ? (route: Route) => route.path === resolvedPath
+            : (route: Route) => route.path.startsWith(resolvedPath);
+          return yield* Signal.derive(currentSignal, matcher);
+        }),
 
       prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
         yield* Debug.log({
@@ -852,19 +858,16 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
         params: <Path extends RoutePath>(_path: Path) =>
           unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
 
-        isActive: Effect.fn("RouterService.isActive")(function* (
-          targetPath: string,
-          options?: IsActiveOptions,
-        ) {
-          const resolvedPath = options?.params
-            ? yield* interpolateParams(targetPath, options.params)
-            : targetPath;
-          const route = yield* Signal.get(currentSignal);
-          if (options?.exact) {
-            return route.path === resolvedPath;
-          }
-          return route.path.startsWith(resolvedPath);
-        }),
+        isActive: (targetPath: string, options?: IsActiveOptions) =>
+          Effect.gen(function* () {
+            const resolvedPath = options?.params
+              ? yield* interpolateParams(targetPath, options.params)
+              : targetPath;
+            const matcher = options?.exact
+              ? (route: Route) => route.path === resolvedPath
+              : (route: Route) => route.path.startsWith(resolvedPath);
+            return yield* Signal.derive(currentSignal, matcher);
+          }),
 
         prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
           yield* Debug.log({

@@ -17,10 +17,10 @@ export type ThemeMode = "dark" | "light";
  * Supports three DI patterns:
  * - **Layer swapping**: `AppThemeDark` vs `AppThemeLight` — same Tag, different config
  * - **Reactive state in a service**: `mode` is a `Signal` owned by the layer
- * - **Signal-as-JSX-prop**: pass `mode` directly to JSX for fine-grained DOM updates
+ * - **Signal-as-JSX-prop**: pass `mode` to `<html data-theme={mode}>` for fine-grained DOM updates
  *
  * Color tokens live in CSS custom properties (styles.css) gated on `[data-theme]`.
- * This service controls _which_ theme is active; CSS applies the visual result.
+ * The renderer subscribes to `mode` on the `<html>` element and updates `data-theme` reactively.
  */
 export interface AppThemeService {
   /** Reactive theme mode — pass to JSX attributes for fine-grained updates */
@@ -37,6 +37,7 @@ export class AppTheme extends Context.Tag("AppTheme")<AppTheme, AppThemeService>
 
 const make = (initial: ThemeMode): Layer.Layer<AppTheme> => {
   const mode = Signal.makeSync<ThemeMode>(initial);
+
   return Layer.succeed(AppTheme, {
     mode,
     toggle: Signal.update(mode, (m: ThemeMode): ThemeMode =>

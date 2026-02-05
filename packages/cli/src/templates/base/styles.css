@@ -39,11 +39,15 @@
    --------------------------------------------------------------------------- */
 
 .nav-link {
-  @apply block px-3 py-1.5 text-sm no-underline rounded-md transition-colors;
+  @apply inline-flex px-3 py-1.5 text-sm no-underline rounded-md transition-colors;
   color: var(--text-2);
   &:hover {
     background: var(--surface-2);
     color: var(--text-1);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   &[data-active="true"] {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -52,7 +56,64 @@
   }
 }
 
-.nav-heading {
-  @apply m-0 px-3 mb-1.5 text-xs font-semibold uppercase tracking-wider;
+/* ---------------------------------------------------------------------------
+   Theme toggle
+   --------------------------------------------------------------------------- */
+
+.theme-toggle {
+  @apply flex items-center justify-center w-8 h-8 rounded-md border-0 cursor-pointer transition-colors;
+  background: transparent;
   color: var(--text-2);
+  &:hover {
+    background: var(--surface-2);
+    color: var(--text-1);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Theme icons — CSS masks so currentColor flows through on hover
+   --------------------------------------------------------------------------- */
+
+.theme-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.theme-icon-moon {
+  mask-image: url("/icon-moon.svg");
+  -webkit-mask-image: url("/icon-moon.svg");
+}
+
+.theme-icon-sun {
+  display: none;
+  mask-image: url("/icon-sun.svg");
+  -webkit-mask-image: url("/icon-sun.svg");
+}
+
+/* Light mode: swap icons */
+[data-theme="light"] .theme-icon-moon { display: none; }
+[data-theme="light"] .theme-icon-sun { display: block; }
+
+/* ---------------------------------------------------------------------------
+   Theme transition
+   --------------------------------------------------------------------------- */
+
+body {
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+header {
+  transition: background-color 150ms ease, border-color 150ms ease;
 }

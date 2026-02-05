@@ -350,12 +350,42 @@ const renderDocumentElement = (
 
     // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
     const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
+    const signalCleanups: Array<() => void> = [];
     if (tag !== "head") {
       for (const key of Object.keys(domProps)) {
         if (key === "children" || key === "key") continue;
         const value = (domProps as Record<string, unknown>)[key];
-        if (typeof value === "string") {
-          const attrName = key === "className" ? "class" : key === "htmlFor" ? "for" : key;
+        const attrName = key === "className" ? "class" : key === "htmlFor" ? "for" : key;
+        if (Signal.isSignal(value)) {
+          // Signal-valued attribute: fine-grained reactivity on document elements
+          const prev = targetNode.getAttribute(attrName);
+          const initialValue = yield* Signal.get(value);
+          applyPropValue(targetNode, key, initialValue);
+          appliedAttrs.push({ key: attrName, prev });
+
+          yield* Debug.log({
+            event: "render.document.signal.initial",
+            signal_id: value._debugId,
+            value: initialValue,
+            element_tag: tag,
+            trigger: `prop:${key}`,
+          });
+
+          const unsubscribe = yield* Signal.subscribe(value, () =>
+            Effect.gen(function* () {
+              const newValue = yield* Signal.get(value);
+              yield* Debug.log({
+                event: "render.document.signal.update",
+                signal_id: value._debugId,
+                value: newValue,
+                element_tag: tag,
+                trigger: `prop:${key}`,
+              });
+              applyPropValue(targetNode, key, newValue);
+            }),
+          );
+          signalCleanups.push(() => Runtime.runSync(runtime)(unsubscribe));
+        } else if (typeof value === "string") {
           const prev = targetNode.getAttribute(attrName);
           targetNode.setAttribute(attrName, value);
           appliedAttrs.push({ key: attrName, prev });
@@ -377,6 +407,9 @@ const renderDocumentElement = (
     return {
       node: anchor,
       cleanup: Effect.gen(function* () {
+        for (const cleanup of signalCleanups) {
+          cleanup();
+        }
         for (const child of childResults) {
           yield* child.cleanup;
         }

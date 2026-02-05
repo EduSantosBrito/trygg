@@ -14,16 +14,20 @@
  *
  * ## Active Link Styling
  *
- * Use `Link` with `Router.isActive()` for active state:
+ * Use `Link` with `Router.isActive()` for reactive active state:
  *
  * ```tsx
- * const NavItem = Effect.gen(function* () {
- *   const isActive = yield* Router.isActive("/users")
+ * const NavItem = Component.gen(function* () {
+ *   const active = yield* Router.isActive("/users")
+ *   // Derive string attributes from the boolean Signal
+ *   const dataActive = yield* Signal.derive(active, a => a ? "true" : "")
+ *   const ariaCurrent = yield* Signal.derive(active, a => a ? "page" : "")
  *   return (
  *     <Link
  *       to="/users"
- *       className={isActive ? "nav-link active" : "nav-link"}
- *       aria-current={isActive ? "page" : undefined}
+ *       className="nav-link"
+ *       data-active={dataActive}
+ *       aria-current={ariaCurrent}
  *     >
  *       Users
  *     </Link>
@@ -38,6 +42,7 @@ import {
   intrinsic,
   normalizeChildren,
   type ElementProps,
+  type AttributeInput,
   componentElement,
   provideElement,
 } from "../primitives/element.js";
@@ -87,6 +92,10 @@ interface BaseLinkProps<Path extends RoutePath> {
    * - false: no prefetch
    */
   readonly prefetch?: PrefetchStrategy;
+  /** Forwarded to the underlying `<a>` element */
+  readonly [key: `data-${string}`]: AttributeInput | undefined;
+  /** Forwarded to the underlying `<a>` element */
+  readonly [key: `aria-${string}`]: AttributeInput | undefined;
 }
 
 /**
@@ -116,18 +125,20 @@ export type LinkProps<Path extends RoutePath = RoutePath> =
  *
  * ## Active Link Styling
  *
- * Link does NOT track active state. Use `Router.isActive()` to compute active
- * state and set attributes like `aria-current` and `data-active`:
+ * Link does NOT track active state. Use `Router.isActive()` to get a reactive
+ * `Signal<boolean>`, then derive string attributes for `aria-current` / `data-active`:
  *
  * ```tsx
- * const NavItem = Effect.gen(function* () {
- *   const isActive = yield* Router.isActive("/users")
+ * const NavItem = Component.gen(function* () {
+ *   const active = yield* Router.isActive("/users")
+ *   const dataActive = yield* Signal.derive(active, a => a ? "true" : "")
+ *   const ariaCurrent = yield* Signal.derive(active, a => a ? "page" : "")
  *   return (
  *     <Link
  *       to="/users"
- *       className={isActive ? "nav-link active" : "nav-link"}
- *       aria-current={isActive ? "page" : undefined}
- *       data-active={isActive ? "true" : undefined}
+ *       className="nav-link"
+ *       data-active={dataActive}
+ *       aria-current={ariaCurrent}
  *     >
  *       Users
  *     </Link>
@@ -162,7 +173,18 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
     children,
     className,
     prefetch = "intent",
+    ...rest
   } = props;
+
+  // Collect data-* and aria-* attributes for forwarding to <a>
+  // Excludes data-trygg-* (reserved for internal framework use)
+  const forwarded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rest)) {
+    if (key.startsWith("data-trygg-")) continue;
+    if (key.startsWith("data-") || key.startsWith("aria-")) {
+      forwarded[key] = value;
+    }
+  }
 
   // Create the effect that builds the link element
   // Requires Router service from parent context
@@ -285,6 +307,8 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
               "data-trygg-prefetch-path": resolvedPath,
             }
           : {}),
+        // Forward data-* and aria-* attributes to <a>
+        ...forwarded,
       };
 
       const childElements = normalizeChildren(children);
