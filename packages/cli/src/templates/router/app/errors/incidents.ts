@@ -1,15 +1,21 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 
-export type Status = "Detected" | "Investigating" | "Identified" | "Monitoring" | "Resolved";
+export const Status = Schema.Literal("Detected", "Investigating", "Identified", "Monitoring", "Resolved");
+export type Status = typeof Status.Type;
 
-export type Severity = "SEV-1" | "SEV-2" | "SEV-3" | "SEV-4";
+export const Severity = Schema.Literal("SEV-1", "SEV-2", "SEV-3", "SEV-4");
+export type Severity = typeof Severity.Type;
 
-export class InvalidTransition extends Data.TaggedError("InvalidTransition")<{
-  readonly from: Status;
-  readonly to: Status;
-  readonly validNext: ReadonlyArray<Status>;
-}> {}
+export class InvalidTransition extends Schema.TaggedError<InvalidTransition>()(
+  "InvalidTransition",
+  {
+    from: Status,
+    to: Status,
+    validNext: Schema.Array(Status),
+  },
+) {}
 
-export class IncidentNotFound extends Data.TaggedError("IncidentNotFound")<{
-  readonly id: number;
-}> {}
+export class IncidentNotFound extends Schema.TaggedError<IncidentNotFound>()(
+  "IncidentNotFound",
+  { id: Schema.Number },
+) {}
