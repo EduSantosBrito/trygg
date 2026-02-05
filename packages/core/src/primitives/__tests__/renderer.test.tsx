@@ -1206,9 +1206,7 @@ describe("Re-render behavior", () => {
         let outletRenderCount = 0;
 
         // Create a view signal OUTSIDE the component (like async tracker does)
-        const viewSignal = Signal.makeSync<Element>(
-          <div data-testid="page-a">Page A Content</div>,
-        );
+        const viewSignal = Signal.makeSync<Element>(<div data-testid="page-a">Page A Content</div>);
 
         // Simulated outlet that re-renders on route change
         const SimulatedOutlet = Component.gen(function* () {
