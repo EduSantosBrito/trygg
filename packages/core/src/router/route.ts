@@ -481,8 +481,7 @@ export function provide<
   builder: RouteBuilder<Path, R, HC, HCh>,
 ) => RouteBuilder<
   Path,
-  | LayerContext<L1 | L2 | Rest[number]>
-  | Exclude<R, LayerSuccess<L1 | L2 | Rest[number]>>,
+  LayerContext<L1 | L2 | Rest[number]> | Exclude<R, LayerSuccess<L1 | L2 | Rest[number]>>,
   HC,
   HCh
 >;
