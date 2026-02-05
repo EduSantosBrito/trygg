@@ -12,7 +12,7 @@
     "@effect/platform": "^0.94.1",
     "@effect/platform-browser": "^0.74.0",
     "effect": "^3.19.15",
-    "trygg": "^0.1.0"
+    "trygg": "^0.1.0-canary.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
