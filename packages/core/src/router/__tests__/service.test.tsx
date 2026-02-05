@@ -231,24 +231,26 @@ describe("Router.forward", () => {
 // Scope: Checking if route is active
 
 describe("Router.isActive", () => {
-  it.scoped("should return true for current route", () =>
+  it.scoped("should return Signal<true> for current route", () =>
     Effect.gen(function* () {
       const router = yield* Router.Router;
 
       yield* router.navigate("/users");
 
-      const isActive = yield* router.isActive("/users", { exact: true });
+      const activeSignal = yield* router.isActive("/users", { exact: true });
+      const isActive = yield* Signal.get(activeSignal);
       assert.isTrue(isActive);
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should return false for non-matching route", () =>
+  it.scoped("should return Signal<false> for non-matching route", () =>
     Effect.gen(function* () {
       const router = yield* Router.Router;
 
       yield* router.navigate("/users");
 
-      const isActive = yield* router.isActive("/about", { exact: true });
+      const activeSignal = yield* router.isActive("/about", { exact: true });
+      const isActive = yield* Signal.get(activeSignal);
       assert.isFalse(isActive);
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
@@ -259,8 +261,28 @@ describe("Router.isActive", () => {
 
       yield* router.navigate("/users/123");
 
-      const isActive = yield* router.isActive("/users");
+      const activeSignal = yield* router.isActive("/users");
+      const isActive = yield* Signal.get(activeSignal);
       assert.isTrue(isActive);
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should update reactively when route changes", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+
+      const activeSignal = yield* router.isActive("/users", { exact: true });
+
+      // Initially at "/", so /users is not active
+      assert.isFalse(yield* Signal.get(activeSignal));
+
+      // Navigate to /users
+      yield* router.navigate("/users");
+      assert.isTrue(yield* Signal.get(activeSignal));
+
+      // Navigate away
+      yield* router.navigate("/about");
+      assert.isFalse(yield* Signal.get(activeSignal));
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });

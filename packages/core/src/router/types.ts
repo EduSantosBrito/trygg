@@ -14,7 +14,7 @@
  * <Link to="/users/:id">User</Link>
  * ```
  */
-import { Data, Effect, type Cause, type Ref } from "effect";
+import { Data, Effect, type Cause, type Ref, type Scope } from "effect";
 import { Component } from "../primitives/component.js";
 import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
@@ -360,8 +360,21 @@ export interface RouterService {
   /** Get query params signal */
   readonly query: Signal<URLSearchParams>;
 
-  /** Check if a path matches current route. Supports param interpolation. */
-  readonly isActive: (path: string, options?: IsActiveOptions) => Effect.Effect<boolean>;
+  /**
+   * Derive a reactive Signal\<boolean\> that tracks whether a path is active.
+   *
+   * Returns a `Signal<boolean>` that can be passed directly to JSX attributes
+   * for fine-grained DOM updates without component re-render.
+   *
+   * Use `Signal.get` on the result if you need the current boolean value
+   * (this subscribes the component to route changes).
+   *
+   * @since 1.0.0
+   */
+  readonly isActive: (
+    path: string,
+    options?: IsActiveOptions,
+  ) => Effect.Effect<Signal<boolean>, never, Scope.Scope>;
 
   /**
    * Prefetch route modules for a path.

@@ -170,6 +170,18 @@ type RenderSignalTextUpdateEvent = BaseEvent & {
   readonly value: unknown;
 };
 
+type RenderDocumentSignalInitialEvent = BaseEvent & {
+  readonly event: "render.document.signal.initial";
+  readonly signal_id: string;
+  readonly value: unknown;
+};
+
+type RenderDocumentSignalUpdateEvent = BaseEvent & {
+  readonly event: "render.document.signal.update";
+  readonly signal_id: string;
+  readonly value: unknown;
+};
+
 type RenderSignalElementInitialEvent = BaseEvent & {
   readonly event: "render.signalelement.initial";
   readonly signal_id: string;
@@ -761,6 +773,8 @@ export type DebugEvent =
   | RenderIntrinsicCleanupStartEvent
   | RenderIntrinsicCleanupRemoveEvent
   | RenderDocumentEvent
+  | RenderDocumentSignalInitialEvent
+  | RenderDocumentSignalUpdateEvent
   | RenderScheduleEvent
   | RenderKeyedListUpdateEvent
   | RenderKeyedListItemAddEvent
