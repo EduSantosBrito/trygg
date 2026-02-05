@@ -165,9 +165,9 @@ jobs:
 
       - name: Validate trygg dependency is published
         run: |
-          TRYGG_DEP=$(jq -r '.dependencies.trygg // empty' packages/cli/template/package.json)
+          TRYGG_DEP=$(grep 'TRYGG_VERSION' packages/cli/src/versions.ts | sed 's/.*"\([^"]*\)".*/\1/')
           if [ -z "$TRYGG_DEP" ]; then
-            echo "::error::trygg not found in template/package.json dependencies"
+            echo "::error::TRYGG_VERSION not found in versions.ts"
             exit 1
           fi
           TRYGG_VERSION="${TRYGG_DEP#^}"
