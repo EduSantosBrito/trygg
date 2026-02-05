@@ -26,55 +26,47 @@ bun run dev
 
 Open http://localhost:5173 in your browser.
 
-## Manual Setup
+## Project Structure
 
-### 1. Install dependencies
+The CLI scaffolds this structure:
 
-```bash
-bun add trygg effect @effect/platform @effect/platform-browser
+```
+my-app/
+├── app/
+│   ├── layout.tsx      # Root layout with <Router.Outlet />
+│   ├── routes.ts       # Route definitions
+│   ├── api.ts          # API routes (optional)
+│   └── pages/
+│       └── home.tsx    # Page components
+├── vite.config.ts      # Vite + trygg plugin
+└── tsconfig.json
 ```
 
-### 2. Configure Vite
+The Vite plugin generates the entry point — no manual mounting needed.
+
+### API Routes
+
+Define type-safe API endpoints in `app/api.ts` using `@effect/platform`:
 
 ```ts
-// vite.config.ts
-import { defineConfig } from "vite";
-import { trygg } from "trygg/vite-plugin";
+// app/api.ts
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
+import { Effect, Layer, Schema } from "effect";
 
-export default defineConfig({
-  plugins: [trygg()],
-});
+class UsersGroup extends HttpApiGroup.make("users")
+  .add(HttpApiEndpoint.get("list", "/users").addSuccess(Schema.Array(User)))
+  .prefix("/api") {}
+
+class Api extends HttpApi.make("app").add(UsersGroup) {}
+
+const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
+  handlers.handle("list", () => Effect.succeed(users))
+);
+
+export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
 ```
 
-### 3. Configure TypeScript
-
-```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "trygg",
-    "moduleResolution": "bundler",
-    "strict": true
-  }
-}
-```
-
-### 4. Create your app
-
-```tsx
-// src/main.tsx
-import { Component, mount, Signal } from "trygg";
-
-const Counter = Component.gen(function* () {
-  const count = yield* Signal.make(0);
-
-  return <button onClick={() => Signal.update(count, (n) => n + 1)}>Count: {count}</button>;
-});
-
-const root = document.getElementById("root");
-if (root) mount(root, <Counter />);
-```
+The plugin serves API routes in dev and bundles them for production.
 
 ## Core Concepts
 
@@ -150,8 +142,6 @@ const themeLayer = Layer.succeed(Theme, { primary: "blue" });
 const App = Component.gen(function* () {
   return <Header />;
 }).provide(themeLayer);
-
-mount(container, <App />);
 ```
 
 ## API Reference
@@ -160,8 +150,6 @@ mount(container, <App />);
 
 | Export                                | Description                                        |
 | ------------------------------------- | -------------------------------------------------- |
-| `mount(container, app)`               | Mount an app to the DOM                            |
-| `mount(container, app, layer)`        | Mount with custom layers merged with defaults      |
 | `Component.gen(fn)`                   | Create component with explicit DI                  |
 | `Component.gen(fn).provide(layer)`    | Satisfy service requirements with a layer          |
 | `Signal.make(initial)`                | Create reactive state                              |
