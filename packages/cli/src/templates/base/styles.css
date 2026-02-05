@@ -1,16 +1,58 @@
 @import "tailwindcss";
 
-/* Sidebar navigation */
+/* ---------------------------------------------------------------------------
+   Theme tokens — CSS custom properties driven by [data-theme] on <html>
+   Default: dark (matches AppThemeDark layer)
+   --------------------------------------------------------------------------- */
+
+:root,
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1a1f2e;
+  --surface-2: #242938;
+  --border: #2a3040;
+  --text-1: #e8eaf0;
+  --text-2: #8892a4;
+  --accent: #5b9cf5;
+  --signal: #f0a050;
+  --success: #50c878;
+  --warning: #f0a050; /* intentionally matches --signal */
+  --error: #f06050;
+}
+
+[data-theme="light"] {
+  --bg: #f8f9fc;
+  --surface: #ffffff;
+  --surface-2: #f1f3f8;
+  --border: #e2e5ec;
+  --text-1: #1a1f2e;
+  --text-2: #6b7280;
+  --accent: #2563eb;
+  --signal: #d97706;
+  --success: #16a34a;
+  --warning: #d97706; /* intentionally matches --signal */
+  --error: #dc2626;
+}
+
+/* ---------------------------------------------------------------------------
+   Navigation
+   --------------------------------------------------------------------------- */
+
 .nav-link {
-  @apply block px-3 py-1.5 text-sm text-gray-600 no-underline rounded-md transition-colors;
+  @apply block px-3 py-1.5 text-sm no-underline rounded-md transition-colors;
+  color: var(--text-2);
   &:hover {
-    @apply bg-gray-100 text-gray-900;
+    background: var(--surface-2);
+    color: var(--text-1);
   }
   &[data-active="true"] {
-    @apply bg-blue-50 text-blue-700 font-medium;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-weight: 500;
   }
 }
 
 .nav-heading {
-  @apply m-0 px-3 mb-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider;
+  @apply m-0 px-3 mb-1.5 text-xs font-semibold uppercase tracking-wider;
+  color: var(--text-2);
 }
