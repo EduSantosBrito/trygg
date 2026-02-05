@@ -4,6 +4,7 @@ export default defineConfig({
   input: {
     index: "src/index.ts",
     router: "src/router/index.ts",
+    testing: "src/testing/index.ts",
     "vite-plugin": "src/vite/plugin.ts",
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts",
@@ -15,7 +16,7 @@ export default defineConfig({
     format: "esm",
     sourcemap: true,
   },
-  external: [/^effect/, /^@effect\//, /^@effect-atom\//, /^node:/, /^bun:/, "vite", "consola"],
+  external: [/^effect/, /^@effect\//, /^node:/, /^bun:/, "vite", "consola"],
   resolve: {
     extensions: [".ts", ".tsx", ".js"],
   },

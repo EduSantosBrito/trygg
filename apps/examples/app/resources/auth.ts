@@ -10,7 +10,7 @@ export interface AuthUser {
 /**
  * Global auth signal - in a real app this would be a proper service
  */
-export const authSignal = Signal.unsafeMake<Option.Option<AuthUser>>(Option.none());
+export const authSignal = Signal.makeSync<Option.Option<AuthUser>>(Option.none());
 
 /**
  * Helper to set auth state

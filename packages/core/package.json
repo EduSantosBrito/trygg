@@ -49,6 +49,10 @@
       "types": "./dist/jsx-dev-runtime.d.ts",
       "import": "./dist/jsx-dev-runtime.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "import": "./dist/config.js"
@@ -67,7 +71,6 @@
     "test:watch": "npx vitest"
   },
   "dependencies": {
-    "@effect-atom/atom": "^0.4.13",
     "consola": "^3.4.2"
   },
   "devDependencies": {

@@ -247,7 +247,7 @@ export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<AsyncLoader, A
   static readonly test = (fallbackElement: Element): AsyncLoaderShape => {
     // In test mode, track just resolves the effect synchronously and stores the result
     let lastElement: Element = fallbackElement;
-    const viewSignal = Signal.unsafeMake(fallbackElement);
+    const viewSignal = Signal.makeSync(fallbackElement);
 
     return {
       view: viewSignal,

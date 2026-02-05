@@ -171,20 +171,6 @@ export {
   PortalTargetNotFoundError,
 } from "./primitives/portal.js";
 
-// Testing utilities (re-export for convenience)
-export {
-  render as testRender,
-  renderElement,
-  testLayer,
-  click,
-  type as typeInput,
-  waitFor,
-  type TestRenderResult,
-  type RenderInput,
-  ElementNotFoundError,
-  WaitForTimeoutError,
-} from "./testing/index.js";
-
 // Debug utilities
 // Enable by adding <DevMode /> to your app, or see OBSERVABILITY.md
 export * as Debug from "./debug/debug.js";
