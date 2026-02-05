@@ -60,7 +60,7 @@ class UsersGroup extends HttpApiGroup.make("users")
 class Api extends HttpApi.make("app").add(UsersGroup) {}
 
 const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
-  handlers.handle("list", () => Effect.succeed(users))
+  handlers.handle("list", () => Effect.succeed(users)),
 );
 
 export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));

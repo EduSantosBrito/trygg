@@ -429,9 +429,8 @@ describe("Route.provide", () => {
 
   it("should narrow R when providing service layers", () => {
     // Type equality check - fails compilation if types don't match
-    type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-      ? true
-      : false;
+    type Equals<X, Y> =
+      (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
     // Create a service
     class AuthService extends Context.Tag("AuthService")<AuthService, { userId: string }>() {}
@@ -444,31 +443,30 @@ describe("Route.provide", () => {
     });
 
     // Route with middleware (R = AuthService)
-    const routeWithRequirement = Route.make("/protected").middleware(requireAuth).component(component);
+    const routeWithRequirement = Route.make("/protected")
+      .middleware(requireAuth)
+      .component(component);
 
     // Type-level assertion: before provide, R includes AuthService
-    type BeforeR = typeof routeWithRequirement extends Route.RouteBuilder<
-      infer _P,
-      infer R,
-      infer _HC,
-      infer _HCh
-    >
-      ? R
-      : never;
+    type BeforeR =
+      typeof routeWithRequirement extends Route.RouteBuilder<
+        infer _P,
+        infer R,
+        infer _HC,
+        infer _HCh
+      >
+        ? R
+        : never;
     const _beforeCheck: Equals<BeforeR, AuthService> = true;
 
     // After provide, R should be never (AuthService is satisfied)
     const routeProvided = routeWithRequirement.pipe(Route.provide(AuthLive));
 
     // Type-level assertion: after provide, R is never
-    type AfterR = typeof routeProvided extends Route.RouteBuilder<
-      infer _P,
-      infer R,
-      infer _HC,
-      infer _HCh
-    >
-      ? R
-      : never;
+    type AfterR =
+      typeof routeProvided extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh>
+        ? R
+        : never;
     const _afterCheck: Equals<AfterR, never> = true;
 
     // Suppress unused variable warnings
@@ -481,9 +479,8 @@ describe("Route.provide", () => {
   });
 
   it("should narrow R with multiple service layers", () => {
-    type Equals<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-      ? true
-      : false;
+    type Equals<X, Y> =
+      (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
     class ServiceA extends Context.Tag("ServiceA")<ServiceA, { a: string }>() {}
     class ServiceB extends Context.Tag("ServiceB")<ServiceB, { b: number }>() {}
@@ -502,9 +499,8 @@ describe("Route.provide", () => {
       .pipe(Route.provide(LayerA, LayerB));
 
     // Type-level: after provide, R should be never
-    type R = typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh>
-      ? R
-      : never;
+    type R =
+      typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh> ? R : never;
     const _check: Equals<R, never> = true;
     void _check;
 
