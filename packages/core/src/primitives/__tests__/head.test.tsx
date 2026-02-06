@@ -704,167 +704,123 @@ describe("Document-Level Elements", () => {
   // Signal-valued attributes on document elements
   // ---------------------------------------------------------------------------
 
-  it.scoped(
-    "should apply Signal-valued attribute on <html> and update reactively",
-    () =>
-      Effect.gen(function* () {
-        const theme = yield* Signal.make("dark");
+  it.scoped("should apply Signal-valued attribute on <html> and update reactively", () =>
+    Effect.gen(function* () {
+      const theme = yield* Signal.make("dark");
 
-        const App = Component.gen(function* () {
-          return (
-            <html lang="en" data-theme={theme}>
-              <body>
-                <div>Content</div>
-              </body>
-            </html>
-          );
-        });
-
-        yield* FiberRef.set(IsDocumentMount, true);
-        yield* render(<App />);
-
-        // Initial value applied
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "dark",
+      const App = Component.gen(function* () {
+        return (
+          <html lang="en" data-theme={theme}>
+            <body>
+              <div>Content</div>
+            </body>
+          </html>
         );
+      });
 
-        // Update signal — attribute should reflect new value
-        yield* Signal.set(theme, "light");
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "light",
-        );
+      yield* FiberRef.set(IsDocumentMount, true);
+      yield* render(<App />);
 
-        // Update again
-        yield* Signal.set(theme, "dark");
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "dark",
-        );
-      }),
+      // Initial value applied
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
+
+      // Update signal — attribute should reflect new value
+      yield* Signal.set(theme, "light");
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "light");
+
+      // Update again
+      yield* Signal.set(theme, "dark");
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
+    }),
   );
 
-  it.scoped(
-    "should revert Signal-valued attribute on cleanup",
-    () =>
-      Effect.gen(function* () {
-        const prevTheme = document.documentElement.getAttribute("data-theme");
+  it.scoped("should revert Signal-valued attribute on cleanup", () =>
+    Effect.gen(function* () {
+      const prevTheme = document.documentElement.getAttribute("data-theme");
 
-        const theme = yield* Signal.make("dark");
+      const theme = yield* Signal.make("dark");
 
-        const App = Component.gen(function* () {
-          return (
-            <html lang="en" data-theme={theme}>
-              <body>
-                <div>Content</div>
-              </body>
-            </html>
-          );
-        });
-
-        yield* FiberRef.set(IsDocumentMount, true);
-        const scope = yield* Scope.make();
-        yield* render(<App />).pipe(Scope.extend(scope));
-
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "dark",
+      const App = Component.gen(function* () {
+        return (
+          <html lang="en" data-theme={theme}>
+            <body>
+              <div>Content</div>
+            </body>
+          </html>
         );
+      });
 
-        yield* Scope.close(scope, Exit.void);
+      yield* FiberRef.set(IsDocumentMount, true);
+      const scope = yield* Scope.make();
+      yield* render(<App />).pipe(Scope.extend(scope));
 
-        // Attribute should be reverted to original
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          prevTheme,
-        );
-      }),
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
+
+      yield* Scope.close(scope, Exit.void);
+
+      // Attribute should be reverted to original
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), prevTheme);
+    }),
   );
 
-  it.scoped(
-    "should unsubscribe from Signal on cleanup (no stale updates)",
-    () =>
-      Effect.gen(function* () {
-        const theme = yield* Signal.make("dark");
+  it.scoped("should unsubscribe from Signal on cleanup (no stale updates)", () =>
+    Effect.gen(function* () {
+      const theme = yield* Signal.make("dark");
 
-        const App = Component.gen(function* () {
-          return (
-            <html lang="en" data-theme={theme}>
-              <body>
-                <div>Content</div>
-              </body>
-            </html>
-          );
-        });
-
-        yield* FiberRef.set(IsDocumentMount, true);
-        const scope = yield* Scope.make();
-        yield* render(<App />).pipe(Scope.extend(scope));
-
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "dark",
+      const App = Component.gen(function* () {
+        return (
+          <html lang="en" data-theme={theme}>
+            <body>
+              <div>Content</div>
+            </body>
+          </html>
         );
+      });
 
-        yield* Scope.close(scope, Exit.void);
+      yield* FiberRef.set(IsDocumentMount, true);
+      const scope = yield* Scope.make();
+      yield* render(<App />).pipe(Scope.extend(scope));
 
-        // After cleanup, signal updates should NOT affect the document element
-        yield* Signal.set(theme, "light");
-        // Attribute was reverted to original (null), not updated to "light"
-        assert.notStrictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "light",
-        );
-      }),
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
+
+      yield* Scope.close(scope, Exit.void);
+
+      // After cleanup, signal updates should NOT affect the document element
+      yield* Signal.set(theme, "light");
+      // Attribute was reverted to original (null), not updated to "light"
+      assert.notStrictEqual(document.documentElement.getAttribute("data-theme"), "light");
+    }),
   );
 
-  it.scoped(
-    "should handle multiple Signal-valued attributes on same document element",
-    () =>
-      Effect.gen(function* () {
-        const theme = yield* Signal.make("dark");
-        const dir = yield* Signal.make("ltr");
+  it.scoped("should handle multiple Signal-valued attributes on same document element", () =>
+    Effect.gen(function* () {
+      const theme = yield* Signal.make("dark");
+      const dir = yield* Signal.make("ltr");
 
-        const App = Component.gen(function* () {
-          return (
-            <html lang="en" data-theme={theme} data-dir={dir}>
-              <body>
-                <div>Content</div>
-              </body>
-            </html>
-          );
-        });
+      const App = Component.gen(function* () {
+        return (
+          <html lang="en" data-theme={theme} data-dir={dir}>
+            <body>
+              <div>Content</div>
+            </body>
+          </html>
+        );
+      });
 
-        yield* FiberRef.set(IsDocumentMount, true);
-        yield* render(<App />);
+      yield* FiberRef.set(IsDocumentMount, true);
+      yield* render(<App />);
 
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "dark",
-        );
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-dir"),
-          "ltr",
-        );
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
+      assert.strictEqual(document.documentElement.getAttribute("data-dir"), "ltr");
 
-        // Update one signal
-        yield* Signal.set(theme, "light");
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-theme"),
-          "light",
-        );
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-dir"),
-          "ltr",
-        );
+      // Update one signal
+      yield* Signal.set(theme, "light");
+      assert.strictEqual(document.documentElement.getAttribute("data-theme"), "light");
+      assert.strictEqual(document.documentElement.getAttribute("data-dir"), "ltr");
 
-        // Update the other
-        yield* Signal.set(dir, "rtl");
-        assert.strictEqual(
-          document.documentElement.getAttribute("data-dir"),
-          "rtl",
-        );
-      }),
+      // Update the other
+      yield* Signal.set(dir, "rtl");
+      assert.strictEqual(document.documentElement.getAttribute("data-dir"), "rtl");
+    }),
   );
 });

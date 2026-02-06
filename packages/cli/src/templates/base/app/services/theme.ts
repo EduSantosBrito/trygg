@@ -40,9 +40,7 @@ const make = (initial: ThemeMode): Layer.Layer<AppTheme> => {
 
   return Layer.succeed(AppTheme, {
     mode,
-    toggle: Signal.update(mode, (m: ThemeMode): ThemeMode =>
-      m === "dark" ? "light" : "dark",
-    ),
+    toggle: Signal.update(mode, (m: ThemeMode): ThemeMode => (m === "dark" ? "light" : "dark")),
   });
 };
 
