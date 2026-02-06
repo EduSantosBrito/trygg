@@ -3,7 +3,7 @@
  * Virtual DOM Element representation for trygg
  */
 import { Cause, Context, Data, Effect, Scope } from "effect";
-import type { Signal, EachOptions } from "./signal.js";
+import type { Signal, EachOptions, EachRenderResult } from "./signal.js";
 import { _setEachImpl, _setSignalElementImpl, _setTextElementImpl, peekSync } from "./signal.js";
 
 /**
@@ -69,7 +69,15 @@ export type AttributeInput = AttributePrimitive | AttributeSignal;
  * Valid child types for JSX elements
  * @since 1.0.0
  */
-export type ElementChild = Element | AnySignal | string | number | boolean | null | undefined;
+export type ElementChild =
+  | Element
+  | AnySignal
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ReadonlyArray<ElementChild>;
 
 /**
  * Children prop type - can be a single child or array of children
@@ -391,9 +399,16 @@ export const keyedList = <T>(
 _setEachImpl(
   <T, E>(
     source: Signal<ReadonlyArray<T>>,
-    renderFn: (item: T, index: number) => Effect.Effect<Element, E, unknown>,
+    renderFn: (item: T, index: number) => EachRenderResult<E>,
     options: EachOptions<T>,
-  ): Element => keyedList(source, renderFn, options.key),
+  ): Element => {
+    // Normalize renderFn to always return Effect<Element>
+    const normalizedRenderFn = (item: T, index: number): Effect.Effect<Element, E, unknown> => {
+      const result = renderFn(item, index);
+      return isEffect(result) ? result : Effect.succeed(result);
+    };
+    return keyedList(source, normalizedRenderFn, options.key);
+  },
 );
 
 /**

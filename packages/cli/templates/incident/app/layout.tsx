@@ -1,5 +1,5 @@
 import "../styles.css";
-import { Component, Signal } from "trygg";
+import { Component, DevMode, Signal } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "./api";
 import { AppTheme, AppThemeDark } from "./services/theme";
@@ -33,6 +33,7 @@ export default Component.gen(function* () {
         <meta name="description" content="Built with trygg - Effect-native UI framework" />
       </head>
       <body className="min-h-screen bg-[var(--bg)] text-[var(--text-1)]">
+        <DevMode />
         <header className="border-b border-[var(--border)] bg-[var(--surface)]">
           <div className="max-w-4xl mx-auto px-4 sm:px-8 h-14 flex items-center justify-between">
             <div className="flex items-center gap-4 sm:gap-8">

@@ -291,6 +291,12 @@ type RenderKeyedListItemRerenderEvent = BaseEvent & {
   readonly key: string | number;
 };
 
+type RenderKeyedListItemRerenderErrorEvent = BaseEvent & {
+  readonly event: "render.keyedlist.item.rerender.error";
+  readonly key: string | number;
+  readonly reason: string;
+};
+
 type RenderKeyedListSubscriptionAddEvent = BaseEvent & {
   readonly event: "render.keyedlist.subscription.add";
   readonly key: string | number;
@@ -308,6 +314,11 @@ type RenderKeyedListReorderEvent = BaseEvent & {
   readonly total_items: number;
   readonly moves: number;
   readonly stable_nodes: number;
+};
+
+type RenderKeyedListUpdateErrorEvent = BaseEvent & {
+  readonly event: "render.keyedlist.update.error";
+  readonly reason: string;
 };
 
 /** Error boundary events */
@@ -780,9 +791,11 @@ export type DebugEvent =
   | RenderKeyedListItemAddEvent
   | RenderKeyedListItemRemoveEvent
   | RenderKeyedListItemRerenderEvent
+  | RenderKeyedListItemRerenderErrorEvent
   | RenderKeyedListSubscriptionAddEvent
   | RenderKeyedListSubscriptionRemoveEvent
   | RenderKeyedListReorderEvent
+  | RenderKeyedListUpdateErrorEvent
   // Error boundary events
   | RenderErrorBoundaryInitialEvent
   | RenderErrorBoundaryCaughtEvent

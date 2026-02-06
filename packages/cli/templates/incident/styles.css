@@ -187,7 +187,11 @@ header {
 }
 
 .incident-card__header {
-  @apply w-full flex flex-col gap-1 p-4 text-left border-0 cursor-pointer;
+  @apply flex items-start gap-3 p-4;
+}
+
+.incident-card__toggle {
+  @apply flex-1 flex flex-col gap-1 text-left border-0 cursor-pointer p-0;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -212,6 +216,14 @@ header {
 
 .incident-card__meta {
   @apply flex items-center justify-between;
+}
+
+.incident-card__detail-link {
+  @apply text-xs no-underline transition-colors shrink-0 self-center;
+  color: var(--accent);
+  &:hover {
+    color: var(--text-1);
+  }
 }
 
 .incident-card__time {
@@ -313,6 +325,92 @@ header {
 /* SEV-4: lowest severity — intentionally uses base muted style */
 
 /* ---------------------------------------------------------------------------
+   Incident detail
+   --------------------------------------------------------------------------- */
+
+.incident-detail {
+  @apply max-w-2xl;
+}
+
+.incident-detail__breadcrumb {
+  @apply flex items-center gap-2 text-sm mb-6;
+  color: var(--text-2);
+}
+
+.incident-detail__back {
+  @apply no-underline transition-colors;
+  color: var(--accent);
+  &:hover {
+    color: var(--text-1);
+  }
+}
+
+.incident-detail__breadcrumb-sep {
+  color: var(--border);
+}
+
+.incident-detail__breadcrumb-current {
+  color: var(--text-2);
+  @apply truncate;
+}
+
+.incident-detail__header {
+  @apply flex items-start justify-between gap-4 mb-8;
+}
+
+.incident-detail__title {
+  @apply text-2xl font-semibold m-0;
+  color: var(--text-1);
+}
+
+.incident-detail__created {
+  @apply text-sm mt-1 block;
+  color: var(--text-2);
+}
+
+.incident-detail__badges {
+  @apply flex items-center gap-2 shrink-0 pt-1;
+}
+
+.incident-detail__timeline {
+  @apply rounded-lg p-5;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.incident-detail__section-title {
+  @apply text-xs font-semibold uppercase tracking-wider m-0 mb-4;
+  color: var(--text-2);
+}
+
+.incident-detail__timeline-list {
+  @apply border-l-2 pl-4 ml-1;
+  border-color: var(--border);
+}
+
+.incident-detail__actions {
+  @apply mt-6 pt-4;
+  border-top: 1px solid var(--border);
+}
+
+.incident-detail__advance-btn {
+  @apply px-4 py-2 text-sm rounded-md border-0 cursor-pointer transition-colors font-medium;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  &:hover {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+/* ---------------------------------------------------------------------------
    Timeline entry
    --------------------------------------------------------------------------- */
 
@@ -337,4 +435,41 @@ header {
 .timeline-entry__time {
   @apply text-xs shrink-0;
   color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Error view
+   --------------------------------------------------------------------------- */
+
+.error-view {
+  @apply p-5 rounded-lg;
+  background: color-mix(in srgb, var(--error) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+}
+
+.error-view__title {
+  @apply text-base font-semibold m-0 mb-2;
+  color: var(--error);
+}
+
+.error-view__message {
+  @apply text-sm m-0;
+  color: var(--text-2);
+}
+
+.error-view__retry {
+  @apply mt-4 px-4 py-2 text-sm rounded-md border-0 cursor-pointer transition-colors font-medium;
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
+  &:hover {
+    background: color-mix(in srgb, var(--error) 25%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--error);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 }

@@ -48,8 +48,8 @@ import { CurrentRouteQuery } from "./route.js";
 export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(decoded)) {
-    if (typeof value === "string") {
-      result[key] = value;
+    if (value !== null && value !== undefined) {
+      result[key] = String(value);
     }
   }
   return result;

@@ -22,7 +22,8 @@
   },
   "files": [
     "index.ts",
-    "src"
+    "src",
+    "templates"
   ],
   "type": "module",
   "publishConfig": {
@@ -36,6 +37,7 @@
     "effect": "^3.19.15"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "trygg": "workspace:*"
   }
 }

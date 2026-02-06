@@ -6,6 +6,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect, Layer } from "effect";
 import * as path from "node:path";
 import type { ProjectOptions } from "./prompts";
+import { TemplateNotFoundError } from "./ports/prompts";
 import { generatePackageJson } from "./generators/package-json";
 import { generateViteConfig } from "./generators/vite-config";
 import { generateTryggConfig } from "./generators/trygg-config";
@@ -46,30 +47,33 @@ const getPlatformLayer = (platform: "node" | "bun"): Layer.Layer<PlatformConfig>
   platform === "bun" ? BunPlatformConfig : NodePlatformConfig;
 
 /**
- * Scaffold a new trygg project
+ * Scaffold a new trygg project from a template in packages/cli/templates/
+ *
+ * Copies app/, styles.css, and public/ from the template, then generates
+ * config files (package.json, tsconfig, vite.config, etc.).
  */
 export const scaffoldProject = (targetDir: string, options: ProjectOptions, templatesDir: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    const templateDir = path.join(templatesDir, options.template);
 
-    // 1. Create target directory
+    // 1. Validate template exists
+    const templateExists = yield* fs.exists(templateDir);
+    if (!templateExists) {
+      return yield* new TemplateNotFoundError({ template: options.template, path: templateDir });
+    }
+
+    // 2. Create target directory
     yield* fs.makeDirectory(targetDir, { recursive: true });
 
-    // 2. Copy base template
-    const baseDir = path.join(templatesDir, "base");
-    yield* copyDir(fs, baseDir, targetDir);
+    // 3. Copy app/ from template
+    yield* copyDir(fs, path.join(templateDir, "app"), path.join(targetDir, "app"));
 
-    // 3. Copy static assets
-    const staticDir = path.join(templatesDir, "static");
-    yield* copyDir(fs, staticDir, targetDir);
+    // 4. Copy styles.css
+    yield* fs.copyFile(path.join(templateDir, "styles.css"), path.join(targetDir, "styles.css"));
 
-    // 4. Always copy router template (routes are core to trygg)
-    const routerDir = path.join(templatesDir, "router");
-    yield* copyDir(fs, routerDir, targetDir);
-
-    // 5. Always copy API template (needed for Resource examples and type-safe client)
-    const apiDir = path.join(templatesDir, "api");
-    yield* copyDir(fs, apiDir, targetDir);
+    // 5. Copy public/ assets
+    yield* copyDir(fs, path.join(templateDir, "public"), path.join(targetDir, "public"));
 
     // 6. Generate package.json with platform-specific configuration
     const platformLayer = getPlatformLayer(options.platform);
