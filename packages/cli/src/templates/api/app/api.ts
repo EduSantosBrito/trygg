@@ -7,12 +7,7 @@ import {
   FetchHttpClient,
 } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
-import {
-  Status,
-  Severity,
-  IncidentNotFound,
-  InvalidTransition,
-} from "./errors/incidents";
+import { Status, Severity, IncidentNotFound, InvalidTransition } from "./errors/incidents";
 import { Incidents, IncidentsLive, type Incident as ServiceIncident } from "./services/incidents";
 
 // =============================================================================

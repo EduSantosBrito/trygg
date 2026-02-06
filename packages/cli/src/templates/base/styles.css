@@ -103,17 +103,25 @@
 }
 
 /* Light mode: swap icons */
-[data-theme="light"] .theme-icon-moon { display: none; }
-[data-theme="light"] .theme-icon-sun { display: block; }
+[data-theme="light"] .theme-icon-moon {
+  display: none;
+}
+[data-theme="light"] .theme-icon-sun {
+  display: block;
+}
 
 /* ---------------------------------------------------------------------------
    Theme transition
    --------------------------------------------------------------------------- */
 
 body {
-  transition: background-color 150ms ease, color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
 }
 
 header {
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
 }

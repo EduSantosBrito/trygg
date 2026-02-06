@@ -30,10 +30,7 @@ export default Component.gen(function* () {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>trygg app</title>
-        <meta
-          name="description"
-          content="Built with trygg - Effect-native UI framework"
-        />
+        <meta name="description" content="Built with trygg - Effect-native UI framework" />
       </head>
       <body className="min-h-screen bg-[var(--bg)] text-[var(--text-1)]">
         <header className="border-b border-[var(--border)] bg-[var(--surface)]">
@@ -67,11 +64,7 @@ export default Component.gen(function* () {
               </nav>
             </div>
 
-            <button
-              className="theme-toggle"
-              onClick={toggle}
-              aria-label={toggleLabel}
-            >
+            <button className="theme-toggle" onClick={toggle} aria-label={toggleLabel}>
               <span className="theme-icon theme-icon-moon" />
               <span className="theme-icon theme-icon-sun" />
             </button>
