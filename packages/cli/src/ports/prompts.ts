@@ -18,6 +18,15 @@ export class InvalidProjectNameError extends Data.TaggedError("InvalidProjectNam
   readonly name: string;
 }> {}
 
+export class InvalidTemplateError extends Data.TaggedError("InvalidTemplateError")<{
+  readonly template: string;
+}> {}
+
+export class TemplateNotFoundError extends Data.TaggedError("TemplateNotFoundError")<{
+  readonly template: string;
+  readonly path: string;
+}> {}
+
 export class DirectoryExistsError extends Data.TaggedError("DirectoryExistsError")<{
   readonly path: string;
 }> {}

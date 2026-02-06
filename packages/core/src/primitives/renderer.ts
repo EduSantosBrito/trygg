@@ -882,10 +882,10 @@ const renderElement = (
                 if (options.errorHandler !== null) {
                   // Propagate error to error boundary - it will render fallback
                   options.errorHandler(cause);
-                } else {
-                  // No error boundary - keep old content and re-subscribe for retry
-                  yield* subscribeToSignals(renderPhase.accessed);
                 }
+                // No error boundary - keep old content. Subscriptions from the last
+                // successful render are still active (not cleared because cleanupCurrent
+                // wasn't called on failure), so they will trigger retry on signal changes.
 
                 isRerendering = false;
                 pendingRerender = false;
@@ -1059,8 +1059,17 @@ const renderElement = (
         type ItemState = {
           renderPhase: Signal.RenderPhase;
           result: RenderResult;
-          node: Node;
+          /** Comment marking start of this item's DOM range */
+          startMarker: Comment;
+          /** Comment marking end of this item's DOM range (always after content) */
+          endMarker: Comment;
           item: unknown;
+          /** Current index in the list (updated on reorder) */
+          currentIndex: number;
+          /** Whether a re-render is in progress */
+          isRerendering: boolean;
+          /** Whether another re-render is pending */
+          pendingRerender: boolean;
           /** Map from signal debugId to unsubscribe Effect */
           subscriptions: Map<string, Effect.Effect<void>>;
         };
@@ -1118,6 +1127,25 @@ const renderElement = (
           return lisIndices;
         };
 
+        /**
+         * Move all DOM nodes in the range [startMarker, endNode] (inclusive)
+         * before the given reference node. Used for reordering keyed items.
+         * @internal
+         */
+        const moveRange = (
+          startMarker: Node,
+          endNode: Node,
+          beforeRef: Node,
+        ): void => {
+          let current: Node | null = startMarker;
+          while (current !== null) {
+            const next: Node | null = current.nextSibling;
+            listParent.insertBefore(current, beforeRef);
+            if (current === endNode) break;
+            current = next;
+          }
+        };
+
         // Helper to render a single item with a stable render phase
         const renderItem = Effect.fn("renderItem")(function* (
           item: unknown,
@@ -1141,7 +1169,11 @@ const renderElement = (
             renderPhase,
           );
 
-          // Render the element with parent context
+          // Insert start marker before rendering so content appears after it
+          const startMarker = document.createComment("item-start");
+          listParent.appendChild(startMarker);
+
+          // Render into list parent (content appended after startMarker)
           const result = yield* renderElement(
             normalizeChild(element),
             listParent,
@@ -1150,7 +1182,11 @@ const renderElement = (
             options,
           );
 
-          return { renderPhase, result };
+          // Insert end marker after content - ensures moveRange captures full Fragment range
+          const endMarker = document.createComment("item-end");
+          listParent.appendChild(endMarker);
+
+          return { renderPhase, result, startMarker, endMarker };
         });
 
         /**
@@ -1250,8 +1286,10 @@ const renderElement = (
                       for (const [, unsubscribe] of state.subscriptions) {
                         yield* unsubscribe;
                       }
-                      // Clean up rendered content
+                      // Clean up rendered content + markers
                       yield* state.result.cleanup;
+                      state.startMarker.remove();
+                      state.endMarker.remove();
                       itemStates.delete(key);
                       yield* Debug.log({
                         event: "render.keyedlist.item.remove",
@@ -1309,53 +1347,118 @@ const renderElement = (
                     newItemStates.push({ key, state: existingState, isNew: false, needsMove });
                   } else {
                     // New item - create new state
-                    const { renderPhase, result } = yield* renderItem(item, i, null);
+                    const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
+                      item,
+                      i,
+                      null,
+                    );
 
                     const state: ItemState = {
                       renderPhase,
                       result,
-                      node: result.node,
+                      startMarker,
+                      endMarker,
                       item,
+                      currentIndex: i,
+                      isRerendering: false,
+                      pendingRerender: false,
                       subscriptions: new Map(),
                     };
 
-                    // Set up subscriptions for this item's accessed signals
-                    // scheduleItemRerender returns an Effect that triggers rerender
+                    // Set up subscriptions for this item's accessed signals.
+                    // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
+                    // signal notification chain. Actual re-render forks via Runtime.runFork.
+                    // Batching via isRerendering/pendingRerender coalesces rapid updates.
                     const scheduleItemRerender = (): Effect.Effect<void> =>
                       Effect.sync(() => {
                         if (isUnmounted) return;
                         const currentState = itemStates.get(key);
                         if (currentState === undefined) return;
 
+                        // Coalesce rapid signal changes - mark pending if already rerendering
+                        if (currentState.isRerendering) {
+                          currentState.pendingRerender = true;
+                          return;
+                        }
+                        currentState.isRerendering = true;
+
                         Runtime.runFork(runtime)(
                           Effect.scoped(
                             Effect.gen(function* () {
-                              // Re-render with same phase (preserves signals)
-                              const { result: newResult } = yield* renderItem(
-                                currentState.item,
-                                i,
-                                currentState.renderPhase,
-                              );
+                              // Re-render with same phase (preserves signals).
+                              // renderItem appends [startMarker, content, endMarker] to listParent.
+                              // We then move the new nodes before the old startMarker and
+                              // clean up the old range to preserve DOM order.
+                              const oldStartMarker = currentState.startMarker;
+                              const oldEndMarker = currentState.endMarker;
 
-                              // Replace old node with new
-                              currentState.result.node.parentNode?.replaceChild(
-                                newResult.node,
-                                currentState.result.node,
-                              );
+                              // Track new nodes for cleanup on error
+                              let newResult: RenderResult | null = null;
+                              let newStartMarker: Comment | null = null;
+                              let newEndMarker: Comment | null = null;
 
-                              // Clean up old render
-                              yield* currentState.result.cleanup;
+                              yield* Effect.gen(function* () {
+                                const rendered = yield* renderItem(
+                                  currentState.item,
+                                  currentState.currentIndex,
+                                  currentState.renderPhase,
+                                );
+                                newResult = rendered.result;
+                                newStartMarker = rendered.startMarker;
+                                newEndMarker = rendered.endMarker;
 
-                              // Update state
-                              currentState.result = newResult;
-                              currentState.node = newResult.node;
+                                // Move new range [newStartMarker..newEndMarker] before old start
+                                moveRange(newStartMarker, newEndMarker, oldStartMarker);
 
-                              // Diff subscriptions (reuse stable ones)
-                              yield* diffSubscriptions(
-                                key,
-                                currentState,
-                                currentState.renderPhase.accessed,
-                                scheduleItemRerender,
+                                // Clean up old render (removes old content)
+                                yield* currentState.result.cleanup;
+                                oldStartMarker.remove();
+                                oldEndMarker.remove();
+
+                                // Update state
+                                currentState.result = newResult;
+                                currentState.startMarker = newStartMarker;
+                                currentState.endMarker = newEndMarker;
+
+                                // Check if another re-render was requested during this render
+                                const needsAnotherRender = currentState.pendingRerender;
+                                currentState.isRerendering = false;
+                                currentState.pendingRerender = false;
+
+                                // Diff subscriptions (reuse stable ones)
+                                yield* diffSubscriptions(
+                                  key,
+                                  currentState,
+                                  currentState.renderPhase.accessed,
+                                  scheduleItemRerender,
+                                );
+
+                                // If a signal changed during re-render, schedule another
+                                if (needsAnotherRender) {
+                                  yield* scheduleItemRerender();
+                                }
+                              }                              ).pipe(
+                                Effect.catchAllCause((cause) =>
+                                  Effect.gen(function* () {
+                                    // Cleanup new render result, ensuring markers are removed
+                                    // even if cleanup fails (prevents DOM leaks)
+                                    yield* Effect.ensuring(
+                                      newResult !== null ? newResult.cleanup : Effect.void,
+                                      Effect.sync(() => {
+                                        if (newStartMarker !== null) newStartMarker.remove();
+                                        if (newEndMarker !== null) newEndMarker.remove();
+                                      }),
+                                    );
+                                    // Reset flags on error to allow retry
+                                    currentState.isRerendering = false;
+                                    currentState.pendingRerender = false;
+                                    yield* Debug.log({
+                                      event: "render.keyedlist.item.rerender.error",
+                                      key,
+                                      reason: String(cause),
+                                    });
+                                  }),
+                                ),
                               );
                             }),
                           ),
@@ -1382,6 +1485,7 @@ const renderElement = (
                 // Reorder DOM nodes using minimal moves (LIS optimization)
                 // Process from end to start, keeping track of next sibling reference
                 // Nodes in LIS stay in place; only move nodes not in LIS
+                // Move the full range [startMarker..node] so content stays with its anchor
                 let moveCount = 0;
                 let nextSibling: Node = anchor;
 
@@ -1391,13 +1495,17 @@ const renderElement = (
                   if (entry === undefined) continue;
                   const { state, isNew, needsMove } = entry;
 
+                  // Update currentIndex so re-renders use correct index
+                  state.currentIndex = i;
+
                   if (isNew || needsMove) {
-                    // Insert/move this node before the next sibling
-                    listParent.insertBefore(state.node, nextSibling);
+                    // Move the entire item range [startMarker..endMarker] before nextSibling
+                    moveRange(state.startMarker, state.endMarker, nextSibling);
                     moveCount++;
                   }
-                  // Update next sibling reference for the next iteration
-                  nextSibling = state.node;
+                  // Update next sibling reference: use startMarker since it's the
+                  // first node of this item's range
+                  nextSibling = state.startMarker;
                 }
 
                 yield* Debug.log({
@@ -1414,7 +1522,14 @@ const renderElement = (
                     keyOrder.push(key);
                   }
                 }
-              }),
+              }).pipe(
+                Effect.catchAllCause((cause) =>
+                  Debug.log({
+                    event: "render.keyedlist.update.error",
+                    reason: String(cause),
+                  }),
+                ),
+              ),
             ),
           );
         };
@@ -1438,6 +1553,8 @@ const renderElement = (
                 yield* unsubscribe;
               }
               yield* state.result.cleanup;
+              state.startMarker.remove();
+              state.endMarker.remove();
             }
             itemStates.clear();
             anchor.remove();

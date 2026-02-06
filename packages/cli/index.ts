@@ -20,6 +20,7 @@ import { PromptsLive } from "./src/adapters/prompts-live";
 import {
   Prompts,
   InvalidProjectNameError,
+  InvalidTemplateError,
   DirectoryExistsError,
   InstallFailedError,
 } from "./src/ports/prompts";
@@ -33,18 +34,24 @@ const projectName = Args.text({ name: "project-name" }).pipe(
   Args.optional,
 );
 
+const templateOption = Options.text("template").pipe(
+  Options.withDescription("Template to scaffold (default: incident)"),
+  Options.optional,
+);
+
 const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
   Options.withDescription(
-    "Accept all defaults (platform: bun, output: server, tailwind: yes, vcs: git, install: yes)",
+    "Accept all defaults (template: incident, platform: bun, output: server, vcs: git, install: yes)",
   ),
 );
 
-const TEMPLATES_DIR = path.join(import.meta.dir, "src", "templates");
+const TEMPLATES_DIR = path.join(import.meta.dir, "templates");
 
 const create = Command.make(
   "create-trygg",
   {
     projectName,
+    template: templateOption,
     yes: yesFlag,
   },
   (args) =>
@@ -90,10 +97,18 @@ const create = Command.make(
       // Gather options
       let options: ProjectOptions;
 
+      // Resolve template from flag or default
+      const resolvedTemplate = Option.isSome(args.template) ? args.template.value : "incident";
+      if (resolvedTemplate !== "incident") {
+        clack.cancel(`Unknown template "${resolvedTemplate}". Available: incident`);
+        return yield* new InvalidTemplateError({ template: resolvedTemplate });
+      }
+
       if (args.yes) {
         // Use all defaults
         options = {
           name,
+          template: resolvedTemplate,
           platform: "bun",
           output: "server",
           vcs: "git",
@@ -101,14 +116,18 @@ const create = Command.make(
         };
         clack.note(
           "Using defaults:\n" +
+            `  Template: ${resolvedTemplate}\n` +
             "  Platform: bun\n" +
             "  Output: server (with API)\n" +
             "  VCS: git\n" +
             "  Install: yes",
           "Configuration",
         );
+      } else if (Option.isSome(args.template)) {
+        // Template from flag, prompt rest
+        options = yield* promptProjectOptions(name, resolvedTemplate);
       } else {
-        // Interactive mode
+        // Fully interactive
         options = yield* promptProjectOptions(name);
       }
 

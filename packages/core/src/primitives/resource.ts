@@ -551,8 +551,15 @@ const fetchStatic = <A, E, R>(
       return state;
     }
 
-    // Check if we have cached data
-    const currentState = yield* Signal.get(state);
+    // Check if we have cached data.
+    // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
+    // If we tracked this read, the component would re-render when state changes,
+    // causing keyed-list teardown/remount race that blanks rendered items.
+    const currentState = yield* Effect.locally(
+      Signal.get(state),
+      Signal.CurrentRenderPhase,
+      null,
+    );
     if (currentState._tag !== "Pending") {
       yield* Debug.log({
         event: "resource.fetch.cached",
@@ -625,8 +632,8 @@ const fetchReactive = <P extends object, A, E, R>(
     // Create the output signal that will be updated on param changes
     const outputState = yield* Signal.make<ResourceState<A, E>>(Pending());
 
-    // Track current in-flight fiber for cancellation
-    const activeFiber = yield* Ref.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(
+    // Track current in-flight fiber for cancellation (SynchronizedRef for atomic updates)
+    const activeFiber = yield* SynchronizedRef.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(
       Option.none(),
     );
 
@@ -636,59 +643,65 @@ const fetchReactive = <P extends object, A, E, R>(
     // Helper: cancel previous daemon, fork new fetch, sync result to output.
     // The daemon stays alive after the initial fetch, mirroring entry.state → outputState
     // so that invalidate/refresh changes propagate to the component.
+    // Uses SynchronizedRef.updateEffect to atomically interrupt+fork+store, preventing
+    // race conditions where concurrent doFetch calls could leak daemons.
     const doFetch = (resource: Resource<A, E, R>): Effect.Effect<void> =>
       Effect.gen(function* () {
-        // Cancel previous doFetch daemon before forking new one
-        const prevFiber = yield* Ref.get(activeFiber);
-        if (Option.isSome(prevFiber)) {
-          yield* Fiber.interrupt(prevFiber.value);
-        }
-
         yield* Ref.set(activeKey, resource.key);
         yield* Signal.set(outputState, Pending<A, E>());
 
-        // Fork the fetch work as a daemon
-        const daemon = yield* Effect.gen(function* () {
-          const registry = yield* ResourceRegistryTag;
-          const entry = yield* registry.getOrCreate(resource.key);
-          const entryState = unsafeEntrySignal<A, E>(entry.state);
-
-          // Check if already cached
-          const cached = yield* Signal.get(entryState);
-          if (cached._tag !== "Pending") {
-            yield* Signal.set(outputState, cached);
-          } else {
-            // Dedupe: if fetch already in-flight for this key, wait for it
-            const currentInFlight = yield* Ref.get(entry.inFlight);
-            if (Option.isSome(currentInFlight)) {
-              yield* Deferred.await(currentInFlight.value);
-            } else {
-              // Start fetch and wait for completion
-              const fiber = yield* fetchInternal(
-                resource,
-                entry,
-                unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
-              );
-              yield* Fiber.join(fiber);
+        // Atomically: interrupt previous daemon → fork new daemon → store reference
+        yield* SynchronizedRef.updateEffect(activeFiber, (prevFiber) =>
+          Effect.gen(function* () {
+            // Cancel previous doFetch daemon before forking new one
+            if (Option.isSome(prevFiber)) {
+              yield* Fiber.interrupt(prevFiber.value);
             }
-            // Sync resolved state to output
-            const finalState = yield* Signal.get(entryState);
-            yield* Signal.set(outputState, finalState);
-          }
 
-          // Subscribe to entry state so invalidate/refresh propagates to outputState.
-          // The daemon stays alive until interrupted by the next doFetch call.
-          const unsubscribe = yield* Signal.subscribe(entryState, () =>
-            Signal.get(entryState).pipe(Effect.flatMap((s) => Signal.set(outputState, s))),
-          );
-          return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
-        }).pipe(
-          Effect.provide(ctx),
-          Effect.catchAllCause(() => Effect.void),
-          Effect.forkDaemon,
+            // Fork the fetch work as a daemon
+            const daemon = yield* Effect.gen(function* () {
+              const registry = yield* ResourceRegistryTag;
+              const entry = yield* registry.getOrCreate(resource.key);
+              const entryState = unsafeEntrySignal<A, E>(entry.state);
+
+              // Check if already cached
+              const cached = yield* Signal.get(entryState);
+              if (cached._tag !== "Pending") {
+                yield* Signal.set(outputState, cached);
+              } else {
+                // Dedupe: if fetch already in-flight for this key, wait for it
+                const currentInFlight = yield* Ref.get(entry.inFlight);
+                if (Option.isSome(currentInFlight)) {
+                  yield* Deferred.await(currentInFlight.value);
+                } else {
+                  // Start fetch and wait for completion
+                  const fiber = yield* fetchInternal(
+                    resource,
+                    entry,
+                    unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+                  );
+                  yield* Fiber.join(fiber);
+                }
+                // Sync resolved state to output
+                const finalState = yield* Signal.get(entryState);
+                yield* Signal.set(outputState, finalState);
+              }
+
+              // Subscribe to entry state so invalidate/refresh propagates to outputState.
+              // The daemon stays alive until interrupted by the next doFetch call.
+              const unsubscribe = yield* Signal.subscribe(entryState, () =>
+                Signal.get(entryState).pipe(Effect.flatMap((s) => Signal.set(outputState, s))),
+              );
+              return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
+            }).pipe(
+              Effect.provide(ctx),
+              Effect.catchAllCause(() => Effect.void),
+              Effect.forkDaemon,
+            );
+
+            return Option.some(daemon);
+          }),
         );
-
-        yield* Ref.set(activeFiber, Option.some(daemon));
       });
 
     // Initial fetch
@@ -718,7 +731,7 @@ const fetchReactive = <P extends object, A, E, R>(
     yield* Scope.addFinalizer(
       scope,
       Effect.gen(function* () {
-        const fiber = yield* Ref.get(activeFiber);
+        const fiber = yield* SynchronizedRef.get(activeFiber);
         if (Option.isSome(fiber)) {
           yield* Fiber.interrupt(fiber.value);
         }

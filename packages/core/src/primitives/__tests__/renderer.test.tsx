@@ -1690,3 +1690,149 @@ describe("Provide element", () => {
     }),
   );
 });
+
+// =============================================================================
+// KeyedList (Signal.each) — DOM order stability
+// =============================================================================
+
+describe("KeyedList rendering", () => {
+  it.scoped("should preserve DOM order when a keyed item re-renders", () =>
+    Effect.gen(function* () {
+      // Items with internal toggle state — simulates expand/collapse
+      const ToggleItem = Component.gen(function* (
+        Props: ComponentProps<{ label: string }>,
+      ) {
+        const { label } = yield* Props;
+        const expanded = yield* Signal.make(false);
+        const isExpanded = yield* Signal.get(expanded);
+
+        return (
+          <div data-testid={`item-${label}`}>
+            <button
+              data-testid={`toggle-${label}`}
+              onClick={() => Signal.update(expanded, (v) => !v)}
+            >
+              {label}
+            </button>
+            {isExpanded && <span data-testid={`detail-${label}`}>details</span>}
+          </div>
+        );
+      });
+
+      const items = Signal.makeSync<ReadonlyArray<{ id: number; label: string }>>([
+        { id: 1, label: "A" },
+        { id: 2, label: "B" },
+        { id: 3, label: "C" },
+      ]);
+
+      const List = Component.gen(function* () {
+        return (
+          <div data-testid="list">
+            {Signal.each(
+              items,
+              (item) => Effect.succeed(<ToggleItem label={item.label} />),
+              { key: (item: { id: number; label: string }) => item.id },
+            )}
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<List />);
+      yield* TestClock.adjust(20);
+
+      // Verify initial order: A, B, C
+      const getOrder = () =>
+        Effect.gen(function* () {
+          const list = yield* getByTestId("list");
+          const labels: Array<string> = [];
+          list.querySelectorAll("[data-testid^='item-']").forEach((el) => {
+            labels.push(el.getAttribute("data-testid")?.replace("item-", "") ?? "");
+          });
+          return labels;
+        });
+
+      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+
+      // Toggle the LAST item (C) — this triggered the reorder bug
+      const toggleC = yield* getByTestId("toggle-C");
+      toggleC.click();
+      yield* TestClock.adjust(20);
+
+      // C should show details
+      const detailC = yield* getByTestId("detail-C");
+      assert.strictEqual(detailC.textContent, "details");
+
+      // Order must still be A, B, C — NOT C, A, B
+      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+
+      // Toggle the FIRST item (A) too
+      const toggleA = yield* getByTestId("toggle-A");
+      toggleA.click();
+      yield* TestClock.adjust(20);
+
+      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+    }),
+  );
+
+  it.scoped("should preserve DOM order when middle item re-renders", () =>
+    Effect.gen(function* () {
+      const Counter = Component.gen(function* (
+        Props: ComponentProps<{ id: number }>,
+      ) {
+        const { id } = yield* Props;
+        const count = yield* Signal.make(0);
+        const value = yield* Signal.get(count);
+
+        return (
+          <div data-testid={`counter-${String(id)}`}>
+            <button
+              data-testid={`inc-${String(id)}`}
+              onClick={() => Signal.update(count, (n) => n + 1)}
+            >
+              {String(value)}
+            </button>
+          </div>
+        );
+      });
+
+      const items = Signal.makeSync<ReadonlyArray<number>>([1, 2, 3, 4, 5]);
+
+      const List = Component.gen(function* () {
+        return (
+          <div data-testid="counters">
+            {Signal.each(
+              items,
+              (id) => Effect.succeed(<Counter id={id} />),
+              { key: (id: number) => id },
+            )}
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<List />);
+      yield* TestClock.adjust(20);
+
+      const getOrder = () =>
+        Effect.gen(function* () {
+          const list = yield* getByTestId("counters");
+          const ids: Array<string> = [];
+          list.querySelectorAll("[data-testid^='counter-']").forEach((el) => {
+            ids.push(el.getAttribute("data-testid")?.replace("counter-", "") ?? "");
+          });
+          return ids;
+        });
+
+      assert.deepStrictEqual(yield* getOrder(), ["1", "2", "3", "4", "5"]);
+
+      // Click middle item (3) to trigger re-render
+      (yield* getByTestId("inc-3")).click();
+      yield* TestClock.adjust(20);
+
+      // Value updated (re-query since Component re-render replaces DOM nodes)
+      assert.strictEqual((yield* getByTestId("inc-3")).textContent, "1");
+
+      // Order preserved
+      assert.deepStrictEqual(yield* getOrder(), ["1", "2", "3", "4", "5"]);
+    }),
+  );
+});

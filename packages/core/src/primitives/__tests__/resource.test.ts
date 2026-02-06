@@ -310,6 +310,70 @@ describe("Resource.fetch reactive render phase", () => {
 });
 
 // =============================================================================
+// Resource.fetch static render phase isolation
+// =============================================================================
+// CRITICAL: Resource.fetch(resource) must NOT register the returned state signal
+// as a component dependency. If it does, component re-renders on Pending→Success,
+// causing keyed-list teardown/remount race that blanks rendered items.
+
+describe("Resource.fetch static render phase isolation", () => {
+  it.scoped("should NOT register state signal in component render phase accessed set", () =>
+    Effect.gen(function* () {
+      const resource = Resource.make(() => Effect.succeed("data"), {
+        key: "phase-isolation:static:1",
+      });
+
+      // Simulate component render phase
+      const phase = yield* Signal.makeRenderPhase;
+
+      const state = yield* Resource.fetch(resource).pipe(
+        Effect.locally(Signal.CurrentRenderPhase, phase),
+      );
+      yield* TestClock.adjust(0);
+
+      // State signal should NOT be in the accessed set —
+      // Resource.fetch should not leak state signal as component dependency
+      assert.isFalse(
+        phase.accessed.has(state),
+        "state signal should not be registered as a component dependency",
+      );
+    }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
+  );
+
+  it.scoped("should NOT register state signal even when checking cached state", () =>
+    Effect.gen(function* () {
+      const resource = Resource.make(() => Effect.succeed("cached-data"), {
+        key: "phase-isolation:static:2",
+      });
+
+      // First fetch outside render phase — populates cache
+      yield* Resource.fetch(resource);
+      yield* TestClock.adjust(0);
+
+      // Second fetch inside render phase — should hit cache but NOT track
+      const phase = yield* Signal.makeRenderPhase;
+
+      const state = yield* Resource.fetch(resource).pipe(
+        Effect.locally(Signal.CurrentRenderPhase, phase),
+      );
+
+      // State signal should NOT be in the accessed set even for cached reads
+      assert.isFalse(
+        phase.accessed.has(state),
+        "cached state signal should not be registered as a component dependency",
+      );
+
+      // Verify we got the cached data
+      const result = yield* Signal.get(state);
+      assert.strictEqual(result._tag, "Success");
+      if (Resource.isSuccess(result)) {
+        assert.strictEqual(result.value, "cached-data");
+      }
+    }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
+  );
+});
+
+// =============================================================================
 // Resource.fetch - Deduplication
 // =============================================================================
 

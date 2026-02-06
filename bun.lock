@@ -45,6 +45,7 @@
       },
       "devDependencies": {
         "@types/node": "^20.0.0",
+        "trygg": "workspace:*",
       },
     },
     "packages/core": {

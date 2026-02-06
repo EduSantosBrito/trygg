@@ -7,6 +7,7 @@ import { Prompts } from "./ports/prompts";
 
 export interface ProjectOptions {
   readonly name: string;
+  readonly template: "incident";
   readonly platform: "node" | "bun";
   readonly output: "server" | "static";
   readonly vcs: "git" | "jj" | "none";
@@ -16,9 +17,17 @@ export interface ProjectOptions {
 /**
  * Run interactive prompts to gather project configuration
  */
-export const promptProjectOptions = (name: string) =>
+export const promptProjectOptions = (name: string, templateOverride?: "incident") =>
   Effect.gen(function* () {
     const prompts = yield* Prompts;
+
+    // Template selection
+    const template = templateOverride ?? (yield* prompts.select({
+      message: "Select template:",
+      options: [
+        { value: "incident" as const, label: "Incident Dashboard", hint: "full-stack incident tracker" },
+      ],
+    }));
 
     // Platform selection
     const platform = yield* prompts.select({
@@ -56,6 +65,7 @@ export const promptProjectOptions = (name: string) =>
 
     return {
       name,
+      template,
       platform,
       output,
       vcs,

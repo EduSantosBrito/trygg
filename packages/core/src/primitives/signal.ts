@@ -991,9 +991,16 @@ export interface EachOptions<T> {
 // We use a lazy getter to avoid circular dependency issues.
 // The actual implementation is in _setEachImpl, called by Element.ts
 
+/**
+ * Render function return type for Signal.each.
+ * Accepts either a plain Element or an Effect that produces an Element.
+ * @since 1.0.0
+ */
+export type EachRenderResult<E> = Element | Effect.Effect<Element, E, unknown>;
+
 type EachFn = <T, E>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => Effect.Effect<any, E, unknown>,
+  renderFn: (item: T, index: number) => EachRenderResult<E>,
   options: EachOptions<T>,
 ) => any;
 
