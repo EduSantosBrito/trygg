@@ -438,6 +438,28 @@ header {
 }
 
 /* ---------------------------------------------------------------------------
+   Radio buttons (settings)
+   --------------------------------------------------------------------------- */
+
+.radio-option {
+  @apply flex items-center gap-2 cursor-pointer;
+}
+
+.radio-input {
+  @apply w-4 h-4 cursor-pointer;
+  accent-color: var(--accent);
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+.radio-label {
+  @apply text-sm;
+  color: var(--text-1);
+}
+
+/* ---------------------------------------------------------------------------
    Error view
    --------------------------------------------------------------------------- */
 

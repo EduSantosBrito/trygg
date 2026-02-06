@@ -1315,7 +1315,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
     name: "trygg",
     enforce: "pre",
 
-    config() {
+    config(_userConfig, env) {
       return {
         appType: "custom",
         esbuild: {
@@ -1343,9 +1343,10 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
         },
         build: {
           outDir: output === "server" ? "dist/client" : "dist",
-          rollupOptions: {
-            input: `${GENERATED_DIR}/index.html`,
-          },
+          // Only set input in build mode — .trygg/index.html doesn't exist in dev.
+          // Vite's dep scanner fails to resolve non-existent files, causing errors.
+          rollupOptions:
+            env.command === "build" ? { input: `${GENERATED_DIR}/index.html` } : {},
         },
       };
     },

@@ -1,13 +1,27 @@
+const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+const DIVISIONS: ReadonlyArray<{ amount: number; unit: Intl.RelativeTimeFormatUnit }> = [
+  { amount: 60, unit: "seconds" },
+  { amount: 60, unit: "minutes" },
+  { amount: 24, unit: "hours" },
+  { amount: 7, unit: "days" },
+  { amount: 4.35, unit: "weeks" },
+  { amount: 12, unit: "months" },
+  { amount: Number.POSITIVE_INFINITY, unit: "years" },
+];
+
 /**
- * Format an ISO date string as a relative time (e.g., "5m ago", "2h ago")
+ * Format an ISO date string as a relative time (e.g., "5 minutes ago", "2 hours ago")
  */
 export const formatRelative = (iso: string): string => {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${String(mins)}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${String(hours)}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${String(days)}d ago`;
+  let seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+
+  for (const { amount, unit } of DIVISIONS) {
+    if (Math.abs(seconds) < amount) {
+      return rtf.format(Math.round(seconds), unit);
+    }
+    seconds /= amount;
+  }
+
+  return rtf.format(Math.round(seconds), "years");
 };
