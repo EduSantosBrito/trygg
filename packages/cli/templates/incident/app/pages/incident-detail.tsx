@@ -52,8 +52,10 @@ export default Component.gen(function* () {
         <section className="incident-detail__timeline">
           <h2 className="incident-detail__section-title">Timeline</h2>
           <div className="incident-detail__timeline-list">
-            {incident.timeline.map((entry, i) => (
-              <TimelineEntry key={i} entry={entry} />
+            {incident.timeline.map((entry, index) => (
+              <div key={`${entry.timestamp}-${String(index)}`}>
+                <TimelineEntry entry={entry} />
+              </div>
             ))}
           </div>
         </section>
@@ -75,7 +77,11 @@ export default Component.gen(function* () {
               Incidents
             </Router.Link>
           </nav>
-          <ErrorView error={error} onRetry={retry} />
+          {retry === undefined ? (
+            <ErrorView error={error} />
+          ) : (
+            <ErrorView error={error} onRetry={retry} />
+          )}
         </div>
       );
     },
@@ -93,13 +99,15 @@ const DetailActions = Component.gen(function* (
   if (nextStatus === undefined) return <></>;
 
   const transitioning = yield* Signal.make(false);
-  const isTransitioning = yield* Signal.get(transitioning);
+  const buttonText = yield* Signal.derive(transitioning, (isTransitioning) =>
+    isTransitioning ? "Advancing..." : `Advance to ${nextStatus}`,
+  );
 
   return (
     <section className="incident-detail__actions">
       <button
         className="incident-detail__advance-btn"
-        disabled={isTransitioning}
+        disabled={transitioning}
         onClick={() =>
           Effect.gen(function* () {
             yield* Signal.set(transitioning, true);
@@ -116,7 +124,7 @@ const DetailActions = Component.gen(function* (
           )
         }
       >
-        {isTransitioning ? "Advancing..." : `Advance to ${nextStatus}`}
+        {buttonText}
       </button>
     </section>
   );

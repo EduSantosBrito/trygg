@@ -321,6 +321,14 @@ type RenderKeyedListUpdateErrorEvent = BaseEvent & {
   readonly reason: string;
 };
 
+type RenderKeyedListStateEvent = BaseEvent & {
+  readonly event: "render.keyedlist.state";
+  readonly phase: "start" | "computed" | "after-reorder" | "committed";
+  readonly key_order: ReadonlyArray<string | number>;
+  readonly new_keys?: ReadonlyArray<string | number>;
+  readonly move_count?: number;
+};
+
 /** Error boundary events */
 type RenderErrorBoundaryInitialEvent = BaseEvent & {
   readonly event: "render.errorboundary.initial";
@@ -796,6 +804,7 @@ export type DebugEvent =
   | RenderKeyedListSubscriptionRemoveEvent
   | RenderKeyedListReorderEvent
   | RenderKeyedListUpdateErrorEvent
+  | RenderKeyedListStateEvent
   // Error boundary events
   | RenderErrorBoundaryInitialEvent
   | RenderErrorBoundaryCaughtEvent
@@ -1165,6 +1174,18 @@ const formatDetails = (event: DebugEvent): string => {
   else if ("path" in e) parts.push(`${e.path}`);
   if ("route_pattern" in e) parts.push(`${e.route_pattern}`);
   if ("trigger" in e) parts.push(`trigger:${e.trigger}`);
+  if ("phase" in e) parts.push(`phase:${e.phase}`);
+  if ("current_keys" in e) parts.push(`keys:${e.current_keys}`);
+  if ("total_items" in e) parts.push(`items:${e.total_items}`);
+  if ("moves" in e) parts.push(`moves:${e.moves}`);
+  if ("stable_nodes" in e) parts.push(`stable:${e.stable_nodes}`);
+  if ("move_count" in e && e.move_count !== undefined) parts.push(`move_count:${e.move_count}`);
+  if ("key_order" in e && Array.isArray(e.key_order)) {
+    parts.push(`order:[${e.key_order.map(String).join(",")}]`);
+  }
+  if ("new_keys" in e && Array.isArray(e.new_keys)) {
+    parts.push(`new:[${e.new_keys.map(String).join(",")}]`);
+  }
   if ("reason" in e) parts.push(`${e.reason}`);
   if ("value" in e) parts.push(`val:${JSON.stringify(e.value)}`);
   if ("error_message" in e) parts.push(`err:${e.error_message}`);

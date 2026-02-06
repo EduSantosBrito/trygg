@@ -1,5 +1,5 @@
 import { Component, Signal } from "trygg";
-import { AppTheme, type ThemeMode } from "../services/theme";
+import { AppTheme } from "../services/theme";
 
 // ---------------------------------------------------------------------------
 // Token definitions for preview
@@ -49,12 +49,11 @@ const ThemePreview = Component.gen(function* () {
 // ---------------------------------------------------------------------------
 
 export default Component.gen(function* () {
-  const { mode } = yield* AppTheme;
+  const { mode, preference, setPreference } = yield* AppTheme;
 
-  const isDark = yield* Signal.derive(mode, (m) => m === "dark");
-  const isLight = yield* Signal.derive(mode, (m) => m === "light");
-
-  const setTheme = (target: ThemeMode) => Signal.set(mode, target);
+  const isSystem = yield* Signal.derive(preference, (p) => p === "system");
+  const isDark = yield* Signal.derive(preference, (p) => p === "dark");
+  const isLight = yield* Signal.derive(preference, (p) => p === "light");
 
   return (
     <section>
@@ -73,9 +72,20 @@ export default Component.gen(function* () {
                 <input
                   type="radio"
                   name="theme"
+                  value="system"
+                  checked={isSystem}
+                  onChange={() => setPreference("system")}
+                  className="radio-input"
+                />
+                <span className="radio-label">System</span>
+              </label>
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  name="theme"
                   value="dark"
                   checked={isDark}
-                  onChange={() => setTheme("dark")}
+                  onChange={() => setPreference("dark")}
                   className="radio-input"
                 />
                 <span className="radio-label">Dark</span>
@@ -86,12 +96,16 @@ export default Component.gen(function* () {
                   name="theme"
                   value="light"
                   checked={isLight}
-                  onChange={() => setTheme("light")}
+                  onChange={() => setPreference("light")}
                   className="radio-input"
                 />
                 <span className="radio-label">Light</span>
               </label>
             </div>
+
+            <p className="text-sm text-[var(--text-2)] mt-3">
+              Current resolved mode: <strong className="text-[var(--text-1)]">{mode}</strong>
+            </p>
           </fieldset>
 
           <ThemePreview />

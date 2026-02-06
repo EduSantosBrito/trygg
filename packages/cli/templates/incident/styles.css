@@ -2,11 +2,43 @@
 
 /* ---------------------------------------------------------------------------
    Theme tokens — CSS custom properties driven by [data-theme] on <html>
-   Default: dark (matches AppThemeDark layer)
+   Default: system preference (no JS needed for first paint)
    --------------------------------------------------------------------------- */
 
-:root,
+:root {
+  color-scheme: dark;
+  --bg: #0f1117;
+  --surface: #1a1f2e;
+  --surface-2: #242938;
+  --border: #2a3040;
+  --text-1: #e8eaf0;
+  --text-2: #8892a4;
+  --accent: #5b9cf5;
+  --signal: #f0a050;
+  --success: #50c878;
+  --warning: #f0a050; /* intentionally matches --signal */
+  --error: #f06050;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f8f9fc;
+    --surface: #ffffff;
+    --surface-2: #f1f3f8;
+    --border: #e2e5ec;
+    --text-1: #1a1f2e;
+    --text-2: #6b7280;
+    --accent: #2563eb;
+    --signal: #d97706;
+    --success: #16a34a;
+    --warning: #d97706; /* intentionally matches --signal */
+    --error: #dc2626;
+  }
+}
+
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0f1117;
   --surface: #1a1f2e;
   --surface-2: #242938;
@@ -21,6 +53,7 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --bg: #f8f9fc;
   --surface: #ffffff;
   --surface-2: #f1f3f8;
@@ -493,5 +526,100 @@ header {
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Report form
+   --------------------------------------------------------------------------- */
+
+.report-form {
+  @apply flex items-end gap-3 p-4 rounded-lg mb-4;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.report-form__field {
+  @apply flex flex-col gap-1.5;
+}
+
+.report-form__field:first-child {
+  @apply flex-1;
+}
+
+.report-form__label {
+  @apply text-xs font-medium;
+  color: var(--text-2);
+}
+
+.report-form__input {
+  @apply px-3 py-2 text-sm rounded-md;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  &::placeholder {
+    color: var(--text-2);
+    opacity: 0.7;
+  }
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+
+.report-form__select {
+  @apply px-3 py-2 text-sm rounded-md cursor-pointer;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+
+.report-form__submit {
+  @apply px-4 py-2 text-sm rounded-md border-0 cursor-pointer transition-colors font-medium;
+  min-width: 120px; /* Prevent width change on text swap */
+  background: var(--accent);
+  color: var(--bg);
+  &:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Severity filter
+   --------------------------------------------------------------------------- */
+
+.incidents-filter {
+  @apply flex gap-2 mb-4;
+}
+
+.incidents-filter__btn {
+  @apply px-3 py-1.5 text-xs rounded-md border-0 cursor-pointer transition-colors;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  &:hover {
+    background: var(--surface-2);
+    color: var(--text-1);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  &[data-active="true"] {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent);
   }
 }
