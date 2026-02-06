@@ -21,7 +21,7 @@
  * })
  * ```
  */
-import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
+import type { ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
 import { FileSystem } from "@effect/platform";
 import {
@@ -1280,6 +1280,29 @@ ${tpl.runtime}.runMain(
 export interface TryggOptions extends TryggConfig {}
 
 /**
+ * Public plugin type deliberately avoids direct `vite` type coupling.
+ * This prevents cross-install type identity conflicts when trygg and
+ * app resolve `vite` from different paths.
+ */
+export interface TryggPlugin {
+  readonly name: string;
+  readonly [key: string]: unknown;
+}
+
+interface PreviewRequestLike {
+  method?: string;
+  url?: string;
+}
+
+interface PreviewServerLike {
+  readonly middlewares: {
+    use: (
+      handler: (req: PreviewRequestLike, _res: unknown, next: () => void) => void,
+    ) => void;
+  };
+}
+
+/**
  * Create trygg Vite plugin with platform-aware dev API.
  *
  * @example
@@ -1294,7 +1317,7 @@ export interface TryggOptions extends TryggConfig {}
  *
  * @since 1.0.0
  */
-export const trygg = (tryggConfig?: TryggConfig): Plugin => {
+export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
   const configPlatform = tryggConfig?.platform ?? "node";
   const output = tryggConfig?.output ?? "server";
 
@@ -1311,11 +1334,11 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
   let generatedDir: string = nodePath.resolve(process.cwd(), GENERATED_DIR);
   let routesFilePath: string | undefined;
 
-  return {
+  const plugin = {
     name: "trygg",
     enforce: "pre",
 
-    config(_userConfig, env) {
+    config(_userConfig: unknown, env: { readonly command: string }) {
       return {
         appType: "custom",
         esbuild: {
@@ -1351,7 +1374,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       };
     },
 
-    async configResolved(resolvedConfig) {
+    async configResolved(resolvedConfig: ResolvedConfig) {
       config = resolvedConfig;
       appDir = nodePath.resolve(config.root, APP_DIR);
       generatedDir = nodePath.resolve(config.root, GENERATED_DIR);
@@ -1567,7 +1590,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       return await Effect.runPromise(effect);
     },
 
-    configurePreviewServer(server) {
+    configurePreviewServer(server: PreviewServerLike) {
       // `vite preview` is a static file server (sirv). When output is
       // "server", the production artifact is `dist/server.js` which handles
       // static files, API routes, and SPA fallback in one process. Warn
@@ -1597,7 +1620,7 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       });
     },
 
-    resolveId(id) {
+    resolveId(id: string) {
       if (id === VIRTUAL_HANDLER_FACTORY_ID) {
         return RESOLVED_HANDLER_FACTORY_ID;
       }
@@ -1607,14 +1630,14 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       return null;
     },
 
-    async load(id) {
+    async load(id: string) {
       if (id === RESOLVED_HANDLER_FACTORY_ID) {
         return devPlatform === "node" ? NODE_HANDLER_FACTORY_CODE : BUN_HANDLER_FACTORY_CODE;
       }
       return null;
     },
 
-    async transform(code, id) {
+    async transform(code: string, id: string) {
       // Only transform the routes file in production builds
       if (routesFilePath === undefined) return null;
       if (id !== routesFilePath) return null;
@@ -1709,6 +1732,8 @@ export const trygg = (tryggConfig?: TryggConfig): Plugin => {
       await Effect.runPromise(effect);
     },
   };
+
+  return plugin;
 };
 
 export default trygg;

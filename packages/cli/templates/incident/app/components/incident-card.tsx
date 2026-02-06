@@ -37,8 +37,10 @@ export const IncidentCard = Component.gen(function* (
       <div className="incident-card__body">
         <div className="incident-card__timeline">
           <h4 className="incident-card__section-title">Timeline</h4>
-          {incident.timeline.map((entry) => (
-            <TimelineEntry entry={entry} />
+          {incident.timeline.map((entry, index) => (
+            <div key={`${entry.timestamp}-${String(index)}`}>
+              <TimelineEntry entry={entry} />
+            </div>
           ))}
         </div>
 

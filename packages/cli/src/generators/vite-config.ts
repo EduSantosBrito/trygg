@@ -4,15 +4,21 @@
  */
 import { Effect } from "effect";
 
-export const generateViteConfig = (): Effect.Effect<string> =>
+export interface ViteConfigOptions {
+  readonly platform: "node" | "bun";
+  readonly output: "server" | "static";
+}
+
+export const generateViteConfig = (options: ViteConfigOptions): Effect.Effect<string> =>
   Effect.gen(function* () {
+    const { platform, output } = options;
+
     return `import { defineConfig } from "vite"
 import tailwindcss from "@tailwindcss/vite"
 import { trygg } from "trygg/vite-plugin"
-import tryggConfig from "./trygg.config"
 
 export default defineConfig({
-  plugins: [tailwindcss(), trygg(tryggConfig)],
+  plugins: [tailwindcss(), trygg({ platform: "${platform}", output: "${output}" })],
 })
 `;
   });

@@ -9,7 +9,6 @@ import type { ProjectOptions } from "./prompts";
 import { TemplateNotFoundError } from "./ports/prompts";
 import { generatePackageJson } from "./generators/package-json";
 import { generateViteConfig } from "./generators/vite-config";
-import { generateTryggConfig } from "./generators/trygg-config";
 import { generateTsConfig } from "./generators/tsconfig";
 import { generateGitignore } from "./generators/gitignore";
 import { PlatformConfig } from "./platform-config";
@@ -83,22 +82,18 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     }).pipe(Effect.provide(platformLayer));
     yield* fs.writeFileString(path.join(targetDir, "package.json"), packageJson);
 
-    // 7. Generate trygg.config.ts
-    const tryggConfig = yield* generateTryggConfig({
+    // 7. Generate vite.config.ts
+    const viteConfig = yield* generateViteConfig({
       platform: options.platform,
       output: options.output,
     });
-    yield* fs.writeFileString(path.join(targetDir, "trygg.config.ts"), tryggConfig);
-
-    // 8. Generate vite.config.ts
-    const viteConfig = yield* generateViteConfig();
     yield* fs.writeFileString(path.join(targetDir, "vite.config.ts"), viteConfig);
 
-    // 9. Generate tsconfig.json
+    // 8. Generate tsconfig.json
     const tsconfig = yield* generateTsConfig();
     yield* fs.writeFileString(path.join(targetDir, "tsconfig.json"), tsconfig);
 
-    // 10. Generate .gitignore
+    // 9. Generate .gitignore
     const gitignore = yield* generateGitignore();
     yield* fs.writeFileString(path.join(targetDir, ".gitignore"), gitignore);
   });

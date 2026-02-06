@@ -811,8 +811,44 @@ const renderElement = (
             context,
             options,
           );
-          // Move rendered content before the anchor
-          actualParent.insertBefore(result.node, anchor);
+
+          // Move rendered content before the anchor.
+          // Anchor parent can change while render is in-flight (e.g. fragment reparent).
+          // Retry once using the current anchor parent before giving up.
+          const inserted = yield* Effect.sync(() => {
+            const tryInsert = (parentNode: Node | null): boolean => {
+              if (parentNode === null) {
+                return false;
+              }
+              try {
+                parentNode.insertBefore(result.node, anchor);
+                return true;
+              } catch {
+                return false;
+              }
+            };
+
+            const firstParent = anchor.parentNode;
+            if (tryInsert(firstParent)) {
+              return true;
+            }
+
+            const secondParent = anchor.parentNode;
+            if (tryInsert(secondParent)) {
+              return true;
+            }
+
+            return false;
+          });
+
+          if (!inserted) {
+            yield* result.cleanup;
+            return {
+              node: anchor,
+              cleanup: Effect.void,
+            };
+          }
+
           return result;
         });
 
@@ -1052,8 +1088,7 @@ const renderElement = (
       Effect.gen(function* () {
         // Create anchor comment for the list
         const anchor = document.createComment("keyed-list");
-        const listParent = parent;
-        listParent.appendChild(anchor);
+        parent.appendChild(anchor);
 
         // Track item states by key
         type ItemState = {
@@ -1072,10 +1107,14 @@ const renderElement = (
           pendingRerender: boolean;
           /** Map from signal debugId to unsubscribe Effect */
           subscriptions: Map<string, Effect.Effect<void>>;
+          /** Trigger item rerender while preserving scope */
+          scheduleRerender: () => Effect.Effect<void>;
         };
         const itemStates = new Map<string | number, ItemState>();
         const keyOrder: Array<string | number> = [];
         let isUnmounted = false;
+        let isUpdating = false;
+        let pendingUpdate = false;
 
         /**
          * Compute Longest Increasing Subsequence indices.
@@ -1137,10 +1176,18 @@ const renderElement = (
           endNode: Node,
           beforeRef: Node,
         ): void => {
+          const parentNode = beforeRef.parentNode;
+          if (parentNode === null) {
+            return;
+          }
+
           let current: Node | null = startMarker;
           while (current !== null) {
             const next: Node | null = current.nextSibling;
-            listParent.insertBefore(current, beforeRef);
+            if (current.parentNode === null || beforeRef.parentNode !== parentNode) {
+              return;
+            }
+            parentNode.insertBefore(current, beforeRef);
             if (current === endNode) break;
             current = next;
           }
@@ -1151,6 +1198,7 @@ const renderElement = (
           item: unknown,
           index: number,
           existingPhase: Signal.RenderPhase | null,
+          parentOverride?: Node,
         ) {
           // Use existing phase or create new one
           const renderPhase = existingPhase ?? (yield* Signal.makeRenderPhase);
@@ -1168,6 +1216,8 @@ const renderElement = (
             Signal.CurrentRenderPhase,
             renderPhase,
           );
+
+          const listParent = parentOverride ?? anchor.parentNode ?? parent;
 
           // Insert start marker before rendering so content appears after it
           const startMarker = document.createComment("item-start");
@@ -1250,8 +1300,15 @@ const renderElement = (
         // Function to update the list
         // Note: updateList is sync because it's called from signal listener,
         // but it immediately forks an Effect for the actual work.
-        const updateList = (): void => {
+        function updateList(): void {
           if (isUnmounted) return;
+
+          if (isUpdating) {
+            pendingUpdate = true;
+            return;
+          }
+
+          isUpdating = true;
 
           Runtime.runFork(runtime)(
             Effect.scoped(
@@ -1261,12 +1318,29 @@ const renderElement = (
                   current_keys: keyOrder.length,
                 });
 
+                yield* Debug.log({
+                  event: "render.keyedlist.state",
+                  phase: "start",
+                  key_order: [...keyOrder],
+                });
+
+                if (isUnmounted || anchor.parentNode === null) {
+                  return;
+                }
+
                 // Get current items from source signal
                 const items = yield* Signal.get(source);
 
                 // Compute new keys
                 const newKeys = items.map((item, i) => keyFn(item, i));
                 const newKeySet = new Set(newKeys);
+
+                yield* Debug.log({
+                  event: "render.keyedlist.state",
+                  phase: "computed",
+                  key_order: [...keyOrder],
+                  new_keys: newKeys,
+                });
 
                 // Build map of old key -> old index for LIS calculation
                 const oldKeyToIndex = new Map<string | number, number>();
@@ -1323,11 +1397,13 @@ const renderElement = (
                 }
 
                 // Render new items and collect all states in new order
+                const stagedParent = document.createDocumentFragment();
                 const newItemStates: Array<{
                   key: string | number;
                   state: ItemState;
                   isNew: boolean;
                   needsMove: boolean;
+                  needsRerender: boolean;
                 }> = [];
 
                 for (let i = 0; i < items.length; i++) {
@@ -1341,29 +1417,26 @@ const renderElement = (
 
                   if (existingState !== undefined && oldIndex !== undefined) {
                     // Item exists - update stored item reference
+                    // If item identity changed, schedule rerender later.
+                    const needsRerender = !Object.is(existingState.item, item);
                     existingState.item = item;
                     // Check if this item needs to move (not in LIS)
                     const needsMove = !stableOldIndices.has(oldIndex);
-                    newItemStates.push({ key, state: existingState, isNew: false, needsMove });
+                    newItemStates.push({
+                      key,
+                      state: existingState,
+                      isNew: false,
+                      needsMove,
+                      needsRerender,
+                    });
                   } else {
                     // New item - create new state
                     const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
                       item,
                       i,
                       null,
+                      stagedParent,
                     );
-
-                    const state: ItemState = {
-                      renderPhase,
-                      result,
-                      startMarker,
-                      endMarker,
-                      item,
-                      currentIndex: i,
-                      isRerendering: false,
-                      pendingRerender: false,
-                      subscriptions: new Map(),
-                    };
 
                     // Set up subscriptions for this item's accessed signals.
                     // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
@@ -1465,6 +1538,19 @@ const renderElement = (
                         );
                       });
 
+                    const state: ItemState = {
+                      renderPhase,
+                      result,
+                      startMarker,
+                      endMarker,
+                      item,
+                      currentIndex: i,
+                      isRerendering: false,
+                      pendingRerender: false,
+                      subscriptions: new Map(),
+                      scheduleRerender: scheduleItemRerender,
+                    };
+
                     // Initial subscription setup
                     yield* diffSubscriptions(
                       key,
@@ -1474,7 +1560,13 @@ const renderElement = (
                     );
 
                     itemStates.set(key, state);
-                    newItemStates.push({ key, state, isNew: true, needsMove: false });
+                    newItemStates.push({
+                      key,
+                      state,
+                      isNew: true,
+                      needsMove: false,
+                      needsRerender: false,
+                    });
                     yield* Debug.log({
                       event: "render.keyedlist.item.add",
                       key,
@@ -1488,17 +1580,42 @@ const renderElement = (
                 // Move the full range [startMarker..node] so content stays with its anchor
                 let moveCount = 0;
                 let nextSibling: Node = anchor;
+                const rerenderStates: Array<ItemState> = [];
 
                 // Iterate in reverse to build correct order
                 for (let i = newItemStates.length - 1; i >= 0; i--) {
+                  const currentParent = anchor.parentNode;
+                  if (isUnmounted || currentParent === null) {
+                    return;
+                  }
+
                   const entry = newItemStates[i];
                   if (entry === undefined) continue;
-                  const { state, isNew, needsMove } = entry;
+                  const { state, isNew, needsMove, needsRerender } = entry;
 
                   // Update currentIndex so re-renders use correct index
                   state.currentIndex = i;
 
                   if (isNew || needsMove) {
+                    if (state.startMarker.parentNode === null || state.endMarker.parentNode === null) {
+                      continue;
+                    }
+
+                    if (
+                      !isNew &&
+                      (state.startMarker.parentNode !== currentParent ||
+                        state.endMarker.parentNode !== currentParent)
+                    ) {
+                      continue;
+                    }
+
+                    if (nextSibling.parentNode !== currentParent) {
+                      nextSibling = anchor;
+                      if (nextSibling.parentNode !== currentParent) {
+                        return;
+                      }
+                    }
+
                     // Move the entire item range [startMarker..endMarker] before nextSibling
                     moveRange(state.startMarker, state.endMarker, nextSibling);
                     moveCount++;
@@ -1506,6 +1623,11 @@ const renderElement = (
                   // Update next sibling reference: use startMarker since it's the
                   // first node of this item's range
                   nextSibling = state.startMarker;
+
+                  // Re-render items with same key but new value.
+                  if (needsRerender && !needsMove) {
+                    rerenderStates.push(state);
+                  }
                 }
 
                 yield* Debug.log({
@@ -1515,6 +1637,23 @@ const renderElement = (
                   stable_nodes: newItemStates.length - moveCount,
                 });
 
+                yield* Debug.log({
+                  event: "render.keyedlist.state",
+                  phase: "after-reorder",
+                  key_order: [...keyOrder],
+                  new_keys: newKeys,
+                  move_count: moveCount,
+                });
+
+                // Re-render changed items only when order is stable.
+                // When reorder happened, defer to next source update to avoid
+                // interfering with move sequencing for fragment ranges.
+                if (moveCount === 0) {
+                  for (const state of rerenderStates) {
+                    yield* state.scheduleRerender();
+                  }
+                }
+
                 // Update key order
                 keyOrder.length = 0;
                 for (const key of newKeys) {
@@ -1522,6 +1661,12 @@ const renderElement = (
                     keyOrder.push(key);
                   }
                 }
+
+                yield* Debug.log({
+                  event: "render.keyedlist.state",
+                  phase: "committed",
+                  key_order: [...keyOrder],
+                });
               }).pipe(
                 Effect.catchAllCause((cause) =>
                   Debug.log({
@@ -1530,9 +1675,19 @@ const renderElement = (
                   }),
                 ),
               ),
+            ).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  isUpdating = false;
+                  if (pendingUpdate && !isUnmounted) {
+                    pendingUpdate = false;
+                    updateList();
+                  }
+                }),
+              ),
             ),
           );
-        };
+        }
 
         // Initial render
         yield* Effect.sync(updateList);
