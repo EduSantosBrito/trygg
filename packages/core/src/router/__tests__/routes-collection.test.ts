@@ -3,7 +3,7 @@
 // Tests for Routes.make(), .add() with R=never enforcement,
 // .notFound(), .forbidden(), and manifest generation.
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Effect } from "effect";
+import { Context, Effect, Schema } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import { empty } from "../../primitives/element.js";
@@ -43,6 +43,7 @@ describe("Routes.make()", () => {
     assert.deepStrictEqual(routes.manifest.routes, []);
     assert.strictEqual(routes.manifest.notFound, undefined);
     assert.strictEqual(routes.manifest.forbidden, undefined);
+    assert.strictEqual(routes.manifest.error, undefined);
   });
 });
 
@@ -75,6 +76,38 @@ describe(".add()", () => {
 
     // @ts-expect-error - Route has R = AuthService, not never
     Routes.make().add(routeWithR);
+  });
+
+  it("should allow params route without error boundary", () => {
+    const routes = Routes.make().add(
+      Route.make("/users/:id")
+        .params(Schema.Struct({ id: Schema.NumberFromString }))
+        .component(comp),
+    );
+
+    assert.strictEqual(routes.manifest.routes.length, 1);
+  });
+
+  it("should allow query route without error boundary", () => {
+    const routes = Routes.make().add(
+      Route.make("/search")
+        .query(Schema.Struct({ q: Schema.String }))
+        .component(comp),
+    );
+
+    assert.strictEqual(routes.manifest.routes.length, 1);
+  });
+
+  it("should allow nested params route without error boundary", () => {
+    const routes = Routes.make().add(
+      Route.make("/incidents").layout(comp).children(
+        Route.make("/:id")
+          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .component(comp),
+      ),
+    );
+
+    assert.strictEqual(routes.manifest.routes.length, 1);
   });
 
   it("should preserve route order", () => {
@@ -141,6 +174,25 @@ describe(".forbidden()", () => {
 });
 
 // =============================================================================
+// .error() - Root error boundary
+// =============================================================================
+
+describe(".error()", () => {
+  it("should store root error boundary", () => {
+    const routes = Routes.make().error(comp);
+
+    assert.strictEqual(routes.manifest.error, comp);
+  });
+
+  it("should override previous root error boundary", () => {
+    const other = makeComp();
+    const routes = Routes.make().error(comp).error(other);
+
+    assert.strictEqual(routes.manifest.error, other);
+  });
+});
+
+// =============================================================================
 // Manifest generation
 // =============================================================================
 
@@ -153,13 +205,15 @@ describe("Manifest generation", () => {
       .add(route1)
       .add(route2)
       .notFound(notFoundComp)
-      .forbidden(forbiddenComp);
+      .forbidden(forbiddenComp)
+      .error(comp);
 
     const manifest = routes.manifest;
 
     assert.strictEqual(manifest.routes.length, 2);
     assert.strictEqual(manifest.notFound, notFoundComp);
     assert.strictEqual(manifest.forbidden, forbiddenComp);
+    assert.strictEqual(manifest.error, comp);
   });
 
   it("should include children in route definitions", () => {

@@ -11,7 +11,7 @@
  * - Cleanup on navigation (different match results)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit, FiberRef, Option, Scope } from "effect";
+import { Cause, Effect, Exit, FiberRef, Option, Schema, Scope } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
@@ -567,6 +567,74 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
+  it.scoped("should render error boundary on params decode failure", () =>
+    Effect.gen(function* () {
+      const ErrorComp = textComp("Invalid params");
+      const PageComp = textComp("User");
+
+      const manifest = Routes.make().add(
+        Route.make("/users/:id")
+          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .component(PageComp)
+          .error(ErrorComp),
+      ).manifest;
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/users/abc");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+
+      assert.strictEqual(result._tag, "Component");
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should render default error text on params decode failure without boundary", () =>
+    Effect.gen(function* () {
+      const PageComp = textComp("User");
+
+      const manifest = Routes.make().add(
+        Route.make("/users/:id")
+          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .component(PageComp),
+      ).manifest;
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/users/abc");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+
+      assert.strictEqual(result._tag, "Text");
+      if (result._tag === "Text") {
+        assert.strictEqual(result.content, "Error");
+      }
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.scoped("should render default error text on query decode failure without boundary", () =>
+    Effect.gen(function* () {
+      const PageComp = textComp("Search");
+
+      const manifest = Routes.make().add(
+        Route.make("/search")
+          .query(Schema.Struct({ q: Schema.String }))
+          .component(PageComp),
+      ).manifest;
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/search");
+
+      const outlet = Outlet({ routes: manifest });
+      const result = yield* runOutletEffect(outlet);
+
+      assert.strictEqual(result._tag, "Text");
+      if (result._tag === "Text") {
+        assert.strictEqual(result.content, "Error");
+      }
+    }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
   // ---------------------------------------------------------------------------
   // Empty/no routes
   // ---------------------------------------------------------------------------
@@ -774,6 +842,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
         routes: [loaderDefinition("/lazy", () => Promise.resolve({ default: PageComp }))],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       const router = yield* Router.Router;
@@ -795,6 +864,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
         routes: [loaderDefinition("/bad", () => Promise.resolve({ default: "not-a-component" }))],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       const router = yield* Router.Router;
@@ -816,6 +886,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
         routes: [loaderDefinition("/fail", () => Promise.reject(new Error("network error")))],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       const router = yield* Router.Router;
@@ -847,6 +918,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
         routes: [defWithError],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       const router = yield* Router.Router;

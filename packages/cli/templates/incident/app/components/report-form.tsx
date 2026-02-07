@@ -6,13 +6,8 @@ import { incidentsResource } from "../resources/incidents";
 
 const SEVERITIES: ReadonlyArray<Severity> = ["SEV-1", "SEV-2", "SEV-3", "SEV-4"];
 
-const parseSeverity = (value: string): Severity | undefined => {
-  if (value === "SEV-1") return value;
-  if (value === "SEV-2") return value;
-  if (value === "SEV-3") return value;
-  if (value === "SEV-4") return value;
-  return undefined;
-};
+const parseSeverity = (value: string): Severity | undefined =>
+  SEVERITIES.find((severity) => severity === value);
 
 export const ReportForm = Component.gen(function* () {
   const title = yield* Signal.make("");

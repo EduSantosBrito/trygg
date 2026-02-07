@@ -11,12 +11,14 @@ import {
   Array as Arr,
   Cause,
   Deferred,
+  Either,
   Effect,
   FiberRef,
   Layer,
   Option,
   Ref,
   Schema,
+  Scope,
   SubscriptionRef,
 } from "effect";
 import * as Debug from "../debug/debug.js";
@@ -490,7 +492,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
             }
           }),
         );
-        void _unsubLoader;
+        yield* Scope.addFinalizer(scope, _unsubLoader);
 
         return loader;
       });
@@ -577,14 +579,54 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         return;
       }
 
-      // Decode params + query
-      const decodedParams = yield* decodeRouteParams(match.route, match.params).pipe(
-        Effect.catchAll(() => Effect.succeed<Record<string, unknown>>(match.params)),
+      // Decode params + query (strict: schema failures route to error boundary)
+      const decodedParamsResult = yield* decodeRouteParams(match.route, match.params).pipe(
+        Effect.either,
       );
+      if (Either.isLeft(decodedParamsResult)) {
+        const el = yield* Option.match(boundaries.resolveError(match.route), {
+          onNone: () =>
+            Debug.log({
+              event: "router.outlet.error",
+              phase: "decode_params",
+              path: route.path,
+              error: decodedParamsResult.left,
+            }).pipe(Effect.as(text("Error"))),
+          onSome: (comp) =>
+            Effect.flatMap(resolveComponent(comp), (resolved) =>
+              renderError(resolved, Cause.fail(decodedParamsResult.left), route.path),
+            ),
+        });
+        yield* setViewAndAwaitSwap(el);
+        yield* applyScroll(resolveScrollStrategy(match.route));
+        return;
+      }
+
       const queryString = route.query.toString();
-      const decodedQuery = yield* decodeRouteQuery(match.route, route.query).pipe(
-        Effect.catchAll(() => Effect.succeed<Record<string, unknown>>({})),
+      const decodedQueryResult = yield* decodeRouteQuery(match.route, route.query).pipe(
+        Effect.either,
       );
+      if (Either.isLeft(decodedQueryResult)) {
+        const el = yield* Option.match(boundaries.resolveError(match.route), {
+          onNone: () =>
+            Debug.log({
+              event: "router.outlet.error",
+              phase: "decode_query",
+              path: route.path,
+              error: decodedQueryResult.left,
+            }).pipe(Effect.as(text("Error"))),
+          onSome: (comp) =>
+            Effect.flatMap(resolveComponent(comp), (resolved) =>
+              renderError(resolved, Cause.fail(decodedQueryResult.left), route.path),
+            ),
+        });
+        yield* setViewAndAwaitSwap(el);
+        yield* applyScroll(resolveScrollStrategy(match.route));
+        return;
+      }
+
+      const decodedParams = decodedParamsResult.right;
+      const decodedQuery = decodedQueryResult.right;
 
       // Prefetch
       const prefetchFns = match.route.definition.prefetch;
@@ -612,7 +654,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Does NOT cause component re-render (subscription, not Signal.get).
     // Router signal outlives the outlet — must unsubscribe on scope close.
     const unsubRouter = yield* Signal.subscribe(router.current, () => processRoute);
-    yield* Effect.addFinalizer(() => unsubRouter);
+    yield* Scope.addFinalizer(scope, unsubRouter);
 
     return signalElement(viewSignal, { onSwap: onSwapEffect });
   });

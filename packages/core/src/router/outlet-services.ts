@@ -109,6 +109,7 @@ export class OutletRenderer extends Context.Tag("trygg/OutletRenderer")<
 /** @since 1.0.0 */
 export interface BoundaryResolverShape {
   readonly resolveError: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+  readonly resolveErrorRoot: () => Option.Option<ComponentInput>;
   readonly resolveLoading: (route: ResolvedRoute) => Option.Option<ComponentInput>;
   readonly resolveNotFound: (route: ResolvedRoute) => Option.Option<ComponentInput>;
   readonly resolveNotFoundRoot: () => Option.Option<ComponentInput>;
@@ -124,7 +125,8 @@ export class BoundaryResolver extends Context.Tag("trygg/BoundaryResolver")<
   BoundaryResolverShape
 >() {
   static readonly make = (manifest: RoutesManifest): BoundaryResolverShape => ({
-    resolveError: (route) => resolveErrorBoundary(route, undefined),
+    resolveError: (route) => resolveErrorBoundary(route, manifest.error),
+    resolveErrorRoot: () => Option.fromNullable(manifest.error),
     resolveLoading: (route) => resolveLoadingBoundary(route),
     resolveNotFound: (route) => resolveNotFoundBoundary(route, manifest.notFound),
     resolveNotFoundRoot: () => Option.fromNullable(manifest.notFound),

@@ -67,6 +67,9 @@ const ChildForbidden = makeNamedComp("ChildForbidden");
 const ParentLoading = makeNamedComp("ParentLoading");
 const ChildLoading = makeNamedComp("ChildLoading");
 
+// Generic error component for routes with .params()/.query() that need coverage
+const ErrorBoundary = makeNamedComp("ErrorBoundary");
+
 // =============================================================================
 // Error Boundary Resolution
 // =============================================================================
@@ -412,7 +415,8 @@ describe("decodeRouteParams", () => {
       const manifest = Routes.make().add(
         Route.make("/users/:id")
           .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -446,7 +450,8 @@ describe("decodeRouteParams", () => {
       const manifest = Routes.make().add(
         Route.make("/users/:id")
           .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -477,7 +482,8 @@ describe("decodeRouteParams", () => {
               slug: Schema.String,
             }),
           )
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -497,7 +503,8 @@ describe("decodeRouteParams", () => {
       const manifest = Routes.make().add(
         Route.make("/items/:id")
           .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -527,7 +534,8 @@ describe("decodeRouteQuery", () => {
               page: Schema.optional(Schema.NumberFromString),
             }),
           )
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -569,7 +577,8 @@ describe("decodeRouteQuery", () => {
               page: Schema.optional(Schema.NumberFromString),
             }),
           )
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -590,7 +599,8 @@ describe("decodeRouteQuery", () => {
       const manifest = Routes.make().add(
         Route.make("/search")
           .query(Schema.Struct({ q: Schema.String }))
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -614,7 +624,8 @@ describe("decodeRouteQuery", () => {
       const manifest = Routes.make().add(
         Route.make("/items")
           .query(Schema.Struct({ page: Schema.NumberFromString }))
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);
@@ -642,7 +653,8 @@ describe("decodeRouteQuery", () => {
               sort: Schema.optional(Schema.String),
             }),
           )
-          .component(Comp),
+          .component(Comp)
+          .error(ErrorBoundary),
       ).manifest;
 
       const matcher = yield* createMatcher(manifest);

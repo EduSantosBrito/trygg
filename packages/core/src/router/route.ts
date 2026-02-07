@@ -18,7 +18,7 @@ import { Data, Effect, FiberRef, Layer, Pipeable, Schema } from "effect";
 import type { ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
-import { unsafeEraseMiddlewareR, unsafeExtractFields } from "../internal/unsafe.js";
+import { unsafeAsOverload, unsafeEraseMiddlewareR, unsafeExtractFields } from "../internal/unsafe.js";
 
 // =============================================================================
 // Type-Level Path Param Extraction
@@ -106,6 +106,7 @@ export type False = { readonly _: unique symbol };
  * - `R` - accumulated service requirements from middleware
  * - `HasComponent` - whether `.component()` has been called
  * - `HasChildren` - whether `.children()` has been called
+ * - `NeedsCoverage` - whether this route tree needs an error boundary
  *
  * @since 1.0.0
  */
@@ -114,12 +115,18 @@ export interface RouteBuilder<
   R,
   HasComponent extends boolean,
   HasChildren extends boolean,
+  NeedsCoverage extends boolean = false,
+  HasErrorBoundary extends boolean = false,
 >
   extends Pipeable.Pipeable {
   readonly _tag: "RouteBuilder";
   readonly [RouteBuilderTypeId]: RouteBuilderTypeId;
   /** Phantom type for service requirements tracking */
   readonly _R: R;
+  /** Phantom type for coverage tracking */
+  readonly _NeedsCoverage: NeedsCoverage;
+  /** Phantom type for boundary tracking */
+  readonly _HasErrorBoundary: HasErrorBoundary;
   readonly definition: RouteDefinition;
 
   /**
@@ -146,7 +153,14 @@ export interface RouteBuilder<
               readonly error: "Schema is missing path params";
               readonly missing: Exclude<ExtractParams<Path>, keyof Fields & string>;
             },
-      ) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+      ) => RouteBuilder<
+        Path,
+        R,
+        HasComponent,
+        HasChildren,
+        HasErrorBoundary extends true ? false : true,
+        HasErrorBoundary
+      >;
 
   /**
    * Set query param schema.
@@ -163,7 +177,14 @@ export interface RouteBuilder<
    */
   query: <Fields extends Schema.Struct.Fields>(
     schema: Schema.Struct<Fields>,
-  ) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  ) => RouteBuilder<
+    Path,
+    R,
+    HasComponent,
+    HasChildren,
+    HasErrorBoundary extends true ? false : true,
+    HasErrorBoundary
+  >;
 
   /**
    * Set the component for this route.
@@ -172,37 +193,46 @@ export interface RouteBuilder<
    */
   component: HasChildren extends true
     ? never
-    : (c: ComponentInput) => RouteBuilder<Path, R, true, HasChildren>;
+    : (c: ComponentInput) => RouteBuilder<Path, R, true, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the layout component (renders Outlet for children).
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  layout: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  layout: (
+    c: ComponentInput,
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the loading fallback component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  loading: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  loading: (
+    c: ComponentInput,
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the error boundary component.
+   * Covers this route and all descendants — satisfies error coverage requirements.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  error: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  error: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren, false, true>;
 
   /**
    * Set the not-found boundary component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  notFound: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  notFound: (
+    c: ComponentInput,
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the forbidden boundary component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  forbidden: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  forbidden: (
+    c: ComponentInput,
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Add middleware to this route.
@@ -210,7 +240,7 @@ export interface RouteBuilder<
    */
   middleware: <R2>(
     m: Effect.Effect<void, unknown, R2>,
-  ) => RouteBuilder<Path, R | R2, HasComponent, HasChildren>;
+  ) => RouteBuilder<Path, R | R2, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Add prefetch effect.
@@ -218,15 +248,29 @@ export interface RouteBuilder<
    */
   prefetch: (
     fn: (ctx: unknown) => Effect.Effect<unknown, unknown, never>,
-  ) => RouteBuilder<Path, R, HasComponent, HasChildren>;
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Add child routes.
    * Mutually exclusive with `.component()`.
+   * If any child needs error coverage, this route inherits that need.
    */
   children: HasComponent extends true
     ? never
-    : (...routes: ReadonlyArray<AnyRouteBuilder>) => RouteBuilder<Path, R, HasComponent, true>;
+    : <const Children extends ReadonlyArray<AnyRouteBuilder>>(
+        ...routes: Children
+      ) => RouteBuilder<
+        Path,
+        R,
+        HasComponent,
+        true,
+        HasErrorBoundary extends true
+          ? false
+          : NeedsCoverage extends true
+            ? true
+            : ChildrenNeedCoverage<Children>,
+        HasErrorBoundary
+      >;
 }
 
 /**
@@ -236,8 +280,29 @@ export interface RouteBuilder<
 export interface AnyRouteBuilder {
   readonly _tag: "RouteBuilder";
   readonly [RouteBuilderTypeId]: RouteBuilderTypeId;
+  readonly _NeedsCoverage: boolean;
+  readonly _HasErrorBoundary: boolean;
   readonly definition: RouteDefinition;
 }
+
+/**
+ * Extract whether a RouteBuilder still needs error coverage.
+ * @internal
+ */
+type ExtractNeedsCoverage<T extends AnyRouteBuilder> = T["_NeedsCoverage"];
+
+/**
+ * Compute whether any child in a tuple needs error coverage.
+ * @internal
+ */
+export type ChildrenNeedCoverage<T extends ReadonlyArray<AnyRouteBuilder>> = T extends readonly [
+  infer Head extends AnyRouteBuilder,
+  ...infer Tail extends ReadonlyArray<AnyRouteBuilder>,
+]
+  ? ExtractNeedsCoverage<Head> extends true
+    ? true
+    : ChildrenNeedCoverage<Tail>
+  : false;
 
 // =============================================================================
 // Route Builder Implementation
@@ -253,80 +318,114 @@ const makeBuilder = <
   R,
   HasComponent extends boolean,
   HasChildren extends boolean,
+  NeedsCoverage extends boolean = false,
+  HasErrorBoundary extends boolean = false,
 >(
   def: RouteDefinition,
-): RouteBuilder<Path, R, HasComponent, HasChildren> => {
-  const self: RouteBuilder<Path, R, HasComponent, HasChildren> = {
+): RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary> => {
+  const paramsImpl = (schema: unknown) =>
+    makeBuilder<
+      Path,
+      R,
+      HasComponent,
+      HasChildren,
+      HasErrorBoundary extends true ? false : true,
+      HasErrorBoundary
+    >({
+      ...def,
+      paramsSchema: schema,
+    });
+
+  const queryImpl = (schema: unknown) =>
+    makeBuilder<
+      Path,
+      R,
+      HasComponent,
+      HasChildren,
+      HasErrorBoundary extends true ? false : true,
+      HasErrorBoundary
+    >({
+      ...def,
+      querySchema: schema,
+    });
+
+  const componentImpl = (c: ComponentInput) =>
+    makeBuilder<Path, R, true, HasChildren, NeedsCoverage, HasErrorBoundary>({
+      ...def,
+      component: c,
+    });
+
+  const childrenImpl = (...routes: ReadonlyArray<AnyRouteBuilder>) =>
+    makeBuilder<Path, R, HasComponent, true, NeedsCoverage, HasErrorBoundary>({
+      ...def,
+      children: routes.map((r) => r.definition),
+    });
+
+  const self: RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary> = {
     _tag: "RouteBuilder",
     [RouteBuilderTypeId]: RouteBuilderTypeId,
     _R: undefined as unknown as R,
+    _NeedsCoverage: undefined as unknown as NeedsCoverage,
+    _HasErrorBoundary: undefined as unknown as HasErrorBoundary,
     definition: def,
 
-    params: ((schema: unknown) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
-        ...def,
-        paramsSchema: schema,
-      })) as unknown as RouteBuilder<Path, R, HasComponent, HasChildren>["params"],
+    params: unsafeAsOverload<
+      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["params"]
+    >(paramsImpl),
 
-    query: ((schema: unknown) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
-        ...def,
-        querySchema: schema,
-      })) as unknown as RouteBuilder<Path, R, HasComponent, HasChildren>["query"],
+    query: unsafeAsOverload<
+      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["query"]
+    >(queryImpl),
 
-    component: ((c: ComponentInput) =>
-      makeBuilder<Path, R, true, HasChildren>({
-        ...def,
-        component: c,
-      })) as RouteBuilder<Path, R, HasComponent, HasChildren>["component"],
+    component: unsafeAsOverload<
+      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["component"]
+    >(componentImpl),
 
     layout: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
         layout: c,
       }),
 
     loading: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
         loading: c,
       }),
 
     error: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, false, true>({
         ...def,
         error: c,
       }),
 
     notFound: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
         notFound: c,
       }),
 
     forbidden: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
         forbidden: c,
       }),
 
     middleware: <R2>(m: Effect.Effect<void, unknown, R2>) =>
-      makeBuilder<Path, R | R2, HasComponent, HasChildren>({
+      makeBuilder<Path, R | R2, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
-        middleware: [...def.middleware, m as Effect.Effect<void, unknown, unknown>],
+        middleware: [...def.middleware, unsafeEraseMiddlewareR(m)],
       }),
 
     prefetch: (fn: (ctx: unknown) => Effect.Effect<unknown, unknown, never>) =>
-      makeBuilder<Path, R, HasComponent, HasChildren>({
+      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
         ...def,
         prefetch: [...def.prefetch, fn],
       }),
 
-    children: ((...routes: ReadonlyArray<RouteBuilder<string, never, boolean, boolean>>) =>
-      makeBuilder<Path, R, HasComponent, true>({
-        ...def,
-        children: routes.map((r) => r.definition),
-      })) as RouteBuilder<Path, R, HasComponent, HasChildren>["children"],
+    children: unsafeAsOverload<
+      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["children"]
+    >(childrenImpl),
 
     pipe() {
       return Pipeable.pipeArguments(this, arguments);
@@ -407,7 +506,7 @@ export const index = (component: ComponentInput): RouteBuilder<"__index__", neve
  */
 export const isRouteBuilder = (
   value: unknown,
-): value is RouteBuilder<string, never, boolean, boolean> =>
+): value is RouteBuilder<string, never, boolean, boolean, boolean, boolean> =>
   typeof value === "object" && value !== null && RouteBuilderTypeId in value;
 
 // =============================================================================
@@ -461,9 +560,16 @@ type LayerContext<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : 
  */
 export function provide<ROut, E2 = never, RIn = never>(
   layer: Layer.Layer<ROut, E2, RIn>,
-): <Path extends string, R, HC extends boolean, HCh extends boolean>(
-  builder: RouteBuilder<Path, R, HC, HCh>,
-) => RouteBuilder<Path, RIn | Exclude<R, ROut>, HC, HCh>;
+): <
+  Path extends string,
+  R,
+  HC extends boolean,
+  HCh extends boolean,
+  NC extends boolean,
+  HEB extends boolean,
+>(
+  builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
+) => RouteBuilder<Path, RIn | Exclude<R, ROut>, HC, HCh, NC, HEB>;
 
 /**
  * Apply multiple Layers to a route.
@@ -477,23 +583,46 @@ export function provide<
   layer1: L1,
   layer2: L2,
   ...rest: Rest
-): <Path extends string, R, HC extends boolean, HCh extends boolean>(
-  builder: RouteBuilder<Path, R, HC, HCh>,
+): <
+  Path extends string,
+  R,
+  HC extends boolean,
+  HCh extends boolean,
+  NC extends boolean,
+  HEB extends boolean,
+>(
+  builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
 ) => RouteBuilder<
   Path,
   LayerContext<L1 | L2 | Rest[number]> | Exclude<R, LayerSuccess<L1 | L2 | Rest[number]>>,
   HC,
-  HCh
+  HCh,
+  NC,
+  HEB
 >;
 
 export function provide(
   ...layers: ReadonlyArray<Layer.Layer.Any>
-): <Path extends string, R, HC extends boolean, HCh extends boolean>(
-  builder: RouteBuilder<Path, R, HC, HCh>,
-) => RouteBuilder<Path, unknown, HC, HCh> {
-  return <Path extends string, R, HC extends boolean, HCh extends boolean>(
-    builder: RouteBuilder<Path, R, HC, HCh>,
-  ): RouteBuilder<Path, unknown, HC, HCh> => {
+): <
+  Path extends string,
+  R,
+  HC extends boolean,
+  HCh extends boolean,
+  NC extends boolean,
+  HEB extends boolean,
+>(
+  builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
+) => RouteBuilder<Path, unknown, HC, HCh, NC, HEB> {
+  return <
+    Path extends string,
+    R,
+    HC extends boolean,
+    HCh extends boolean,
+    NC extends boolean,
+    HEB extends boolean,
+  >(
+    builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
+  ): RouteBuilder<Path, unknown, HC, HCh, NC, HEB> => {
     let renderStrategy: Layer.Layer<RenderStrategy> | undefined = builder.definition.renderStrategy;
     let scrollStrategy: Layer.Layer<ScrollStrategy> | undefined = builder.definition.scrollStrategy;
     const otherLayers: Array<Layer.Layer.Any> = [...builder.definition.layers];
@@ -508,7 +637,7 @@ export function provide(
       }
     }
 
-    return makeBuilder<Path, unknown, HC, HCh>({
+    return makeBuilder<Path, unknown, HC, HCh, NC, HEB>({
       ...builder.definition,
       renderStrategy,
       scrollStrategy,

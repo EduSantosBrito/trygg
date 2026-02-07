@@ -20,7 +20,6 @@ import type { RenderStrategy } from "./render-strategy.js";
 import type { ScrollStrategy } from "./scroll-strategy.js";
 import type { ComponentInput, RouteParams } from "./types.js";
 
-// =============================================================================
 // Resolved Route
 // =============================================================================
 
@@ -753,7 +752,9 @@ export interface SyncMatcher {
  *
  * @since 1.0.0
  */
-export const createMatcher = (manifest: RoutesManifest): Effect.Effect<SyncMatcher> =>
+export const createMatcher = (
+  manifest: RoutesManifest,
+): Effect.Effect<SyncMatcher> =>
   Effect.map(resolveRoutes(manifest), (resolved) => ({
     match: buildTrieMatcher(resolved),
     routes: resolved,
