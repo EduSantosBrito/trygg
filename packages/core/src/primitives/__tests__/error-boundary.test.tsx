@@ -207,6 +207,29 @@ describe("ErrorBoundary basic functionality", () => {
       assert.strictEqual(node.textContent, "symbol-value");
     }),
   );
+
+  it.scoped("preserveSignalProp keeps signal-typed props usable", () =>
+    Effect.gen(function* () {
+      const SignalPropComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ count: Signal.Signal<number> }>,
+      ) {
+        const { count } = yield* Props;
+        const doubled = yield* Signal.derive(count, (n) => n * 2);
+        return <div data-testid="doubled">{doubled}</div>;
+      });
+
+      const count = Signal.makeSync(3);
+      const SafeComponent = yield* ErrorBoundary.catch(SignalPropComponent).catchAll(() => (
+        <div data-testid="fallback">fallback</div>
+      ));
+
+      const element = SafeComponent({ count: ErrorBoundary.preserveSignalProp(count) });
+      const { getByTestId, queryByTestId } = yield* render(element);
+
+      assert.strictEqual((yield* getByTestId("doubled")).textContent, "6");
+      assert.isTrue(Option.isNone(yield* queryByTestId("fallback")));
+    }),
+  );
 });
 
 // =============================================================================

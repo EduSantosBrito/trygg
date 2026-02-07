@@ -13,10 +13,11 @@
  *   so moveRange(startMarker, firstChild, ref) orphans subsequent siblings.
  */
 import { describe, it, expect } from "@effect/vitest";
-import { Effect, TestClock } from "effect";
+import { Data, Effect, TestClock } from "effect";
 import * as Signal from "../signal.js";
 import * as Resource from "../resource.js";
 import * as Component from "../component.js";
+import * as ErrorBoundary from "../error-boundary.js";
 import { render } from "../../testing/index.js";
 
 // Note: Signal.each accepts Element | Effect<Element>, so Effect.succeed is optional
@@ -913,6 +914,64 @@ describe("KeyedList with SignalElement swap", () => {
         }),
       ({ restore }) => Effect.sync(restore),
     ),
+  );
+
+  it.scoped("renders ErrorBoundary fallback when keyed list item rerender fails", () =>
+    Effect.gen(function* () {
+      class ItemError extends Data.TaggedError("ItemError")<{ readonly reason: "fail" }> {}
+
+      interface ItemRowData {
+        readonly id: number;
+        readonly label: string;
+      }
+
+      const items = yield* Signal.make<ReadonlyArray<ItemRowData>>([{ id: 1, label: "A" }]);
+      const shouldFail = yield* Signal.make(false);
+
+      const RiskyItem = Component.gen(function* (
+        Props: Component.ComponentProps<{ readonly item: ItemRowData }>,
+      ) {
+        const { item } = yield* Props;
+        const fail = yield* Signal.get(shouldFail);
+        if (fail) {
+          return yield* new ItemError({ reason: "fail" });
+        }
+        return <div data-id={String(item.id)}>{item.label}</div>;
+      });
+
+      const ErrorFallback = Component.gen(function* (
+        Props: Component.ComponentProps<{ readonly error: ItemError }>,
+      ) {
+        yield* Props;
+        return <div data-testid="item-fallback">fallback</div>;
+      });
+
+      const SafeItem = yield* ErrorBoundary.catch(RiskyItem)
+        .on("ItemError", ErrorFallback)
+        .catchAll(() => <div data-testid="item-fallback-generic">generic</div>);
+
+      const { container } = yield* render(
+        <div>
+          {Signal.each(
+            items,
+            (item) => <SafeItem item={item} />,
+            { key: (item) => item.id },
+          )}
+        </div>,
+      );
+
+      for (let i = 0; i < 10; i++) {
+        yield* Effect.yieldNow();
+      }
+      expect(container.querySelector('[data-id="1"]')).not.toBeNull();
+
+      yield* Signal.set(shouldFail, true);
+      for (let i = 0; i < 10; i++) {
+        yield* Effect.yieldNow();
+      }
+
+      expect(container.querySelector('[data-testid="item-fallback"]')).not.toBeNull();
+    }),
   );
 
   it.scoped("renders on first update when initial anchor insert throws once", () =>

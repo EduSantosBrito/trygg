@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, Resource, Signal } from "trygg";
+import { Component, ErrorBoundary, Resource, Signal, type ComponentProps } from "trygg";
 import { type Severity } from "../errors/incidents";
 import { incidentsResource, type Incident } from "../resources/incidents";
 import { IncidentCard } from "../components/incident-card";
@@ -10,6 +10,17 @@ import { ReportForm } from "../components/report-form";
 type Filter = "all" | Severity;
 const FILTERS: ReadonlyArray<Filter> = ["all", "SEV-1", "SEV-2", "SEV-3", "SEV-4"];
 const EMPTY_INCIDENTS: ReadonlyArray<Incident> = [];
+
+const UnexpectedTransitionView = Component.gen(function* (
+  Props: ComponentProps<{ error: unknown }>,
+) {
+  yield* Props;
+  return (
+    <div className="mt-3 rounded-md bg-[--error]/10 px-3 py-2 text-sm text-[--error]" role="alert">
+      Unexpected error
+    </div>
+  );
+});
 
 export default Component.gen(function* () {
   const state = yield* Resource.fetch(incidentsResource);
@@ -61,6 +72,10 @@ export default Component.gen(function* () {
     ),
   );
 
+  const SafeIncidentCard = yield* ErrorBoundary.catch(IncidentCard)
+    .on("UnexpectedTransitionError", UnexpectedTransitionView)
+    .exhaustive();
+
   const dataRegion = yield* Resource.match(state, {
     Pending: () => <IncidentSkeleton />,
     Success: () => (
@@ -82,9 +97,9 @@ export default Component.gen(function* () {
         {Signal.each(
           filteredIncidents,
           (incident) => (
-            <IncidentCard
+            <SafeIncidentCard
               incident={incident}
-              expandedIds={expandedIds}
+              expandedIds={ErrorBoundary.preserveSignalProp(expandedIds)}
               onToggle={() => toggleExpanded(incident.id)}
             />
           ),
