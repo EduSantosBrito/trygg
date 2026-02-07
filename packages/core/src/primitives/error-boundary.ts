@@ -341,5 +341,15 @@ export function catch_<Props extends object, E, R>(
   return new ErrorBoundaryBuilderImpl<Props, E, R, never, never>(component, createState<E>());
 }
 
+/**
+ * Preserve a signal-valued prop across ErrorBoundary prop unwrapping.
+ *
+ * ErrorBoundary unwraps one signal layer from reactive props. For components
+ * whose prop type is itself `Signal<A>`, wrap with this helper so the boundary
+ * unwraps to the original signal instead of the signal's current value.
+ */
+export const preserveSignalProp = <A>(signal: Signal.Signal<A>): Signal.Signal<Signal.Signal<A>> =>
+  Signal.makeSync(signal);
+
 // Export catch_ as catch (reserved word workaround)
 export { catch_ as catch };

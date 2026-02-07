@@ -1730,17 +1730,87 @@ const renderElement = (
         let isUnmounted = false;
         let hasErrored = false;
 
+        const cleanupRendered = (
+          result: RenderResult | null,
+          scope: Scope.CloseableScope | null,
+        ): Effect.Effect<void> =>
+          Effect.gen(function* () {
+            if (result !== null) {
+              yield* result.cleanup;
+            }
+            if (scope !== null) {
+              yield* Scope.close(scope, Exit.void);
+            }
+          });
+
         const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
-          if (currentResult !== null) {
-            yield* currentResult.cleanup;
-            currentResult = null;
-          }
-          if (currentScope !== null) {
-            const scope = currentScope;
-            currentScope = null;
-            yield* Scope.close(scope, Exit.void);
-          }
+          const result = currentResult;
+          const scope = currentScope;
+          currentResult = null;
+          currentScope = null;
+          yield* cleanupRendered(result, scope);
         });
+
+        const insertBeforeAnchor = (node: Node): Effect.Effect<boolean> =>
+          Effect.sync(() => {
+            const tryInsert = (parentNode: Node | null): boolean => {
+              if (parentNode === null) {
+                return false;
+              }
+              try {
+                parentNode.insertBefore(node, anchor);
+                return true;
+              } catch {
+                return false;
+              }
+            };
+
+            const firstParent = anchor.parentNode;
+            if (tryInsert(firstParent)) {
+              return true;
+            }
+
+            const secondParent = anchor.parentNode;
+            if (tryInsert(secondParent)) {
+              return true;
+            }
+
+            return false;
+          });
+
+        const mountFallback = (
+          fallbackElement: Element,
+        ): Effect.Effect<
+          { result: RenderResult; scope: Scope.CloseableScope } | null,
+          unknown,
+          never
+        > =>
+          Effect.gen(function* () {
+            const renderParent = anchor.parentNode;
+            if (renderParent === null) {
+              return null;
+            }
+
+            const fallbackScope = yield* Scope.make();
+            const fallbackResult = yield* renderElement(
+              fallbackElement,
+              renderParent,
+              runtime,
+              context,
+              defaultRenderOptions,
+            ).pipe(
+              Effect.provideService(Scope.Scope, fallbackScope),
+              Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
+            );
+
+            const inserted = yield* insertBeforeAnchor(fallbackResult.node);
+            if (!inserted) {
+              yield* cleanupRendered(fallbackResult, fallbackScope);
+              return null;
+            }
+
+            return { result: fallbackResult, scope: fallbackScope };
+          });
 
         // Error handler that swaps to fallback
         const errorHandler: ErrorBoundaryHandler = (cause) => {
@@ -1762,26 +1832,17 @@ const renderElement = (
               // Compute fallback element
               const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
 
-              // Render fallback with a new scope (no error handler - don't catch fallback errors)
-              const fallbackScope = yield* Scope.make();
-              const fallbackResult = yield* renderElement(
-                fallbackElement,
-                parent,
-                runtime,
-                context,
-                defaultRenderOptions,
-              ).pipe(
-                Effect.provideService(Scope.Scope, fallbackScope),
-                Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
-              );
+              // Render + mount fallback before tearing down prior content.
+              const mounted = yield* mountFallback(fallbackElement);
+              if (mounted === null) {
+                return;
+              }
 
-              // Clean up old content
-              yield* cleanupCurrent;
-
-              // Install fallback
-              currentResult = fallbackResult;
-              currentScope = fallbackScope;
-              parent.insertBefore(currentResult.node, anchor);
+              const previousResult = currentResult;
+              const previousScope = currentScope;
+              currentResult = mounted.result;
+              currentScope = mounted.scope;
+              yield* cleanupRendered(previousResult, previousScope);
 
               yield* Debug.log({
                 event: "render.errorboundary.fallback",
@@ -1821,26 +1882,14 @@ const renderElement = (
           // Compute fallback element
           const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
 
-          // Render fallback with a new scope (no error handler - don't catch fallback errors)
-          const fallbackScope = yield* Scope.make();
-          const fallbackResult = yield* renderElement(
-            fallbackElement,
-            parent,
-            runtime,
-            context,
-            defaultRenderOptions,
-          ).pipe(
-            Effect.provideService(Scope.Scope, fallbackScope),
-            Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
-          );
+          // Render + mount fallback.
+          const mounted = yield* mountFallback(fallbackElement);
+          if (mounted === null) {
+            return;
+          }
 
-          // Clean up old content (should be nothing on initial render)
-          yield* cleanupCurrent;
-
-          // Install fallback
-          currentResult = fallbackResult;
-          currentScope = fallbackScope;
-          parent.insertBefore(currentResult.node, anchor);
+          currentResult = mounted.result;
+          currentScope = mounted.scope;
 
           yield* Debug.log({
             event: "render.errorboundary.fallback",
@@ -1867,7 +1916,10 @@ const renderElement = (
         if (childRenderResult.success) {
           currentResult = childRenderResult.result;
           currentScope = childRenderResult.scope;
-          parent.insertBefore(currentResult.node, anchor);
+          const inserted = yield* insertBeforeAnchor(currentResult.node);
+          if (!inserted) {
+            yield* cleanupCurrent;
+          }
 
           yield* Debug.log({
             event: "render.errorboundary.initial",
