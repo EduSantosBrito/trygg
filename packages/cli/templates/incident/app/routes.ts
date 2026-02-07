@@ -1,27 +1,29 @@
 import { Schema } from "effect";
 import { Routes, Route } from "trygg/router";
 import Home from "./pages/home";
-import AboutPage from "./pages/about";
-import ResourcePage from "./pages/resource";
-import IncidentsPage from "./pages/incidents";
-import IncidentDetailPage from "./pages/incident-detail";
-import SettingsPage from "./pages/settings";
+import IncidentsLayout from "./pages/incidents-layout";
+import IncidentsIndex from "./pages/incidents";
+import IncidentDetail from "./pages/incident-detail";
+import Settings from "./pages/settings";
 import { LoadingFallback } from "./components/loading-fallback";
 import { IncidentSkeleton } from "./components/incident-skeleton";
+import { NotFoundView } from "./components/not-found-view";
+import { RouteErrorView } from "./components/route-error-view";
 
 export const routes = Routes.make()
   .add(Route.make("/").component(Home))
-  .add(Route.make("/about").component(AboutPage).loading(LoadingFallback))
-  .add(Route.make("/resource").component(ResourcePage).loading(LoadingFallback))
-  .add(Route.make("/settings").component(SettingsPage).loading(LoadingFallback))
   .add(
     Route.make("/incidents")
+      .layout(IncidentsLayout)
+      .loading(LoadingFallback)
       .children(
-        Route.index(IncidentsPage),
+        Route.index(IncidentsIndex),
         Route.make("/:id")
           .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(IncidentDetailPage)
-          .loading(IncidentSkeleton),
-      )
-      .loading(LoadingFallback),
-  );
+          .component(IncidentDetail)
+          .loading(IncidentSkeleton)
+          .error(RouteErrorView),
+      ),
+  )
+  .add(Route.make("/settings").component(Settings))
+  .notFound(NotFoundView);

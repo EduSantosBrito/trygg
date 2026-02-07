@@ -1466,6 +1466,7 @@ describe("Re-render behavior", () => {
         ],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       const App = Component.gen(function* () {

@@ -105,6 +105,7 @@ describe(":param* (zero-or-more) matching", () => {
     routes: [Route.make("/docs/:path*").component(comp).definition],
     notFound: undefined,
     forbidden: undefined,
+    error: undefined,
   };
 
   it.effect("should match :param* with zero segments", () =>
@@ -165,6 +166,7 @@ describe(":param+ (one-or-more) matching", () => {
     routes: [Route.make("/files/:filepath+").component(comp).definition],
     notFound: undefined,
     forbidden: undefined,
+    error: undefined,
   };
 
   it.effect("should not match :param+ with zero segments", () =>
@@ -224,7 +226,12 @@ describe("Matching priority", () => {
 
   it.effect("should prefer static over param", () =>
     Effect.gen(function* () {
-      const manifest = { routes: [paramDef, staticDef], notFound: undefined, forbidden: undefined };
+      const manifest = {
+        routes: [paramDef, staticDef],
+        notFound: undefined,
+        forbidden: undefined,
+        error: undefined,
+      };
       const matcher = yield* createMatcher(manifest);
       const result = matcher.match("/users/admin");
 
@@ -241,6 +248,7 @@ describe("Matching priority", () => {
         routes: [wildcardDef, paramDef],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
       const matcher = yield* createMatcher(manifest);
       const result = matcher.match("/users/123");
@@ -258,6 +266,7 @@ describe("Matching priority", () => {
         routes: [wildcardDef, staticDef],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
       const matcher = yield* createMatcher(manifest);
       const result = matcher.match("/users/admin");
@@ -275,6 +284,7 @@ describe("Matching priority", () => {
         routes: [staticDef, paramDef, wildcardDef],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
       const matcher = yield* createMatcher(manifest);
       const result = matcher.match("/users/foo/bar");

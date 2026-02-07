@@ -12,6 +12,7 @@
  *   .add(Route.make("/").component(HomePage))
  *   .add(Route.make("/users").component(UsersList))
  *   .notFound(NotFoundPage)
+ *   .error(ErrorPage)  // Root error boundary
  * ```
  */
 import { FiberRef, Option } from "effect";
@@ -31,6 +32,7 @@ export interface RoutesManifest {
   readonly routes: ReadonlyArray<RouteDefinition>;
   readonly notFound: ComponentInput | undefined;
   readonly forbidden: ComponentInput | undefined;
+  readonly error: ComponentInput | undefined;
 }
 
 // =============================================================================
@@ -49,8 +51,21 @@ export interface RoutesCollection {
    * Add a route to the collection.
    * Route must have R = never (all service requirements satisfied).
    */
-  readonly add: <Path extends string, HasComponent extends boolean, HasChildren extends boolean>(
-    route: RouteBuilder<Path, never, HasComponent, HasChildren>,
+  readonly add: <
+    Path extends string,
+    HasComponent extends boolean,
+    HasChildren extends boolean,
+    NeedsCoverage extends boolean,
+    HasErrorBoundary extends boolean,
+  >(
+    route: RouteBuilder<
+      Path,
+      never,
+      HasComponent,
+      HasChildren,
+      NeedsCoverage,
+      HasErrorBoundary
+    >,
   ) => RoutesCollection;
 
   /**
@@ -64,7 +79,13 @@ export interface RoutesCollection {
   readonly forbidden: (component: RouteComponent) => RoutesCollection;
 
   /**
+   * Set root error boundary.
+   */
+  readonly error: (component: RouteComponent) => RoutesCollection;
+
+  /**
    * Get the internal manifest for Outlet consumption.
+   * Used by Outlet to render matched routes.
    */
   readonly manifest: RoutesManifest;
 }
@@ -74,29 +95,36 @@ export interface RoutesCollection {
 // =============================================================================
 
 /** @internal */
-const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
-  _tag: "RoutesCollection",
+const makeCollection = (manifest: RoutesManifest): RoutesCollection =>
+  ({
+    _tag: "RoutesCollection",
 
-  add: (route) =>
-    makeCollection({
-      ...manifest,
-      routes: [...manifest.routes, route.definition],
-    }),
+    add: (route) =>
+      makeCollection({
+        ...manifest,
+        routes: [...manifest.routes, route.definition],
+      }),
 
-  notFound: (component) =>
-    makeCollection({
-      ...manifest,
-      notFound: component,
-    }),
+    notFound: (component) =>
+      makeCollection({
+        ...manifest,
+        notFound: component,
+      }),
 
-  forbidden: (component) =>
-    makeCollection({
-      ...manifest,
-      forbidden: component,
-    }),
+    forbidden: (component) =>
+      makeCollection({
+        ...manifest,
+        forbidden: component,
+      }),
 
-  manifest,
-});
+    error: (component) =>
+      makeCollection({
+        ...manifest,
+        error: component,
+      }),
+
+    manifest,
+  });
 
 // =============================================================================
 // Public API
@@ -120,6 +148,7 @@ export const make = (): RoutesCollection =>
     routes: [],
     notFound: undefined,
     forbidden: undefined,
+    error: undefined,
   });
 
 // =============================================================================

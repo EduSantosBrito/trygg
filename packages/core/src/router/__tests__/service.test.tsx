@@ -502,6 +502,7 @@ describe("Router.currentError", () => {
         routes: [Route.make("/test").component(RouteComponent).error(ErrorComponent).definition],
         notFound: undefined,
         forbidden: undefined,
+        error: undefined,
       };
 
       // Render outlet with routes
