@@ -1,6 +1,6 @@
 {
   "name": "trygg",
-  "version": "0.1.0-canary.1",
+  "version": "0.2.0-canary.0",
   "description": "Effect-native UI framework with JSX support and fine-grained reactivity",
   "keywords": [
     "effect",
