@@ -1,47 +1,73 @@
 import { Component, Signal } from "trygg";
+import * as Router from "trygg/router";
+
+const FEATURES: ReadonlyArray<{ readonly title: string; readonly description: string }> = [
+  {
+    title: "Signals",
+    description: "Signals update only changed nodes, so reactive UI stays predictable under load.",
+  },
+  {
+    title: "Effects",
+    description: "Effects model async and failure paths explicitly, so UI flows stay typed and composable.",
+  },
+  {
+    title: "Layers",
+    description: "Layers wire dependencies at the edge, so components stay focused on behavior.",
+  },
+];
 
 export default Component.gen(function* () {
   const count = yield* Signal.make(0);
-  const increment = () => Signal.update(count, (n) => n + 1);
+  const increment = () => Signal.update(count, (value) => value + 1);
 
   return (
     <div className="pb-8">
-      <div className="mb-8">
-        <h1 className="text-2xl m-0 mb-2">Welcome to trygg</h1>
-        <p className="text-gray-500 m-0 text-lg">
-          Effect-native UI framework with fine-grained reactivity
+      <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8">
+        <p className="m-0 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--signal)]">
+          trygg
         </p>
+        <h1 className="m-0 mt-3 text-2xl font-semibold text-[var(--text-1)] sm:text-3xl">
+          Effect-native UI. Fine-grained signals. No virtual DOM.
+        </h1>
+        <div className="mt-5">
+          <Router.Link
+            to="/incidents"
+            className="inline-flex items-center rounded-md border border-[color-mix(in_srgb,var(--signal)_35%,var(--border))] bg-[color-mix(in_srgb,var(--signal)_14%,transparent)] px-4 py-2 text-sm font-medium text-[var(--signal)] no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--signal)_20%,transparent)]"
+          >
+            Open Incident Commander -&gt;
+          </Router.Link>
+        </div>
       </div>
 
-      <div className="bg-white p-6 rounded-lg border border-gray-200 mb-6">
-        <h2 className="m-0 mb-4 text-xl">Quick Start</h2>
-        <p className="text-gray-600 mb-4">
-          This is a basic counter example using Signal for reactive state.
+      <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+        <h2 className="m-0 text-lg font-semibold text-[var(--text-1)]">Signal counter</h2>
+        <p className="m-0 mt-2 text-sm text-[var(--text-2)]">
+          Click increment and only the amber value node updates.
         </p>
         <button
-          className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer transition-colors hover:bg-blue-700"
+          className="mt-4 rounded-md border-0 bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--bg)] transition-opacity hover:opacity-90"
           onClick={increment}
         >
-          Count: {count}
+          Increment
         </button>
+        <p className="m-0 mt-3 text-sm text-[var(--text-2)]">
+          Count:&nbsp;
+          <span className="inline-block min-w-8 text-center font-semibold text-[var(--signal)] motion-safe:animate-pulse">
+            {count}
+          </span>
+        </p>
       </div>
 
-      <div className="bg-white p-6 rounded-lg border border-gray-200">
-        <h2 className="m-0 mb-4 text-xl">Features</h2>
-        <ul className="space-y-2 m-0 pl-5">
-          <li className="text-gray-700">
-            <strong>Fine-grained reactivity</strong> - Signals update only what changes
-          </li>
-          <li className="text-gray-700">
-            <strong>Type-safe routing</strong> - Router with params validation
-          </li>
-          <li className="text-gray-700">
-            <strong>API integration</strong> - Type-safe HTTP client with Resource caching
-          </li>
-          <li className="text-gray-700">
-            <strong>Effect-native</strong> - Built on Effect for composable, type-safe side effects
-          </li>
-        </ul>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {FEATURES.map((feature) => (
+          <article
+            key={feature.title}
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
+          >
+            <h3 className="m-0 text-sm font-semibold text-[var(--text-1)]">{feature.title}</h3>
+            <p className="m-0 mt-2 text-sm text-[var(--text-2)]">{feature.description}</p>
+          </article>
+        ))}
       </div>
     </div>
   );
