@@ -62,7 +62,7 @@ const seed: ReadonlyArray<Incident> = [
     status: "Investigating",
     timeline: [
       { timestamp: new Date("2026-01-15T14:02:00Z"), message: "Incident created" },
-      { timestamp: new Date("2026-01-15T14:03:00Z"), message: "→ Investigating" },
+      { timestamp: new Date("2026-01-15T14:03:00Z"), message: "Investigating" },
     ],
     createdAt: new Date("2026-01-15T14:02:00Z"),
   },
@@ -81,10 +81,10 @@ const seed: ReadonlyArray<Incident> = [
     status: "Resolved",
     timeline: [
       { timestamp: new Date("2026-01-15T13:50:00Z"), message: "Incident created" },
-      { timestamp: new Date("2026-01-15T13:52:00Z"), message: "→ Investigating" },
-      { timestamp: new Date("2026-01-15T13:55:00Z"), message: "→ Identified" },
-      { timestamp: new Date("2026-01-15T13:58:00Z"), message: "→ Monitoring" },
-      { timestamp: new Date("2026-01-15T14:00:00Z"), message: "→ Resolved" },
+      { timestamp: new Date("2026-01-15T13:52:00Z"), message: "Investigating" },
+      { timestamp: new Date("2026-01-15T13:55:00Z"), message: "Identified" },
+      { timestamp: new Date("2026-01-15T13:58:00Z"), message: "Monitoring" },
+      { timestamp: new Date("2026-01-15T14:00:00Z"), message: "Resolved" },
     ],
     createdAt: new Date("2026-01-15T13:50:00Z"),
   },
@@ -137,7 +137,7 @@ const makeIncidentService = (): IncidentService => {
         const updated: Incident = {
           ...incident,
           status: to,
-          timeline: [...incident.timeline, { timestamp: ts, message: `→ ${to}` }],
+          timeline: [...incident.timeline, { timestamp: ts, message: to }],
         };
         store.set(id, updated);
         return updated;

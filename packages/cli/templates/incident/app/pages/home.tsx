@@ -1,74 +1,68 @@
-import { Component, Signal } from "trygg";
+import { Component } from "trygg";
 import * as Router from "trygg/router";
 
 const FEATURES: ReadonlyArray<{ readonly title: string; readonly description: string }> = [
   {
     title: "Signals",
-    description: "Signals update only changed nodes, so reactive UI stays predictable under load.",
+    description: "Fine-grained reactivity that updates only what changed. No virtual DOM diffing.",
   },
   {
     title: "Effects",
-    description: "Effects model async and failure paths explicitly, so UI flows stay typed and composable.",
+    description: "Typed async operations with explicit error handling. Compose complex flows safely.",
   },
   {
     title: "Layers",
-    description: "Layers wire dependencies at the edge, so components stay focused on behavior.",
+    description: "Dependency injection at the edge. Swap implementations without touching components.",
   },
 ];
 
 export default Component.gen(function* () {
-  const count = yield* Signal.make(0);
-  const increment = () => Signal.update(count, (value) => value + 1);
-
   return (
-    <div className="pb-8">
-      <div className="mb-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8">
-        <p className="m-0 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--signal)]">
-          trygg
-        </p>
-        <h1 className="m-0 mt-3 text-2xl font-semibold text-[var(--text-1)] sm:text-3xl">
-          Effect-native UI. Fine-grained signals. No virtual DOM.
-        </h1>
-        <div className="mt-5">
-          <Router.Link
-            to="/incidents"
-            className="inline-flex items-center rounded-md border border-[color-mix(in_srgb,var(--signal)_35%,var(--border))] bg-[color-mix(in_srgb,var(--signal)_14%,transparent)] px-4 py-2 text-sm font-medium text-[var(--signal)] no-underline transition-colors hover:bg-[color-mix(in_srgb,var(--signal)_20%,transparent)]"
+    <>
+      <header className="content-header">
+        <div className="content-header__left">
+          <div className="content-header__title">
+            <div className="content-header__icon content-header__icon--home" aria-hidden="true" />
+            <h1 className="content-header__text">Home</h1>
+          </div>
+        </div>
+      </header>
+
+      <main className="content-body">
+        {/* Hero card */}
+        <div className="card" style={{ padding: "32px", marginBottom: "24px" }}>
+          <p
+            className="text-xs font-semibold uppercase tracking-widest mb-3"
+            style={{ color: "var(--accent)", letterSpacing: "0.15em" }}
           >
-            Open Incident Commander -&gt;
+            trygg
+          </p>
+          <h2 className="text-2xl font-semibold mb-2" style={{ color: "var(--text-1)" }}>
+            Effect-native UI framework
+          </h2>
+          <p className="text-sm mb-6" style={{ color: "var(--text-3)", maxWidth: "480px" }}>
+            Fine-grained signals, typed effects, and dependency injection — 
+            for UIs that scale with your codebase.
+          </p>
+          <Router.Link to="/incidents" className="btn btn--primary">
+            Open Incident Commander
           </Router.Link>
         </div>
-      </div>
 
-      <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-        <h2 className="m-0 text-lg font-semibold text-[var(--text-1)]">Signal counter</h2>
-        <p className="m-0 mt-2 text-sm text-[var(--text-2)]">
-          Click increment and only the amber value node updates.
-        </p>
-        <button
-          className="mt-4 rounded-md border-0 bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--bg)] transition-opacity hover:opacity-90"
-          onClick={increment}
-        >
-          Increment
-        </button>
-        <p className="m-0 mt-3 text-sm text-[var(--text-2)]">
-          Count:&nbsp;
-          <span className="inline-block min-w-8 text-center font-semibold text-[var(--signal)] motion-safe:animate-pulse">
-            {count}
-          </span>
-        </p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        {FEATURES.map((feature) => (
-          <article
-            key={feature.title}
-            className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
-          >
-            <h3 className="m-0 text-sm font-semibold text-[var(--text-1)]">{feature.title}</h3>
-            <p className="m-0 mt-2 text-sm text-[var(--text-2)]">{feature.description}</p>
-          </article>
-        ))}
-      </div>
-    </div>
+        {/* Feature cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
+          {FEATURES.map((feature) => (
+            <article key={feature.title} className="card" style={{ padding: "20px" }}>
+              <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--text-1)" }}>
+                {feature.title}
+              </h3>
+              <p className="text-sm" style={{ color: "var(--text-3)", lineHeight: "1.5" }}>
+                {feature.description}
+              </p>
+            </article>
+          ))}
+        </div>
+      </main>
+    </>
   );
 });

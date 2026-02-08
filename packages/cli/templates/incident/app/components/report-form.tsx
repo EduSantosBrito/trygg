@@ -1,18 +1,29 @@
 import { Effect } from "effect";
-import { Component, Resource, Signal } from "trygg";
+import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import { ApiClient } from "../api";
 import { type Severity } from "../errors/incidents";
 import { incidentsResource } from "../resources/incidents";
 
-const SEVERITIES: ReadonlyArray<Severity> = ["SEV-1", "SEV-2", "SEV-3", "SEV-4"];
+const SEVERITIES: ReadonlyArray<{ value: Severity; label: string; description: string }> = [
+  { value: "SEV-1", label: "Critical", description: "Complete outage or major functionality broken" },
+  { value: "SEV-2", label: "Major", description: "Significant impact affecting many users" },
+  { value: "SEV-3", label: "Minor", description: "Limited impact, workaround available" },
+  { value: "SEV-4", label: "Low", description: "Minimal impact, cosmetic issues" },
+];
 
 const parseSeverity = (value: string): Severity | undefined =>
-  SEVERITIES.find((severity) => severity === value);
+  SEVERITIES.find((s) => s.value === value)?.value;
 
-export const ReportForm = Component.gen(function* () {
+interface ReportFormProps {
+  readonly onSuccess?: () => Effect.Effect<void, unknown, unknown>;
+}
+
+export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportFormProps>) {
+  const { onSuccess } = yield* Props;
+
   const title = yield* Signal.make("");
-  const severity = yield* Signal.make<Severity>("SEV-1");
-  const severityValue = yield* Signal.derive(severity, (s): string => s);
+  const severity = yield* Signal.make<Severity>("SEV-3");
+  const summary = yield* Signal.make("");
   const submitting = yield* Signal.make(false);
 
   const submitDisabled = yield* Signal.deriveAll(
@@ -21,7 +32,7 @@ export const ReportForm = Component.gen(function* () {
   );
 
   const buttonText = yield* Signal.derive(submitting, (s) =>
-    s ? "Creating..." : "Report Incident",
+    s ? "Declaring…" : "Declare",
   );
 
   const handleSubmit = (event: Event) =>
@@ -41,7 +52,12 @@ export const ReportForm = Component.gen(function* () {
 
       yield* Resource.invalidate(incidentsResource);
       yield* Signal.set(title, "");
+      yield* Signal.set(summary, "");
       yield* Signal.set(submitting, false);
+
+      if (onSuccess) {
+        yield* onSuccess();
+      }
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
@@ -60,6 +76,15 @@ export const ReportForm = Component.gen(function* () {
       return "";
     }).pipe(Effect.flatMap((value) => Signal.set(title, value)));
 
+  const onSummaryInput = (event: Event) =>
+    Effect.sync(() => {
+      const target = event.target;
+      if (target instanceof HTMLTextAreaElement) {
+        return target.value;
+      }
+      return "";
+    }).pipe(Effect.flatMap((value) => Signal.set(summary, value)));
+
   const onSeverityChange = (event: Event) =>
     Effect.sync(() => {
       const target = event.target;
@@ -76,48 +101,82 @@ export const ReportForm = Component.gen(function* () {
       }),
     );
 
+  // Derive selected severity info for description display
+  const selectedSeverity = yield* Signal.derive(severity, (s) =>
+    SEVERITIES.find((sev) => sev.value === s),
+  );
+  const severityDescription = yield* Signal.derive(
+    selectedSeverity,
+    (s) => s?.description ?? "",
+  );
+  const severityValue = yield* Signal.derive(severity, (s): string => s);
+
   return (
-    <form className="report-form" onSubmit={handleSubmit}>
-      <div className="report-form__field">
-        <label htmlFor="incident-title" className="report-form__label">
-          Title
+    <form onSubmit={handleSubmit}>
+      <div className="form-group">
+        <label htmlFor="incident-name" className="label">
+          Name
         </label>
+        <p className="field-hint" style={{ marginTop: "-4px", marginBottom: "8px" }}>
+          Give a short description of what is happening.
+        </p>
         <input
           type="text"
-          id="incident-title"
-          className="report-form__input"
-          placeholder="Brief incident description"
+          id="incident-name"
+          name="name"
+          className="input"
+          placeholder="e.g. API latency spike in /users endpoint…"
           value={title}
           onInput={onTitleInput}
+          autoComplete="off"
+          spellCheck={false}
         />
       </div>
 
-      <div className="report-form__field">
-        <label htmlFor="incident-severity" className="report-form__label">
+      <div className="form-group">
+        <label htmlFor="incident-severity" className="label">
           Severity
         </label>
         <select
           id="incident-severity"
-          className="report-form__select"
+          name="severity"
+          className="select"
           value={severityValue}
           onChange={onSeverityChange}
         >
           {SEVERITIES.map((sev) => (
-            <option key={sev} value={sev}>
-              {sev}
+            <option key={sev.value} value={sev.value}>
+              {sev.label}
             </option>
           ))}
         </select>
+        <p className="field-hint">{severityDescription}</p>
       </div>
 
-      <button
-        type="submit"
-        className="report-form__submit"
-        disabled={submitDisabled}
-        aria-busy={submitting}
-      >
-        {buttonText}
-      </button>
+      <div className="form-group">
+        <label htmlFor="incident-summary" className="label label--optional">
+          Summary
+        </label>
+        <p className="field-hint" style={{ marginTop: "-4px", marginBottom: "8px" }}>
+          Your current understanding of the incident and its impact.
+        </p>
+        <textarea
+          id="incident-summary"
+          name="summary"
+          className="input"
+          rows={3}
+          placeholder="Think about what you'd like to read if you were coming to the incident with no context…"
+          value={summary}
+          onInput={onSummaryInput}
+          autoComplete="off"
+        />
+      </div>
+
+      <div className="modal__footer" style={{ padding: 0, border: "none", marginTop: "20px" }}>
+        <button type="submit" className="btn btn--primary" disabled={submitDisabled}>
+          {buttonText}
+        </button>
+      </div>
     </form>
   );
 });
