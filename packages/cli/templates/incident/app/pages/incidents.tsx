@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Component, ErrorBoundary, Resource, Signal, type ComponentProps } from "trygg";
+import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 import { type Severity } from "../errors/incidents";
 import { incidentsResource, type Incident } from "../resources/incidents";
@@ -14,25 +14,12 @@ type Filter = "all" | Severity;
 const FILTERS: ReadonlyArray<Filter> = ["all", "SEV-1", "SEV-2", "SEV-3", "SEV-4"];
 const EMPTY_INCIDENTS: ReadonlyArray<Incident> = [];
 
-const UnexpectedErrorView = Component.gen(function* (
-  Props: ComponentProps<{ error: unknown }>,
-) {
-  yield* Props;
-  return (
-    <div className="error-view" role="alert">
-      <h3 className="error-view__title">Unexpected Error</h3>
-      <p className="error-view__message">Something went wrong while loading this incident.</p>
-    </div>
-  );
-});
-
 export default Component.gen(function* () {
   const state = yield* Resource.fetch(incidentsResource);
 
   // Modal open state
   const modalOpen = yield* Signal.make(false);
   const openModal = () => Signal.set(modalOpen, true);
-  const closeModal = () => Signal.set(modalOpen, false);
   const closeModalAndClearQuery = () =>
     Effect.gen(function* () {
       yield* Signal.set(modalOpen, false);
@@ -55,14 +42,14 @@ export default Component.gen(function* () {
   );
 
   // Derive filtered incidents based on severity filter
-  const filteredIncidents = yield* Signal.deriveAll(
-    [incidentsSignal, filter],
-    (incidents, f) => (f === "all" ? incidents : incidents.filter((i) => i.severity === f)),
+  const filteredIncidents = yield* Signal.deriveAll([incidentsSignal, filter], (incidents, f) =>
+    f === "all" ? incidents : incidents.filter((i) => i.severity === f),
   );
 
   // Derive counts for summary
-  const activeCount = yield* Signal.derive(incidentsSignal, (incidents) =>
-    incidents.filter((i) => i.status !== "Resolved").length,
+  const activeCount = yield* Signal.derive(
+    incidentsSignal,
+    (incidents) => incidents.filter((i) => i.status !== "Resolved").length,
   );
 
   // Derive filter button active states
@@ -72,16 +59,15 @@ export default Component.gen(function* () {
     ),
   );
 
-  // Modal visibility derived
-  const modalVisible = yield* Signal.derive(modalOpen, (open) => (open ? "true" : "false"));
-
   const listContent = yield* Resource.match(state, {
     Pending: () => <IncidentSkeleton />,
     Success: () => (
       <div className="incidents-list">
         {Signal.each(
           filteredIncidents,
-          (incident) => <IncidentRow incident={incident} />,
+          (incident) => (
+            <IncidentRow incident={incident} />
+          ),
           { key: (incident: Incident) => incident.id },
         )}
       </div>
@@ -160,11 +146,7 @@ const IncidentRow = Component.gen(function* (Props: ComponentProps<{ incident: I
   const { incident } = yield* Props;
 
   return (
-    <Router.Link
-      to="/incidents/:id"
-      params={{ id: String(incident.id) }}
-      className="incident-row"
-    >
+    <Router.Link to="/incidents/:id" params={{ id: String(incident.id) }} className="incident-row">
       <div className="incident-row__content">
         <div className="incident-row__header">
           <span className="incident-row__id">INC-{incident.id}</span>
@@ -216,7 +198,9 @@ const DeclareModal = Component.gen(function* (Props: ComponentProps<DeclareModal
     >
       <div className="modal">
         <div className="modal__header">
-          <h2 id="declare-modal-title" className="modal__title">Declare Incident</h2>
+          <h2 id="declare-modal-title" className="modal__title">
+            Declare Incident
+          </h2>
           <button
             type="button"
             className="modal__close"
@@ -226,8 +210,6 @@ const DeclareModal = Component.gen(function* (Props: ComponentProps<DeclareModal
             <span className="modal__close-icon" aria-hidden="true" />
           </button>
         </div>
-
-
 
         <div className="modal__body">
           <ReportForm onSuccess={onClose} />

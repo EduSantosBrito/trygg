@@ -5,7 +5,11 @@ import { type Severity } from "../errors/incidents";
 import { incidentsResource } from "../resources/incidents";
 
 const SEVERITIES: ReadonlyArray<{ value: Severity; label: string; description: string }> = [
-  { value: "SEV-1", label: "Critical", description: "Complete outage or major functionality broken" },
+  {
+    value: "SEV-1",
+    label: "Critical",
+    description: "Complete outage or major functionality broken",
+  },
   { value: "SEV-2", label: "Major", description: "Significant impact affecting many users" },
   { value: "SEV-3", label: "Minor", description: "Limited impact, workaround available" },
   { value: "SEV-4", label: "Low", description: "Minimal impact, cosmetic issues" },
@@ -31,9 +35,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
     (t, s) => t.trim() === "" || s,
   );
 
-  const buttonText = yield* Signal.derive(submitting, (s) =>
-    s ? "Declaring…" : "Declare",
-  );
+  const buttonText = yield* Signal.derive(submitting, (s) => (s ? "Declaring…" : "Declare"));
 
   const handleSubmit = (event: Event) =>
     Effect.gen(function* () {
@@ -105,10 +107,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
   const selectedSeverity = yield* Signal.derive(severity, (s) =>
     SEVERITIES.find((sev) => sev.value === s),
   );
-  const severityDescription = yield* Signal.derive(
-    selectedSeverity,
-    (s) => s?.description ?? "",
-  );
+  const severityDescription = yield* Signal.derive(selectedSeverity, (s) => s?.description ?? "");
   const severityValue = yield* Signal.derive(severity, (s): string => s);
 
   return (

@@ -1700,9 +1700,7 @@ describe("KeyedList rendering", () => {
   it.scoped("should preserve DOM order when a keyed item re-renders", () =>
     Effect.gen(function* () {
       // Items with internal toggle state — simulates expand/collapse
-      const ToggleItem = Component.gen(function* (
-        Props: ComponentProps<{ label: string }>,
-      ) {
+      const ToggleItem = Component.gen(function* (Props: ComponentProps<{ label: string }>) {
         const { label } = yield* Props;
         const expanded = yield* Signal.make(false);
         const isExpanded = yield* Signal.get(expanded);
@@ -1729,11 +1727,9 @@ describe("KeyedList rendering", () => {
       const List = Component.gen(function* () {
         return (
           <div data-testid="list">
-            {Signal.each(
-              items,
-              (item) => Effect.succeed(<ToggleItem label={item.label} />),
-              { key: (item: { id: number; label: string }) => item.id },
-            )}
+            {Signal.each(items, (item) => Effect.succeed(<ToggleItem label={item.label} />), {
+              key: (item: { id: number; label: string }) => item.id,
+            })}
           </div>
         );
       });
@@ -1777,9 +1773,7 @@ describe("KeyedList rendering", () => {
 
   it.scoped("should preserve DOM order when middle item re-renders", () =>
     Effect.gen(function* () {
-      const Counter = Component.gen(function* (
-        Props: ComponentProps<{ id: number }>,
-      ) {
+      const Counter = Component.gen(function* (Props: ComponentProps<{ id: number }>) {
         const { id } = yield* Props;
         const count = yield* Signal.make(0);
         const value = yield* Signal.get(count);
@@ -1801,11 +1795,9 @@ describe("KeyedList rendering", () => {
       const List = Component.gen(function* () {
         return (
           <div data-testid="counters">
-            {Signal.each(
-              items,
-              (id) => Effect.succeed(<Counter id={id} />),
-              { key: (id: number) => id },
-            )}
+            {Signal.each(items, (id) => Effect.succeed(<Counter id={id} />), {
+              key: (id: number) => id,
+            })}
           </div>
         );
       });

@@ -183,7 +183,6 @@ describe("resolveRoutes", () => {
       assert.strictEqual(resolved[0]?.path, "/docs/:path*");
     }),
   );
-
 });
 
 // =============================================================================

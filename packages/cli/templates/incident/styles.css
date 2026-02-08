@@ -9,7 +9,7 @@
 
 :root {
   color-scheme: light;
-  
+
   /* Nav rail (dark) */
   --nav-bg: #1f1f1f;
   --nav-bg-hover: #2a2a2a;
@@ -18,30 +18,30 @@
   --nav-text-hover: #e5e5e5;
   --nav-text-active: #ffffff;
   --nav-border: #333333;
-  
+
   /* Content canvas (light) */
   --bg: #ffffff;
   --bg-subtle: #f9fafb;
   --bg-muted: #f3f4f6;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  
+
   /* Borders */
   --border: #e5e7eb;
   --border-subtle: #f3f4f6;
   --border-strong: #d1d5db;
-  
+
   /* Text */
   --text-1: #111827;
   --text-2: #4b5563;
   --text-3: #6b7280;
   --text-muted: #9ca3af;
-  
+
   /* Brand accent (coral) */
   --accent: #f25c54;
   --accent-hover: #e04a42;
   --accent-subtle: #fef2f2;
-  
+
   /* Semantic colors */
   --success: #10b981;
   --success-subtle: #ecfdf5;
@@ -51,7 +51,7 @@
   --error-subtle: #fef2f2;
   --info: #3b82f6;
   --info-subtle: #eff6ff;
-  
+
   /* Status colors (incident lifecycle) */
   --status-investigating: #f59e0b;
   --status-investigating-bg: #fffbeb;
@@ -63,7 +63,7 @@
   --status-documenting-bg: #f5f3ff;
   --status-closed: #10b981;
   --status-closed-bg: #ecfdf5;
-  
+
   /* Severity colors */
   --severity-critical: #ef4444;
   --severity-critical-bg: #fef2f2;
@@ -73,19 +73,19 @@
   --severity-minor-bg: #fefce8;
   --severity-low: #6b7280;
   --severity-low-bg: #f3f4f6;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  
+
   /* Radii */
   --radius-sm: 4px;
   --radius: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  
+
   /* Transitions */
   --transition-fast: 100ms ease;
   --transition: 150ms ease;
@@ -94,7 +94,7 @@
 /* Dark theme overrides */
 [data-theme="dark"] {
   color-scheme: dark;
-  
+
   --nav-bg: #0f0f0f;
   --nav-bg-hover: #1a1a1a;
   --nav-bg-active: #262626;
@@ -102,39 +102,39 @@
   --nav-text-hover: #a3a3a3;
   --nav-text-active: #ffffff;
   --nav-border: #262626;
-  
+
   --bg: #0f0f0f;
   --bg-subtle: #171717;
   --bg-muted: #1f1f1f;
   --surface: #171717;
   --surface-raised: #1f1f1f;
-  
+
   --border: #262626;
   --border-subtle: #1f1f1f;
   --border-strong: #404040;
-  
+
   --text-1: #fafafa;
   --text-2: #a3a3a3;
   --text-3: #737373;
   --text-muted: #525252;
-  
+
   --accent-subtle: #451a1a;
   --success-subtle: #052e1d;
   --warning-subtle: #422006;
   --error-subtle: #450a0a;
   --info-subtle: #1e3a5f;
-  
+
   --status-investigating-bg: #422006;
   --status-fixing-bg: #431407;
   --status-monitoring-bg: #1e3a5f;
   --status-documenting-bg: #2e1065;
   --status-closed-bg: #052e1d;
-  
+
   --severity-critical-bg: #450a0a;
   --severity-major-bg: #431407;
   --severity-minor-bg: #422006;
   --severity-low-bg: #262626;
-  
+
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
@@ -146,7 +146,13 @@
    --------------------------------------------------------------------------- */
 
 html {
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Inter",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -230,15 +236,15 @@ body {
   color: var(--nav-text);
   font-size: 13px;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-  
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+
   &:hover {
     background: var(--nav-bg-active);
     border-color: var(--nav-text);
   }
 }
-
-
 
 .nav-rail__search-text {
   flex: 1;
@@ -270,18 +276,20 @@ body {
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
-  transition: background var(--transition-fast), color var(--transition-fast);
-  
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+
   &:hover {
     background: var(--nav-bg-hover);
     color: var(--nav-text-hover);
   }
-  
+
   &[data-active="true"] {
     background: var(--nav-bg-active);
     color: var(--nav-text-active);
   }
-  
+
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
@@ -350,7 +358,7 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background var(--transition-fast);
-  
+
   &:hover {
     background: var(--nav-bg-hover);
   }
@@ -476,14 +484,17 @@ body {
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
   white-space: nowrap;
-  
+
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
-  
+
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -493,7 +504,7 @@ body {
 .btn--primary {
   background: var(--accent);
   color: white;
-  
+
   &:hover:not(:disabled) {
     background: var(--accent-hover);
   }
@@ -503,7 +514,7 @@ body {
   background: var(--surface);
   border-color: var(--border);
   color: var(--text-1);
-  
+
   &:hover:not(:disabled) {
     background: var(--bg-muted);
     border-color: var(--border-strong);
@@ -513,7 +524,7 @@ body {
 .btn--ghost {
   background: transparent;
   color: var(--text-2);
-  
+
   &:hover:not(:disabled) {
     background: var(--bg-muted);
     color: var(--text-1);
@@ -527,7 +538,7 @@ body {
 
 .btn--icon {
   padding: 8px;
-  
+
   &.btn--sm {
     padding: 5px;
   }
@@ -545,18 +556,20 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-1);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+
   &::placeholder {
     color: var(--text-muted);
   }
-  
+
   &:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);
   }
-  
+
   &:disabled {
     background: var(--bg-muted);
     cursor: not-allowed;
@@ -576,7 +589,7 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
-  
+
   &:focus {
     outline: none;
     border-color: var(--accent);
@@ -707,8 +720,10 @@ body {
 
 .card--interactive {
   cursor: pointer;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+
   &:hover {
     border-color: var(--border-strong);
     box-shadow: var(--shadow);
@@ -755,11 +770,11 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-1);
-  
+
   &::placeholder {
     color: var(--text-muted);
   }
-  
+
   &:focus {
     outline: none;
     border-color: var(--accent);
@@ -791,16 +806,16 @@ body {
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background var(--transition-fast);
-  
+
   &:last-child {
     border-bottom: none;
   }
-  
+
   &:hover {
     background: var(--bg-muted);
     box-shadow: inset 3px 0 0 var(--accent);
   }
-  
+
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
@@ -917,7 +932,7 @@ body {
 .incident-detail__breadcrumb-link {
   color: var(--text-3);
   text-decoration: none;
-  
+
   &:hover {
     color: var(--text-1);
   }
@@ -1018,14 +1033,14 @@ body {
   cursor: pointer;
   position: relative;
   transition: color var(--transition-fast);
-  
+
   &:hover {
     color: var(--text-1);
   }
-  
+
   &[data-active="true"] {
     color: var(--text-1);
-    
+
     &::after {
       content: "";
       position: absolute;
@@ -1036,7 +1051,7 @@ body {
       background: var(--text-1);
     }
   }
-  
+
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
@@ -1118,7 +1133,7 @@ body {
 .sidebar-section {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
-  
+
   &:last-child {
     border-bottom: none;
     padding-bottom: 0;
@@ -1159,7 +1174,7 @@ body {
   font-size: 13px;
   color: var(--info);
   text-decoration: none;
-  
+
   &:hover {
     text-decoration: underline;
   }
@@ -1210,13 +1225,15 @@ body {
   cursor: pointer;
   color: var(--text-3);
   border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), color var(--transition-fast);
-  
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+
   &:hover {
     background: var(--bg-muted);
     color: var(--text-1);
   }
-  
+
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -1250,14 +1267,14 @@ body {
   border: none;
   cursor: pointer;
   position: relative;
-  
+
   &:hover {
     color: var(--text-1);
   }
-  
+
   &[data-active="true"] {
     color: var(--text-1);
-    
+
     &::after {
       content: "";
       position: absolute;
@@ -1360,15 +1377,24 @@ body {
    --------------------------------------------------------------------------- */
 
 .skeleton {
-  background: linear-gradient(90deg, var(--bg-muted) 25%, var(--bg-subtle) 50%, var(--bg-muted) 75%);
+  background: linear-gradient(
+    90deg,
+    var(--bg-muted) 25%,
+    var(--bg-subtle) 50%,
+    var(--bg-muted) 75%
+  );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }
 
 @keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .loading-spinner {
@@ -1382,7 +1408,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1401,21 +1429,25 @@ body {
   max-width: none;
   max-height: none;
   overflow: visible;
-  
+
   &::backdrop {
     background: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(4px);
     animation: cmdk-backdrop-in 150ms ease-out;
   }
-  
+
   &[open] {
     animation: cmdk-dialog-in 150ms ease-out;
   }
 }
 
 @keyframes cmdk-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes cmdk-dialog-in {
@@ -1464,7 +1496,7 @@ body {
   font-size: 16px;
   background: transparent;
   color: var(--text-1);
-  
+
   &::placeholder {
     color: var(--text-muted);
   }
@@ -1517,7 +1549,7 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   transition: background var(--transition-fast);
-  
+
   &:hover {
     background: var(--bg-muted);
   }
@@ -1525,7 +1557,7 @@ body {
 
 .cmdk-item--active {
   background: var(--bg-muted);
-  
+
   &:hover {
     background: var(--bg-muted);
   }

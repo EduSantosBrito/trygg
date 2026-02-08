@@ -25,9 +25,7 @@ const DIALOG_ID = "cmdk-dialog";
 // Command Palette Component
 // ---------------------------------------------------------------------------
 
-export const CommandPalette = Component.gen(function* (
-  Props: ComponentProps<CommandPaletteProps>,
-) {
+export const CommandPalette = Component.gen(function* (Props: ComponentProps<CommandPaletteProps>) {
   const { open, onClose } = yield* Props;
 
   // Search query state
@@ -93,18 +91,13 @@ export const CommandPalette = Component.gen(function* (
   });
 
   // Filter incidents based on query
-  const filteredIncidents = yield* Signal.deriveAll(
-    [query, allIncidents],
-    (q, incidents) => {
-      const lower = q.toLowerCase().trim();
-      if (lower === "") return incidents.slice(0, 5);
-      return incidents.filter(
-        (inc) =>
-          inc.title.toLowerCase().includes(lower) ||
-          `inc-${inc.id}`.includes(lower),
-      );
-    },
-  );
+  const filteredIncidents = yield* Signal.deriveAll([query, allIncidents], (q, incidents) => {
+    const lower = q.toLowerCase().trim();
+    if (lower === "") return incidents.slice(0, 5);
+    return incidents.filter(
+      (inc) => inc.title.toLowerCase().includes(lower) || `inc-${inc.id}`.includes(lower),
+    );
+  });
 
   // Total result count for keyboard navigation bounds
   const totalResults = yield* Signal.deriveAll(
@@ -118,23 +111,25 @@ export const CommandPalette = Component.gen(function* (
       const dialog = document.getElementById(DIALOG_ID) as HTMLDialogElement | null;
       if (!dialog) return;
 
-      Effect.runSync(Signal.get(open).pipe(
-        Effect.tap((isOpen) =>
-          Effect.sync(() => {
-            if (isOpen && !dialog.open) {
-              Effect.runFork(
-                Effect.gen(function* () {
-                  yield* Signal.set(query, "");
-                  yield* Signal.set(activeIndex, 0);
-                }),
-              );
-              dialog.showModal();
-            } else if (!isOpen && dialog.open) {
-              dialog.close();
-            }
-          }),
+      Effect.runSync(
+        Signal.get(open).pipe(
+          Effect.tap((isOpen) =>
+            Effect.sync(() => {
+              if (isOpen && !dialog.open) {
+                Effect.runFork(
+                  Effect.gen(function* () {
+                    yield* Signal.set(query, "");
+                    yield* Signal.set(activeIndex, 0);
+                  }),
+                );
+                dialog.showModal();
+              } else if (!isOpen && dialog.open) {
+                dialog.close();
+              }
+            }),
+          ),
         ),
-      ));
+      );
     }),
   );
 
@@ -172,7 +167,9 @@ export const CommandPalette = Component.gen(function* (
             const incIndex = current - cmds.length;
             if (incIndex < incs.length) {
               yield* onClose();
-              yield* Router.navigate("/incidents/:id", { params: { id: String(incs[incIndex].id) } });
+              yield* Router.navigate("/incidents/:id", {
+                params: { id: String(incs[incIndex].id) },
+              });
             }
           }
           break;
@@ -208,12 +205,7 @@ export const CommandPalette = Component.gen(function* (
     });
 
   return (
-    <dialog
-      id={DIALOG_ID}
-      className="cmdk-dialog"
-      onCancel={onCancel}
-      onClick={onBackdropClick}
-    >
+    <dialog id={DIALOG_ID} className="cmdk-dialog" onCancel={onCancel} onClick={onBackdropClick}>
       <div className="cmdk" onKeyDown={onKeyDown}>
         <div className="cmdk-input-wrapper">
           <span className="cmdk-input-icon" aria-hidden="true" />
@@ -230,11 +222,7 @@ export const CommandPalette = Component.gen(function* (
         </div>
 
         <div className="cmdk-list">
-          <CommandsSection
-            commands={filteredCommands}
-            activeIndex={activeIndex}
-            baseIndex={0}
-          />
+          <CommandsSection commands={filteredCommands} activeIndex={activeIndex} baseIndex={0} />
 
           <IncidentsSection
             incidents={filteredIncidents}
@@ -244,10 +232,12 @@ export const CommandPalette = Component.gen(function* (
           />
 
           <EmptyState
-            show={yield* Signal.deriveAll(
-              [filteredCommands, filteredIncidents],
-              (cmds, incs) => cmds.length === 0 && incs.length === 0,
-            )}
+            show={
+              yield* Signal.deriveAll(
+                [filteredCommands, filteredIncidents],
+                (cmds, incs) => cmds.length === 0 && incs.length === 0,
+              )
+            }
           />
         </div>
       </div>
@@ -265,9 +255,7 @@ interface CommandsSectionProps {
   readonly baseIndex: number;
 }
 
-const CommandsSection = Component.gen(function* (
-  Props: ComponentProps<CommandsSectionProps>,
-) {
+const CommandsSection = Component.gen(function* (Props: ComponentProps<CommandsSectionProps>) {
   const { commands, activeIndex, baseIndex } = yield* Props;
   const cmds = yield* Signal.get(commands);
 
@@ -279,12 +267,7 @@ const CommandsSection = Component.gen(function* (
     <div className="cmdk-group">
       <div className="cmdk-group-heading">Commands</div>
       {cmds.map((cmd, i) => (
-        <CommandItem
-          key={cmd.id}
-          command={cmd}
-          index={baseIndex + i}
-          activeIndex={activeIndex}
-        />
+        <CommandItem key={cmd.id} command={cmd} index={baseIndex + i} activeIndex={activeIndex} />
       ))}
     </div>
   );
@@ -297,9 +280,7 @@ interface CommandItemProps {
   readonly activeIndex: Signal.Signal<number>;
 }
 
-const CommandItem = Component.gen(function* (
-  Props: ComponentProps<CommandItemProps>,
-) {
+const CommandItem = Component.gen(function* (Props: ComponentProps<CommandItemProps>) {
   const { command, index, activeIndex } = yield* Props;
 
   const className = yield* Signal.derive(activeIndex, (active) =>
@@ -326,9 +307,7 @@ interface IncidentsSectionProps {
   readonly onSelect: (inc: Incident) => () => Effect.Effect<void, unknown, unknown>;
 }
 
-const IncidentsSection = Component.gen(function* (
-  Props: ComponentProps<IncidentsSectionProps>,
-) {
+const IncidentsSection = Component.gen(function* (Props: ComponentProps<IncidentsSectionProps>) {
   const { incidents, activeIndex, baseIndex, onSelect } = yield* Props;
   const incs = yield* Signal.get(incidents);
 
@@ -362,15 +341,11 @@ interface IncidentItemProps {
   readonly onSelect: () => Effect.Effect<void, unknown, unknown>;
 }
 
-const IncidentItem = Component.gen(function* (
-  Props: ComponentProps<IncidentItemProps>,
-) {
+const IncidentItem = Component.gen(function* (Props: ComponentProps<IncidentItemProps>) {
   const { incident, index, baseIndex, activeIndex, onSelect } = yield* Props;
 
-  const className = yield* Signal.deriveAll(
-    [activeIndex, baseIndex],
-    (active, base) =>
-      active === base + index ? "cmdk-item cmdk-item--active" : "cmdk-item",
+  const className = yield* Signal.deriveAll([activeIndex, baseIndex], (active, base) =>
+    active === base + index ? "cmdk-item cmdk-item--active" : "cmdk-item",
   );
 
   return (
