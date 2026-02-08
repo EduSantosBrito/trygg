@@ -102,6 +102,61 @@ The Vite plugin auto-generates the entry, handles `mountDocument`, routing, and 
 6. **No floating Effects** -- every `Effect.runFork` held in a Scope
 7. **Signal.make does not subscribe** -- only `Signal.get` subscribes to changes
 
+## Global State Pattern (Recommended)
+
+For global state, use service-wrapped signals with a stable layer:
+
+```tsx
+import { Context, Effect, Layer, Option } from "effect"
+import { Signal } from "trygg"
+
+type User = { id: string }
+
+interface AuthService {
+  readonly currentUser: Signal.Signal<Option.Option<User>>
+  readonly setUser: (user: User) => Effect.Effect<void>
+  readonly clearUser: Effect.Effect<void>
+}
+
+class Auth extends Context.Tag("Auth")<Auth, AuthService>() {}
+
+const currentUser = Signal.makeSync<Option.Option<User>>(Option.none())
+
+const AuthLive: AuthService = {
+  currentUser,
+  setUser: (user) => Signal.set(currentUser, Option.some(user)),
+  clearUser: Signal.set(currentUser, Option.none()),
+}
+
+export const AuthLayer = Layer.succeed(Auth, AuthLive)
+```
+
+Why this pattern:
+- `Signal.makeSync` creates one module-lifetime signal
+- `Context.Tag` keeps components dependent on contract, not implementation
+- `Layer.succeed` provides a stable service reference (no signal re-creation)
+
+Anti-pattern (causes state loss):
+
+```tsx
+// Avoid for stateful services
+const AuthLayer = Layer.effect(
+  Auth,
+  Effect.gen(function* () {
+    const currentUser = yield* Signal.make<Option.Option<User>>(Option.none())
+    return {
+      currentUser,
+      setUser: (user: User) => Signal.set(currentUser, Option.some(user)),
+      clearUser: Signal.set(currentUser, Option.none()),
+    }
+  }),
+)
+```
+
+The renderer rebuilds layers on each render (no cross-render memoization).
+For stateful services, `Layer.effect`/`Layer.sync` will re-run and recreate signals.
+Use `Signal.makeSync` + `Layer.succeed` instead.
+
 ## Component with Props and DI
 
 ```tsx

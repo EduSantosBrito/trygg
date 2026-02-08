@@ -235,15 +235,27 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
  * signals are created eagerly at module load time and can be shared
  * across components via services or direct import.
  *
+ * Recommended global-state service pattern:
+ * - Keep the signal module-private with `Signal.makeSync`
+ * - Expose state operations through a `Context.Tag` service contract
+ * - Provide the service with `Layer.succeed` (stable reference)
+ *
+ * Anti-pattern (state loss):
+ * - Creating signals inside `Layer.effect` / `Layer.sync` using `Signal.make`
+ * - The renderer rebuilds layers on each render, so `Layer.effect` /
+ *   `Layer.sync` re-execute and recreate those signals
+ *
+ * Rule: stateful services should use `Signal.makeSync` + `Layer.succeed`.
+ *
  * Use `Signal.make` inside `Component.gen` for component-local state
  * that is scoped to the component's lifecycle and cleaned up automatically.
  *
  * @example
  * ```tsx
- * // Global auth state — created at module load, lives forever
- * export const authSignal = Signal.makeSync<Option<User>>(Option.none())
+ * // Global auth state — module-private, created at module load
+ * const authSignal = Signal.makeSync<Option.Option<User>>(Option.none())
  *
- * // In components, read/write normally
+ * // Expose via service contract; components depend on Tag, not raw signal
  * const user = yield* Signal.get(authSignal)
  * yield* Signal.set(authSignal, Option.some(newUser))
  * ```
