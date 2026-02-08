@@ -18,7 +18,11 @@ import { Data, Effect, FiberRef, Layer, Pipeable, Schema } from "effect";
 import type { ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
-import { unsafeAsOverload, unsafeEraseMiddlewareR, unsafeExtractFields } from "../internal/unsafe.js";
+import {
+  unsafeAsOverload,
+  unsafeEraseMiddlewareR,
+  unsafeExtractFields,
+} from "../internal/unsafe.js";
 
 // =============================================================================
 // Type-Level Path Param Extraction
@@ -193,7 +197,9 @@ export interface RouteBuilder<
    */
   component: HasChildren extends true
     ? never
-    : (c: ComponentInput) => RouteBuilder<Path, R, true, HasChildren, NeedsCoverage, HasErrorBoundary>;
+    : (
+        c: ComponentInput,
+      ) => RouteBuilder<Path, R, true, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the layout component (renders Outlet for children).
@@ -369,17 +375,27 @@ const makeBuilder = <
     _HasErrorBoundary: undefined as unknown as HasErrorBoundary,
     definition: def,
 
-    params: unsafeAsOverload<
-      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["params"]
-    >(paramsImpl),
+    params:
+      unsafeAsOverload<
+        RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["params"]
+      >(paramsImpl),
 
-    query: unsafeAsOverload<
-      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["query"]
-    >(queryImpl),
+    query:
+      unsafeAsOverload<
+        RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["query"]
+      >(queryImpl),
 
-    component: unsafeAsOverload<
-      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["component"]
-    >(componentImpl),
+    component:
+      unsafeAsOverload<
+        RouteBuilder<
+          Path,
+          R,
+          HasComponent,
+          HasChildren,
+          NeedsCoverage,
+          HasErrorBoundary
+        >["component"]
+      >(componentImpl),
 
     layout: (c: ComponentInput) =>
       makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
@@ -423,9 +439,17 @@ const makeBuilder = <
         prefetch: [...def.prefetch, fn],
       }),
 
-    children: unsafeAsOverload<
-      RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["children"]
-    >(childrenImpl),
+    children:
+      unsafeAsOverload<
+        RouteBuilder<
+          Path,
+          R,
+          HasComponent,
+          HasChildren,
+          NeedsCoverage,
+          HasErrorBoundary
+        >["children"]
+      >(childrenImpl),
 
     pipe() {
       return Pipeable.pipeArguments(this, arguments);

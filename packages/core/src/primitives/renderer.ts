@@ -1171,11 +1171,7 @@ const renderElement = (
          * before the given reference node. Used for reordering keyed items.
          * @internal
          */
-        const moveRange = (
-          startMarker: Node,
-          endNode: Node,
-          beforeRef: Node,
-        ): void => {
+        const moveRange = (startMarker: Node, endNode: Node, beforeRef: Node): void => {
           const parentNode = beforeRef.parentNode;
           if (parentNode === null) {
             return;
@@ -1510,7 +1506,7 @@ const renderElement = (
                                 if (needsAnotherRender) {
                                   yield* scheduleItemRerender();
                                 }
-                              }                              ).pipe(
+                              }).pipe(
                                 Effect.catchAllCause((cause) =>
                                   Effect.gen(function* () {
                                     // Cleanup new render result, ensuring markers are removed
@@ -1597,7 +1593,10 @@ const renderElement = (
                   state.currentIndex = i;
 
                   if (isNew || needsMove) {
-                    if (state.startMarker.parentNode === null || state.endMarker.parentNode === null) {
+                    if (
+                      state.startMarker.parentNode === null ||
+                      state.endMarker.parentNode === null
+                    ) {
                       continue;
                     }
 

@@ -1296,9 +1296,7 @@ interface PreviewRequestLike {
 
 interface PreviewServerLike {
   readonly middlewares: {
-    use: (
-      handler: (req: PreviewRequestLike, _res: unknown, next: () => void) => void,
-    ) => void;
+    use: (handler: (req: PreviewRequestLike, _res: unknown, next: () => void) => void) => void;
   };
 }
 
@@ -1368,8 +1366,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           outDir: output === "server" ? "dist/client" : "dist",
           // Only set input in build mode — .trygg/index.html doesn't exist in dev.
           // Vite's dep scanner fails to resolve non-existent files, causing errors.
-          rollupOptions:
-            env.command === "build" ? { input: `${GENERATED_DIR}/index.html` } : {},
+          rollupOptions: env.command === "build" ? { input: `${GENERATED_DIR}/index.html` } : {},
         },
       };
     },

@@ -9,9 +9,7 @@ const STATUS_CONFIG: Record<Status, { label: string; className: string }> = {
   Resolved: { label: "Closed", className: "badge badge--status badge--closed" },
 };
 
-export const StatusBadge = Component.gen(function* (
-  Props: ComponentProps<{ status: Status }>,
-) {
+export const StatusBadge = Component.gen(function* (Props: ComponentProps<{ status: Status }>) {
   const { status } = yield* Props;
   const config = STATUS_CONFIG[status];
 

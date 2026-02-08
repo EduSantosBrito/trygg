@@ -555,11 +555,7 @@ const fetchStatic = <A, E, R>(
     // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
     // If we tracked this read, the component would re-render when state changes,
     // causing keyed-list teardown/remount race that blanks rendered items.
-    const currentState = yield* Effect.locally(
-      Signal.get(state),
-      Signal.CurrentRenderPhase,
-      null,
-    );
+    const currentState = yield* Effect.locally(Signal.get(state), Signal.CurrentRenderPhase, null);
     if (currentState._tag !== "Pending") {
       yield* Debug.log({
         event: "resource.fetch.cached",

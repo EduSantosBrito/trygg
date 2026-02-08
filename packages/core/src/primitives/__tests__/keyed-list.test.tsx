@@ -251,7 +251,9 @@ describe("KeyedList single-element reorder (baseline)", () => {
         <div>
           {Signal.each(
             items,
-            (item: string) => <div data-item={item}>{item}</div>,
+            (item: string) => (
+              <div data-item={item}>{item}</div>
+            ),
             { key: (item) => item },
           )}
         </div>,
@@ -278,7 +280,9 @@ describe("KeyedList single-element reorder (baseline)", () => {
         <div data-testid="root">
           {Signal.each(
             items,
-            (item: string) => <div data-id={item}>{item}</div>,
+            (item: string) => (
+              <div data-id={item}>{item}</div>
+            ),
             { key: (item) => item },
           )}
         </div>,
@@ -342,7 +346,9 @@ describe("KeyedList single-element reorder (baseline)", () => {
         <div>
           {Signal.each(
             filtered,
-            (item) => <Row item={item} />,
+            (item) => (
+              <Row item={item} />
+            ),
             { key: (item) => item.id },
           )}
         </div>,
@@ -476,8 +482,8 @@ describe("KeyedList stable-order updates", () => {
       yield* Effect.yieldNow();
       yield* Effect.yieldNow();
 
-      const ids = Array.from(container.querySelectorAll("[data-id]")).map(
-        (el) => el.getAttribute("data-id"),
+      const ids = Array.from(container.querySelectorAll("[data-id]")).map((el) =>
+        el.getAttribute("data-id"),
       );
 
       expect(ids).toEqual(["1", "2", "3"]);
@@ -641,10 +647,15 @@ describe("KeyedList with SignalElement swap", () => {
       const EMPTY_ITEMS: ReadonlyArray<{ readonly id: number; readonly label: string }> = [];
 
       const state = yield* Signal.make<
-        Resource.ResourceState<ReadonlyArray<{ readonly id: number; readonly label: string }>, never>
+        Resource.ResourceState<
+          ReadonlyArray<{ readonly id: number; readonly label: string }>,
+          never
+        >
       >(Resource.Pending());
 
-      const items = yield* Signal.derive(state, (s) => (s._tag === "Success" ? s.value : EMPTY_ITEMS));
+      const items = yield* Signal.derive(state, (s) =>
+        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+      );
 
       const dataRegion = yield* Resource.match(state, {
         Pending: () => <div data-testid="pending">pending</div>,
@@ -711,10 +722,15 @@ describe("KeyedList with SignalElement swap", () => {
       });
 
       const state = yield* Signal.make<
-        Resource.ResourceState<ReadonlyArray<{ readonly id: number; readonly label: string }>, never>
+        Resource.ResourceState<
+          ReadonlyArray<{ readonly id: number; readonly label: string }>,
+          never
+        >
       >(Resource.Pending());
 
-      const items = yield* Signal.derive(state, (s) => (s._tag === "Success" ? s.value : EMPTY_ITEMS));
+      const items = yield* Signal.derive(state, (s) =>
+        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+      );
       const showContent = yield* Signal.derive(state, (s) => s._tag === "Success");
 
       const fallbackRegion = yield* Resource.match(state, {
@@ -728,7 +744,9 @@ describe("KeyedList with SignalElement swap", () => {
           <section>
             {Signal.each(
               items,
-              (item) => <ItemRow item={item} />,
+              (item) => (
+                <ItemRow item={item} />
+              ),
               { key: (item) => item.id },
             )}
           </section>
@@ -769,7 +787,10 @@ describe("KeyedList with SignalElement swap", () => {
       const shouldInterrupt = yield* Signal.make(true);
 
       const state = yield* Signal.make<
-        Resource.ResourceState<ReadonlyArray<{ readonly id: number; readonly label: string }>, never>
+        Resource.ResourceState<
+          ReadonlyArray<{ readonly id: number; readonly label: string }>,
+          never
+        >
       >(Resource.Pending());
 
       const ItemRow = Component.gen(function* (
@@ -790,7 +811,9 @@ describe("KeyedList with SignalElement swap", () => {
         return <div data-id={String(item.id)}>{item.label}</div>;
       });
 
-      const items = yield* Signal.derive(state, (s) => (s._tag === "Success" ? s.value : EMPTY_ITEMS));
+      const items = yield* Signal.derive(state, (s) =>
+        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+      );
       const showContent = yield* Signal.derive(state, (s) => s._tag === "Success");
 
       const contentRegion = yield* Signal.derive(showContent, (visible) =>
@@ -798,7 +821,9 @@ describe("KeyedList with SignalElement swap", () => {
           <section>
             {Signal.each(
               items,
-              (item) => <ItemRow item={item} />,
+              (item) => (
+                <ItemRow item={item} />
+              ),
               { key: (item) => item.id },
             )}
           </section>
@@ -895,7 +920,9 @@ describe("KeyedList with SignalElement swap", () => {
             <div>
               {Signal.each(
                 items,
-                (item) => <ItemRow item={item} />,
+                (item) => (
+                  <ItemRow item={item} />
+                ),
                 { key: (item) => item.id },
               )}
             </div>,
@@ -954,7 +981,9 @@ describe("KeyedList with SignalElement swap", () => {
         <div>
           {Signal.each(
             items,
-            (item) => <SafeItem item={item} />,
+            (item) => (
+              <SafeItem item={item} />
+            ),
             { key: (item) => item.id },
           )}
         </div>,
@@ -1012,15 +1041,17 @@ describe("KeyedList with SignalElement swap", () => {
             return <div data-id={String(item.id)}>{item.label}</div>;
           });
 
-          const items = yield* Signal.make<ReadonlyArray<{ readonly id: number; readonly label: string }>>(
-            [],
-          );
+          const items = yield* Signal.make<
+            ReadonlyArray<{ readonly id: number; readonly label: string }>
+          >([]);
 
           const { container } = yield* render(
             <div>
               {Signal.each(
                 items,
-                (item) => <ItemRow item={item} />,
+                (item) => (
+                  <ItemRow item={item} />
+                ),
                 { key: (item) => item.id },
               )}
             </div>,
@@ -1035,5 +1066,4 @@ describe("KeyedList with SignalElement swap", () => {
       ({ restore }) => Effect.sync(restore),
     ),
   );
-
 });

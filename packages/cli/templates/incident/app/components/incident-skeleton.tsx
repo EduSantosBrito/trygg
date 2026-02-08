@@ -11,8 +11,14 @@ export const IncidentSkeleton = Component.gen(function* () {
               <div className="skeleton" style={{ width: "200px", height: "16px" }} />
             </div>
             <div className="incident-row__meta">
-              <div className="skeleton" style={{ width: "60px", height: "22px", borderRadius: "9999px" }} />
-              <div className="skeleton" style={{ width: "80px", height: "22px", borderRadius: "9999px" }} />
+              <div
+                className="skeleton"
+                style={{ width: "60px", height: "22px", borderRadius: "9999px" }}
+              />
+              <div
+                className="skeleton"
+                style={{ width: "80px", height: "22px", borderRadius: "9999px" }}
+              />
               <div className="skeleton" style={{ width: "120px", height: "16px" }} />
             </div>
           </div>

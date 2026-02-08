@@ -32,7 +32,10 @@ export default Component.gen(function* () {
     document.addEventListener("keydown", handler);
     // Cleanup on scope close
     Effect.runFork(
-      Scope.addFinalizer(scope, Effect.sync(() => document.removeEventListener("keydown", handler))),
+      Scope.addFinalizer(
+        scope,
+        Effect.sync(() => document.removeEventListener("keydown", handler)),
+      ),
     );
   });
 
@@ -87,12 +90,11 @@ export default Component.gen(function* () {
             </button>
 
             <nav className="nav-rail__nav" aria-label="Main">
-              <Router.Link
-                to="/"
-                className="nav-rail__link"
-                data-active={homeDataActive}
-              >
-                <span className="nav-rail__link-icon nav-rail__link-icon--home" aria-hidden="true" />
+              <Router.Link to="/" className="nav-rail__link" data-active={homeDataActive}>
+                <span
+                  className="nav-rail__link-icon nav-rail__link-icon--home"
+                  aria-hidden="true"
+                />
                 Home
               </Router.Link>
               <Router.Link
@@ -100,7 +102,10 @@ export default Component.gen(function* () {
                 className="nav-rail__link"
                 data-active={incidentsDataActive}
               >
-                <span className="nav-rail__link-icon nav-rail__link-icon--alert" aria-hidden="true" />
+                <span
+                  className="nav-rail__link-icon nav-rail__link-icon--alert"
+                  aria-hidden="true"
+                />
                 Incidents
               </Router.Link>
               <Router.Link
@@ -108,7 +113,10 @@ export default Component.gen(function* () {
                 className="nav-rail__link"
                 data-active={settingsDataActive}
               >
-                <span className="nav-rail__link-icon nav-rail__link-icon--settings" aria-hidden="true" />
+                <span
+                  className="nav-rail__link-icon nav-rail__link-icon--settings"
+                  aria-hidden="true"
+                />
                 Settings
               </Router.Link>
             </nav>

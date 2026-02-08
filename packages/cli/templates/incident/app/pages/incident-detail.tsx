@@ -46,10 +46,11 @@ export default Component.gen(function* () {
           <div className="content-header__left">
             <div className="content-header__title">
               <div className="content-header__icon" aria-hidden="true" />
-              <h1 className="content-header__text">INC-{incident.id} {incident.title}</h1>
+              <h1 className="content-header__text">
+                INC-{incident.id} {incident.title}
+              </h1>
             </div>
           </div>
-
         </header>
 
         <main className={`content-body${stale ? " opacity-60" : ""}`}>
@@ -61,7 +62,9 @@ export default Component.gen(function* () {
                 <Router.Link to="/incidents" className="incident-detail__breadcrumb-link">
                   Incidents
                 </Router.Link>
-                <span className="incident-detail__breadcrumb-sep" aria-hidden="true">&gt;</span>
+                <span className="incident-detail__breadcrumb-sep" aria-hidden="true">
+                  &gt;
+                </span>
                 <span aria-current="page">INC-{incident.id}</span>
               </nav>
 
@@ -93,27 +96,37 @@ export default Component.gen(function* () {
               {/* Section header */}
               <h2
                 className="text-sm font-semibold uppercase tracking-wide"
-                style={{ color: "var(--text-3)", marginTop: "24px", marginBottom: "16px", letterSpacing: "0.05em" }}
+                style={{
+                  color: "var(--text-3)",
+                  marginTop: "24px",
+                  marginBottom: "16px",
+                  letterSpacing: "0.05em",
+                }}
               >
                 Updates
               </h2>
 
               {/* Timeline entries as updates */}
               <div className="timeline">
-                {incident.timeline.slice().reverse().map((entry, index) => (
-                  <div key={`${entry.timestamp}-${String(index)}`} className="timeline-entry">
-                    <div className="timeline-entry__avatar">U</div>
-                    <div className="timeline-entry__content">
-                      <div className="timeline-entry__header">
-                        <span className="timeline-entry__author">System</span>
-                        <span className="timeline-entry__time">{formatRelative(entry.timestamp)}</span>
-                      </div>
-                      <div className="timeline-entry__body">
-                        <p className="timeline-entry__message">{entry.message}</p>
+                {incident.timeline
+                  .slice()
+                  .reverse()
+                  .map((entry, index) => (
+                    <div key={`${entry.timestamp}-${String(index)}`} className="timeline-entry">
+                      <div className="timeline-entry__avatar">U</div>
+                      <div className="timeline-entry__content">
+                        <div className="timeline-entry__header">
+                          <span className="timeline-entry__author">System</span>
+                          <span className="timeline-entry__time">
+                            {formatRelative(entry.timestamp)}
+                          </span>
+                        </div>
+                        <div className="timeline-entry__body">
+                          <p className="timeline-entry__message">{entry.message}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
 
               {/* Advance action */}
@@ -206,9 +219,7 @@ export default Component.gen(function* () {
 // Detail actions component
 // ---------------------------------------------------------------------------
 
-const DetailActions = Component.gen(function* (
-  Props: ComponentProps<{ incident: Incident }>,
-) {
+const DetailActions = Component.gen(function* (Props: ComponentProps<{ incident: Incident }>) {
   const { incident } = yield* Props;
   const validTransitions = TRANSITIONS[incident.status];
   if (validTransitions.length === 0) return <></>;

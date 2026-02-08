@@ -8,11 +8,13 @@ const FEATURES: ReadonlyArray<{ readonly title: string; readonly description: st
   },
   {
     title: "Effects",
-    description: "Typed async operations with explicit error handling. Compose complex flows safely.",
+    description:
+      "Typed async operations with explicit error handling. Compose complex flows safely.",
   },
   {
     title: "Layers",
-    description: "Dependency injection at the edge. Swap implementations without touching components.",
+    description:
+      "Dependency injection at the edge. Swap implementations without touching components.",
   },
 ];
 
@@ -41,8 +43,8 @@ export default Component.gen(function* () {
             Effect-native UI framework
           </h2>
           <p className="text-sm mb-6" style={{ color: "var(--text-3)", maxWidth: "480px" }}>
-            Fine-grained signals, typed effects, and dependency injection — 
-            for UIs that scale with your codebase.
+            Fine-grained signals, typed effects, and dependency injection — for UIs that scale with
+            your codebase.
           </p>
           <Router.Link to="/incidents" className="btn btn--primary">
             Open Incident Commander
@@ -50,7 +52,13 @@ export default Component.gen(function* () {
         </div>
 
         {/* Feature cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: "16px",
+          }}
+        >
           {FEATURES.map((feature) => (
             <article key={feature.title} className="card" style={{ padding: "20px" }}>
               <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--text-1)" }}>

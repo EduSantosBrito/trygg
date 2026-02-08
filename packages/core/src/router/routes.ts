@@ -58,14 +58,7 @@ export interface RoutesCollection {
     NeedsCoverage extends boolean,
     HasErrorBoundary extends boolean,
   >(
-    route: RouteBuilder<
-      Path,
-      never,
-      HasComponent,
-      HasChildren,
-      NeedsCoverage,
-      HasErrorBoundary
-    >,
+    route: RouteBuilder<Path, never, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>,
   ) => RoutesCollection;
 
   /**
@@ -95,36 +88,35 @@ export interface RoutesCollection {
 // =============================================================================
 
 /** @internal */
-const makeCollection = (manifest: RoutesManifest): RoutesCollection =>
-  ({
-    _tag: "RoutesCollection",
+const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
+  _tag: "RoutesCollection",
 
-    add: (route) =>
-      makeCollection({
-        ...manifest,
-        routes: [...manifest.routes, route.definition],
-      }),
+  add: (route) =>
+    makeCollection({
+      ...manifest,
+      routes: [...manifest.routes, route.definition],
+    }),
 
-    notFound: (component) =>
-      makeCollection({
-        ...manifest,
-        notFound: component,
-      }),
+  notFound: (component) =>
+    makeCollection({
+      ...manifest,
+      notFound: component,
+    }),
 
-    forbidden: (component) =>
-      makeCollection({
-        ...manifest,
-        forbidden: component,
-      }),
+  forbidden: (component) =>
+    makeCollection({
+      ...manifest,
+      forbidden: component,
+    }),
 
-    error: (component) =>
-      makeCollection({
-        ...manifest,
-        error: component,
-      }),
+  error: (component) =>
+    makeCollection({
+      ...manifest,
+      error: component,
+    }),
 
-    manifest,
-  });
+  manifest,
+});
 
 // =============================================================================
 // Public API

@@ -100,11 +100,13 @@ describe(".add()", () => {
 
   it("should allow nested params route without error boundary", () => {
     const routes = Routes.make().add(
-      Route.make("/incidents").layout(comp).children(
-        Route.make("/:id")
-          .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(comp),
-      ),
+      Route.make("/incidents")
+        .layout(comp)
+        .children(
+          Route.make("/:id")
+            .params(Schema.Struct({ id: Schema.NumberFromString }))
+            .component(comp),
+        ),
     );
 
     assert.strictEqual(routes.manifest.routes.length, 1);

@@ -22,12 +22,18 @@ export const promptProjectOptions = (name: string, templateOverride?: "incident"
     const prompts = yield* Prompts;
 
     // Template selection
-    const template = templateOverride ?? (yield* prompts.select({
-      message: "Select template:",
-      options: [
-        { value: "incident" as const, label: "Incident Dashboard", hint: "full-stack incident tracker" },
-      ],
-    }));
+    const template =
+      templateOverride ??
+      (yield* prompts.select({
+        message: "Select template:",
+        options: [
+          {
+            value: "incident" as const,
+            label: "Incident Dashboard",
+            hint: "full-stack incident tracker",
+          },
+        ],
+      }));
 
     // Platform selection
     const platform = yield* prompts.select({
