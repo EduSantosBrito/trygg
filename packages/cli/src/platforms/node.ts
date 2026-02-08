@@ -4,7 +4,7 @@
  */
 import { PlatformConfig, layer } from "../platform-config.js";
 
-const NODE_VERSION = "^0.87.0";
+const NODE_VERSION = "^0.104.1";
 
 const config: PlatformConfig = {
   name: "node",
