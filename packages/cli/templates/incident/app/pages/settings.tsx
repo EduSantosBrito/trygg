@@ -1,116 +1,123 @@
 import { Component, Signal } from "trygg";
 import { AppTheme } from "../services/theme";
 
-// ---------------------------------------------------------------------------
-// Token definitions for preview
-// ---------------------------------------------------------------------------
-
-const PREVIEW_TOKENS = [
-  { name: "--bg", label: "Background" },
-  { name: "--surface", label: "Surface" },
-  { name: "--text-1", label: "Text" },
-  { name: "--accent", label: "Accent" },
-  { name: "--signal", label: "Signal" },
+const THEME_OPTIONS = [
+  { value: "system", label: "System", description: "Follow your operating system preference" },
+  { value: "dark", label: "Dark", description: "Always use dark theme" },
+  { value: "light", label: "Light", description: "Always use light theme" },
 ] as const;
-
-// ---------------------------------------------------------------------------
-// ThemePreview — demonstrates DI by yielding AppTheme
-// ---------------------------------------------------------------------------
-
-const ThemePreview = Component.gen(function* () {
-  const { mode } = yield* AppTheme;
-
-  return (
-    <div className="mt-6 p-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)]">
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--text-2)] mb-4">
-        Token Preview — {mode}
-      </h3>
-      <div className="grid gap-3">
-        {PREVIEW_TOKENS.map(({ name, label }) => (
-          <div key={name} className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded border border-[var(--border)] shrink-0"
-              style={{ backgroundColor: `var(${name})` }}
-              aria-hidden="true"
-            />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-[var(--text-1)]">{label}</p>
-              <p className="text-xs font-mono text-[var(--text-2)]">{name}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-});
-
-// ---------------------------------------------------------------------------
-// Settings page
-// ---------------------------------------------------------------------------
 
 export default Component.gen(function* () {
   const { mode, preference, setPreference } = yield* AppTheme;
 
+  // Derive checked state for each radio
   const isSystem = yield* Signal.derive(preference, (p) => p === "system");
   const isDark = yield* Signal.derive(preference, (p) => p === "dark");
   const isLight = yield* Signal.derive(preference, (p) => p === "light");
 
+  const checkedMap = { system: isSystem, dark: isDark, light: isLight };
+
   return (
-    <section>
-      <h1 className="text-2xl font-semibold mb-6">Settings</h1>
+    <>
+      <header className="content-header">
+        <div className="content-header__left">
+          <div className="content-header__title">
+            <div className="content-header__icon">S</div>
+            <h1 className="content-header__text">Settings</h1>
+          </div>
+        </div>
+      </header>
 
-      <div className="space-y-6">
-        <div className="p-4 border border-[var(--border)] rounded-lg bg-[var(--surface)]">
-          <h2 className="text-lg font-medium mb-4">Appearance</h2>
+      <main className="content-body">
+        <div className="card" style={{ padding: "24px", maxWidth: "560px" }}>
+          <h2 className="text-lg font-semibold mb-6" style={{ color: "var(--text-1)" }}>
+            Appearance
+          </h2>
 
-          <fieldset className="border-0 p-0 m-0">
-            <legend className="text-sm font-medium text-[var(--text-1)] mb-3">
+          <fieldset style={{ border: "none", padding: 0, margin: 0 }}>
+            <legend className="label" style={{ marginBottom: "12px" }}>
               Theme
             </legend>
-            <div className="flex gap-4">
-              <label className="radio-option">
-                <input
-                  type="radio"
-                  name="theme"
-                  value="system"
-                  checked={isSystem}
-                  onChange={() => setPreference("system")}
-                  className="radio-input"
-                />
-                <span className="radio-label">System</span>
-              </label>
-              <label className="radio-option">
-                <input
-                  type="radio"
-                  name="theme"
-                  value="dark"
-                  checked={isDark}
-                  onChange={() => setPreference("dark")}
-                  className="radio-input"
-                />
-                <span className="radio-label">Dark</span>
-              </label>
-              <label className="radio-option">
-                <input
-                  type="radio"
-                  name="theme"
-                  value="light"
-                  checked={isLight}
-                  onChange={() => setPreference("light")}
-                  className="radio-input"
-                />
-                <span className="radio-label">Light</span>
-              </label>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {THEME_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="card card--interactive"
+                  style={{
+                    padding: "12px 16px",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="theme"
+                    value={option.value}
+                    checked={checkedMap[option.value]}
+                    onChange={() => setPreference(option.value)}
+                    style={{ marginTop: "2px", accentColor: "var(--accent)" }}
+                  />
+                  <div>
+                    <div className="text-sm font-medium" style={{ color: "var(--text-1)" }}>
+                      {option.label}
+                    </div>
+                    <div className="text-xs" style={{ color: "var(--text-3)", marginTop: "2px" }}>
+                      {option.description}
+                    </div>
+                  </div>
+                </label>
+              ))}
             </div>
 
-            <p className="text-sm text-[var(--text-2)] mt-3">
-              Current resolved mode: <strong className="text-[var(--text-1)]">{mode}</strong>
+            <p className="text-sm mt-4" style={{ color: "var(--text-3)" }}>
+              Current theme: <strong style={{ color: "var(--text-1)" }}>{mode}</strong>
             </p>
           </fieldset>
-
-          <ThemePreview />
         </div>
-      </div>
-    </section>
+
+        {/* Theme token preview */}
+        <div className="card" style={{ padding: "24px", maxWidth: "560px", marginTop: "20px" }}>
+          <h3
+            className="text-xs font-semibold uppercase tracking-wider mb-4"
+            style={{ color: "var(--text-3)", letterSpacing: "0.05em" }}
+          >
+            Token Preview
+          </h3>
+          <div style={{ display: "grid", gap: "12px" }}>
+            {[
+              { name: "--bg", label: "Background" },
+              { name: "--surface", label: "Surface" },
+              { name: "--text-1", label: "Text Primary" },
+              { name: "--accent", label: "Accent" },
+            ].map(({ name, label }) => (
+              <div key={name} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "var(--radius)",
+                    border: "1px solid var(--border)",
+                    backgroundColor: `var(${name})`,
+                    flexShrink: 0,
+                  }}
+                  aria-hidden="true"
+                />
+                <div>
+                  <div className="text-sm font-medium" style={{ color: "var(--text-1)" }}>
+                    {label}
+                  </div>
+                  <code className="text-xs" style={{ color: "var(--text-3)" }}>
+                    {name}
+                  </code>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+    </>
   );
 });

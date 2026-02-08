@@ -7,18 +7,18 @@ import { IncidentNotFound, InvalidTransition } from "../errors/incidents";
  */
 const getErrorInfo = (error: unknown): { title: string; message: string } => {
   if (error instanceof IncidentNotFound) {
-    return { title: "Not Found", message: `Incident #${error.id} does not exist` };
+    return { title: "Not Found", message: `Incident #${String(error.id)} does not exist.` };
   }
   if (error instanceof InvalidTransition) {
     return {
       title: "Invalid Transition",
-      message: `Cannot transition from ${error.from} to ${error.to}`,
+      message: `Cannot transition from ${error.from} to ${error.to}.`,
     };
   }
   if (error instanceof Error) {
     return { title: "Error", message: error.message };
   }
-  return { title: "Error", message: "An unexpected error occurred" };
+  return { title: "Error", message: "An unexpected error occurred." };
 };
 
 export const ErrorView = Component.gen(function* (
@@ -35,9 +35,11 @@ export const ErrorView = Component.gen(function* (
       <h3 className="error-view__title">{title}</h3>
       <p className="error-view__message">{message}</p>
       {onRetry && (
-        <button type="button" className="error-view__retry" onClick={onRetry}>
-          Retry
-        </button>
+        <div className="error-view__actions">
+          <button type="button" className="btn btn--secondary btn--sm" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
       )}
     </div>
   );

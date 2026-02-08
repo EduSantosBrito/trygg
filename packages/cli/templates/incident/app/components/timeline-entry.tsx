@@ -9,10 +9,15 @@ export const TimelineEntry = Component.gen(function* (
 
   return (
     <div className="timeline-entry">
-      <span className="timeline-entry__dot" />
+      <div className="timeline-entry__avatar">U</div>
       <div className="timeline-entry__content">
-        <span className="timeline-entry__message">{entry.message}</span>
-        <time className="timeline-entry__time">{formatRelative(entry.timestamp)}</time>
+        <div className="timeline-entry__header">
+          <span className="timeline-entry__author">System</span>
+          <time className="timeline-entry__time">{formatRelative(entry.timestamp)}</time>
+        </div>
+        <div className="timeline-entry__body">
+          <p className="timeline-entry__message">{entry.message}</p>
+        </div>
       </div>
     </div>
   );

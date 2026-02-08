@@ -5,13 +5,13 @@ import * as Router from "trygg/router";
 const errorCopy = (error: unknown): { title: string; message: string } => {
   if (Predicate.isTagged(error, "ParamsDecodeError")) {
     return {
-      title: "Invalid incident URL",
-      message: "Incident id must be numeric, ex /incidents/1.",
+      title: "Invalid Incident URL",
+      message: "Incident ID must be numeric, e.g. /incidents/1.",
     };
   }
 
   return {
-    title: "Could not load page",
+    title: "Could Not Load Page",
     message: "Something failed while resolving this route.",
   };
 };
@@ -22,18 +22,29 @@ export const RouteErrorView = Component.gen(function* () {
   const { title, message } = errorCopy(error);
 
   return (
-    <section className="route-state" role="alert">
-      <p className="route-state__eyebrow">Route error</p>
-      <h1 className="route-state__title">{title}</h1>
-      <p className="route-state__message">{message}</p>
-      <div className="route-state__actions">
-        <Router.Link to="/incidents" className="route-state__action route-state__action--primary">
-          Open incidents
-        </Router.Link>
-        <Router.Link to="/" className="route-state__action">
-          Go home
-        </Router.Link>
-      </div>
-    </section>
+    <>
+      <header className="content-header">
+        <div className="content-header__left">
+          <div className="content-header__title">
+            <h1 className="content-header__text">Error</h1>
+          </div>
+        </div>
+      </header>
+      <main className="content-body">
+        <section className="route-state" role="alert">
+          <p className="route-state__eyebrow">Route Error</p>
+          <h2 className="route-state__title">{title}</h2>
+          <p className="route-state__message">{message}</p>
+          <div className="route-state__actions">
+            <Router.Link to="/incidents" className="btn btn--primary">
+              Open Incidents
+            </Router.Link>
+            <Router.Link to="/" className="btn btn--secondary">
+              Go Home
+            </Router.Link>
+          </div>
+        </section>
+      </main>
+    </>
   );
 });
