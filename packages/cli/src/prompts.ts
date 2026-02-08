@@ -5,9 +5,14 @@
 import { Effect } from "effect";
 import { Prompts } from "./ports/prompts";
 
+export type Template = "blank" | "incident";
+
+export const isTemplate = (value: string): value is Template =>
+  value === "blank" || value === "incident";
+
 export interface ProjectOptions {
   readonly name: string;
-  readonly template: "incident";
+  readonly template: Template;
   readonly platform: "node" | "bun";
   readonly output: "server" | "static";
   readonly vcs: "git" | "jj" | "none";
@@ -17,18 +22,23 @@ export interface ProjectOptions {
 /**
  * Run interactive prompts to gather project configuration
  */
-export const promptProjectOptions = (name: string, templateOverride?: "incident") =>
+export const promptProjectOptions = (name: string, templateOverride?: Template) =>
   Effect.gen(function* () {
     const prompts = yield* Prompts;
 
     // Template selection
     const template =
       templateOverride ??
-      (yield* prompts.select({
+      (yield* prompts.select<Template>({
         message: "Select template:",
         options: [
           {
-            value: "incident" as const,
+            value: "blank",
+            label: "Blank App",
+            hint: "minimal app starter",
+          },
+          {
+            value: "incident",
             label: "Incident Dashboard",
             hint: "full-stack incident tracker",
           },

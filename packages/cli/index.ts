@@ -12,7 +12,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect, Layer, Option } from "effect";
 import * as clack from "@clack/prompts";
 import * as path from "node:path";
-import { promptProjectOptions, type ProjectOptions } from "./src/prompts";
+import { isTemplate, promptProjectOptions, type ProjectOptions } from "./src/prompts";
 import { scaffoldProject } from "./src/scaffold";
 import { detectPackageManager, getInstallCommand, getRunCommand } from "./src/detect-pm";
 import { spawn } from "node:child_process";
@@ -35,13 +35,13 @@ const projectName = Args.text({ name: "project-name" }).pipe(
 );
 
 const templateOption = Options.text("template").pipe(
-  Options.withDescription("Template to scaffold (default: incident)"),
+  Options.withDescription("Template to scaffold (default: blank)"),
   Options.optional,
 );
 
 const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
   Options.withDescription(
-    "Accept all defaults (template: incident, platform: bun, output: server, vcs: git, install: yes)",
+    "Accept all defaults (template: blank, platform: bun, output: server, vcs: git, install: yes)",
   ),
 );
 
@@ -98,11 +98,12 @@ const create = Command.make(
       let options: ProjectOptions;
 
       // Resolve template from flag or default
-      const resolvedTemplate = Option.isSome(args.template) ? args.template.value : "incident";
-      if (resolvedTemplate !== "incident") {
-        clack.cancel(`Unknown template "${resolvedTemplate}". Available: incident`);
-        return yield* new InvalidTemplateError({ template: resolvedTemplate });
+      const resolvedTemplateRaw = Option.isSome(args.template) ? args.template.value : "blank";
+      if (!isTemplate(resolvedTemplateRaw)) {
+        clack.cancel(`Unknown template "${resolvedTemplateRaw}". Available: blank, incident`);
+        return yield* new InvalidTemplateError({ template: resolvedTemplateRaw });
       }
+      const resolvedTemplate = resolvedTemplateRaw;
 
       if (args.yes) {
         // Use all defaults

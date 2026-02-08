@@ -74,6 +74,15 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     // 5. Copy public/ assets
     yield* copyDir(fs, path.join(templateDir, "public"), path.join(targetDir, "public"));
 
+    // 5.1. Blank + static mode should not include server API scaffold
+    if (options.template === "blank" && options.output === "static") {
+      const apiPath = path.join(targetDir, "app", "api.ts");
+      const hasApi = yield* fs.exists(apiPath);
+      if (hasApi) {
+        yield* fs.remove(apiPath);
+      }
+    }
+
     // 6. Generate package.json with platform-specific configuration
     const platformLayer = getPlatformLayer(options.platform);
     const packageJson = yield* generatePackageJson({
