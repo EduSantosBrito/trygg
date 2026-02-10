@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/*
+ * trygg landing page
+ * Tailwind v4 with custom theme tokens
+ */
+
+@theme {
+  /* Typography */
+  --font-display: "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Dark palette */
+  --color-bg: #050508;
+  --color-bg-subtle: #0a0a0f;
+  --color-bg-muted: #0f0f16;
+  --color-bg-elevated: #14141d;
+
+  /* Text */
+  --color-text: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+  --color-text-subtle: #71717a;
+
+  /* Accent */
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #9d6dfa;
+  --color-accent-glow: rgba(139, 92, 246, 0.4);
+
+  /* Borders */
+  --color-border: rgba(255, 255, 255, 0.08);
+
+  /* Warning */
+  --color-warning: #facc15;
+  --color-warning-bg: rgba(250, 204, 21, 0.08);
+}
+
+/* Base */
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Code syntax colors (Shiki overrides) */
+.code-block .shiki {
+  background: transparent !important;
+}
+
+/* Grid background */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Focus visible outline */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Remove default focus for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+
