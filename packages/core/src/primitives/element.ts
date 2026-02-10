@@ -183,6 +183,9 @@ export interface ElementProps extends BaseProps, EventProps {
   readonly httpEquiv?: string;
   readonly charset?: string;
 
+  // Script attributes
+  readonly defer?: MaybeSignal<boolean>;
+
   // Head hoisting control
   readonly mode?: "hoisted" | "static";
 
