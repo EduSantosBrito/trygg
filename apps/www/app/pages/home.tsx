@@ -80,11 +80,7 @@ const Hero = Component.gen(function* () {
       </div>
 
       <div className="relative w-full lg:w-[140%] lg:-mr-[40%]">
-        <CodeBlock
-          lines={highlightedCode}
-          header="bunx create-trygg@canary"
-          fileType="TSX"
-        />
+        <CodeBlock lines={highlightedCode} header="bunx create-trygg@canary" fileType="TSX" />
       </div>
     </section>
   );
@@ -162,9 +158,7 @@ const Install = Component.gen(function* () {
 
   const handleCopy = () =>
     Effect.gen(function* () {
-      yield* Effect.tryPromise(() =>
-        navigator.clipboard.writeText(sections.install.command)
-      );
+      yield* Effect.tryPromise(() => navigator.clipboard.writeText(sections.install.command));
       yield* Effect.sync(() => window.datafast?.("install_copy_click"));
       yield* Signal.set(copied, true);
       yield* Effect.sleep("2 seconds");
@@ -227,12 +221,8 @@ const FAQ = Component.gen(function* () {
         <dl className="divide-y divide-[var(--color-border)]">
           {sections.faq.questions.map((item, i) => (
             <div key={i} className="py-6 first:pt-0 last:pb-0">
-              <dt className="font-semibold text-[var(--color-text)] mb-2">
-                {item.q}
-              </dt>
-              <dd className="text-sm text-[var(--color-text-muted)] leading-relaxed">
-                {item.a}
-              </dd>
+              <dt className="font-semibold text-[var(--color-text)] mb-2">{item.q}</dt>
+              <dd className="text-sm text-[var(--color-text-muted)] leading-relaxed">{item.a}</dd>
             </div>
           ))}
         </dl>

@@ -10,11 +10,11 @@
  */
 
 export interface LandingCopy {
-  readonly heroTitle: string
-  readonly heroSubtitle: string
-  readonly canaryWarning: string
-  readonly primaryCtaLabel: "Try trygg"
-  readonly primaryCtaHref: string
+  readonly heroTitle: string;
+  readonly heroSubtitle: string;
+  readonly canaryWarning: string;
+  readonly primaryCtaLabel: "Try trygg";
+  readonly primaryCtaHref: string;
 }
 
 export const copy: LandingCopy = {
@@ -24,7 +24,7 @@ export const copy: LandingCopy = {
   canaryWarning: "Canary — breaking changes expected",
   primaryCtaLabel: "Try trygg",
   primaryCtaHref: "#install",
-} as const
+} as const;
 
 /**
  * Section-specific copy tokens.
@@ -66,8 +66,7 @@ export const sections = {
       },
       {
         title: "Error Boundaries",
-        description:
-          "Typed error handling with recovery. Observable spans and metrics built in.",
+        description: "Typed error handling with recovery. Observable spans and metrics built in.",
       },
     ],
   },
@@ -114,4 +113,4 @@ export const sections = {
       },
     ],
   },
-} as const
+} as const;
