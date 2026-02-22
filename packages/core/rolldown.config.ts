@@ -8,7 +8,7 @@ export default defineConfig({
     "vite-plugin": "src/vite/plugin.ts",
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts",
-    api: "src/api/types.ts",
+    api: "src/api/index.ts",
     config: "src/config.ts",
   },
   output: {

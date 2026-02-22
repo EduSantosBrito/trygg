@@ -30,7 +30,7 @@
       "import": "./dist/index.js"
     },
     "./api": {
-      "types": "./dist/api/types.d.ts",
+      "types": "./dist/api/index.d.ts",
       "import": "./dist/api.js"
     },
     "./router": {

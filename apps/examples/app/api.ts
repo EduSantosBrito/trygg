@@ -3,15 +3,9 @@
  *
  * Single file defining all API endpoints and handlers.
  */
-import {
-  HttpApi,
-  HttpApiEndpoint,
-  HttpApiGroup,
-  HttpApiBuilder,
-  HttpApiClient,
-  FetchHttpClient,
-} from "@effect/platform";
-import { Context, Effect, Layer, Schema } from "effect";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
+import { Effect, Layer, Schema } from "effect";
+import { Trygger } from "trygg/api";
 
 // =============================================================================
 // Schemas
@@ -113,17 +107,11 @@ const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
 export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
 
 // =============================================================================
-// Typed API Client
+// Typed API Client — one line with Trygger
 // =============================================================================
 
-const client = HttpApiClient.make(Api, { baseUrl: "" });
-type ApiClientService = Effect.Effect.Success<typeof client>;
-
 /** Tag for the typed API client. Yield in effects to get the client. */
-export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
+export const ApiClient = Trygger(Api);
 
 /** Layer that creates the ApiClient using FetchHttpClient. */
-export const ApiClientLive = Layer.effect(
-  ApiClient,
-  client.pipe(Effect.provide(FetchHttpClient.layer)),
-);
+export const ApiClientLive = ApiClient.Default;
