@@ -16,6 +16,7 @@
       "trygg/router": ["../../packages/core/src/router/index.ts"],
       "trygg/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
       "trygg/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],
+      "trygg/api": ["../../packages/core/src/api/index.ts"],
       "trygg/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
     }
   },
