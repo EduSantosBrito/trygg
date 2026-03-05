@@ -1,4 +1,4 @@
-import { Data, Effect, Either, Layer, Match, Option } from "effect";
+import { Data, Effect, Layer, Match, Option, Result } from "effect";
 import { Signal, Component } from "trygg";
 import { FormTheme } from "../services/form";
 import { FormField } from "../components/form-field";
@@ -101,20 +101,20 @@ const FormPage = Component.gen(function* () {
       const currentEmail = yield* Signal.get(email);
       const currentPassword = yield* Signal.get(password);
 
-      const emailResult = yield* validateEmail(currentEmail).pipe(Effect.either);
-      if (Either.isLeft(emailResult)) {
-        yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.left)));
+      const emailResult = yield* validateEmail(currentEmail).pipe(Effect.result);
+      if (Result.isFailure(emailResult)) {
+        yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.failure)));
         return;
       }
 
-      const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.either);
-      if (Either.isLeft(passwordResult)) {
-        yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.left)));
+      const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.result);
+      if (Result.isFailure(passwordResult)) {
+        yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.failure)));
         return;
       }
 
       yield* Signal.set(submitted, true);
-      yield* Effect.log(`Form submitted: email=${emailResult.right}`);
+      yield* Effect.log(`Form submitted: email=${emailResult.success}`);
     });
 
   const resetForm = () =>

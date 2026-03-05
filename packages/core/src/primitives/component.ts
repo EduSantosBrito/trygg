@@ -7,10 +7,11 @@
  *
  * @example
  * ```tsx
- * import { Context, Effect, Layer } from "effect"
+ * import { Effect, Layer } from "effect"
+ * import * as ServiceMap from "effect/ServiceMap"
  * import { Component, mount } from "trygg"
  *
- * class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
+ * class Theme extends ServiceMap.Service<Theme, { primary: string }>()("Theme") {}
  *
  * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
  *   const { title } = yield* Props
@@ -27,9 +28,9 @@
  * mount(container, <App />)
  * ```
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
-import { YieldWrap } from "effect/Utils";
 import {
   Element,
   componentElement,
@@ -60,7 +61,7 @@ export class ComponentGenError extends Data.TaggedError("ComponentGenError")<{
 
 /**
  * Marker interface for Props service - distinguishes props from other services.
- * Used as the identifier type for the Props Context.Tag.
+ * Used as the identifier type for the Props service key.
  * @since 1.0.0
  */
 export interface PropsMarker<P> {
@@ -72,13 +73,16 @@ export interface PropsMarker<P> {
  * Props tag type used in Component.gen for inference.
  * @since 1.0.0
  */
-export type ComponentProps<P> = Context.Tag<PropsMarker<P>, P>;
+export type ComponentProps<P> = ServiceMap.Service<PropsMarker<P>, P>;
 
 // =============================================================================
 // Component Types
 // =============================================================================
 
 type ComponentResult = Element | Effect.Effect<Element, unknown, unknown>;
+type ComponentCallProps<Props> = [Props] extends [never] ? {} : Props;
+type ComponentYieldable = Effect.Yieldable.Any;
+type LegacyGenResume = undefined;
 
 const effectComponentTag = "EffectComponent" as const;
 
@@ -91,8 +95,8 @@ const effectComponentTag = "EffectComponent" as const;
  * @internal
  */
 const deduplicateLayers = (
-  layers: ReadonlyArray<Layer.Layer.Any>,
-): ReadonlyArray<Layer.Layer.Any> => {
+  layers: ReadonlyArray<Layer.Any>,
+): ReadonlyArray<Layer.Any> => {
   // For now, we keep all layers and let Layer.mergeAll handle precedence
   // In a more sophisticated implementation, we could track service tags and deduplicate
   // But Layer.mergeAll already handles "last layer wins" correctly
@@ -103,16 +107,16 @@ const deduplicateLayers = (
  * Tag a component function with Component metadata
  * @internal
  */
-export const tagComponent = <Props, E, R>(
-  fn: (props: any) => Element,
-  layers: ReadonlyArray<Layer.Layer.Any> = [],
-  runFn?: (props: any) => Effect.Effect<Element, E, unknown>,
+export const tagComponent = <Props, RuntimeProps, E, R>(
+  fn: (props: RuntimeProps) => Element,
+  layers: ReadonlyArray<Layer.Any> = [],
+  runFn?: (props: RuntimeProps) => Effect.Effect<Element, E, unknown>,
   displayName?: string,
 ): Component.Type<Props, E, R> => {
   // Build provide as a standalone function, then pass to unsafeTagCallable
   // The provide implementation serves multiple overloads — the overload
   // signatures on Component.Type ensure type safety at call sites
-  const provide = (layerOrLayers: Layer.Layer.Any | ReadonlyArray<Layer.Layer.Any>) => {
+  const provide = (layerOrLayers: Layer.Any | ReadonlyArray<Layer.Any>) => {
     const newLayers = Array.isArray(layerOrLayers) ? layerOrLayers : [layerOrLayers];
     // Append new layers - Layer.mergeAll applies left-to-right with last-write-wins
     // When we call .provide(A).provide(B), mergedLayers = [A, B], B wins
@@ -120,7 +124,7 @@ export const tagComponent = <Props, E, R>(
     const mergedLayers = deduplicateLayers([...layers, ...newLayers]);
 
     // Create new component function that preserves the Props type
-    const newComponent = (props: [Props] extends [never] ? {} : Props): Element => {
+    const newComponent = (props: RuntimeProps): Element => {
       // Create a Component element whose run function builds context and wraps output in Provide
       const run = (): Effect.Effect<Element, E, unknown> =>
         Effect.gen(function* () {
@@ -141,7 +145,7 @@ export const tagComponent = <Props, E, R>(
     };
 
     // Tag the new component with merged layers and preserve the runFn and displayName
-    return tagComponent(newComponent, mergedLayers, runFn, displayName);
+    return tagComponent<Props, RuntimeProps, E, R>(newComponent, mergedLayers, runFn, displayName);
   };
 
   return unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
@@ -171,12 +175,12 @@ const normalizeResult = <E, R>(
  * @since 1.0.0
  */
 export function Component<P extends object = {}>(): <E, R>(
-  effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
+  effectFn: (Props: ServiceMap.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
 ) => Component.Type<P, E, Exclude<R, PropsMarker<P>>> {
   return <E, R>(
-    effectFn: (Props: Context.Tag<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
+    effectFn: (Props: ServiceMap.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
   ): Component.Type<P, E, Exclude<R, PropsMarker<P>>> => {
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@trygg/Props");
+    const PropsTag = ServiceMap.Service<PropsMarker<P>, P>("@trygg/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, R> => {
@@ -188,7 +192,7 @@ export function Component<P extends object = {}>(): <E, R>(
       return componentElement(run);
     };
 
-    return tagComponent(componentFn);
+    return tagComponent<P, P, E, Exclude<R, PropsMarker<P>>>(componentFn);
   };
 }
 
@@ -198,7 +202,7 @@ export function Component<P extends object = {}>(): <E, R>(
  */
 export interface ComponentInternal {
   readonly _tag: "EffectComponent";
-  readonly _layers: ReadonlyArray<Layer.Layer.Any>;
+  readonly _layers: ReadonlyArray<Layer.Any>;
   readonly _baseFn: (props: unknown) => Element;
 }
 
@@ -210,10 +214,10 @@ export interface ComponentInternal {
 export declare namespace Component {
   export interface Type<Props = never, _E = never, _R = never> {
     readonly _tag: "EffectComponent";
-    readonly _layers: ReadonlyArray<Layer.Layer.Any>;
-    readonly _runFn?: (props: any) => Effect.Effect<Element, unknown, unknown>;
+    readonly _layers: ReadonlyArray<Layer.Any>;
+    readonly _runFn?: (props: ComponentCallProps<Props>) => Effect.Effect<Element, unknown, unknown>;
     readonly _displayName?: string;
-    (props: [Props] extends [never] ? {} : Props): ComponentElementWithRequirements<_R>;
+    (props: ComponentCallProps<Props>): ComponentElementWithRequirements<_R>;
 
     /**
      * Provide services to satisfy component requirements at definition time.
@@ -239,13 +243,13 @@ export declare namespace Component {
      * const Button = Component.gen(...).provide([themeLayer, analyticsLayer]);
      * ```
      */
-    provide<const Layers extends readonly [Layer.Layer.Any, ...Array<Layer.Layer.Any>]>(
+    provide<const Layers extends readonly [Layer.Any, ...Array<Layer.Any>]>(
       layers: Layers,
     ): Component.Type<
       Props,
-      _E | { [k in keyof Layers]: Layer.Layer.Error<Layers[k]> }[number],
-      | { [k in keyof Layers]: Layer.Layer.Context<Layers[k]> }[number]
-      | Exclude<_R, { [k in keyof Layers]: Layer.Layer.Success<Layers[k]> }[number]>
+      _E | { [k in keyof Layers]: Layer.Error<Layers[k]> }[number],
+      | { [k in keyof Layers]: Layer.Services<Layers[k]> }[number]
+      | Exclude<_R, { [k in keyof Layers]: Layer.Success<Layers[k]> }[number]>
     >;
   }
 }
@@ -269,28 +273,28 @@ export const isEffectComponent = (value: unknown): value is Component.Type<unkno
 // =============================================================================
 
 /**
- * Type alias for the YieldWrap type used in Effect.gen
+ * Type alias for Effect v4 yieldables used in Effect.gen
  * @internal
  */
-type EffectYieldWrap<A, E, R> = YieldWrap<Effect.Effect<A, E, R>>;
+type EffectYieldable<A, E, R> = Effect.Yieldable<Effect.Effect<A, E, R>, A, E, R>;
 
 /**
- * Extract error type from YieldWrap union
+ * Extract error type from yieldable union
  * @internal
  */
 type ExtractError<Eff> = [Eff] extends [never]
   ? never
-  : [Eff] extends [YieldWrap<Effect.Effect<infer _A, infer E, infer _R>>]
+  : [Eff] extends [Effect.Yieldable<infer _Self, infer _A, infer E, infer _R>]
     ? E
     : never;
 
 /**
- * Extract context (requirements) type from YieldWrap union
+ * Extract context (requirements) type from yieldable union
  * @internal
  */
 type ExtractContext<Eff> = [Eff] extends [never]
   ? never
-  : [Eff] extends [YieldWrap<Effect.Effect<infer _A, infer _E, infer R>>]
+  : [Eff] extends [Effect.Yieldable<infer _Self, infer _A, infer _E, infer R>]
     ? R
     : never;
 
@@ -299,18 +303,18 @@ type ExtractContext<Eff> = [Eff] extends [never]
  * @internal
  */
 function genNoProps<
-  Eff extends EffectYieldWrap<unknown, unknown, unknown>,
+  Eff extends ComponentYieldable,
   AEff extends ComponentResult,
 >(
-  f: (resume?: Effect.Adapter) => Generator<Eff, AEff, never>,
+  f: (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
 ): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>> {
   type E = ExtractError<Eff>;
 
-  const runFn = (): Effect.Effect<Element, E, unknown> => normalizeResult(Effect.gen(f));
+  const runFn = (): Effect.Effect<Element, E, unknown> => normalizeResult(Effect.gen(() => f(undefined)));
 
   const componentFn = (_props: {}): Element => componentElement(runFn);
 
-  return tagComponent(componentFn, [], runFn);
+  return tagComponent<never, {}, E, ExtractContext<Eff>>(componentFn, [], runFn);
 }
 
 /**
@@ -318,30 +322,30 @@ function genNoProps<
  * @internal
  */
 function genWithProps<P extends object>(): <
-  Eff extends EffectYieldWrap<unknown, unknown, unknown>,
+  Eff extends ComponentYieldable,
   AEff extends ComponentResult,
 >(
   f: (
-    Props: Context.Tag<PropsMarker<P>, P>,
-  ) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>,
+    Props: ServiceMap.Service<PropsMarker<P>, P>,
+  ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
 ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
-  return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends ComponentResult>(
+  return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
     f: (
-      Props: Context.Tag<PropsMarker<P>, P>,
-    ) => (resume: Effect.Adapter) => Generator<Eff, AEff, never>,
+      Props: ServiceMap.Service<PropsMarker<P>, P>,
+    ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> => {
     type E = ExtractError<Eff>;
-    const PropsTag = Context.GenericTag<PropsMarker<P>, P>("@trygg/Props");
+    const PropsTag = ServiceMap.Service<PropsMarker<P>, P>("@trygg/Props");
 
     const runFn = (props: P): Effect.Effect<Element, E, unknown> => {
-      const baseEffect = Effect.gen(f(PropsTag));
+      const baseEffect = Effect.gen(() => f(PropsTag)(undefined));
       const withProps = Effect.provideService(baseEffect, PropsTag, props);
       return normalizeResult(withProps);
     };
 
     const componentFn = (props: P): Element => componentElement(() => runFn(props));
 
-    return tagComponent(componentFn, [], runFn);
+    return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(componentFn, [], runFn);
   };
 }
 
@@ -350,20 +354,20 @@ function genWithProps<P extends object>(): <
  * @internal
  */
 function genWithPropsDirect<P extends object>(): <
-  Eff extends EffectYieldWrap<unknown, unknown, unknown>,
+  Eff extends ComponentYieldable,
   AEff extends ComponentResult,
 >(
   f: (
-    Props: Context.Tag<PropsMarker<P>, P>,
-    resume?: Effect.Adapter,
+    Props: ServiceMap.Service<PropsMarker<P>, P>,
+    resume?: LegacyGenResume,
   ) => Generator<Eff, AEff, never>,
 ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
   const withProps = genWithProps<P>();
 
-  return <Eff extends EffectYieldWrap<unknown, unknown, unknown>, AEff extends ComponentResult>(
+  return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
     f: (
-      Props: Context.Tag<PropsMarker<P>, P>,
-      resume?: Effect.Adapter,
+      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      resume?: LegacyGenResume,
     ) => Generator<Eff, AEff, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> =>
     withProps((Props) => (resume) => f(Props, resume));
@@ -375,7 +379,7 @@ function genWithPropsDirect<P extends object>(): <
  */
 type GeneratorComponentFn = (
   ...args: ReadonlyArray<unknown>
-) => Generator<EffectYieldWrap<unknown, unknown, unknown>, ComponentResult, never>;
+) => Generator<ComponentYieldable, ComponentResult, never>;
 
 const isGeneratorFunction = (fn: unknown): fn is GeneratorComponentFn =>
   typeof fn === "function" && fn.constructor.name === "GeneratorFunction";
@@ -391,32 +395,32 @@ const isGeneratorFunction = (fn: unknown): fn is GeneratorComponentFn =>
  * @since 1.0.0
  */
 type Gen = {
-  <Eff extends EffectYieldWrap<unknown, unknown, unknown>>(
-    f: (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>,
+  <Eff extends ComponentYieldable>(
+    f: (resume: LegacyGenResume) => Generator<Eff, ComponentResult, never>,
   ): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>>;
   <
     P extends object = {},
-    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<
+    Eff extends ComponentYieldable = EffectYieldable<
       unknown,
       unknown,
       unknown
     >,
   >(
     f: (
-      Props: Context.Tag<PropsMarker<P>, P>,
-      resume?: Effect.Adapter,
+      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      resume?: LegacyGenResume,
     ) => Generator<Eff, ComponentResult, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
   <P extends object = {}>(): <
-    Eff extends EffectYieldWrap<unknown, unknown, unknown> = EffectYieldWrap<
+    Eff extends ComponentYieldable = EffectYieldable<
       unknown,
       unknown,
       unknown
     >,
   >(
     f: (
-      Props: Context.Tag<PropsMarker<P>, P>,
-    ) => (resume: Effect.Adapter) => Generator<Eff, ComponentResult, never>,
+      Props: ServiceMap.Service<PropsMarker<P>, P>,
+    ) => (resume: LegacyGenResume) => Generator<Eff, ComponentResult, never>,
   ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
 };
 

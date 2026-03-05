@@ -35,7 +35,8 @@
  * })
  * ```
  */
-import { Duration, Effect, Fiber, FiberRef, Layer, Context } from "effect";
+import { Duration, Effect, Fiber } from "effect";
+import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
 import * as Signal from "../primitives/signal.js";
 import {
   Element,
@@ -48,6 +49,7 @@ import {
 } from "../primitives/element.js";
 
 import * as Debug from "../debug/debug.js";
+import { unsafeWidenContext } from "../internal/unsafe.js";
 import { get as getRouter, Router } from "./service.js";
 import { buildPath } from "./utils.js";
 import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
@@ -201,11 +203,11 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
       // Capture component scope — ties prefetch fibers to component lifecycle.
       // Always set inside a component render. If somehow null (should not happen),
       // prefetch handlers become no-ops via the guard below.
-      const prefetchScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+      const prefetchScope = yield* Signal.CurrentComponentScope;
 
       // F-001: Prefetch state and handlers
       let prefetchTriggered = false;
-      let hoverFiber: Fiber.RuntimeFiber<void> | null = null;
+      let hoverFiber: Fiber.Fiber<void, never> | null = null;
 
       // Trigger prefetch once (guarded by flag)
       const triggerPrefetch = Effect.gen(function* () {
@@ -324,9 +326,9 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
 interface LinkComponent {
   <Path extends RoutePath>(props: LinkProps<Path>): Element;
   readonly _tag: "EffectComponent";
-  readonly _layers: ReadonlyArray<Layer.Layer.Any>;
+  readonly _layers: ReadonlyArray<AnyLayer>;
   readonly _displayName: "Link";
-  provide<RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent;
+  provide<RIn, E2, ROut>(layer: LayerType<ROut, E2, RIn>): LinkComponent;
 }
 
 // Apply Component.Type properties to Link function
@@ -334,16 +336,16 @@ const linkComponent: LinkComponent = Object.assign(
   <Path extends RoutePath>(props: LinkProps<Path>): Element => LinkImpl(props),
   {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
     _displayName: "Link" as const,
-    provide: <RIn, E2, ROut>(layer: Layer.Layer<ROut, E2, RIn>): LinkComponent => {
+    provide: <RIn, E2, ROut>(layer: LayerType<ROut, E2, RIn>): LinkComponent => {
       const wrappedLink: LinkComponent = Object.assign(
         <Path extends RoutePath>(props: LinkProps<Path>): Element => {
           const run = (): Effect.Effect<Element, E2, RIn> =>
             Effect.gen(function* () {
-              const context = yield* Effect.context<ROut>().pipe(
+              const context = yield* Effect.services<ROut>().pipe(
                 Effect.provide(layer),
-                Effect.map((ctx) => ctx as Context.Context<unknown>),
+                Effect.map((ctx) => unsafeWidenContext(ctx)),
               );
               const element = LinkImpl(props);
               return provideElement(context, element);
@@ -352,7 +354,7 @@ const linkComponent: LinkComponent = Object.assign(
         },
         {
           _tag: "EffectComponent" as const,
-          _layers: [layer] as ReadonlyArray<Layer.Layer.Any>,
+          _layers: [layer] as ReadonlyArray<AnyLayer>,
           _displayName: "Link" as const,
           provide: linkComponent.provide,
         },

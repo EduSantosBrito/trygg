@@ -22,8 +22,9 @@
  * - Anchor comment left in original position
  * - Content cleanup runs on scope close
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Scope, TestClock } from "effect";
+import { assert, describe, effect } from "@effect/vitest";
+import { Effect, Exit, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import * as Component from "../component.js";
 import * as Signal from "../signal.js";
 import { render } from "../../testing/index.js";
@@ -54,7 +55,7 @@ function getPortalContainers(): HTMLElement[] {
 // =============================================================================
 
 describe("Portal.make — targeted (HTMLElement)", () => {
-  it.scoped("renders content into the target element", () =>
+  effect("renders content into the target element", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -79,7 +80,7 @@ describe("Portal.make — targeted (HTMLElement)", () => {
     }),
   );
 
-  it.scoped("content does NOT appear in the component's own DOM position", () =>
+  effect("content does NOT appear in the component's own DOM position", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -114,7 +115,7 @@ describe("Portal.make — targeted (HTMLElement)", () => {
     }),
   );
 
-  it.scoped("renders multiple children into target", () =>
+  effect("renders multiple children into target", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -146,7 +147,7 @@ describe("Portal.make — targeted (HTMLElement)", () => {
 // =============================================================================
 
 describe("Portal.make — targeted (CSS selector)", () => {
-  it.scoped("resolves CSS selector and renders content into matching element", () =>
+  effect("resolves CSS selector and renders content into matching element", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       target.id = "portal-selector-target";
@@ -172,7 +173,7 @@ describe("Portal.make — targeted (CSS selector)", () => {
     }),
   );
 
-  it.scoped("fails with PortalTargetNotFoundError when selector matches nothing", () =>
+  effect("fails with PortalTargetNotFoundError when selector matches nothing", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span>Ghost</span>, {
@@ -181,9 +182,9 @@ describe("Portal.make — targeted (CSS selector)", () => {
         return <MyPortal />;
       });
 
-      const result = yield* render(<App />).pipe(Effect.either);
+      const result = yield* Effect.exit(render(<App />));
 
-      assert.isTrue(result._tag === "Left", "Should fail when target selector matches no element");
+      assert.isTrue(Exit.isFailure(result), "Should fail when target selector matches no element");
     }),
   );
 });
@@ -193,7 +194,7 @@ describe("Portal.make — targeted (CSS selector)", () => {
 // =============================================================================
 
 describe("Portal.make — dynamic (no target)", () => {
-  it.scoped("creates a container div on document.body", () =>
+  effect("creates a container div on document.body", () =>
     Effect.gen(function* () {
       const containersBefore = getPortalContainers().length;
 
@@ -221,7 +222,7 @@ describe("Portal.make — dynamic (no target)", () => {
     }),
   );
 
-  it.scoped("content does not appear in the component's own DOM position", () =>
+  effect("content does not appear in the component's own DOM position", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span data-testid="dynamic-ported">Teleported</span>);
@@ -243,7 +244,7 @@ describe("Portal.make — dynamic (no target)", () => {
     }),
   );
 
-  it.scoped("dynamic container is removed when scope closes", () =>
+  effect("dynamic container is removed when scope closes", () =>
     Effect.gen(function* () {
       const containersBefore = getPortalContainers().length;
       const scope = yield* Scope.make();
@@ -253,7 +254,7 @@ describe("Portal.make — dynamic (no target)", () => {
         return <MyPortal />;
       });
 
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Scope.provide(scope));
       yield* TestClock.adjust(100);
 
       // Container should exist while scope is open
@@ -280,7 +281,7 @@ describe("Portal.make — dynamic (no target)", () => {
 // =============================================================================
 
 describe("Portal.make — visible prop", () => {
-  it.scoped("content is mounted when visible is not provided (always visible)", () =>
+  effect("content is mounted when visible is not provided (always visible)", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -304,7 +305,7 @@ describe("Portal.make — visible prop", () => {
     }),
   );
 
-  it.scoped("content is mounted when visible is true (static boolean)", () =>
+  effect("content is mounted when visible is true (static boolean)", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -328,7 +329,7 @@ describe("Portal.make — visible prop", () => {
     }),
   );
 
-  it.scoped("content is NOT mounted when visible is false (static boolean)", () =>
+  effect("content is NOT mounted when visible is false (static boolean)", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -352,7 +353,7 @@ describe("Portal.make — visible prop", () => {
     }),
   );
 
-  it.scoped("content mounts/unmounts reactively with Signal<boolean> visible", () =>
+  effect("content mounts/unmounts reactively with Signal<boolean> visible", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -397,7 +398,7 @@ describe("Portal.make — visible prop", () => {
     }),
   );
 
-  it.scoped("unmount destroys DOM (not display:none)", () =>
+  effect("unmount destroys DOM (not display:none)", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -443,7 +444,7 @@ describe("Portal.make — visible prop", () => {
 // =============================================================================
 
 describe("Portal.make — reactivity inside portalled content", () => {
-  it.scoped("Signal updates text content inside portal", () =>
+  effect("Signal updates text content inside portal", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -478,7 +479,7 @@ describe("Portal.make — reactivity inside portalled content", () => {
     }),
   );
 
-  it.scoped("Component with signals inside portal works normally", () =>
+  effect("Component with signals inside portal works normally", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -527,7 +528,7 @@ describe("Portal.make — reactivity inside portalled content", () => {
 // =============================================================================
 
 describe("Portal.make — anchor in original position", () => {
-  it.scoped("leaves a comment node as anchor where the portal is placed in JSX", () =>
+  effect("leaves a comment node as anchor where the portal is placed in JSX", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -565,7 +566,7 @@ describe("Portal.make — anchor in original position", () => {
 // =============================================================================
 
 describe("Portal.make — cleanup", () => {
-  it.scoped("content is removed from target when scope closes", () =>
+  effect("content is removed from target when scope closes", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -579,7 +580,7 @@ describe("Portal.make — cleanup", () => {
         return <MyPortal />;
       });
 
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Scope.provide(scope));
       yield* TestClock.adjust(100);
 
       assert.isNotNull(
@@ -598,7 +599,7 @@ describe("Portal.make — cleanup", () => {
     }),
   );
 
-  it.scoped("multiple portals to the same target all render correctly", () =>
+  effect("multiple portals to the same target all render correctly", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -630,7 +631,7 @@ describe("Portal.make — cleanup", () => {
     }),
   );
 
-  it.scoped("portal with visible signal cleans up on scope close", () =>
+  effect("portal with visible signal cleans up on scope close", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);
@@ -644,7 +645,7 @@ describe("Portal.make — cleanup", () => {
         return <MyPortal visible={isOpen} />;
       });
 
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Scope.provide(scope));
       yield* TestClock.adjust(100);
 
       assert.isNotNull(
@@ -670,7 +671,7 @@ describe("Portal.make — cleanup", () => {
 // =============================================================================
 
 describe("Portal.make — return type", () => {
-  it.scoped("returns a ComponentType (callable with _tag EffectComponent)", () =>
+  effect("returns a ComponentType (callable with _tag EffectComponent)", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");
       document.body.appendChild(target);

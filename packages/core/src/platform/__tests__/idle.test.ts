@@ -9,7 +9,7 @@ import { Effect } from "effect";
 import { Idle, test as idleTest } from "../idle.js";
 
 describe("Idle", () => {
-  it.scoped("request executes handler immediately in test layer", () =>
+  it.effect("request executes handler immediately in test layer", () =>
     Effect.gen(function* () {
       const idle = yield* Idle;
       let executed = false;
@@ -22,7 +22,7 @@ describe("Idle", () => {
     }).pipe(Effect.provide(idleTest)),
   );
 
-  it.scoped("request executes multiple handlers in order", () =>
+  it.effect("request executes multiple handlers in order", () =>
     Effect.gen(function* () {
       const idle = yield* Idle;
       const order: Array<number> = [];
@@ -45,7 +45,7 @@ describe("Idle", () => {
     }).pipe(Effect.provide(idleTest)),
   );
 
-  it.scoped("request with timeout option does not affect test behavior", () =>
+  it.effect("request with timeout option does not affect test behavior", () =>
     Effect.gen(function* () {
       const idle = yield* Idle;
       let executed = false;

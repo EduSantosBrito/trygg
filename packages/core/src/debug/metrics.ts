@@ -22,7 +22,7 @@
  * ```
  */
 import { createConsola } from "consola";
-import { Effect, Metric, MetricBoundaries, MetricState } from "effect";
+import { Effect, Metric } from "effect";
 
 const metricsLogger = createConsola({ defaults: { tag: "trygg" } });
 
@@ -38,7 +38,7 @@ const metricsLogger = createConsola({ defaults: { tag: "trygg" } });
  * Incremented on each Router.navigate() call.
  * @since 1.0.0
  */
-export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
+export const navigationCounter: Metric.Counter<number> = Metric.counter(
   "trygg.router.navigate.count",
   { description: "Total number of navigation events", incremental: true },
 );
@@ -48,7 +48,7 @@ export const navigationCounter: Metric.Metric.Counter<number> = Metric.counter(
  * Incremented when a route render fails.
  * @since 1.0.0
  */
-export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
+export const routeErrorCounter: Metric.Counter<number> = Metric.counter(
   "trygg.router.error.count",
   { description: "Total number of route errors", incremental: true },
 );
@@ -58,7 +58,7 @@ export const routeErrorCounter: Metric.Metric.Counter<number> = Metric.counter(
  * Incremented on each Signal.set() or Signal.update() that changes value.
  * @since 1.0.0
  */
-export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter(
+export const signalUpdateCounter: Metric.Counter<number> = Metric.counter(
   "trygg.signal.update.count",
   { description: "Total number of signal value changes", incremental: true },
 );
@@ -68,7 +68,7 @@ export const signalUpdateCounter: Metric.Metric.Counter<number> = Metric.counter
  * Incremented on initial render and re-renders.
  * @since 1.0.0
  */
-export const componentRenderCounter: Metric.Metric.Counter<number> = Metric.counter(
+export const componentRenderCounter: Metric.Counter<number> = Metric.counter(
   "trygg.render.component.count",
   { description: "Total number of component renders", incremental: true },
 );
@@ -80,18 +80,31 @@ export const componentRenderCounter: Metric.Metric.Counter<number> = Metric.coun
  * Buckets: 0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000
  * @since 1.0.0
  */
-export const renderDurationBoundaries: MetricBoundaries.MetricBoundaries =
-  MetricBoundaries.fromIterable([0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000]);
+export const renderDurationBoundaries: ReadonlyArray<number> = Metric.boundariesFromIterable([
+  0,
+  1,
+  2,
+  5,
+  10,
+  25,
+  50,
+  100,
+  250,
+  500,
+  1000,
+]);
 
 /**
  * Histogram for component render duration.
  * Records how long each component render takes in milliseconds.
  * @since 1.0.0
  */
-export const renderDurationHistogram: Metric.Metric.Histogram<number> = Metric.histogram(
+export const renderDurationHistogram: Metric.Histogram<number> = Metric.histogram(
   "trygg.render.duration_ms",
-  renderDurationBoundaries,
-  "Distribution of component render durations in milliseconds",
+  {
+    boundaries: renderDurationBoundaries,
+    description: "Distribution of component render durations in milliseconds",
+  },
 );
 
 // --- Metric Recording API ---
@@ -100,34 +113,32 @@ export const renderDurationHistogram: Metric.Metric.Histogram<number> = Metric.h
  * Increment the navigation counter.
  * @since 1.0.0
  */
-export const recordNavigation: Effect.Effect<void> = Metric.increment(navigationCounter);
+export const recordNavigation: Effect.Effect<void> = Metric.update(navigationCounter, 1);
 
 /**
  * Increment the route error counter.
  * @since 1.0.0
  */
-export const recordRouteError: Effect.Effect<void> = Metric.increment(routeErrorCounter);
+export const recordRouteError: Effect.Effect<void> = Metric.update(routeErrorCounter, 1);
 
 /**
  * Increment the signal update counter.
  * @since 1.0.0
  */
-export const recordSignalUpdate: Effect.Effect<void> = Metric.increment(signalUpdateCounter);
+export const recordSignalUpdate: Effect.Effect<void> = Metric.update(signalUpdateCounter, 1);
 
 /**
  * Increment the component render counter.
  * @since 1.0.0
  */
-export const recordComponentRender: Effect.Effect<void> = Metric.increment(componentRenderCounter);
+export const recordComponentRender: Effect.Effect<void> = Metric.update(componentRenderCounter, 1);
 
 /**
  * Record a render duration in milliseconds.
  * @since 1.0.0
  */
 export const recordRenderDuration = (durationMs: number): Effect.Effect<void> =>
-  Effect.sync(() => {
-    renderDurationHistogram.unsafeUpdate(durationMs, []);
-  });
+  Metric.update(renderDurationHistogram, durationMs);
 
 // --- Snapshot API ---
 
@@ -179,7 +190,7 @@ export const snapshot: Effect.Effect<MetricsSnapshot> = Effect.gen(function* () 
 /**
  * Extract numeric value from counter state.
  */
-const extractCounterValue = (state: MetricState.MetricState.Counter<number>): number => {
+const extractCounterValue = (state: Metric.CounterState<number>): number => {
   return state.count;
 };
 
@@ -187,7 +198,7 @@ const extractCounterValue = (state: MetricState.MetricState.Counter<number>): nu
  * Extract histogram values from histogram state.
  */
 const extractHistogramValue = (
-  state: MetricState.MetricState.Histogram,
+  state: Metric.HistogramState,
 ): MetricsSnapshot["renderDurationHistogram"] => {
   return {
     count: state.count,
@@ -273,11 +284,11 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
   const currentSnapshot = yield* snapshot;
 
   for (const sink of _sinks.values()) {
-    yield* sink.export(currentSnapshot).pipe(
-      Effect.catchAllCause((cause) =>
-        Effect.sync(() => {
-          metricsLogger.error(`Metrics sink "${sink.name}" error:`, cause);
-        }),
+      yield* sink.export(currentSnapshot).pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            metricsLogger.error(`Metrics sink "${sink.name}" error:`, cause);
+          }),
       ),
     );
   }

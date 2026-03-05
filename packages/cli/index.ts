@@ -5,10 +5,11 @@
  * Usage: bun create trygg [project-name] [options]
  *        bunx create-trygg [project-name] [options]
  */
-import { Args, Command, Options } from "@effect/cli";
+import { Argument, Command, Flag } from "effect/unstable/cli";
 import pkg from "./package.json";
-import { BunContext, BunRuntime } from "@effect/platform-bun";
-import { FileSystem } from "@effect/platform";
+import { BunRuntime } from "@effect/platform-bun";
+import * as BunServices from "@effect/platform-bun/BunServices";
+import * as FileSystem from "effect/FileSystem";
 import { Effect, Layer, Option } from "effect";
 import * as clack from "@clack/prompts";
 import * as path from "node:path";
@@ -29,18 +30,19 @@ import {
 // CLI Definition
 // =============================================================================
 
-const projectName = Args.text({ name: "project-name" }).pipe(
-  Args.withDescription("Name of the project to create"),
-  Args.optional,
+const projectName = Argument.string("project-name").pipe(
+  Argument.withDescription("Name of the project to create"),
+  Argument.optional,
 );
 
-const templateOption = Options.text("template").pipe(
-  Options.withDescription("Template to scaffold (default: blank)"),
-  Options.optional,
+const templateOption = Flag.string("template").pipe(
+  Flag.withDescription("Template to scaffold (default: blank)"),
+  Flag.optional,
 );
 
-const yesFlag = Options.boolean("yes", { aliases: ["y"] }).pipe(
-  Options.withDescription(
+const yesFlag = Flag.boolean("yes").pipe(
+  Flag.withAlias("y"),
+  Flag.withDescription(
     "Accept all defaults (template: blank, platform: bun, output: server, vcs: git, install: yes)",
   ),
 );
@@ -54,7 +56,7 @@ const create = Command.make(
     template: templateOption,
     yes: yesFlag,
   },
-  (args) =>
+  (args): Effect.Effect<void, unknown, Prompts | FileSystem.FileSystem> =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const prompts = yield* Prompts;
@@ -69,7 +71,7 @@ const create = Command.make(
         name = yield* prompts.text({
           message: "Project name:",
           placeholder: "my-app",
-          validate: (value) => {
+          validate: (value: string) => {
             if (!value) return "Project name is required";
             if (!/^[a-zA-Z0-9-_]+$/.test(value)) {
               return "Use only letters, numbers, hyphens, and underscores";
@@ -142,18 +144,21 @@ const create = Command.make(
       if (options.vcs !== "none") {
         spinner.start(`Initializing ${options.vcs}...`);
         const vcsCommand = options.vcs === "git" ? "git init" : "jj git init";
-        yield* Effect.async<void>((resume) => {
-          const proc = spawn(vcsCommand, { cwd: targetDir, shell: true });
-          proc.on("close", (code) => {
-            if (code === 0) {
-              spinner.stop(`Initialized ${options.vcs} repository`);
-              resume(Effect.void);
-            } else {
-              spinner.stop(`Failed to initialize ${options.vcs}`);
-              resume(Effect.void);
-            }
-          });
-        });
+        yield* Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              const proc = spawn(vcsCommand, { cwd: targetDir, shell: true });
+              proc.on("close", (code) => {
+                if (code === 0) {
+                  spinner.stop(`Initialized ${options.vcs} repository`);
+                  resolve();
+                } else {
+                  spinner.stop(`Failed to initialize ${options.vcs}`);
+                  resolve();
+                }
+              });
+            }),
+        );
       }
 
       // Install dependencies
@@ -162,17 +167,21 @@ const create = Command.make(
         const installCmd = getInstallCommand(pm);
 
         spinner.start(`Installing dependencies with ${pm}...`);
-        yield* Effect.async<void, InstallFailedError>((resume) => {
-          const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" });
-          proc.on("close", (code) => {
-            if (code === 0) {
-              spinner.stop("Dependencies installed");
-              resume(Effect.void);
-            } else {
-              spinner.stop("Failed to install dependencies");
-              resume(Effect.fail(new InstallFailedError()));
-            }
-          });
+        yield* Effect.tryPromise({
+          try: () =>
+            new Promise<void>((resolve, reject) => {
+              const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" });
+              proc.on("close", (code) => {
+                if (code === 0) {
+                  spinner.stop("Dependencies installed");
+                  resolve();
+                } else {
+                  spinner.stop("Failed to install dependencies");
+                  reject(new InstallFailedError());
+                }
+              });
+            }),
+          catch: () => new InstallFailedError(),
         });
       }
 
@@ -201,11 +210,10 @@ const create = Command.make(
 // =============================================================================
 
 const cli = Command.run(create, {
-  name: "create-trygg",
   version: pkg.version,
 });
 
 // Application layer with prompts
-const AppLayer = Layer.mergeAll(BunContext.layer, PromptsLive);
+const AppLayer = Layer.mergeAll(BunServices.layer, PromptsLive);
 
-cli(process.argv).pipe(Effect.provide(AppLayer), BunRuntime.runMain);
+cli.pipe(Effect.provide(AppLayer), BunRuntime.runMain);

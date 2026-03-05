@@ -16,7 +16,7 @@
  * ```
  */
 
-import { Effect, FiberRef, GlobalValue, Layer } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 
 /** Base fields for all events */
 interface BaseEvent {
@@ -973,50 +973,56 @@ export const nextTraceId = (): string => `trace_${++traceCounter}`;
 let spanCounter = 0;
 export const nextSpanId = (): string => `span_${++spanCounter}`;
 
-// --- Trace Context FiberRefs ---
+// --- Trace Context References ---
+
+const getReference = <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+  Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference)));
+
+const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+  Effect.withFiber((fiber) =>
+    Effect.sync(() => {
+      fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+    }));
 
 /**
- * FiberRef for current trace ID.
+ * Reference for current trace ID.
  * Set by router on navigate, propagated through Effect context.
- * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentTraceId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("trygg/Debug/CurrentTraceId"),
-  () => FiberRef.unsafeMake<string | undefined>(undefined),
-);
+export const CurrentTraceId = ServiceMap.Reference<string | undefined>("trygg/Debug/CurrentTraceId", {
+  defaultValue: () => undefined,
+});
 
 /**
- * FiberRef for current span ID.
+ * Reference for current span ID.
  * Set by startSpan, propagated through Effect context.
- * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("trygg/Debug/CurrentSpanId"),
-  () => FiberRef.unsafeMake<string | undefined>(undefined),
-);
+export const CurrentSpanId = ServiceMap.Reference<string | undefined>("trygg/Debug/CurrentSpanId", {
+  defaultValue: () => undefined,
+});
 
 /**
- * FiberRef for parent span ID.
+ * Reference for parent span ID.
  * Used for building span hierarchies.
- * Uses GlobalValue to ensure single instance even with module duplication.
  * @since 1.0.0
  */
-export const CurrentParentSpanId: FiberRef.FiberRef<string | undefined> = GlobalValue.globalValue(
-  Symbol.for("trygg/Debug/CurrentParentSpanId"),
-  () => FiberRef.unsafeMake<string | undefined>(undefined),
+export const CurrentParentSpanId = ServiceMap.Reference<string | undefined>(
+  "trygg/Debug/CurrentParentSpanId",
+  {
+    defaultValue: () => undefined,
+  },
 );
 
 /**
- * Get current trace context from FiberRefs.
+ * Get current trace context from references.
  * Effect-based - reads from fiber-local state.
  * @since 1.0.0
  */
 export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function* () {
-  const traceId = yield* FiberRef.get(CurrentTraceId);
-  const spanId = yield* FiberRef.get(CurrentSpanId);
-  const parentSpanId = yield* FiberRef.get(CurrentParentSpanId);
+  const traceId = yield* getReference(CurrentTraceId);
+  const spanId = yield* getReference(CurrentSpanId);
+  const parentSpanId = yield* getReference(CurrentParentSpanId);
 
   return {
     ...(traceId !== undefined ? { traceId } : {}),
@@ -1031,16 +1037,16 @@ export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function*
  * @since 1.0.0
  */
 export const setTraceId = (traceId: string): Effect.Effect<void> =>
-  FiberRef.set(CurrentTraceId, traceId);
+  setReference(CurrentTraceId, traceId);
 
 /**
  * Clear the current trace context.
  * @since 1.0.0
  */
 export const clearTraceContext: Effect.Effect<void> = Effect.gen(function* () {
-  yield* FiberRef.set(CurrentTraceId, undefined);
-  yield* FiberRef.set(CurrentSpanId, undefined);
-  yield* FiberRef.set(CurrentParentSpanId, undefined);
+  yield* setReference(CurrentTraceId, undefined);
+  yield* setReference(CurrentSpanId, undefined);
+  yield* setReference(CurrentParentSpanId, undefined);
 });
 
 // --- Enable/Disable API ---
@@ -1272,7 +1278,7 @@ const dispatchToPlugins = (fullEvent: DebugEvent): void => {
 
 /**
  * Log a wide event (Effect-based).
- * Reads trace context from FiberRefs and dispatches to plugins.
+ * Reads trace context from references and dispatches to plugins.
  * No-op if debug is disabled or event is filtered out.
  * @since 1.0.0
  */
@@ -1281,7 +1287,7 @@ export const log: (event: LogInput) => Effect.Effect<void> = Effect.fnUntraced(f
 ) {
   if (!shouldLog(event.event)) return;
 
-  // Read trace context from FiberRefs
+  // Read trace context from references
   const traceContext = yield* getTraceContext;
 
   const fullEvent = {
@@ -1306,12 +1312,12 @@ export const startSpan: (
   attributes?: Record<string, unknown>,
 ) {
   const newSpanId = nextSpanId();
-  const previousSpanId = yield* FiberRef.get(CurrentSpanId);
-  const previousParentSpanId = yield* FiberRef.get(CurrentParentSpanId);
+  const previousSpanId = yield* getReference(CurrentSpanId);
+  const previousParentSpanId = yield* getReference(CurrentParentSpanId);
 
   // Set new span as current, with previous span as parent
-  yield* FiberRef.set(CurrentParentSpanId, previousSpanId);
-  yield* FiberRef.set(CurrentSpanId, newSpanId);
+  yield* setReference(CurrentParentSpanId, previousSpanId);
+  yield* setReference(CurrentSpanId, newSpanId);
 
   yield* log({
     event: "trace.span.start",
@@ -1324,8 +1330,8 @@ export const startSpan: (
     Effect.all(
       [
         log({ event: "trace.span.end", name, status: "ok" }),
-        FiberRef.set(CurrentSpanId, previousSpanId),
-        FiberRef.set(CurrentParentSpanId, previousParentSpanId),
+        setReference(CurrentSpanId, previousSpanId),
+        setReference(CurrentParentSpanId, previousParentSpanId),
       ],
       { discard: true },
     ),
@@ -1344,12 +1350,12 @@ export const withSpan = <A, E, R>(
 ): Effect.Effect<A, E, R> =>
   Effect.gen(function* () {
     const newSpanId = nextSpanId();
-    const previousSpanId = yield* FiberRef.get(CurrentSpanId);
-    const previousParentSpanId = yield* FiberRef.get(CurrentParentSpanId);
+    const previousSpanId = yield* getReference(CurrentSpanId);
+    const previousParentSpanId = yield* getReference(CurrentParentSpanId);
 
     // Set new span as current
-    yield* FiberRef.set(CurrentParentSpanId, previousSpanId);
-    yield* FiberRef.set(CurrentSpanId, newSpanId);
+    yield* setReference(CurrentParentSpanId, previousSpanId);
+    yield* setReference(CurrentSpanId, newSpanId);
 
     yield* log({
       event: "trace.span.start",
@@ -1358,26 +1364,24 @@ export const withSpan = <A, E, R>(
     });
 
     return yield* effect.pipe(
-      Effect.tapBoth({
-        onSuccess: () =>
-          log({
-            event: "trace.span.end",
-            name,
-            status: "ok",
-          }),
-        onFailure: (error) =>
-          log({
-            event: "trace.span.end",
-            name,
-            status: "error",
-            error: String(error),
-          }),
-      }),
+      Effect.tap(() =>
+        log({
+          event: "trace.span.end",
+          name,
+          status: "ok",
+        })),
+      Effect.tapError((error) =>
+        log({
+          event: "trace.span.end",
+          name,
+          status: "error",
+          error: String(error),
+        })),
       Effect.ensuring(
         Effect.all(
           [
-            FiberRef.set(CurrentSpanId, previousSpanId),
-            FiberRef.set(CurrentParentSpanId, previousParentSpanId),
+            setReference(CurrentSpanId, previousSpanId),
+            setReference(CurrentParentSpanId, previousParentSpanId),
           ],
           { discard: true },
         ),
@@ -1422,7 +1426,7 @@ export const measure = <A, E, R>(
  *
  * @since 1.0.0
  */
-export const defaultLayer: Layer.Layer<never> = Layer.scopedDiscard(
+export const defaultLayer: Layer.Layer<never> = Layer.effectDiscard(
   Effect.gen(function* () {
     registerPlugin(consolePlugin);
 

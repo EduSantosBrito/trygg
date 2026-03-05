@@ -16,7 +16,8 @@
  * - Verify handler requirements are propagated
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Cause, Data, Effect, Layer, Option } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -29,14 +30,19 @@ import { render } from "../../testing/index.js";
 class TestError extends Data.TaggedError("TestError")<{}> {}
 class NetworkError extends Data.TaggedError("NetworkError")<{}> {}
 
+const catchAllView = (content: string, testId?: string) =>
+  Component.gen(function* (_Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {
+    return testId === undefined ? <div>{content}</div> : <div data-testid={testId}>{content}</div>;
+  });
+
 // =============================================================================
 // .provide() preservation
 // =============================================================================
 
 describe("ErrorBoundary .provide() preservation", () => {
-  it.scoped("provide preserves error boundary wrapper", () =>
+  it.effect("provide preserves error boundary wrapper", () =>
     Effect.gen(function* () {
-      const TestService = Context.GenericTag<string>("TestService");
+      const TestService = ServiceMap.Service<string>("TestService");
       const TestLayer = Layer.succeed(TestService, "provided-value");
 
       const FailingComponent = Component.gen(function* () {
@@ -44,8 +50,9 @@ describe("ErrorBoundary .provide() preservation", () => {
         return <div>should not render</div>;
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>fallback</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("fallback")),
+      );
 
       // Apply .provide() - this should NOT break the error boundary
       const ProvidedComponent = SafeComponent.provide(TestLayer);
@@ -59,9 +66,9 @@ describe("ErrorBoundary .provide() preservation", () => {
     }),
   );
 
-  it.scoped("services provided via .provide() available inside wrapped tree", () =>
+  it.effect("services provided via .provide() available inside wrapped tree", () =>
     Effect.gen(function* () {
-      const TestService = Context.GenericTag<string>("TestService");
+      const TestService = ServiceMap.Service<string>("TestService");
       const TestLayer = Layer.succeed(TestService, "provided-value");
 
       const ServiceComponent = Component.gen(function* () {
@@ -69,8 +76,9 @@ describe("ErrorBoundary .provide() preservation", () => {
         return <div data-testid="service-value">{value}</div>;
       });
 
-      const builder = ErrorBoundary.catch(ServiceComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>error</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(ServiceComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("error")),
+      );
 
       const ProvidedComponent = SafeComponent.provide(TestLayer);
       const element = ProvidedComponent({});
@@ -81,15 +89,16 @@ describe("ErrorBoundary .provide() preservation", () => {
     }),
   );
 
-  it.scoped("isEffectComponent remains true and error boundary works", () =>
+  it.effect("isEffectComponent remains true and error boundary works", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         yield* new TestError();
         return <div>test</div>;
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>fallback</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("fallback")),
+      );
 
       // Verify it's an effect component
       assert.isTrue(Component.isEffectComponent(SafeComponent));
@@ -106,9 +115,9 @@ describe("ErrorBoundary .provide() preservation", () => {
 // =============================================================================
 
 describe("ErrorBoundary handler requirements propagation", () => {
-  it.scoped("propagates handler service requirements", () =>
+  it.effect("propagates handler service requirements", () =>
     Effect.gen(function* () {
-      const ErrorTheme = Context.GenericTag<string>("ErrorTheme");
+      const ErrorTheme = ServiceMap.Service<string>("ErrorTheme");
       const ErrorThemeLayer = Layer.succeed(ErrorTheme, "error-theme");
 
       const RiskyComponent = Component.gen(function* () {
@@ -124,9 +133,10 @@ describe("ErrorBoundary handler requirements propagation", () => {
         return <div className={theme}>error</div>;
       });
 
-      const builder = ErrorBoundary.catch(RiskyComponent);
-      const withHandler = builder.on("NetworkError", ThemedFallback);
-      const SafeComponent = yield* withHandler.catchAll(() => <div>generic</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+        ErrorBoundary.on("NetworkError", ThemedFallback),
+        ErrorBoundary.catchAll(catchAllView("generic")),
+      );
 
       // Render with ErrorTheme provided - should work
       const ProvidedComponent = SafeComponent.provide(ErrorThemeLayer);
@@ -144,15 +154,16 @@ describe("ErrorBoundary handler requirements propagation", () => {
 // =============================================================================
 
 describe("ErrorBoundary basic functionality", () => {
-  it.scoped("catchAll renders fallback on error", () =>
+  it.effect("catchAll renders fallback on error", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         yield* new TestError();
         return <div>should not render</div>;
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>fallback</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("fallback")),
+      );
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -160,7 +171,7 @@ describe("ErrorBoundary basic functionality", () => {
     }),
   );
 
-  it.scoped("on() handler matches specific error tags", () =>
+  it.effect("on() handler matches specific error tags", () =>
     Effect.gen(function* () {
       const RiskyComponent = Component.gen(function* () {
         yield* new NetworkError();
@@ -174,9 +185,10 @@ describe("ErrorBoundary basic functionality", () => {
         return <div>network-error</div>;
       });
 
-      const builder = ErrorBoundary.catch(RiskyComponent);
-      const withHandler = builder.on("NetworkError", NetworkErrorView);
-      const SafeComponent = yield* withHandler.catchAll(() => <div>generic-error</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+        ErrorBoundary.on("NetworkError", NetworkErrorView),
+        ErrorBoundary.catchAll(catchAllView("generic-error")),
+      );
 
       const { getByText, queryByText } = yield* render(<SafeComponent />);
 
@@ -185,20 +197,22 @@ describe("ErrorBoundary basic functionality", () => {
     }),
   );
 
-  it.scoped("unwraps symbol-key props", () =>
+  it.effect("unwraps symbol-key props", () =>
     Effect.gen(function* () {
-      const SymbolKey = Symbol.for("error-boundary-symbol");
+        const SymbolKey = Symbol.for("error-boundary-symbol");
 
-      const SymbolComponent = Component.gen(function* (
-        Props: Component.ComponentProps<{ [SymbolKey]: string }>,
+        const SymbolComponent = Component.gen(function* (
+        Props: Component.ComponentProps<{ [SymbolKey]: Signal.Signal<string> }>,
       ) {
         const props = yield* Props;
-        return <div data-testid="symbol-prop">{props[SymbolKey]}</div>;
+        const value = yield* Signal.get(props[SymbolKey]);
+        return <div data-testid="symbol-prop">{value}</div>;
       });
 
       const valueSignal = Signal.makeSync("symbol-value");
-      const builder = ErrorBoundary.catch(SymbolComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>fallback</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(SymbolComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("fallback")),
+      );
 
       const element = SafeComponent({ [SymbolKey]: valueSignal });
       const { getByTestId } = yield* render(element);
@@ -208,7 +222,7 @@ describe("ErrorBoundary basic functionality", () => {
     }),
   );
 
-  it.scoped("preserveSignalProp keeps signal-typed props usable", () =>
+  it.effect("signal-typed props stay usable through boundaries", () =>
     Effect.gen(function* () {
       const SignalPropComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ count: Signal.Signal<number> }>,
@@ -219,11 +233,11 @@ describe("ErrorBoundary basic functionality", () => {
       });
 
       const count = Signal.makeSync(3);
-      const SafeComponent = yield* ErrorBoundary.catch(SignalPropComponent).catchAll(() => (
-        <div data-testid="fallback">fallback</div>
-      ));
+      const SafeComponent = yield* ErrorBoundary.catch(SignalPropComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView("fallback", "fallback")),
+      );
 
-      const element = SafeComponent({ count: ErrorBoundary.preserveSignalProp(count) });
+      const element = SafeComponent({ count });
       const { getByTestId, queryByTestId } = yield* render(element);
 
       assert.strictEqual((yield* getByTestId("doubled")).textContent, "6");
@@ -237,7 +251,7 @@ describe("ErrorBoundary basic functionality", () => {
 // =============================================================================
 
 describe("ErrorBoundary builder validation", () => {
-  it.scoped("calling catchAll independently on same builder succeeds (immutable)", () =>
+  it.effect("calling catchAll independently on same builder succeeds (immutable)", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         yield* new TestError();
@@ -247,8 +261,8 @@ describe("ErrorBoundary builder validation", () => {
       const builder = ErrorBoundary.catch(FailingComponent);
 
       // Both calls succeed independently — immutable builder semantics
-      const Safe1 = yield* builder.catchAll(() => <div data-testid="fb1">fallback1</div>);
-      const Safe2 = yield* builder.catchAll(() => <div data-testid="fb2">fallback2</div>);
+      const Safe1 = yield* builder.pipe(ErrorBoundary.catchAll(catchAllView("fallback1", "fb1")));
+      const Safe2 = yield* builder.pipe(ErrorBoundary.catchAll(catchAllView("fallback2", "fb2")));
 
       assert.isTrue(Component.isEffectComponent(Safe1));
       assert.isTrue(Component.isEffectComponent(Safe2));

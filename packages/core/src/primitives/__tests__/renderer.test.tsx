@@ -16,8 +16,10 @@
  * - Every test manages its own fibers/scope to prevent memory leaks
  * - Tests verify DOM structure and cleanup
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Context, Data, Effect, Exit, Layer, Option, Scope, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Data, Effect, Exit, Layer, Option, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
+import { TestClock } from "effect/testing";
 
 // Tagged errors for testing component failures
 class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
@@ -27,6 +29,8 @@ import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
 import * as Router from "../../router/index.js";
 import { Element, Fragment } from "../../index.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // mount - App entry point
@@ -99,7 +103,7 @@ describe("Text element rendering", () => {
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
-      yield* render(<div id="cleanup-text">Will be removed</div>).pipe(Scope.extend(scope));
+      yield* render(<div id="cleanup-text">Will be removed</div>).pipe(Scope.provide(scope));
 
       const before = document.querySelector("#cleanup-text");
       assert.isNotNull(before);
@@ -155,7 +159,7 @@ describe("SignalText element rendering", () => {
       const textSignal = yield* Signal.make("cleanup");
       const scope = yield* Scope.make();
 
-      yield* render(<div id="signal-cleanup">{textSignal}</div>).pipe(Scope.extend(scope));
+      yield* render(<div id="signal-cleanup">{textSignal}</div>).pipe(Scope.provide(scope));
 
       const listenersBefore = textSignal._listeners.size;
 
@@ -217,7 +221,7 @@ describe("SignalElement rendering", () => {
       const elemSignal = yield* Signal.make(<span id="elem-cleanup" />);
       const scope = yield* Scope.make();
 
-      yield* render(<div>{elemSignal}</div>).pipe(Scope.extend(scope));
+      yield* render(<div>{elemSignal}</div>).pipe(Scope.provide(scope));
 
       const before = document.querySelector("#elem-cleanup");
       assert.isNotNull(before);
@@ -240,7 +244,7 @@ describe("SignalElement rendering", () => {
 
   it.scoped("should preserve provided context when swapping", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Tag("Theme")<Theme, { value: string }>() {}
+      class Theme extends ServiceMap.Service<Theme, { value: string }>()("Theme") {}
       const themeLayer = Layer.succeed(Theme, { value: "themed" });
 
       const ViewA = Component.gen(function* () {
@@ -322,7 +326,7 @@ describe("Intrinsic element rendering", () => {
         <div id="cleanup-intrinsic">
           <span id="cleanup-child" />
         </div>,
-      ).pipe(Scope.extend(scope));
+      ).pipe(Scope.provide(scope));
 
       assert.isNotNull(document.querySelector("#cleanup-intrinsic"));
       assert.isNotNull(document.querySelector("#cleanup-child"));
@@ -453,7 +457,7 @@ describe("Component element rendering", () => {
         return <div id="comp-cleanup" />;
       });
 
-      yield* render(<MyComponent />).pipe(Scope.extend(scope));
+      yield* render(<MyComponent />).pipe(Scope.provide(scope));
 
       assert.isNotNull(document.querySelector("#comp-cleanup"));
 
@@ -621,7 +625,7 @@ describe("Fragment element rendering", () => {
             <span id="frag-child-2" />
           </>
         </div>,
-      ).pipe(Scope.extend(scope));
+      ).pipe(Scope.provide(scope));
 
       assert.isNotNull(document.querySelector("#frag-child-1"));
       assert.isNotNull(document.querySelector("#frag-child-2"));
@@ -824,7 +828,7 @@ describe("Signal props", () => {
       const classSignal = yield* Signal.make("class");
       const scope = yield* Scope.make();
 
-      yield* render(<div id="sig-cleanup" className={classSignal} />).pipe(Scope.extend(scope));
+      yield* render(<div id="sig-cleanup" className={classSignal} />).pipe(Scope.provide(scope));
 
       const listenersBefore = classSignal._listeners.size;
 
@@ -942,7 +946,7 @@ describe("Scope and cleanup", () => {
         <div id="scope-unmount">
           <MyComponent />
         </div>,
-      ).pipe(Scope.extend(scope));
+      ).pipe(Scope.provide(scope));
 
       yield* Scope.close(scope, Exit.void);
 
@@ -977,7 +981,7 @@ describe("Scope and cleanup", () => {
         );
       });
 
-      yield* render(<Parent />).pipe(Scope.extend(scope));
+      yield* render(<Parent />).pipe(Scope.provide(scope));
       yield* Scope.close(scope, Exit.void);
 
       assert.include(cleanupOrder, "child");
@@ -995,7 +999,7 @@ describe("Scope and cleanup", () => {
         return <span>{String(value)}</span>;
       });
 
-      yield* render(<MyComponent />).pipe(Scope.extend(scope));
+      yield* render(<MyComponent />).pipe(Scope.provide(scope));
 
       const listenersBefore = signal._listeners.size;
 
@@ -1015,7 +1019,7 @@ describe("Scope and cleanup", () => {
           <span id="dom-child-1" />
           <span id="dom-child-2" />
         </div>,
-      ).pipe(Scope.extend(scope));
+      ).pipe(Scope.provide(scope));
 
       assert.isNotNull(document.querySelector("#dom-cleanup"));
       assert.isNotNull(document.querySelector("#dom-child-1"));
@@ -1618,7 +1622,7 @@ describe("Renderer error handling", () => {
         return <div id="error-cleanup">Content</div>;
       });
 
-      yield* render(<ErrorOnRerenderComponent />).pipe(Scope.extend(scope));
+      yield* render(<ErrorOnRerenderComponent />).pipe(Scope.provide(scope));
 
       // Initial render
       assert.isNotNull(document.querySelector("#error-cleanup"));
@@ -1647,7 +1651,7 @@ describe("Renderer error handling", () => {
 describe("Provide element", () => {
   it.scoped("should provide context to child components", () =>
     Effect.gen(function* () {
-      class TestCtx extends Context.Tag("TestCtx")<TestCtx, { value: string }>() {}
+      class TestCtx extends ServiceMap.Service<TestCtx, { value: string }>()("TestCtx") {}
 
       const Child = Component.gen(function* () {
         const ctx = yield* TestCtx;
@@ -1666,7 +1670,7 @@ describe("Provide element", () => {
 
   it.scoped("should propagate context to deeply nested components", () =>
     Effect.gen(function* () {
-      class DeepCtx extends Context.Tag("DeepCtx")<DeepCtx, { nested: string }>() {}
+      class DeepCtx extends ServiceMap.Service<DeepCtx, { nested: string }>()("DeepCtx") {}
 
       const DeepChild = Component.gen(function* () {
         const ctx = yield* DeepCtx;

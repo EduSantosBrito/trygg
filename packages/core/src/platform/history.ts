@@ -4,7 +4,8 @@
  *
  * Manage the browser navigation stack.
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -33,7 +34,9 @@ export interface HistoryService {
 // Tag
 // =============================================================================
 
-export class History extends Context.Tag("trygg/platform/History")<History, HistoryService>() {}
+export interface History extends ServiceMap.Service<History, HistoryService> {}
+
+export const History = ServiceMap.Service<History, HistoryService>("trygg/platform/History");
 
 // =============================================================================
 // Browser layer

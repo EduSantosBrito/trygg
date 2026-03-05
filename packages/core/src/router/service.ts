@@ -2,7 +2,8 @@
  * @since 1.0.0
  * Router service for trygg
  */
-import { Context, Effect, FiberRef, GlobalValue, Layer, Option, Ref, Schema, Scope } from "effect";
+import { Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import { CurrentRouteQuery } from "./route.js";
 
 import * as Signal from "../primitives/signal.js";
@@ -32,10 +33,20 @@ import { PlatformEventTarget } from "../platform/event-target.js";
 import { Observer } from "../platform/observer.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
 
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+    Effect.withFiber((fiber) =>
+      Effect.sync(() => {
+        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+      })),
+};
+
 /** @internal */
 const ScrollPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 /** @internal */
-const ScrollPositionJson = Schema.parseJson(ScrollPosition);
+const ScrollPositionJson = Schema.fromJsonString(ScrollPosition);
 /** @internal Schema for history.state scroll key — replaces unsafe `as` casts. */
 const ScrollState = Schema.Struct({ _scrollKey: Schema.String });
 /** @internal */
@@ -153,10 +164,12 @@ const setupViewportPrefetch = (
   });
 
 /**
- * Router service tag
+ * Router service key
  * @since 1.0.0
  */
-export class Router extends Context.Tag("@trygg/Router")<Router, RouterService>() {}
+export interface Router extends ServiceMap.Service<Router, RouterService> {}
+
+export const Router = ServiceMap.Service<Router, RouterService>("@trygg/Router");
 
 /**
  * FiberRef to store current route params for the active route
@@ -164,10 +177,9 @@ export class Router extends Context.Tag("@trygg/Router")<Router, RouterService>(
  * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
  * @internal
  */
-export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = GlobalValue.globalValue(
-  Symbol.for("trygg/Router/CurrentRouteParams"),
-  () => FiberRef.unsafeMake<RouteParams>({}),
-);
+export const CurrentRouteParams = ServiceMap.Reference<RouteParams>("trygg/Router/CurrentRouteParams", {
+  defaultValue: () => ({}),
+});
 
 /**
  * FiberRef to store the current router service.
@@ -177,10 +189,12 @@ export const CurrentRouteParams: FiberRef.FiberRef<RouteParams> = GlobalValue.gl
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
-  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentRouter"), () =>
-    FiberRef.unsafeMake<Option.Option<RouterService>>(Option.none()),
-  );
+export const CurrentRouter = ServiceMap.Reference<Option.Option<RouterService>>(
+  "trygg/Router/CurrentRouter",
+  {
+    defaultValue: Option.none,
+  },
+);
 
 /**
  * FiberRef to store route error info for .error() boundary components.
@@ -188,10 +202,12 @@ export const CurrentRouter: FiberRef.FiberRef<Option.Option<RouterService>> =
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>> =
-  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentRouteError"), () =>
-    FiberRef.unsafeMake<Option.Option<RouteErrorInfo>>(Option.none()),
-  );
+export const CurrentRouteError = ServiceMap.Reference<Option.Option<RouteErrorInfo>>(
+  "trygg/Router/CurrentRouteError",
+  {
+    defaultValue: Option.none,
+  },
+);
 
 /**
  * FiberRef to store child content passed from parent outlet to nested outlet.
@@ -202,31 +218,33 @@ export const CurrentRouteError: FiberRef.FiberRef<Option.Option<RouteErrorInfo>>
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentOutletChild: FiberRef.FiberRef<Option.Option<Element>> =
-  GlobalValue.globalValue(Symbol.for("trygg/Router/CurrentOutletChild"), () =>
-    FiberRef.unsafeMake<Option.Option<Element>>(Option.none()),
-  );
+export const CurrentOutletChild = ServiceMap.Reference<Option.Option<Element>>(
+  "trygg/Router/CurrentOutletChild",
+  {
+    defaultValue: Option.none,
+  },
+);
 
 /**
  * Get the current router service.
- * Uses the Router Context.Tag which is provided to all components
+ * Uses the Router service key which is provided to all components
  * via the render context in browserLayer.
  * @since 1.0.0
  */
-export const get: Effect.Effect<RouterService, never, Router> = Router;
+export const get: Effect.Effect<RouterService, never, Router> = Router.asEffect();
 
 /**
  * @deprecated Use `Router.get` instead
  * @internal
  */
-export const getRouter: Effect.Effect<RouterService, never, Router> = Router;
+export const getRouter: Effect.Effect<RouterService, never, Router> = Router.asEffect();
 
 /**
  * Get the current route signal
  * @since 1.0.0
  */
 export const current: Effect.Effect<Signal.Signal<Route>, never, Router> = Effect.map(
-  Router,
+  Router.asEffect(),
   (router) => router.current,
 );
 
@@ -253,7 +271,7 @@ export const currentRoute: Effect.Effect<Route, never, Router> = Effect.gen(func
  * @since 1.0.0
  */
 export const querySignal: Effect.Effect<Signal.Signal<URLSearchParams>, never, Router> = Effect.map(
-  Router,
+  Router.asEffect(),
   (router) => router.query,
 );
 
@@ -288,13 +306,13 @@ export const navigate = (
   path: string,
   options?: NavigateOptions,
 ): Effect.Effect<void, NavigationError, Router> =>
-  Effect.flatMap(Router, (router) => router.navigate(path, options));
+  Effect.flatMap(Router.asEffect(), (router) => router.navigate(path, options));
 
 /**
  * Go back in history
  * @since 1.0.0
  */
-export const back: Effect.Effect<void, never, Router> = Effect.flatMap(Router, (router) =>
+export const back: Effect.Effect<void, never, Router> = Effect.flatMap(Router.asEffect(), (router) =>
   router.back(),
 );
 
@@ -302,7 +320,7 @@ export const back: Effect.Effect<void, never, Router> = Effect.flatMap(Router, (
  * Go forward in history
  * @since 1.0.0
  */
-export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(Router, (router) =>
+export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(Router.asEffect(), (router) =>
   router.forward(),
 );
 
@@ -351,7 +369,7 @@ export const isActive = (
   path: string,
   options?: IsActiveOptions,
 ): Effect.Effect<Signal.Signal<boolean>, never, Router | Scope.Scope> =>
-  Effect.flatMap(Router, (router) => router.isActive(path, options));
+  Effect.flatMap(Router.asEffect(), (router) => router.isActive(path, options));
 
 /**
  * Prefetch route modules for a path.
@@ -360,7 +378,7 @@ export const isActive = (
  * @since 1.0.0
  */
 export const prefetch = (path: string): Effect.Effect<void, never, Router> =>
-  Effect.flatMap(Router, (router) => router.prefetch(path));
+  Effect.flatMap(Router.asEffect(), (router) => router.prefetch(path));
 
 /**
  * Get route error info in an error boundary component.
@@ -426,7 +444,7 @@ export const browserLayer: Layer.Layer<
   Router,
   NavigationError,
   SessionStorage | Scroll | Dom | History | Location | PlatformEventTarget | Observer
-> = Layer.scoped(
+> = Layer.effect(
   Router,
   Effect.gen(function* () {
     // Resolve platform services
@@ -448,8 +466,7 @@ export const browserLayer: Layer.Layer<
     const { path, query: initialQuery } = yield* parsePath(initialPath);
 
     // Generate unique key for scroll position storage
-    const random = yield* Effect.random;
-    const generateKey = Effect.map(random.nextInt, (n) => Math.abs(n).toString(36).slice(0, 8));
+    const generateKey = Effect.map(Random.nextInt, (n) => Math.abs(n).toString(36).slice(0, 8));
     let currentNavKey = yield* generateKey;
 
     // Ensure initial history state has a key
@@ -510,16 +527,16 @@ export const browserLayer: Layer.Layer<
           x: pos.x,
           y: pos.y,
         });
-        const encoded = yield* Schema.encode(ScrollPositionJson)(pos);
+        const encoded = yield* Schema.encodeUnknownEffect(ScrollPositionJson)(pos);
         yield* storage.set(`trygg:scroll:${currentNavKey}`, encoded);
       }).pipe(Effect.ignore);
 
     // Yield to requestAnimationFrame — lets forked render fibers (microtasks)
     // complete DOM updates before we scroll. Effect.async suspends the current
     // fiber, draining the microtask queue, then rAF fires after layout/paint.
-    const afterFrame: Effect.Effect<void> = Effect.async((resume) => {
-      requestAnimationFrame(() => resume(Effect.void));
-    });
+    const afterFrame: Effect.Effect<void> = Effect.promise(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+    );
 
     // Apply scroll behavior using captured services (best-effort).
     // Dispatches on ScrollStrategyType._tag — no sentinel strings.
@@ -552,7 +569,7 @@ export const browserLayer: Layer.Layer<
         if (opts.isPopstate) {
           const stored = yield* storage.get(`trygg:scroll:${storageKey}`);
           if (stored !== null) {
-            const pos = yield* Schema.decode(ScrollPositionJson)(stored);
+            const pos = yield* Schema.decodeUnknownEffect(ScrollPositionJson)(stored);
             yield* Debug.log({
               event: "router.scroll.restore",
               key: storageKey,

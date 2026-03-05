@@ -3,15 +3,10 @@
  *
  * Single file defining all API endpoints and handlers.
  */
-import {
-  HttpApi,
-  HttpApiEndpoint,
-  HttpApiGroup,
-  HttpApiBuilder,
-  HttpApiClient,
-  FetchHttpClient,
-} from "@effect/platform";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Data, Effect, Layer, Schema } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
+import { FetchHttpClient } from "effect/unstable/http";
+import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 
 // =============================================================================
 // Schemas
@@ -33,9 +28,13 @@ export const Post = Schema.Struct({
 });
 export type Post = typeof Post.Type;
 
-export class UserNotFound extends Schema.TaggedError<UserNotFound>()("UserNotFound", {
+const UserNotFoundSchema = Schema.TaggedStruct("UserNotFound", {
   id: Schema.String,
-}) {}
+});
+
+export class UserNotFound extends Data.TaggedError("UserNotFound")<{
+  readonly id: string;
+}> {}
 
 // =============================================================================
 // Mock Data
@@ -58,26 +57,28 @@ const mockPosts: ReadonlyArray<Post> = [
 // API Groups
 // =============================================================================
 
-class UsersGroup extends HttpApiGroup.make("users")
-  .add(HttpApiEndpoint.get("listUsers", "/users").addSuccess(Schema.Array(User)))
+const UsersGroup = HttpApiGroup.make("users")
+  .add(HttpApiEndpoint.get("listUsers", "/users", { success: Schema.Array(User) }))
   .add(
-    HttpApiEndpoint.get("getUser", "/users/:id")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(User)
-      .addError(UserNotFound),
+    HttpApiEndpoint.get("getUser", "/users/:id", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: User,
+      error: UserNotFoundSchema,
+    }),
   )
   .add(
-    HttpApiEndpoint.get("getUserPosts", "/users/:id/posts")
-      .setPath(Schema.Struct({ id: Schema.String }))
-      .addSuccess(Schema.Array(Post)),
+    HttpApiEndpoint.get("getUserPosts", "/users/:id/posts", {
+      params: Schema.Struct({ id: Schema.String }),
+      success: Schema.Array(Post),
+    }),
   )
-  .prefix("/api") {}
+  .prefix("/api");
 
 // =============================================================================
 // API Definition
 // =============================================================================
 
-class Api extends HttpApi.make("app").add(UsersGroup) {}
+const Api = HttpApi.make("app").add(UsersGroup);
 
 // =============================================================================
 // Handlers
@@ -91,36 +92,36 @@ const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
         return Object.values(mockUsers);
       }),
     )
-    .handle("getUser", ({ path }) =>
+    .handle("getUser", ({ params }) =>
       Effect.gen(function* () {
         yield* Effect.sleep("300 millis");
-        const user = mockUsers[path.id];
+        const user = mockUsers[params.id];
         if (!user) {
-          return yield* new UserNotFound({ id: path.id });
+          return yield* Effect.fail(new UserNotFound({ id: params.id }));
         }
         return user;
       }),
     )
-    .handle("getUserPosts", ({ path }) =>
+    .handle("getUserPosts", ({ params }) =>
       Effect.gen(function* () {
         yield* Effect.sleep("400 millis");
-        return mockPosts.filter((p) => p.authorId === path.id);
+        return mockPosts.filter((p) => p.authorId === params.id);
       }),
     ),
 );
 
-// Default export: composed Layer<HttpApi.Api> — the framework reads this.
-export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+// Default export: composed API layer — the framework reads this.
+export default HttpApiBuilder.layer(Api).pipe(Layer.provide(UsersLive));
 
 // =============================================================================
 // Typed API Client
 // =============================================================================
 
 const client = HttpApiClient.make(Api, { baseUrl: "" });
-type ApiClientService = Effect.Effect.Success<typeof client>;
+type ApiClientService = HttpApiClient.ForApi<typeof Api>;
 
 /** Tag for the typed API client. Yield in effects to get the client. */
-export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
+export class ApiClient extends ServiceMap.Service<ApiClient, ApiClientService>()("ApiClient") {}
 
 /** Layer that creates the ApiClient using FetchHttpClient. */
 export const ApiClientLive = Layer.effect(

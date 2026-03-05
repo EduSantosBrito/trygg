@@ -3,20 +3,21 @@
 // Tests for Routes.make(), .add() with R=never enforcement,
 // .notFound(), .forbidden(), and manifest generation.
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Effect, Schema } from "effect";
+import { Effect, Schema } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer } from "effect";
+import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -29,7 +30,9 @@ const notFoundComp = makeComp();
 const forbiddenComp = makeComp();
 
 // Test service for R != never
-class AuthService extends Context.Tag("AuthService")<AuthService, { check: () => boolean }>() {}
+class AuthService extends ServiceMap.Service<AuthService, { readonly check: () => boolean }>()(
+  "AuthService",
+) {}
 
 // =============================================================================
 // Routes.make() - Create empty collection
@@ -71,7 +74,7 @@ describe(".add()", () => {
   });
 
   it("should reject route with unsatisfied R (type-level)", () => {
-    const requireAuth = AuthService.pipe(Effect.flatMap(() => Effect.void));
+    const requireAuth = AuthService.asEffect().pipe(Effect.flatMap(() => Effect.void));
     const routeWithR = Route.make("/admin").middleware(requireAuth).component(comp);
 
     // @ts-expect-error - Route has R = AuthService, not never

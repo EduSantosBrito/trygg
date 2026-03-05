@@ -4,7 +4,8 @@
  *
  * All document and element operations — creation, mutation, attributes, properties, queries.
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -69,7 +70,9 @@ export interface DomService {
 // Tag
 // =============================================================================
 
-export class Dom extends Context.Tag("trygg/platform/Dom")<Dom, DomService>() {}
+export interface Dom extends ServiceMap.Service<Dom, DomService> {}
+
+export const Dom = ServiceMap.Service<Dom, DomService>("trygg/platform/Dom");
 
 // =============================================================================
 // Browser layer

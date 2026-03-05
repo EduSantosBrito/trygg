@@ -12,8 +12,9 @@
  * - Fragment items break moveRange: Fragment returns first child as result.node,
  *   so moveRange(startMarker, firstChild, ref) orphans subsequent siblings.
  */
-import { describe, it, expect } from "@effect/vitest";
-import { Data, Effect, TestClock } from "effect";
+import { describe, effect, expect } from "@effect/vitest";
+import { Cause, Data, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 import * as Resource from "../resource.js";
 import * as Component from "../component.js";
@@ -56,7 +57,7 @@ const findKeyedListAnchor = (root: Node): Comment | null => {
 //      when result.node is the first child of a Fragment, orphaning remaining children.
 
 describe("KeyedList Fragment reorder", () => {
-  it.scoped("should move all Fragment children during reorder", () =>
+  effect("should move all Fragment children during reorder", () =>
     Effect.gen(function* () {
       // Items that render to Fragments with multiple children
       const items = yield* Signal.make<readonly Item[]>([
@@ -97,7 +98,7 @@ describe("KeyedList Fragment reorder", () => {
       ]);
 
       // Allow microtask for update
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       // Expected after reorder: C1 C2 C3 A1 A2 A3 B1 B2 B3
       // BUG: Without fix, only C1 moves, C2 and C3 orphaned at end
@@ -105,7 +106,7 @@ describe("KeyedList Fragment reorder", () => {
     }),
   );
 
-  it.scoped("should handle reverse order of Fragment items", () =>
+  effect("should handle reverse order of Fragment items", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<readonly ItemValues[]>([
         { id: "1", values: ["X", "Y"] },
@@ -142,13 +143,13 @@ describe("KeyedList Fragment reorder", () => {
         { id: "1", values: ["X", "Y"] },
       ]);
 
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(getValues()).toEqual(["M", "N", "P", "Q", "X", "Y"]);
     }),
   );
 
-  it.scoped("should handle interleaved reorder of Fragment items", () =>
+  effect("should handle interleaved reorder of Fragment items", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<readonly ItemNums[]>([
         { id: "a", nums: [1, 2] },
@@ -187,7 +188,7 @@ describe("KeyedList Fragment reorder", () => {
         { id: "d", nums: [7, 8] },
       ]);
 
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(getNums()).toEqual(["1", "2", "5", "6", "3", "4", "7", "8"]);
     }),
@@ -199,7 +200,7 @@ describe("KeyedList Fragment reorder", () => {
 // =============================================================================
 
 describe("KeyedList Fragment removal", () => {
-  it.scoped("should remove all Fragment children when item removed", () =>
+  effect("should remove all Fragment children when item removed", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<readonly Item[]>([
         { id: "a", parts: ["A1", "A2"] },
@@ -227,7 +228,7 @@ describe("KeyedList Fragment removal", () => {
 
       // Remove first item
       yield* Signal.set(items, [{ id: "b", parts: ["B1", "B2"] }]);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       // Should only have B1, B2
       const texts = Array.from(container.querySelectorAll("span")).map((el) => el.textContent);
@@ -242,7 +243,7 @@ describe("KeyedList Fragment removal", () => {
 // Single elements use their own node as result.node, so moveRange works correctly.
 
 describe("KeyedList single-element reorder (baseline)", () => {
-  it.scoped("should reorder single-element items correctly", () =>
+  effect("should reorder single-element items correctly", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<readonly string[]>(["alpha", "beta", "gamma"]);
 
@@ -266,13 +267,13 @@ describe("KeyedList single-element reorder (baseline)", () => {
 
       // Reverse order
       yield* Signal.set(items, ["gamma", "beta", "alpha"]);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(getItems()).toEqual(["gamma", "beta", "alpha"]);
     }),
   );
 
-  it.scoped("should keep rendering after keyed-list anchor reparent", () =>
+  effect("should keep rendering after keyed-list anchor reparent", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<readonly string[]>([]);
 
@@ -300,13 +301,13 @@ describe("KeyedList single-element reorder (baseline)", () => {
       newParent.appendChild(anchor);
 
       yield* Signal.set(items, ["a", "b", "c"]);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(newParent.querySelectorAll("[data-id]").length).toBe(3);
     }),
   );
 
-  it.scoped("should preserve order after filter roundtrip with nested component", () =>
+  effect("should preserve order after filter roundtrip with nested component", () =>
     Effect.gen(function* () {
       interface IncidentLike {
         readonly id: number;
@@ -360,19 +361,19 @@ describe("KeyedList single-element reorder (baseline)", () => {
           .filter((id): id is string => id !== null);
 
       // KeyedList update runs in forked effect; allow mount to settle.
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
 
       expect(ids()).toEqual(["1", "2", "3"]);
 
       yield* Signal.set(filter, "SEV-1");
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
       expect(ids()).toEqual(["2"]);
 
       yield* Signal.set(filter, "all");
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
       expect(ids()).toEqual(["1", "2", "3"]);
 
       // Rapid toggles should still converge to stable order.
@@ -381,9 +382,9 @@ describe("KeyedList single-element reorder (baseline)", () => {
         yield* Signal.set(filter, "all");
       }
 
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
       expect(ids()).toEqual(["1", "2", "3"]);
     }),
   );
@@ -394,7 +395,7 @@ describe("KeyedList single-element reorder (baseline)", () => {
 // =============================================================================
 
 describe("KeyedList stable-order updates", () => {
-  it.scoped("should rerender existing key when item value changes", () =>
+  effect("should rerender existing key when item value changes", () =>
     Effect.gen(function* () {
       const items = yield* Signal.make<
         ReadonlyArray<{ readonly id: string; readonly label: string }>
@@ -427,13 +428,13 @@ describe("KeyedList stable-order updates", () => {
         { id: "a", label: "Alpha" },
         { id: "b", label: "Bravo 2" },
       ]);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(getLabels()).toEqual(["Alpha", "Bravo 2"]);
     }),
   );
 
-  it.scoped("should converge to source order under rapid filter toggles", () =>
+  effect("should converge to source order under rapid filter toggles", () =>
     Effect.gen(function* () {
       interface Item {
         readonly id: number;
@@ -470,7 +471,7 @@ describe("KeyedList stable-order updates", () => {
       );
 
       yield* TestClock.adjust("30 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       // Rapid toggles while update work is in-flight.
       yield* Signal.set(filter, "SEV-1");
@@ -479,8 +480,8 @@ describe("KeyedList stable-order updates", () => {
       yield* Signal.set(filter, "all");
 
       yield* TestClock.adjust("60 millis");
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
 
       const ids = Array.from(container.querySelectorAll("[data-id]")).map((el) =>
         el.getAttribute("data-id"),
@@ -490,7 +491,7 @@ describe("KeyedList stable-order updates", () => {
     }),
   );
 
-  it.scoped("should preserve order with incident-card-like nested structure", () =>
+  effect("should preserve order with incident-card-like nested structure", () =>
     Effect.gen(function* () {
       type Severity = "SEV-1" | "SEV-2" | "SEV-3";
       interface IncidentLike {
@@ -566,23 +567,23 @@ describe("KeyedList stable-order updates", () => {
           .filter((id): id is string => id !== null);
 
       yield* TestClock.adjust("20 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       expect(readOrder()).toEqual(["1", "2", "3"]);
 
       yield* Signal.set(filter, "SEV-1");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       yield* TestClock.adjust("10 millis");
       expect(readOrder()).toEqual(["2"]);
 
       yield* Signal.set(filter, "all");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       yield* TestClock.adjust("20 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       expect(readOrder()).toEqual(["1", "2", "3"]);
     }),
   );
 
-  it.scoped("should not expose partial intermediate order while rebuilding from filter", () =>
+  effect("should not expose partial intermediate order while rebuilding from filter", () =>
     Effect.gen(function* () {
       interface Item {
         readonly id: number;
@@ -624,25 +625,25 @@ describe("KeyedList stable-order updates", () => {
           .map((el) => el.getAttribute("data-id"))
           .filter((id): id is string => id !== null);
 
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       expect(ids()).toEqual(["2"]);
 
       yield* Signal.set(filter, "all");
       yield* TestClock.adjust("10 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       // Should not show partial rebuild like [2,1] while id=3 is still rendering.
       expect(ids()).toEqual(["2"]);
 
       yield* TestClock.adjust("60 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
       expect(ids()).toEqual(["1", "2", "3"]);
     }),
   );
 });
 
 describe("KeyedList with SignalElement swap", () => {
-  it.scoped("should render all keyed items after Pending -> Success swap", () =>
+  effect("should render all keyed items after Pending -> Success swap", () =>
     Effect.gen(function* () {
       const EMPTY_ITEMS: ReadonlyArray<{ readonly id: number; readonly label: string }> = [];
 
@@ -692,13 +693,13 @@ describe("KeyedList with SignalElement swap", () => {
       );
 
       yield* TestClock.adjust("30 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(container.querySelectorAll("[data-id]").length).toBe(3);
     }),
   );
 
-  it.scoped("renders list after Pending -> Success with nested SignalElement in item", () =>
+  effect("renders list after Pending -> Success with nested SignalElement in item", () =>
     Effect.gen(function* () {
       const EMPTY_ITEMS: ReadonlyArray<{ readonly id: number; readonly label: string }> = [];
 
@@ -774,14 +775,14 @@ describe("KeyedList with SignalElement swap", () => {
         ),
       );
 
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
 
       expect(container.querySelectorAll("[data-id]").length).toBe(3);
     }),
   );
 
-  it.scoped("recovers list after interrupted Pending -> Success -> Pending -> Success", () =>
+  effect("recovers list after interrupted Pending -> Success -> Pending -> Success", () =>
     Effect.gen(function* () {
       const EMPTY_ITEMS: ReadonlyArray<{ readonly id: number; readonly label: string }> = [];
       const shouldInterrupt = yield* Signal.make(true);
@@ -846,7 +847,7 @@ describe("KeyedList with SignalElement swap", () => {
       );
 
       yield* TestClock.adjust("20 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       yield* Signal.set(
         state,
@@ -860,14 +861,14 @@ describe("KeyedList with SignalElement swap", () => {
       );
 
       yield* TestClock.adjust("30 millis");
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       expect(container.querySelectorAll("[data-id]").length).toBe(2);
       expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A2");
     }),
   );
 
-  it.scoped("recovers from NotFoundError during component anchor insert", () =>
+  effect("recovers from NotFoundError during component anchor insert", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const originalInsertBefore = Node.prototype.insertBefore;
@@ -930,11 +931,11 @@ describe("KeyedList with SignalElement swap", () => {
 
           arm();
           yield* Signal.set(items, [{ id: 1, label: "A" }]);
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
 
           // Subsequent update should still render correctly.
           yield* Signal.set(items, [{ id: 1, label: "A2" }]);
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
 
           expect(container.querySelectorAll("[data-id]").length).toBe(1);
           expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A2");
@@ -943,7 +944,7 @@ describe("KeyedList with SignalElement swap", () => {
     ),
   );
 
-  it.scoped("renders ErrorBoundary fallback when keyed list item rerender fails", () =>
+  effect("renders ErrorBoundary fallback when keyed list item rerender fails", () =>
     Effect.gen(function* () {
       class ItemError extends Data.TaggedError("ItemError")<{ readonly reason: "fail" }> {}
 
@@ -973,9 +974,17 @@ describe("KeyedList with SignalElement swap", () => {
         return <div data-testid="item-fallback">fallback</div>;
       });
 
-      const SafeItem = yield* ErrorBoundary.catch(RiskyItem)
-        .on("ItemError", ErrorFallback)
-        .catchAll(() => <div data-testid="item-fallback-generic">generic</div>);
+      const GenericFallback = Component.gen(function* (
+        Props: Component.ComponentProps<{ readonly cause: Cause.Cause<unknown> }>,
+      ) {
+        yield* Props;
+        return <div data-testid="item-fallback-generic">generic</div>;
+      });
+
+      const SafeItem = yield* ErrorBoundary.catch(RiskyItem).pipe(
+        ErrorBoundary.on("ItemError", ErrorFallback),
+        ErrorBoundary.catchAll(GenericFallback),
+      );
 
       const { container } = yield* render(
         <div>
@@ -990,20 +999,20 @@ describe("KeyedList with SignalElement swap", () => {
       );
 
       for (let i = 0; i < 10; i++) {
-        yield* Effect.yieldNow();
+        yield* Effect.yieldNow;
       }
       expect(container.querySelector('[data-id="1"]')).not.toBeNull();
 
       yield* Signal.set(shouldFail, true);
       for (let i = 0; i < 10; i++) {
-        yield* Effect.yieldNow();
+        yield* Effect.yieldNow;
       }
 
       expect(container.querySelector('[data-testid="item-fallback"]')).not.toBeNull();
     }),
   );
 
-  it.scoped("renders on first update when initial anchor insert throws once", () =>
+  effect("renders on first update when initial anchor insert throws once", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const originalInsertBefore = Node.prototype.insertBefore;
@@ -1058,7 +1067,7 @@ describe("KeyedList with SignalElement swap", () => {
           );
 
           yield* Signal.set(items, [{ id: 1, label: "A" }]);
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
 
           expect(container.querySelectorAll("[data-id]").length).toBe(1);
           expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A");

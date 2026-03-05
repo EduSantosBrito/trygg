@@ -11,7 +11,7 @@ interface Command {
   readonly id: string;
   readonly label: string;
   readonly shortcut?: string;
-  readonly action: () => Effect.Effect<void, unknown, unknown>;
+  readonly action: () => Effect.Effect<void, never, Router.Router>;
 }
 
 interface CommandPaletteProps {
@@ -52,7 +52,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         Effect.gen(function* () {
           yield* onClose();
           yield* Router.navigate("/incidents?declare=true");
-        }),
+        }).pipe(Effect.ignore),
     },
     {
       id: "go-home",
@@ -61,7 +61,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         Effect.gen(function* () {
           yield* onClose();
           yield* Router.navigate("/");
-        }),
+        }).pipe(Effect.ignore),
     },
     {
       id: "go-incidents",
@@ -70,7 +70,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         Effect.gen(function* () {
           yield* onClose();
           yield* Router.navigate("/incidents");
-        }),
+        }).pipe(Effect.ignore),
     },
     {
       id: "go-settings",
@@ -79,7 +79,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         Effect.gen(function* () {
           yield* onClose();
           yield* Router.navigate("/settings");
-        }),
+        }).pipe(Effect.ignore),
     },
   ];
 
@@ -107,29 +107,25 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
 
   // Subscribe to open state and sync with dialog
   yield* Signal.subscribe(open, () =>
-    Effect.sync(() => {
-      const dialog = document.getElementById(DIALOG_ID) as HTMLDialogElement | null;
-      if (!dialog) return;
+    Effect.gen(function* () {
+      const node = document.getElementById(DIALOG_ID);
+      if (!(node instanceof HTMLDialogElement)) {
+        return;
+      }
 
-      Effect.runSync(
-        Signal.get(open).pipe(
-          Effect.tap((isOpen) =>
-            Effect.sync(() => {
-              if (isOpen && !dialog.open) {
-                Effect.runFork(
-                  Effect.gen(function* () {
-                    yield* Signal.set(query, "");
-                    yield* Signal.set(activeIndex, 0);
-                  }),
-                );
-                dialog.showModal();
-              } else if (!isOpen && dialog.open) {
-                dialog.close();
-              }
-            }),
-          ),
-        ),
-      );
+      const dialog = node;
+      const isOpen = yield* Signal.get(open);
+
+      if (isOpen && !dialog.open) {
+        yield* Signal.set(query, "");
+        yield* Signal.set(activeIndex, 0);
+        yield* Effect.sync(() => dialog.showModal());
+        return;
+      }
+
+      if (!isOpen && dialog.open) {
+        yield* Effect.sync(() => dialog.close());
+      }
     }),
   );
 
@@ -143,8 +139,12 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
       }
     });
 
-  const onKeyDown = (event: KeyboardEvent) =>
+  const onKeyDown = (event: Event) =>
     Effect.gen(function* () {
+      if (!(event instanceof KeyboardEvent)) {
+        return;
+      }
+
       const total = yield* Signal.get(totalResults);
       const current = yield* Signal.get(activeIndex);
       const cmds = yield* Signal.get(filteredCommands);
@@ -162,29 +162,39 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         case "Enter":
           event.preventDefault();
           if (current < cmds.length) {
-            yield* cmds[current].action();
+            const selectedCommand = cmds[current];
+            if (selectedCommand !== undefined) {
+              yield* selectedCommand.action();
+            }
           } else {
             const incIndex = current - cmds.length;
-            if (incIndex < incs.length) {
+            const selectedIncident = incs[incIndex];
+            if (selectedIncident !== undefined) {
               yield* onClose();
               yield* Router.navigate("/incidents/:id", {
-                params: { id: String(incs[incIndex].id) },
-              });
+                params: { id: String(selectedIncident.id) },
+              }).pipe(Effect.ignore);
             }
           }
+          break;
+        case "Escape":
+          event.preventDefault();
+          yield* onClose();
           break;
       }
     });
 
-  // Handle native dialog cancel (Escape key)
-  const onCancel = (event: Event) => {
-    event.preventDefault();
-    return onClose();
-  };
-
   // Handle backdrop click
-  const onBackdropClick = (event: MouseEvent) => {
-    const dialog = event.currentTarget as HTMLDialogElement;
+  const onBackdropClick = (event: Event) => {
+    if (!(event instanceof MouseEvent)) {
+      return Effect.void;
+    }
+
+    if (!(event.currentTarget instanceof HTMLDialogElement)) {
+      return Effect.void;
+    }
+
+    const dialog = event.currentTarget;
     const rect = dialog.getBoundingClientRect();
     const clickedInDialog =
       event.clientX >= rect.left &&
@@ -202,10 +212,10 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
     Effect.gen(function* () {
       yield* onClose();
       yield* Router.navigate("/incidents/:id", { params: { id: String(incident.id) } });
-    });
+    }).pipe(Effect.ignore);
 
   return (
-    <dialog id={DIALOG_ID} className="cmdk-dialog" onCancel={onCancel} onClick={onBackdropClick}>
+    <dialog id={DIALOG_ID} className="cmdk-dialog" onClick={onBackdropClick}>
       <div className="cmdk" onKeyDown={onKeyDown}>
         <div className="cmdk-input-wrapper">
           <span className="cmdk-input-icon" aria-hidden="true" />
@@ -283,7 +293,7 @@ interface CommandItemProps {
 const CommandItem = Component.gen(function* (Props: ComponentProps<CommandItemProps>) {
   const { command, index, activeIndex } = yield* Props;
 
-  const className = yield* Signal.derive(activeIndex, (active) =>
+  const className = yield* Signal.derive(activeIndex, (active): string =>
     active === index ? "cmdk-item cmdk-item--active" : "cmdk-item",
   );
 
@@ -304,7 +314,7 @@ interface IncidentsSectionProps {
   readonly incidents: Signal.Signal<Incident[]>;
   readonly activeIndex: Signal.Signal<number>;
   readonly baseIndex: Signal.Signal<number>;
-  readonly onSelect: (inc: Incident) => () => Effect.Effect<void, unknown, unknown>;
+  readonly onSelect: (inc: Incident) => () => Effect.Effect<void, never, Router.Router>;
 }
 
 const IncidentsSection = Component.gen(function* (Props: ComponentProps<IncidentsSectionProps>) {
@@ -338,13 +348,13 @@ interface IncidentItemProps {
   readonly index: number;
   readonly baseIndex: Signal.Signal<number>;
   readonly activeIndex: Signal.Signal<number>;
-  readonly onSelect: () => Effect.Effect<void, unknown, unknown>;
+  readonly onSelect: () => Effect.Effect<void, never, Router.Router>;
 }
 
 const IncidentItem = Component.gen(function* (Props: ComponentProps<IncidentItemProps>) {
   const { incident, index, baseIndex, activeIndex, onSelect } = yield* Props;
 
-  const className = yield* Signal.deriveAll([activeIndex, baseIndex], (active, base) =>
+  const className = yield* Signal.deriveAll([activeIndex, baseIndex], (active, base): string =>
     active === base + index ? "cmdk-item cmdk-item--active" : "cmdk-item",
   );
 

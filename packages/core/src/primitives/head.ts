@@ -20,7 +20,8 @@
  * Keyed elements (title, meta, base) use stack-based dedup — deepest component
  * wins, previous value restores on unmount.
  */
-import { Context, Data, Effect, FiberRef, Option, Ref, Scope } from "effect";
+import { Data, Effect, Option, Ref, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Constants
@@ -61,10 +62,9 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  * Can be explicitly overridden per-route.
  * @since 1.0.0
  */
-export class HeadStrategy extends Context.Tag("trygg/HeadStrategy")<
-  HeadStrategy,
-  HeadStrategyService
->() {
+export class HeadStrategy extends ServiceMap.Service<HeadStrategy, HeadStrategyService>()(
+  "trygg/HeadStrategy",
+) {
   /**
    * Head computed server-side (in initial HTML).
    * SEO-optimal — crawlers see head content immediately.
@@ -184,12 +184,14 @@ export interface HeadService {
 }
 
 /**
- * Head service tag.
+ * Head service key.
  * Provided implicitly by `mount` (browser) or `renderToString` (SSR).
  * Components never provide this manually.
  * @since 1.0.0
  */
-export class Head extends Context.Tag("trygg/Head")<Head, HeadService>() {}
+export interface Head extends ServiceMap.Service<Head, HeadService> {}
+
+export const Head = ServiceMap.Service<Head, HeadService>("trygg/Head");
 
 // =============================================================================
 // Dedup Stack — Stack-based deduplication for keyed head elements
@@ -343,8 +345,9 @@ export const makeTestHead = (): Effect.Effect<HeadService, never, Scope.Scope> =
  * When null, hoistable elements render normally (append to parent).
  * @since 1.0.0
  */
-export const CurrentHead: FiberRef.FiberRef<HeadService | null> =
-  FiberRef.unsafeMake<HeadService | null>(null);
+export const CurrentHead = ServiceMap.Reference<HeadService | null>("trygg/Head/CurrentHead", {
+  defaultValue: () => null,
+});
 
 /**
  * FiberRef to gate document-level element mapping.
@@ -353,7 +356,9 @@ export const CurrentHead: FiberRef.FiberRef<HeadService | null> =
  * Set by `mountDocument()` — not by regular `mount()`.
  * @since 1.0.0
  */
-export const IsDocumentMount: FiberRef.FiberRef<boolean> = FiberRef.unsafeMake<boolean>(false);
+export const IsDocumentMount = ServiceMap.Reference<boolean>("trygg/Head/IsDocumentMount", {
+  defaultValue: () => false,
+});
 
 /**
  * Tags that map to existing document nodes in document-mount mode.

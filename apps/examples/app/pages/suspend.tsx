@@ -1,3 +1,4 @@
+import { Cause } from "effect";
 import { Signal, Component } from "trygg";
 import { UserProfileAsync } from "../components/suspend/user-profile-async";
 import { StatsAsync } from "../components/suspend/stats-async";
@@ -10,23 +11,23 @@ import { PostsSkeleton } from "../components/suspend/posts-skeleton";
 const SuspendPage = Component.gen(function* () {
   const userId = yield* Signal.make(1);
 
-  const SuspendedUserProfile = yield* Signal.suspend(UserProfileAsync, {
-    Pending: (stale) => stale ?? <UserSkeleton />,
-    Failure: (cause) => <ErrorCard label="User" cause={cause} />,
-    Success: <UserProfileAsync userId={userId} />,
-  });
+  const SuspendedUserProfile = yield* Signal.suspend(UserProfileAsync).pipe(
+    Signal.on("Pending", <UserSkeleton />),
+    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="User" cause={cause} />),
+    Signal.exhaustive,
+  );
 
-  const SuspendedStats = yield* Signal.suspend(StatsAsync, {
-    Pending: (stale) => stale ?? <StatsSkeleton />,
-    Failure: (cause) => <ErrorCard label="Stats" cause={cause} />,
-    Success: <StatsAsync userId={userId} />,
-  });
+  const SuspendedStats = yield* Signal.suspend(StatsAsync).pipe(
+    Signal.on("Pending", <StatsSkeleton />),
+    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="Stats" cause={cause} />),
+    Signal.exhaustive,
+  );
 
-  const SuspendedPosts = yield* Signal.suspend(PostsAsync, {
-    Pending: (stale) => stale ?? <PostsSkeleton />,
-    Failure: (cause) => <ErrorCard label="Posts" cause={cause} />,
-    Success: <PostsAsync userId={userId} />,
-  });
+  const SuspendedPosts = yield* Signal.suspend(PostsAsync).pipe(
+    Signal.on("Pending", <PostsSkeleton />),
+    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="Posts" cause={cause} />),
+    Signal.exhaustive,
+  );
 
   const nextUser = () => Signal.update(userId, (id) => (id % 3) + 1);
 
@@ -49,17 +50,17 @@ const SuspendPage = Component.gen(function* () {
       <div className="grid grid-cols-2 gap-6">
         <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
           <h3 className="m-0 mb-4 text-base text-gray-500">User Profile (800ms)</h3>
-          <SuspendedUserProfile />
+          <SuspendedUserProfile userId={userId} />
         </div>
 
         <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
           <h3 className="m-0 mb-4 text-base text-gray-500">User Stats (800ms)</h3>
-          <SuspendedStats />
+          <SuspendedStats userId={userId} />
         </div>
 
         <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 col-span-full">
           <h3 className="m-0 mb-4 text-base text-gray-500">User Posts (1200ms)</h3>
-          <SuspendedPosts />
+          <SuspendedPosts userId={userId} />
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { Context, Effect, Layer, Scope } from "effect";
+import { Effect, Layer, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import { Signal } from "trygg";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ export interface AppThemeService {
   readonly toggle: Effect.Effect<void>;
 }
 
-export class AppTheme extends Context.Tag("AppTheme")<AppTheme, AppThemeService>() {}
+export class AppTheme extends ServiceMap.Service<AppTheme, AppThemeService>()("AppTheme") {}
 
 // ---------------------------------------------------------------------------
 // Layers — same Tag, different initial configuration
@@ -49,7 +50,7 @@ const parsePreference = (value: string | null): ThemePreference => {
   return "system";
 };
 
-const readStoredPreference = (): ThemePreference => {
+const readStoredPreference: Effect.Effect<ThemePreference> = Effect.sync(() => {
   if (typeof localStorage === "undefined") {
     return "system";
   }
@@ -59,7 +60,7 @@ const readStoredPreference = (): ThemePreference => {
   } catch {
     return "system";
   }
-};
+});
 
 const persistPreference = (preference: ThemePreference): Effect.Effect<void> =>
   Effect.sync(() => {
@@ -74,16 +75,17 @@ const persistPreference = (preference: ThemePreference): Effect.Effect<void> =>
     }
   });
 
-const resolveSystemMode = (fallback: ThemeMode): ThemeMode => {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return fallback;
-  }
+const resolveSystemMode = (fallback: ThemeMode): Effect.Effect<ThemeMode> =>
+  Effect.sync(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return fallback;
+    }
 
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-};
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
 
-const resolveMode = (preference: ThemePreference, fallback: ThemeMode): ThemeMode =>
-  preference === "system" ? resolveSystemMode(fallback) : preference;
+const resolveMode = (preference: ThemePreference, fallback: ThemeMode): Effect.Effect<ThemeMode> =>
+  preference === "system" ? resolveSystemMode(fallback) : Effect.succeed(preference);
 
 const subscribeToSystemTheme = (
   preference: Signal.Signal<ThemePreference>,
@@ -119,17 +121,19 @@ const subscribeToSystemTheme = (
   ).pipe(Effect.asVoid);
 
 const make = (fallback: ThemeMode): Layer.Layer<AppTheme> =>
-  Layer.scoped(
+  Layer.effect(
     AppTheme,
     Effect.gen(function* () {
-      const initialPreference = readStoredPreference();
+      const initialPreference = yield* readStoredPreference;
       const preference = Signal.makeSync<ThemePreference>(initialPreference);
-      const mode = Signal.makeSync<ThemeMode>(resolveMode(initialPreference, fallback));
+      const initialMode = yield* resolveMode(initialPreference, fallback);
+      const mode = Signal.makeSync<ThemeMode>(initialMode);
 
       const setPreference = (next: ThemePreference): Effect.Effect<void> =>
         Effect.gen(function* () {
           yield* Signal.set(preference, next);
-          yield* Signal.set(mode, resolveMode(next, fallback));
+          const nextMode = yield* resolveMode(next, fallback);
+          yield* Signal.set(mode, nextMode);
           yield* persistPreference(next);
         });
 

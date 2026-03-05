@@ -2,8 +2,9 @@
  * Tests for testing utilities
  * @module
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Option, Scope, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Cause, Effect, Exit, Fiber, Option, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import {
   click,
   ElementNotFoundError,
@@ -16,6 +17,8 @@ import {
 } from "../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { Renderer } from "../../primitives/renderer.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -85,7 +88,7 @@ describe("Testing Utilities", () => {
 
         yield* renderElement(<div id="scoped-element">Content</div>).pipe(
           Effect.provide(testLayer),
-          Scope.extend(scope),
+          Scope.provide(scope),
         );
 
         const elementInDom = document.querySelector("#scoped-element");
@@ -922,7 +925,7 @@ describe("Testing Utilities", () => {
         let attempts = 0;
 
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
               attempts++;
@@ -944,7 +947,7 @@ describe("Testing Utilities", () => {
     it.scoped("should fail with WaitForTimeoutError on timeout", () =>
       Effect.gen(function* () {
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
               throw new Error("Always fails");
@@ -966,7 +969,7 @@ describe("Testing Utilities", () => {
         let checkCount = 0;
 
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
               checkCount++;
@@ -992,7 +995,7 @@ describe("Testing Utilities", () => {
         let checkCount = 0;
 
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
               checkCount++;
@@ -1016,7 +1019,7 @@ describe("Testing Utilities", () => {
         let attempts = 0;
 
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(() => {
             attempts++;
             if (attempts < 3) throw new Error("Not ready");
@@ -1044,7 +1047,7 @@ describe("Testing Utilities", () => {
     it.scoped("should include last error in timeout error", () =>
       Effect.gen(function* () {
         // Fork waitFor so we can advance time
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
               throw new Error("Custom error message");
@@ -1059,7 +1062,7 @@ describe("Testing Utilities", () => {
         const exit = yield* Fiber.await(fiber);
 
         if (exit._tag === "Failure") {
-          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          const error = Cause.squash(exit.cause);
           if (error instanceof WaitForTimeoutError) {
             assert.include(error.message, "Custom error message");
           }
@@ -1187,7 +1190,7 @@ describe("Testing Utilities", () => {
         let checkCount = 0;
 
         // Fork waitFor and a delayed update
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitFor(() => {
             checkCount++;
             // Simulate: status becomes ready after a few checks

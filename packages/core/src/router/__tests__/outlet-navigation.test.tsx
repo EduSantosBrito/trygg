@@ -16,8 +16,9 @@
  * The route reading should happen inside the AsyncLoader's tracking, not
  * in the component body.
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Effect, Layer, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
@@ -30,6 +31,9 @@ import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
+import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // Helpers
@@ -50,7 +54,7 @@ const identifiableComp = (testId: string, content: string): RouteComponent => {
     );
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -72,7 +76,7 @@ const loadingComp = (): RouteComponent => {
     );
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -80,7 +84,7 @@ const loadingComp = (): RouteComponent => {
 };
 
 /** Custom test layer with specified initial path */
-const testLayerAt = (path: string): Layer.Layer<Renderer | Router.Router> =>
+const testLayerAt = (path: string): LayerType<Renderer | Router.Router> =>
   Layer.merge(browserLayer, Router.testLayer(path));
 
 // =============================================================================

@@ -9,7 +9,8 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Option, TestClock } from "effect";
+import { Cause, Data, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import * as Signal from "../../primitives/signal.js";
 import * as ErrorBoundary from "../../primitives/error-boundary.js";
 import { DevMode } from "../dev-mode.js";
@@ -36,20 +37,27 @@ const withDebugReset = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<
     return result;
   });
 
+const catchAllView = (render_: (cause: Cause.Cause<unknown>) => JSX.Element) =>
+  Component.gen(function* (Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {
+    const { cause } = yield* Props;
+    return render_(cause);
+  });
+
 // =============================================================================
 // ErrorBoundary
 // =============================================================================
 // Scope: Catching errors from child components
 
 describe("ErrorBoundary", () => {
-  it.scoped("should render children when no error occurs", () =>
+  it.effect("should render children when no error occurs", () =>
     Effect.gen(function* () {
       const SuccessComponent = Component.gen(function* () {
         return <div>Success</div>;
       });
 
-      const builder = ErrorBoundary.catch(SuccessComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>Error</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(SuccessComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div>Error</div>)),
+      );
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -57,14 +65,15 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should render fallback when component fails", () =>
+  it.effect("should render fallback when component fails", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         return yield* new TestError({ message: "Test error" });
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>Fallback shown</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div>Fallback shown</div>)),
+      );
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -72,7 +81,7 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should pass cause to specific error handler", () =>
+  it.effect("should pass cause to specific error handler", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         return yield* new TestError({ message: "Specific error" });
@@ -85,9 +94,10 @@ describe("ErrorBoundary", () => {
         return <div>Error: {error.message}</div>;
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const withHandler = builder.on("TestError", TestErrorView);
-      const SafeComponent = yield* withHandler.catchAll(() => <div>Generic error</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.on("TestError", TestErrorView),
+        ErrorBoundary.catchAll(catchAllView(() => <div>Generic error</div>)),
+      );
 
       const { getByText } = yield* render(<SafeComponent />);
 
@@ -95,16 +105,19 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should use catchAll for unmatched errors", () =>
+  it.effect("should use catchAll for unmatched errors", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         return yield* new OtherError();
       });
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll((cause) => (
-        <div data-testid="catch-all">Catch-all: {String(Cause.squash(cause))}</div>
-      ));
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(
+          catchAllView((cause) => (
+            <div data-testid="catch-all">Catch-all: {String(Cause.squash(cause))}</div>
+          )),
+        ),
+      );
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -112,7 +125,7 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should render static fallback with catchAll", () =>
+  it.effect("should render static fallback with catchAll", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
         return yield* Effect.fail("error");
@@ -120,8 +133,9 @@ describe("ErrorBoundary", () => {
 
       const staticFallback = <div data-testid="static-fallback">Static fallback content</div>;
 
-      const builder = ErrorBoundary.catch(FailingComponent);
-      const SafeComponent = yield* builder.catchAll(() => staticFallback);
+      const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => staticFallback)),
+      );
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -129,17 +143,19 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should catch at nearest boundary", () =>
+  it.effect("should catch at nearest boundary", () =>
     Effect.gen(function* () {
       const InnerFailing = Component.gen(function* () {
         return yield* new TestError({ message: "Inner error" });
       });
 
-      const innerBuilder = ErrorBoundary.catch(InnerFailing);
-      const InnerSafe = yield* innerBuilder.catchAll(() => <div>Inner fallback</div>);
+      const InnerSafe = yield* ErrorBoundary.catch(InnerFailing).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div>Inner fallback</div>)),
+      );
 
-      const outerBuilder = ErrorBoundary.catch(InnerSafe);
-      const OuterSafe = yield* outerBuilder.catchAll(() => <div>Outer fallback</div>);
+      const OuterSafe = yield* ErrorBoundary.catch(InnerSafe).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div>Outer fallback</div>)),
+      );
 
       const { getByText, queryByText } = yield* render(<OuterSafe />);
 
@@ -150,7 +166,7 @@ describe("ErrorBoundary", () => {
   );
 
   // Re-render error handling tests
-  it.scoped("should catch error when child component throws on re-render", () =>
+  it.effect("should catch error when child component throws on re-render", () =>
     Effect.gen(function* () {
       const shouldThrow = Signal.makeSync(false);
 
@@ -162,10 +178,9 @@ describe("ErrorBoundary", () => {
         return <div data-testid="child">Child content</div>;
       });
 
-      const builder = ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() => (
-        <div data-testid="fallback">Error caught!</div>
-      ));
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div data-testid="fallback">Error caught!</div>)),
+      );
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
@@ -183,24 +198,24 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should re-render when signal props change", () =>
+  it.effect("should re-render when signal props change", () =>
     Effect.gen(function* () {
       const mode = yield* Signal.make<"ok" | "error">("ok");
 
       const ChildComponent = Component.gen(function* (
-        Props: Component.ComponentProps<{ mode: "ok" | "error" }>,
+        Props: Component.ComponentProps<{ mode: Signal.Signal<"ok" | "error"> }>,
       ) {
         const { mode } = yield* Props;
-        if (mode === "error") {
+        const currentMode = yield* Signal.get(mode);
+        if (currentMode === "error") {
           return yield* new TestError({ message: "Prop error" });
         }
         return <div data-testid="ok">OK</div>;
       });
 
-      const builder = ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() => (
-        <div data-testid="fallback">Fallback</div>
-      ));
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div data-testid="fallback">Fallback</div>)),
+      );
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent mode={mode} />);
 
@@ -215,14 +230,15 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should support static Element children", () =>
+  it.effect("should support static Element children", () =>
     Effect.gen(function* () {
       const StaticComponent = Component.gen(function* () {
         return <div data-testid="static-child">Static content</div>;
       });
 
-      const builder = ErrorBoundary.catch(StaticComponent);
-      const SafeComponent = yield* builder.catchAll(() => <div>Error fallback</div>);
+      const SafeComponent = yield* ErrorBoundary.catch(StaticComponent).pipe(
+        ErrorBoundary.catchAll(catchAllView(() => <div>Error fallback</div>)),
+      );
 
       const { getByTestId } = yield* render(<SafeComponent />);
 
@@ -230,7 +246,7 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("should catch error from SignalElement swap", () =>
+  it.effect("should catch error from SignalElement swap", () =>
     Effect.gen(function* () {
       const contentSignal = Signal.makeSync<"ok" | "error">("ok");
 
@@ -242,10 +258,11 @@ describe("ErrorBoundary", () => {
         return <div data-testid="content">Good content</div>;
       });
 
-      const builder = ErrorBoundary.catch(ChildComponent);
-      const SafeComponent = yield* builder.catchAll(() => (
-        <div data-testid="fallback">Signal error caught</div>
-      ));
+      const SafeComponent = yield* ErrorBoundary.catch(ChildComponent).pipe(
+        ErrorBoundary.catchAll(
+          catchAllView(() => <div data-testid="fallback">Signal error caught</div>),
+        ),
+      );
 
       const { getByTestId, queryByTestId } = yield* render(<SafeComponent />);
 
@@ -263,7 +280,7 @@ describe("ErrorBoundary", () => {
     }),
   );
 
-  it.scoped("on() after catchAll on same builder succeeds (immutable state)", () =>
+  it.effect("on() after catchAll on same builder succeeds (immutable state)", () =>
     Effect.gen(function* () {
       const Component_ = Component.gen(function* () {
         return yield* new TestError({ message: "fail" });
@@ -279,11 +296,13 @@ describe("ErrorBoundary", () => {
       });
 
       // Builder is immutable — catchAll doesn't mutate original builder
-      yield* builder.catchAll(() => <div>Error</div>);
+      yield* builder.pipe(ErrorBoundary.catchAll(catchAllView(() => <div>Error</div>)));
 
       // .on() after catchAll on the same builder still works (independent state)
-      const nextBuilder = builder.on("TestError", TestErrorView);
-      const safe = yield* nextBuilder.catchAll(() => <div>Fallback</div>);
+      const safe = yield* builder.pipe(
+        ErrorBoundary.on("TestError", TestErrorView),
+        ErrorBoundary.catchAll(catchAllView(() => <div>Fallback</div>)),
+      );
 
       assert.isTrue(Component.isEffectComponent(safe));
     }),
@@ -299,7 +318,7 @@ describe("ErrorBoundary", () => {
 // Scope: Enabling debug observability
 
 describe("DevMode", () => {
-  it.scoped("should enable debug logging on mount", () =>
+  it.effect("should enable debug logging on mount", () =>
     withDebugReset(
       Effect.gen(function* () {
         assert.isFalse(Debug.isEnabled());
@@ -318,7 +337,7 @@ describe("DevMode", () => {
     assert.strictEqual(element._tag, "Component");
   });
 
-  it.scoped("should pass filter to Debug.enable", () =>
+  it.effect("should pass filter to Debug.enable", () =>
     withDebugReset(
       Effect.gen(function* () {
         yield* render(<DevMode filter="signal" />);
@@ -329,7 +348,7 @@ describe("DevMode", () => {
     ),
   );
 
-  it.scoped("should support array of filters", () =>
+  it.effect("should support array of filters", () =>
     withDebugReset(
       Effect.gen(function* () {
         yield* render(<DevMode filter={["signal", "render"]} />);
@@ -342,7 +361,7 @@ describe("DevMode", () => {
     ),
   );
 
-  it.scoped("should not enable debug when enabled is false", () =>
+  it.effect("should not enable debug when enabled is false", () =>
     withDebugReset(
       Effect.gen(function* () {
         const { container } = yield* render(<DevMode enabled={false} />);
@@ -353,7 +372,7 @@ describe("DevMode", () => {
     ),
   );
 
-  it.scoped("should register custom plugins", () =>
+  it.effect("should register custom plugins", () =>
     withDebugReset(
       Effect.gen(function* () {
         const events: Debug.DebugEvent[] = [];
@@ -366,7 +385,7 @@ describe("DevMode", () => {
     ),
   );
 
-  it.scoped("should register multiple plugins", () =>
+  it.effect("should register multiple plugins", () =>
     withDebugReset(
       Effect.gen(function* () {
         const events1: Debug.DebugEvent[] = [];

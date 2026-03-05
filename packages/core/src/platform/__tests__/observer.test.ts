@@ -8,7 +8,7 @@ import { Effect, Exit, Scope } from "effect";
 import { Observer, test as observerTest, type TestObserverService } from "../observer.js";
 
 describe("Observer.intersection", () => {
-  it.scoped("observe registers element for intersection", () =>
+  it.effect("observe registers element for intersection", () =>
     Effect.gen(function* () {
       const obs = yield* Observer;
       const received: Array<Element> = [];
@@ -29,7 +29,7 @@ describe("Observer.intersection", () => {
     }).pipe(Effect.provide(observerTest)),
   );
 
-  it.scoped("unobserve removes element from observation", () =>
+  it.effect("unobserve removes element from observation", () =>
     Effect.gen(function* () {
       const obs = yield* Observer;
       const received: Array<Element> = [];
@@ -75,7 +75,7 @@ describe("Observer.intersection", () => {
     }).pipe(Effect.provide(observerTest)),
   );
 
-  it.scoped("multiple elements can be observed", () =>
+  it.effect("multiple elements can be observed", () =>
     Effect.gen(function* () {
       const obs = yield* Observer;
       const received: Array<string> = [];
@@ -99,7 +99,7 @@ describe("Observer.intersection", () => {
     }).pipe(Effect.provide(observerTest)),
   );
 
-  it.scoped("triggerIntersection on unobserved element is no-op", () =>
+  it.effect("triggerIntersection on unobserved element is no-op", () =>
     Effect.gen(function* () {
       const obs = yield* Observer;
       const received: Array<Element> = [];
@@ -120,7 +120,7 @@ describe("Observer.intersection", () => {
 });
 
 describe("Observer.mutation", () => {
-  it.scoped("mutation registers handler for target", () =>
+  it.effect("mutation registers handler for target", () =>
     Effect.gen(function* () {
       const obs = yield* Observer;
       const received: Array<number> = [];

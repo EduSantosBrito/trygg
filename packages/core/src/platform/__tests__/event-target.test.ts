@@ -12,7 +12,7 @@ import {
 } from "../event-target.js";
 
 describe("EventTarget", () => {
-  it.scoped("on registers handler that receives dispatched events", () =>
+  it.effect("on registers handler that receives dispatched events", () =>
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
@@ -30,7 +30,7 @@ describe("EventTarget", () => {
     }).pipe(Effect.provide(eventTargetTest)),
   );
 
-  it.scoped("on can register multiple handlers for same event", () =>
+  it.effect("on can register multiple handlers for same event", () =>
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
@@ -81,7 +81,7 @@ describe("EventTarget", () => {
     }).pipe(Effect.provide(eventTargetTest)),
   );
 
-  it.scoped("dispatch to unknown target is no-op", () =>
+  it.effect("dispatch to unknown target is no-op", () =>
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const target = { __testId: "unknown" } as unknown as EventTarget;
@@ -90,7 +90,7 @@ describe("EventTarget", () => {
     }).pipe(Effect.provide(eventTargetTest)),
   );
 
-  it.scoped("different events on same target are independent", () =>
+  it.effect("different events on same target are independent", () =>
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];

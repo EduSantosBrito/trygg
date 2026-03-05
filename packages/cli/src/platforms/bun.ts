@@ -2,11 +2,11 @@
  * Bun platform configuration layer
  * @since 1.0.0
  */
-import { PlatformConfig, layer } from "../platform-config.js";
+import { layer, type PlatformConfigService } from "../platform-config.js";
 
-const BUN_VERSION = "^0.87.1";
+const BUN_VERSION = "^4.0.0-beta.27";
 
-const config: PlatformConfig = {
+const config: PlatformConfigService = {
   name: "bun",
   devScript: "bunx --bun vite",
   devDependencies: {

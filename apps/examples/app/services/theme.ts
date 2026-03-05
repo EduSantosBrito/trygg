@@ -1,7 +1,6 @@
-import { Context } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
-export class Theme extends Context.Tag("Theme")<
-  Theme,
+export class Theme extends ServiceMap.Service<Theme,
   {
     readonly name: string;
     readonly background: string;
@@ -9,4 +8,4 @@ export class Theme extends Context.Tag("Theme")<
     readonly primary: string;
     readonly border: string;
   }
->() {}
+>()("Theme") {}

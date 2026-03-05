@@ -15,7 +15,8 @@
  *   .error(ErrorPage)  // Root error boundary
  * ```
  */
-import { FiberRef, Option } from "effect";
+import { Option } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import type { RouteComponent, ComponentInput } from "./types.js";
 import type { RouteBuilder, RouteDefinition } from "./route.js";
 
@@ -156,5 +157,9 @@ export const make = (): RoutesCollection =>
  *
  * @since 1.0.0
  */
-export const CurrentRoutesManifest: FiberRef.FiberRef<Option.Option<RoutesManifest>> =
-  FiberRef.unsafeMake<Option.Option<RoutesManifest>>(Option.none());
+export const CurrentRoutesManifest = ServiceMap.Reference<Option.Option<RoutesManifest>>(
+  "trygg/Router/CurrentRoutesManifest",
+  {
+    defaultValue: Option.none,
+  },
+);

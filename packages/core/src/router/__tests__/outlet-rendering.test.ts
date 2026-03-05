@@ -10,8 +10,10 @@
  * - Parent loading component fallback
  * - Cleanup on navigation (different match results)
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit, FiberRef, Option, Schema, Scope } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Cause, Effect, Exit, Option, Schema, Scope } from "effect";
+import type * as LayerTypes from "effect/Layer";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
@@ -22,7 +24,18 @@ import { componentElement, text } from "../../primitives/element.js";
 import type { Element, ElementKey } from "../../primitives/element.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer } from "effect";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
+
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+    Effect.withFiber((fiber) =>
+      Effect.sync(() => {
+        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+      })),
+};
 
 // =============================================================================
 // Helper: Create RouteComponent
@@ -33,7 +46,7 @@ const textComp = (content: string): RouteComponent => {
   const fn = () => componentElement(() => Effect.succeed(text(content)));
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<LayerTypes.Any>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -55,7 +68,7 @@ const layoutComp = (_name: string): RouteComponent => {
     );
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<LayerTypes.Any>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -595,7 +608,7 @@ describe("Outlet - Rendering", () => {
 
       const manifest = Routes.make().add(
         Route.make("/users/:id")
-          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .params(Schema.Struct({ id: Schema.FiniteFromString }))
           .component(PageComp),
       ).manifest;
 
@@ -943,10 +956,13 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
       const exit = yield* renderer.renderComponent("not-a-component" as any, {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
-        const error = Cause.failureOption(exit.cause);
+        const error = Cause.findErrorOption(exit.cause);
         assert.isTrue(Option.isSome(error));
         if (Option.isSome(error)) {
-          assert.strictEqual((error.value as InvalidRouteComponent)._tag, "InvalidRouteComponent");
+          assert.isTrue(error.value instanceof InvalidRouteComponent);
+          if (error.value instanceof InvalidRouteComponent) {
+            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+          }
         }
       }
     }).pipe(Effect.provide(OutletRenderer.Live)),
@@ -958,10 +974,13 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
       const exit = yield* renderer.renderLayout(42 as any, text("child"), {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
-        const error = Cause.failureOption(exit.cause);
+        const error = Cause.findErrorOption(exit.cause);
         assert.isTrue(Option.isSome(error));
         if (Option.isSome(error)) {
-          assert.strictEqual((error.value as InvalidRouteComponent)._tag, "InvalidRouteComponent");
+          assert.isTrue(error.value instanceof InvalidRouteComponent);
+          if (error.value instanceof InvalidRouteComponent) {
+            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+          }
         }
       }
     }).pipe(Effect.provide(OutletRenderer.Live)),
@@ -973,10 +992,13 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
       const exit = yield* renderer.renderError(null as any, Cause.empty, "/test").pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
-        const error = Cause.failureOption(exit.cause);
+        const error = Cause.findErrorOption(exit.cause);
         assert.isTrue(Option.isSome(error));
         if (Option.isSome(error)) {
-          assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+          assert.isTrue(error.value instanceof InvalidRouteComponent);
+          if (error.value instanceof InvalidRouteComponent) {
+            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+          }
         }
       }
     }).pipe(Effect.provide(OutletRenderer.Live)),

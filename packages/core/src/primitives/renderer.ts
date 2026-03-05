@@ -6,17 +6,15 @@
  */
 import {
   Cause,
-  Context,
   Data,
   Effect,
   Exit,
-  FiberRef,
   Layer,
   Match,
   Option,
-  Runtime,
   Scope,
 } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import {
   Element,
   isElement,
@@ -27,11 +25,12 @@ import {
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
-import * as Router from "../router/index.js";
+import { unsafeEraseR } from "../internal/unsafe.js";
 import { ResourceRegistryLive } from "./resource.js";
 import * as SafeUrl from "../security/safe-url.js";
 import * as Head from "./head.js";
 import { browser as platformBrowser } from "../platform/browser.js";
+import type { RoutesManifest } from "../router/index.js";
 
 /**
  * Type guard to check if a value is an EventHandler (function or Effect)
@@ -49,7 +48,18 @@ const isEventHandler = (value: unknown): value is EventHandler =>
  */
 const isEffectProp = (value: unknown): value is Effect.Effect<unknown> => Effect.isEffect(value);
 
-const emptyContext = Context.unsafeMake<unknown>(new Map());
+const emptyContext = ServiceMap.empty();
+
+const provideRenderContext = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  context: ServiceMap.ServiceMap<unknown> | null,
+): Effect.Effect<A, E, unknown> =>
+  context === null
+    ? effect
+    : Effect.gen(function* () {
+        const services = yield* Effect.services<unknown>();
+        return yield* unsafeEraseR(Effect.provide(effect, ServiceMap.merge(context, services)));
+      });
 
 /**
  * Omit a single key from a props object.
@@ -91,16 +101,37 @@ export class ComponentAnchorError extends Data.TaggedError("ComponentAnchorError
  * @since 1.0.0
  */
 export interface RenderContext {
-  readonly runtime: Runtime.Runtime<never>;
+  readonly runtime: unknown;
   readonly scope: Scope.Scope;
 }
+
+const Runtime = {
+  runFork: (_runtime: unknown) => <A, E>(effect: Effect.Effect<A, E, unknown>) =>
+    Effect.runFork(unsafeEraseR(effect)),
+  runSync: (_runtime: unknown) => <A, E>(effect: Effect.Effect<A, E, unknown>) =>
+    Effect.runSync(unsafeEraseR(effect)),
+};
+
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+    Effect.withFiber((fiber) =>
+      Effect.sync(() => {
+        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+      })),
+};
 
 /**
  * FiberRef to track the current render context
  * @since 1.0.0
  */
-export const CurrentRenderContext: FiberRef.FiberRef<RenderContext | null> =
-  FiberRef.unsafeMake<RenderContext | null>(null);
+export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
+  "trygg/Renderer/CurrentRenderContext",
+  {
+    defaultValue: () => null,
+  },
+);
 
 /**
  * Result of rendering an element - contains the DOM node and cleanup effect
@@ -140,7 +171,7 @@ export interface RendererService {
   readonly mount: (
     container: HTMLElement,
     element: Element,
-  ) => Effect.Effect<void, unknown, Scope.Scope>;
+  ) => Effect.Effect<void, unknown, unknown>;
 
   /**
    * Render an Element to a DOM node
@@ -148,14 +179,14 @@ export interface RendererService {
   readonly render: (
     element: Element,
     parent: Node,
-  ) => Effect.Effect<RenderResult, unknown, Scope.Scope>;
+  ) => Effect.Effect<RenderResult, unknown, unknown>;
 }
 
 /**
  * Renderer service tag
  * @since 1.0.0
  */
-export class Renderer extends Context.Tag("@trygg/Renderer")<Renderer, RendererService>() {}
+export class Renderer extends ServiceMap.Service<Renderer, RendererService>()("@trygg/Renderer") {}
 
 /**
  * Apply a single prop value to a DOM element
@@ -235,8 +266,8 @@ const applyPropValue = (node: HTMLElement, key: string, value: unknown): void =>
 const applyProps = Effect.fn("applyProps")(function* (
   node: HTMLElement,
   props: ElementProps,
-  runtime: Runtime.Runtime<never>,
-  context: Context.Context<unknown> | null,
+  runtime: unknown,
+  context: ServiceMap.ServiceMap<unknown> | null,
 ) {
   const cleanups: Array<() => void> = [];
 
@@ -324,10 +355,10 @@ const renderDocumentElement = (
   props: ElementProps,
   children: ReadonlyArray<Element>,
   _parent: Node,
-  runtime: Runtime.Runtime<never>,
-  context: Context.Context<unknown> | null,
+  runtime: unknown,
+  context: ServiceMap.ServiceMap<unknown> | null,
   options: RenderOptions,
-): Effect.Effect<RenderResult, unknown, Scope.Scope> =>
+): Effect.Effect<RenderResult, unknown, unknown> =>
   Effect.gen(function* () {
     // Determine which existing DOM node to map to
     const targetNode =
@@ -433,10 +464,10 @@ const renderDocumentElement = (
 const renderElement = (
   element: Element,
   parent: Node,
-  runtime: Runtime.Runtime<never>,
-  context: Context.Context<unknown> | null,
+  runtime: unknown,
+  context: ServiceMap.ServiceMap<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
-): Effect.Effect<RenderResult, unknown, Scope.Scope> =>
+): Effect.Effect<RenderResult, unknown, unknown> =>
   Match.value(element).pipe(
     Match.tag("Text", ({ content }) =>
       Effect.sync(() => {
@@ -494,7 +525,7 @@ const renderElement = (
 
         // State to track current rendered content
         let currentResult: RenderResult | null = null;
-        let currentScope: Scope.CloseableScope | null = null;
+        let currentScope: Scope.Closeable | null = null;
         let isUnmounted = false;
         let swapVersion = 0; // Discard stale renders when multiple swaps race
 
@@ -516,7 +547,7 @@ const renderElement = (
 
         const renderWithScope: (
           value: unknown,
-        ) => Effect.Effect<{ result: RenderResult; scope: Scope.CloseableScope }, unknown, never> =
+        ) => Effect.Effect<{ result: RenderResult; scope: Scope.Closeable }, unknown, unknown> =
           Effect.fnUntraced(function* (value: unknown) {
             const scope = yield* Scope.make();
             const element = renderValue(value);
@@ -598,7 +629,7 @@ const renderElement = (
                   signal_id: signal._debugId,
                 });
               }).pipe(
-                Effect.catchAllCause((cause) =>
+                Effect.catchCause((cause) =>
                   Effect.gen(function* () {
                     yield* Debug.log({
                       event: "render.signalelement.swap",
@@ -637,7 +668,7 @@ const renderElement = (
         child,
         parent,
         runtime,
-        context !== null ? Context.merge(context, providedContext) : providedContext,
+        context !== null ? ServiceMap.merge(context, providedContext) : providedContext,
         options,
       ),
     ),
@@ -737,7 +768,7 @@ const renderElement = (
       Effect.gen(function* () {
         // Create the effect from the thunk
         const effect = run();
-        const effectWithContext = Effect.provide(effect, context ?? emptyContext);
+        const effectWithContext = provideRenderContext(effect, context);
 
         // Create a placeholder comment as anchor for this component
         const anchor = document.createComment("component");
@@ -745,7 +776,7 @@ const renderElement = (
 
         // State for reactive re-rendering
         let currentResult: RenderResult | null = null;
-        let currentRenderScope: Scope.CloseableScope | null = null;
+        let currentRenderScope: Scope.Closeable | null = null;
         let isRerendering = false;
         let isUnmounted = false;
         let pendingRerender = false; // Track if signal changed during re-render
@@ -775,15 +806,19 @@ const renderElement = (
         });
 
         const runComponentEffect: () => Effect.Effect<
-          { element: Element; scope: Scope.CloseableScope },
+          { element: Element; scope: Scope.Closeable },
           unknown,
-          never
+          unknown
         > = Effect.fnUntraced(function* () {
           const renderScope = yield* Scope.make();
-          const element = yield* Effect.locally(
-            Effect.locally(
-              Effect.locally(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
-              Signal.CurrentComponentScope,
+          const element = yield* Effect.provideService(
+            Effect.provideService(
+              Effect.provideService(
+                Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
+                Signal.CurrentComponentScope,
+                componentScope,
+              ),
+              Scope.Scope,
               componentScope,
             ),
             Signal.CurrentRenderScope,
@@ -906,7 +941,7 @@ const renderElement = (
               scheduleRerender();
             }
           }).pipe(
-            Effect.catchAllCause((cause) =>
+            Effect.catchCause((cause) =>
               Effect.gen(function* () {
                 yield* Debug.log({
                   event: "render.component.rerender",
@@ -1205,13 +1240,9 @@ const renderElement = (
           }
 
           // Execute render function with render phase context and parent context
-          const renderEffect = Effect.provide(renderFn(item, index), context ?? emptyContext);
+          const renderEffect = provideRenderContext(renderFn(item, index), context);
 
-          const element = yield* Effect.locally(
-            renderEffect,
-            Signal.CurrentRenderPhase,
-            renderPhase,
-          );
+          const element = yield* Effect.provideService(renderEffect, Signal.CurrentRenderPhase, renderPhase);
 
           const listParent = parentOverride ?? anchor.parentNode ?? parent;
 
@@ -1507,7 +1538,7 @@ const renderElement = (
                                   yield* scheduleItemRerender();
                                 }
                               }).pipe(
-                                Effect.catchAllCause((cause) =>
+                                Effect.catchCause((cause) =>
                                   Effect.gen(function* () {
                                     // Cleanup new render result, ensuring markers are removed
                                     // even if cleanup fails (prevents DOM leaks)
@@ -1667,7 +1698,7 @@ const renderElement = (
                   key_order: [...keyOrder],
                 });
               }).pipe(
-                Effect.catchAllCause((cause) =>
+                Effect.catchCause((cause) =>
                   Debug.log({
                     event: "render.keyedlist.update.error",
                     reason: String(cause),
@@ -1725,13 +1756,13 @@ const renderElement = (
 
         // State to track current rendered content
         let currentResult: RenderResult | null = null;
-        let currentScope: Scope.CloseableScope | null = null;
+        let currentScope: Scope.Closeable | null = null;
         let isUnmounted = false;
         let hasErrored = false;
 
         const cleanupRendered = (
           result: RenderResult | null,
-          scope: Scope.CloseableScope | null,
+          scope: Scope.Closeable | null,
         ): Effect.Effect<void> =>
           Effect.gen(function* () {
             if (result !== null) {
@@ -1780,9 +1811,9 @@ const renderElement = (
         const mountFallback = (
           fallbackElement: Element,
         ): Effect.Effect<
-          { result: RenderResult; scope: Scope.CloseableScope } | null,
+          { result: RenderResult; scope: Scope.Closeable } | null,
           unknown,
-          never
+          unknown
         > =>
           Effect.gen(function* () {
             const renderParent = anchor.parentNode;
@@ -1848,7 +1879,7 @@ const renderElement = (
               });
             }).pipe(
               // Log any errors during fallback rendering
-              Effect.tapErrorCause((fallbackCause) =>
+              Effect.tapCause((fallbackCause) =>
                 Effect.sync(() => {
                   console.error(
                     "[trygg] ErrorBoundary fallback rendering failed:",
@@ -1907,7 +1938,7 @@ const renderElement = (
           Effect.provideService(Scope.Scope, childScope),
           Effect.onError(() => Scope.close(childScope, Exit.void)),
           Effect.map((result) => ({ success: true as const, result, scope: childScope })),
-          Effect.catchAllCause((cause) =>
+          Effect.catchCause((cause) =>
             renderFallbackForError(cause).pipe(Effect.map(() => ({ success: false as const }))),
           ),
         );
@@ -1963,8 +1994,9 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       container: HTMLElement,
       element: Element,
     ) {
-      const runtime = yield* Effect.runtime<never>();
+      const runtime = {};
       const scope = yield* Effect.scope;
+      const services = yield* Effect.services<unknown>();
 
       // Set up render context
       yield* FiberRef.set(CurrentRenderContext, { runtime, scope });
@@ -1981,7 +2013,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       // Render the element tree - content is inserted before the anchor
       // by the renderElement function (for Component, Fragment, etc.)
       // For elements that append directly, they go after existing content
-      const result = yield* renderElement(element, container, runtime, null);
+      const result = yield* renderElement(element, container, runtime, services);
 
       // Move rendered content before the anchor for consistent ordering
       container.insertBefore(result.node, mountAnchor);
@@ -1996,8 +2028,9 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
     });
 
     const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
-      const runtime = yield* Effect.runtime<never>();
-      return yield* renderElement(element, parent, runtime, null);
+      const runtime = {};
+      const services = yield* Effect.services<unknown>();
+      return yield* renderElement(element, parent, runtime, services);
     });
 
     return Renderer.of({ mount: mountElement, render: renderToParent });
@@ -2050,7 +2083,7 @@ export const render = Effect.fn("render")(function* <E>(
  * @internal
  */
 const isEffectValue = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
-  typeof value === "object" && value !== null && Effect.EffectTypeId in value;
+  Effect.isEffect(value);
 
 /**
  * Mount an app to the DOM
@@ -2092,13 +2125,14 @@ export const mount = <E>(
   // Normalize to Effect
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
 
-  // Provide platform services to router, then merge all layers
-  const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-  const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
-
   // Dynamic import to avoid bundling platform-browser for non-browser usage
-  import("@effect/platform-browser/BrowserRuntime").then(({ runMain }) => {
-    runMain(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer)));
+  Promise.all([import("@effect/platform-browser/BrowserRuntime"), import("../router/index.js")]).then(([
+    { runMain },
+    Router,
+  ]) => {
+    const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
+    const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
+    runMain(unsafeEraseR(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer))));
   });
 };
 
@@ -2132,7 +2166,7 @@ export const mount = <E>(
  */
 export const renderDocument = <E>(
   app: Effect.Effect<Element, E, never>,
-  options?: { readonly manifest?: Router.RoutesManifest },
+  options?: { readonly manifest?: RoutesManifest },
 ): Effect.Effect<never, E | unknown, Renderer | Scope.Scope> =>
   Effect.gen(function* () {
     const renderer = yield* Renderer;
@@ -2142,6 +2176,7 @@ export const renderDocument = <E>(
 
     // Set routes manifest if provided (enables <Router.Outlet /> without props)
     if (options?.manifest !== undefined) {
+      const Router = yield* Effect.promise(() => import("../router/index.js"));
       yield* FiberRef.set(Router.CurrentRoutesManifest, Option.some(options.manifest));
     }
 
@@ -2187,15 +2222,18 @@ export const renderDocument = <E>(
  */
 export const mountDocument = <E>(
   app: Effect.Effect<Element, E, never> | Element,
-  options?: { readonly manifest?: Router.RoutesManifest },
+  options?: { readonly manifest?: RoutesManifest },
 ): void => {
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
 
-  // Provide platform services to router, then merge all layers
-  const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-  const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
-
-  import("@effect/platform-browser/BrowserRuntime").then(({ runMain }) => {
-    runMain(renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer)));
+  Promise.all([import("@effect/platform-browser/BrowserRuntime"), import("../router/index.js")]).then(([
+    { runMain },
+    Router,
+  ]) => {
+    const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
+    const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
+    runMain(
+      unsafeEraseR(renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer))),
+    );
   });
 };

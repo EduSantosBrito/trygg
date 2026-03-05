@@ -1,13 +1,15 @@
+import { Effect, Layer, Schema } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
+import { FetchHttpClient } from "effect/unstable/http";
 import {
   HttpApi,
-  HttpApiEndpoint,
-  HttpApiGroup,
   HttpApiBuilder,
   HttpApiClient,
-  FetchHttpClient,
-} from "@effect/platform";
-import { Context, Effect, Layer, Schema } from "effect";
-import { Status, Severity, IncidentNotFound, InvalidTransition } from "./errors/incidents";
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiSchema,
+} from "effect/unstable/httpapi";
+import { Status, Severity } from "./errors/incidents";
 import { Incidents, IncidentsLive, type Incident as ServiceIncident } from "./services/incidents";
 
 // =============================================================================
@@ -18,7 +20,7 @@ export const TimelineEntry = Schema.Struct({
   timestamp: Schema.String,
   message: Schema.String,
 });
-export type TimelineEntry = typeof TimelineEntry.Type;
+export type TimelineEntry = Schema.Schema.Type<typeof TimelineEntry>;
 
 export const Incident = Schema.Struct({
   id: Schema.Number,
@@ -28,16 +30,26 @@ export const Incident = Schema.Struct({
   timeline: Schema.Array(TimelineEntry),
   createdAt: Schema.String,
 });
-export type Incident = typeof Incident.Type;
+export type Incident = Schema.Schema.Type<typeof Incident>;
 
 export const CreateIncident = Schema.Struct({
   title: Schema.String,
   severity: Severity,
 });
-export type CreateIncident = typeof CreateIncident.Type;
+export type CreateIncident = Schema.Schema.Type<typeof CreateIncident>;
 
 const TransitionInput = Schema.Struct({
   to: Status,
+});
+
+const IncidentNotFoundSchema = Schema.TaggedStruct("IncidentNotFound", {
+  id: Schema.Number,
+});
+
+const InvalidTransitionSchema = Schema.TaggedStruct("InvalidTransition", {
+  from: Status,
+  to: Status,
+  validNext: Schema.Array(Status),
 });
 
 // =============================================================================
@@ -46,40 +58,45 @@ const TransitionInput = Schema.Struct({
 
 const Hello = Schema.Struct({ message: Schema.String });
 
-class HelloGroup extends HttpApiGroup.make("hello")
-  .add(HttpApiEndpoint.get("greet", "/hello").addSuccess(Hello))
-  .prefix("/api") {}
+const HelloGroup = HttpApiGroup.make("hello")
+  .add(HttpApiEndpoint.get("greet", "/hello", { success: Hello }))
+  .prefix("/api");
 
-class IncidentsGroup extends HttpApiGroup.make("incidents")
-  .add(HttpApiEndpoint.get("list", "/incidents").addSuccess(Schema.Array(Incident)))
+const IncidentsGroup = HttpApiGroup.make("incidents")
+  .add(HttpApiEndpoint.get("list", "/incidents", { success: Schema.Array(Incident) }))
   .add(
-    HttpApiEndpoint.get("get", "/incidents/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Incident)
-      .addError(IncidentNotFound, { status: 404 }),
+    HttpApiEndpoint.get("get", "/incidents/:id", {
+      params: Schema.Struct({ id: Schema.NumberFromString }),
+      success: Incident,
+      error: HttpApiSchema.status(404)(IncidentNotFoundSchema),
+    }),
   )
   .add(
-    HttpApiEndpoint.post("create", "/incidents")
-      .setPayload(CreateIncident)
-      .addSuccess(Incident, { status: 201 }),
+    HttpApiEndpoint.post("create", "/incidents", {
+      payload: CreateIncident,
+      success: HttpApiSchema.status(201)(Incident),
+    }),
   )
   .add(
-    HttpApiEndpoint.post("transition", "/incidents/:id/transition")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .setPayload(TransitionInput)
-      .addSuccess(Incident)
-      .addError(InvalidTransition, { status: 422 })
-      .addError(IncidentNotFound, { status: 404 }),
+    HttpApiEndpoint.post("transition", "/incidents/:id/transition", {
+      params: Schema.Struct({ id: Schema.NumberFromString }),
+      payload: TransitionInput,
+      success: Incident,
+      error: [
+        HttpApiSchema.status(422)(InvalidTransitionSchema),
+        HttpApiSchema.status(404)(IncidentNotFoundSchema),
+      ],
+    }),
   )
-  .prefix("/api") {}
+  .prefix("/api");
 
-class Api extends HttpApi.make("app").add(HelloGroup).add(IncidentsGroup) {}
+const Api = HttpApi.make("app").add(HelloGroup).add(IncidentsGroup);
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-const toWire = (i: ServiceIncident): typeof Incident.Type => ({
+const toWire = (i: ServiceIncident): Incident => ({
   id: i.id,
   title: i.title,
   severity: i.severity,
@@ -108,10 +125,10 @@ const IncidentsHandlers = HttpApiBuilder.group(Api, "incidents", (handlers) =>
         return list.map(toWire);
       }),
     )
-    .handle("get", ({ path }) =>
+    .handle("get", ({ params }) =>
       Effect.gen(function* () {
         const svc = yield* Incidents;
-        return toWire(yield* svc.get(path.id));
+        return toWire(yield* svc.get(params.id));
       }),
     )
     .handle("create", ({ payload }) =>
@@ -120,16 +137,16 @@ const IncidentsHandlers = HttpApiBuilder.group(Api, "incidents", (handlers) =>
         return toWire(yield* svc.create(payload));
       }),
     )
-    .handle("transition", ({ path, payload }) =>
+    .handle("transition", ({ params, payload }) =>
       Effect.gen(function* () {
         const svc = yield* Incidents;
-        return toWire(yield* svc.transition(path.id, payload.to));
+        return toWire(yield* svc.transition(params.id, payload.to));
       }),
     ),
 );
 
-// Default export: composed Layer<HttpApi.Api> — the framework reads this.
-export default HttpApiBuilder.api(Api).pipe(
+// Default export: composed API layer — the framework reads this.
+export default HttpApiBuilder.layer(Api).pipe(
   Layer.provide(HelloLive),
   Layer.provide(IncidentsHandlers),
   Layer.provide(IncidentsLive),
@@ -140,10 +157,10 @@ export default HttpApiBuilder.api(Api).pipe(
 // =============================================================================
 
 const _client = HttpApiClient.make(Api, { baseUrl: "" });
-type ApiClientService = Effect.Effect.Success<typeof _client>;
+type ApiClientService = HttpApiClient.ForApi<typeof Api>;
 
 /** Tag for the typed API client. Yield in effects to get the client. */
-export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
+export class ApiClient extends ServiceMap.Service<ApiClient, ApiClientService>()("ApiClient") {}
 
 /** Layer that creates the ApiClient using FetchHttpClient. */
 export const ApiClientLive = Layer.effect(

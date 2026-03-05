@@ -7,6 +7,7 @@ import * as clack from "@clack/prompts";
 import {
   Prompts,
   PromptCancelledError,
+  type PromptsService,
   type TextOptions,
   type SelectOptions,
   type ConfirmOptions,
@@ -47,7 +48,7 @@ const buildConfirmOptions = (options: ConfirmOptions): clack.ConfirmOptions => {
   return result;
 };
 
-const promptsImpl: Prompts = {
+const promptsImpl: PromptsService = {
   text: (options: TextOptions) => runPrompt(() => clack.text(buildTextOptions(options))),
 
   select: <T>(options: SelectOptions<T>) =>

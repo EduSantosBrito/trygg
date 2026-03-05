@@ -6,20 +6,22 @@
  * of .component() and .children().
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
 import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
+import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -433,8 +435,10 @@ describe("Route.provide", () => {
       (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
     // Create a service
-    class AuthService extends Context.Tag("AuthService")<AuthService, { userId: string }>() {}
-    const AuthLive = Layer.succeed(AuthService, { userId: "test" });
+    class AuthService extends ServiceMap.Service<AuthService, { readonly userId: string }>()(
+      "AuthService",
+    ) {}
+    const AuthLive = Layer.succeed(AuthService)({ userId: "test" });
 
     // Middleware that requires AuthService
     const requireAuth = Effect.gen(function* () {
@@ -482,11 +486,11 @@ describe("Route.provide", () => {
     type Equals<X, Y> =
       (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
-    class ServiceA extends Context.Tag("ServiceA")<ServiceA, { a: string }>() {}
-    class ServiceB extends Context.Tag("ServiceB")<ServiceB, { b: number }>() {}
+    class ServiceA extends ServiceMap.Service<ServiceA, { readonly a: string }>()("ServiceA") {}
+    class ServiceB extends ServiceMap.Service<ServiceB, { readonly b: number }>()("ServiceB") {}
 
-    const LayerA = Layer.succeed(ServiceA, { a: "test" });
-    const LayerB = Layer.succeed(ServiceB, { b: 42 });
+    const LayerA = Layer.succeed(ServiceA)({ a: "test" });
+    const LayerB = Layer.succeed(ServiceB)({ b: 42 });
 
     const middleware = Effect.gen(function* () {
       yield* ServiceA;

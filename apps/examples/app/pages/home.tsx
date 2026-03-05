@@ -24,13 +24,13 @@ const features = [
     title: "Theme (DI)",
     path: "/theme",
     description: "Dependency injection with Component.provide, swappable layers",
-    concepts: ["Context.Tag", "Layer.succeed", "Component.provide", "Runtime switching"],
+    concepts: ["ServiceMap.Service", "Layer.succeed", "Component.provide", "Runtime switching"],
   },
   {
     title: "Form Validation",
     path: "/form",
     description: "Typed errors, validation Effects, form state",
-    concepts: ["Data.TaggedError", "Effect.either", "Typed validation", "Option for UI"],
+    concepts: ["Data.TaggedError", "Effect.result", "Typed validation", "Option for UI"],
   },
   {
     title: "Error Boundary",

@@ -14,16 +14,17 @@ import {
   Effect,
   Equal,
   Exit,
-  FiberRef,
-  GlobalValue,
+  Pipeable,
   Ref,
   Scope,
   SubscriptionRef,
 } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
-import { unsafeTagCallable, unsafeEraseR } from "../internal/unsafe.js";
+import { type Component } from "./component.js";
+import { unsafeMakeKeyedListElement, unsafeRunComponent, unsafeTagCallable } from "../internal/unsafe.js";
 
 /**
  * Error raised when Signal module is not properly initialized.
@@ -66,6 +67,15 @@ export interface Signal<A> {
  */
 type AnySignal = Signal<any>;
 
+type PropsInput<Props> = [Props] extends [never] ? {} : Props;
+
+declare global {
+  var __tryggSignalCurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> | undefined;
+  var __tryggSignalCurrentRenderPhaseId: string | undefined;
+  var __tryggSignalCurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> | undefined;
+  var __tryggSignalCurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> | undefined;
+}
+
 /**
  * Render phase context - managed by Renderer during component execution.
  * Tracks signals created during render for identity across re-renders.
@@ -81,43 +91,45 @@ export interface RenderPhase {
 }
 
 /**
- * FiberRef to track current render phase.
+ * Reference to track current render phase.
  * Set by Renderer before executing component effects.
- * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
+ * Stored on globalThis to survive module duplication.
  * @internal
  */
-export const CurrentRenderPhase: FiberRef.FiberRef<RenderPhase | null> = GlobalValue.globalValue(
-  Symbol.for("trygg/Signal/CurrentRenderPhase"),
-  () => FiberRef.unsafeMake<RenderPhase | null>(null),
-);
+export const CurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> =
+  globalThis.__tryggSignalCurrentRenderPhase ??=
+    ServiceMap.Reference<RenderPhase | null>("trygg/Signal/CurrentRenderPhase", {
+      defaultValue: () => null,
+    });
 
 // Debug: unique ID to detect module duplication
-export const _currentRenderPhaseId = GlobalValue.globalValue(
-  Symbol.for("trygg/Signal/_currentRenderPhaseId"),
-  () => `fiberref_${Math.random().toString(36).slice(2, 8)}`,
-);
+export const _currentRenderPhaseId =
+  globalThis.__tryggSignalCurrentRenderPhaseId ??=
+    `reference_${Math.random().toString(36).slice(2, 8)}`;
 
 /**
- * FiberRef to track the current component lifetime scope.
+ * Reference to track current component lifetime scope.
  * Set by Renderer before executing component effects.
- * Uses GlobalValue to ensure single instance even with module duplication.
+ * Stored on globalThis to survive module duplication.
  * @internal
  */
-export const CurrentComponentScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  GlobalValue.globalValue(Symbol.for("trygg/Signal/CurrentComponentScope"), () =>
-    FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
-  );
+export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> =
+  globalThis.__tryggSignalCurrentComponentScope ??=
+    ServiceMap.Reference<Scope.Closeable | null>("trygg/Signal/CurrentComponentScope", {
+      defaultValue: () => null,
+    });
 
 /**
- * FiberRef to track the current render scope (cleared on re-render).
+ * Reference to track current render scope (cleared on re-render).
  * Set by Renderer before executing component effects.
- * Uses GlobalValue to ensure single instance even with module duplication.
+ * Stored on globalThis to survive module duplication.
  * @internal
  */
-export const CurrentRenderScope: FiberRef.FiberRef<Scope.CloseableScope | null> =
-  GlobalValue.globalValue(Symbol.for("trygg/Signal/CurrentRenderScope"), () =>
-    FiberRef.unsafeMake<Scope.CloseableScope | null>(null),
-  );
+export const CurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> =
+  globalThis.__tryggSignalCurrentRenderScope ??=
+    ServiceMap.Reference<Scope.Closeable | null>("trygg/Signal/CurrentRenderScope", {
+      defaultValue: () => null,
+    });
 
 /**
  * Create a new RenderPhase for a component.
@@ -164,7 +176,7 @@ export const resetRenderPhase = Effect.fn("Signal.resetRenderPhase")(function* (
  */
 export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Signal.make")(
   function* <A>(initial: A) {
-    const phase = yield* FiberRef.get(CurrentRenderPhase);
+    const phase = yield* CurrentRenderPhase;
 
     if (phase === null) {
       // Not in component render - create standalone signal
@@ -294,7 +306,7 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
   A,
 >(signal: Signal<A>) {
   // Track this signal as accessed - subscribes component to changes
-  const phase = yield* FiberRef.get(CurrentRenderPhase);
+  const phase = yield* CurrentRenderPhase;
   yield* Debug.log({
     event: "signal.get.phase",
     signal_id: signal._debugId,
@@ -459,7 +471,7 @@ export function derive<A, B>(
   options?: DeriveOptions,
 ): Effect.Effect<Signal<B>, never, Scope.Scope> {
   return Effect.gen(function* () {
-    const renderScope = yield* FiberRef.get(CurrentRenderScope);
+    const renderScope = yield* CurrentRenderScope;
     // Get scope from options or from render scope
     const scope = options?.scope ?? renderScope ?? (yield* Effect.scope);
 
@@ -563,7 +575,7 @@ export function deriveAll(
   options?: DeriveOptions,
 ): Effect.Effect<Signal<unknown>, never, Scope.Scope> {
   return Effect.gen(function* () {
-    const renderScope = yield* FiberRef.get(CurrentRenderScope);
+    const renderScope = yield* CurrentRenderScope;
     const scope = options?.scope ?? renderScope ?? (yield* Effect.scope);
 
     // Read initial values from all sources
@@ -662,13 +674,13 @@ const notifyListeners: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fn
 
   // Notify all listeners in parallel with error isolation
   yield* Effect.forEach(
-    listeners,
-    (listener, index) =>
-      listener().pipe(
-        Effect.catchAllCause((cause) =>
-          Debug.log({
-            event: "signal.listener.error",
-            signal_id: signal._debugId,
+      listeners,
+      (listener, index) =>
+        listener().pipe(
+          Effect.catchCause((cause) =>
+            Debug.log({
+              event: "signal.listener.error",
+              signal_id: signal._debugId,
             cause: Cause.pretty(cause),
             listener_index: index,
           }),
@@ -725,261 +737,336 @@ export const subscribe: <A>(
  */
 type SuspendElement = import("./element.js").Element;
 
-/**
- * ComponentType interface for suspend - matches Component.ts
- * @internal
- */
-interface SuspendComponentType<_Props = never, _E = never, _R = never> {
-  readonly _tag: "EffectComponent";
-  (props: [_Props] extends [never] ? {} : _Props): SuspendElement;
-}
+type SuspendState = "Pending" | "Failure";
+
+type PendingHandler<R> =
+  | Component.Type<{ stale: SuspendElement | null }, unknown, R>
+  | SuspendElement
+  | ((stale: SuspendElement | null) => SuspendElement);
+
+type FailureHandler<R> =
+  | Component.Type<{ cause: Cause.Cause<unknown>; stale: SuspendElement | null }, unknown, R>
+  | ((cause: Cause.Cause<unknown>, stale: SuspendElement | null) => SuspendElement);
+
+type StateHandler<State extends SuspendState, R> = State extends "Pending"
+  ? PendingHandler<R>
+  : FailureHandler<R>;
 
 /**
- * Result type for suspend - a ComponentType with no props
- * Also exposes the internal signal for testing/debugging
+ * Suspended component preserving `Props`, `E`, `R` and exposing the internal
+ * signal for tests/debugging.
+ *
  * @since 1.0.0
  */
-export interface SuspendedComponent<_E = never> {
-  readonly _tag: "EffectComponent";
-  (props: {}): SuspendElement;
-  /** Internal signal for testing/debugging. Do not use in production code. */
+export interface SuspendedComponent<Props = never, E = never, R = never>
+  extends Component.Type<Props, E, R> {
   readonly _signal: Signal<SuspendElement>;
 }
 
 /**
- * Handlers for Signal.suspend to define what to show during async states.
+ * Pipeable matcher for `Signal.suspend`.
+ *
+ * `E` is the wrapped component error type. This remains on the returned
+ * component type and documents failures from the wrapped component itself.
+ * The `Failure` branch is for the suspend lifecycle fallback UI.
+ *
  * @since 1.0.0
  */
-export interface SuspendHandlers<_E> {
-  /**
-   * What to show while the component is doing async work.
-   * Receives the stale Element if this dep-key was previously rendered.
-   */
-  readonly Pending: SuspendElement | ((stale: SuspendElement | null) => SuspendElement);
-  /**
-   * What to show if the component fails.
-   * Receives the Cause (unknown because the Element union erases E)
-   * and optionally the stale Element from a previous successful render.
-   */
-  readonly Failure: (cause: Cause.Cause<unknown>, stale: SuspendElement | null) => SuspendElement;
-  /**
-   * The component to render. May do async work (Effect.sleep, fetch, etc).
-   * While async is in progress, Pending is shown.
-   */
-  readonly Success: SuspendElement;
+export interface SuspendMatcher<
+  Props,
+  E,
+  R,
+  HasPending extends boolean,
+  HasFailure extends boolean,
+> extends Pipeable.Pipeable {
+  readonly _tag: "SuspendMatcher";
+  readonly component: Component.Type<Props, E, R>;
+  readonly pending?: PendingHandler<unknown>;
+  readonly failure?: FailureHandler<unknown>;
+  readonly _hasPending?: HasPending;
+  readonly _hasFailure?: HasFailure;
 }
 
+const makeSuspendMatcher = <Props, E, R, HasPending extends boolean, HasFailure extends boolean>(
+  component: Component.Type<Props, E, R>,
+  pending?: PendingHandler<unknown>,
+  failure?: FailureHandler<unknown>,
+): SuspendMatcher<Props, E, R, HasPending, HasFailure> => ({
+  _tag: "SuspendMatcher",
+  component,
+  ...(pending === undefined ? {} : { pending }),
+  ...(failure === undefined ? {} : { failure }),
+  pipe() {
+    return Pipeable.pipeArguments(this, arguments);
+  },
+});
+
+const makeTextElement = (content: string): SuspendElement =>
+  ({ _tag: "Text", content }) satisfies Extract<SuspendElement, { readonly _tag: "Text" }>;
+
+const makeSignalElement = (signal: Signal<Element>): SuspendElement =>
+  ({
+    _tag: "SignalElement",
+    signal,
+    onSwap: undefined,
+  }) satisfies Extract<SuspendElement, { readonly _tag: "SignalElement" }>;
+
+const makeComponentElement = <E, R>(
+  run: () => Effect.Effect<SuspendElement, E, R>,
+): SuspendElement =>
+  ({ _tag: "Component", run, key: null }) satisfies Extract<SuspendElement, { readonly _tag: "Component" }>;
+
+const isEffectComponentLike = (value: unknown): value is Component.Type<unknown, unknown, unknown> =>
+  typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
+
+const isPendingComponent = (
+  handler: PendingHandler<unknown>,
+): handler is Component.Type<{ stale: SuspendElement | null }, unknown, unknown> => isEffectComponentLike(handler);
+
+const isFailureComponent = (
+  handler: FailureHandler<unknown>,
+): handler is Component.Type<{ cause: Cause.Cause<unknown>; stale: SuspendElement | null }, unknown, unknown> =>
+  isEffectComponentLike(handler);
+
+const renderPending = (
+  handler: PendingHandler<unknown>,
+  stale: SuspendElement | null,
+): SuspendElement => {
+  if (isPendingComponent(handler)) {
+    return handler({ stale });
+  }
+  if (typeof handler === "function") {
+    return handler(stale);
+  }
+  return handler;
+};
+
+const renderFailure = (
+  handler: FailureHandler<unknown>,
+  cause: Cause.Cause<unknown>,
+  stale: SuspendElement | null,
+): SuspendElement => {
+  if (isFailureComponent(handler)) {
+    return handler({ cause, stale });
+  }
+  return handler(cause, stale);
+};
+
+const runSuspendRender = <Props, E>(
+  component: Component.Type<Props, E, unknown>,
+  props: PropsInput<Props>,
+  renderPhase: RenderPhase,
+): Effect.Effect<SuspendElement, E> =>
+  Effect.provideService(unsafeRunComponent(component, props), CurrentRenderPhase, renderPhase).pipe(
+    Effect.withSpan("Signal.suspend.render"),
+  );
+
 /**
- * Create a suspended component that tracks async state.
- *
- * Returns a ComponentType that can be rendered with JSX: `<SuspendedView />`
- *
- * The first parameter is the ComponentType for type inference and component identity.
- * The Success handler should be a call to that component with props.
- *
- * Caching: Dependencies (Signals read via Signal.get) are serialized as a cache key.
- * - New dep-key: shows Pending (no stale)
- * - Previously seen dep-key: shows Pending with stale Element
+ * Start building a suspended component.
  *
  * @example
  * ```tsx
- * const UserProfile = Component.gen(function* (Props: ComponentProps<{ userId: Signal<number> }>) {
- *   const { userId } = yield* Props
- *   const id = yield* Signal.get(userId)
- *   const user = yield* fetchUser(id)
- *   return <UserCard user={user} />
- * })
- *
- * const SuspendedProfile = yield* Signal.suspend(UserProfile, {
- *   Pending: (stale) => stale ?? <Spinner />,
- *   Failure: (cause) => <ErrorView cause={cause} />,
- *   Success: <UserProfile userId={userId} />
- * })
- *
- * return <SuspendedProfile />
+ * const SuspendedProfile = yield* Signal
+ *   .suspend(UserProfile)
+ *   .pipe(
+ *     Signal.on("Pending", Spinner),
+ *     Signal.on("Failure", ErrorView),
+ *     Signal.exhaustive,
+ *   )
  * ```
  *
  * @since 1.0.0
  */
-export const suspend: <Props, E>(
-  _component: SuspendComponentType<Props, E>,
-  handlers: SuspendHandlers<E>,
-) => Effect.Effect<SuspendedComponent<E>, never, Scope.Scope> = Effect.fn("Signal.suspend")(
-  function* <Props, E>(_component: SuspendComponentType<Props, E>, handlers: SuspendHandlers<E>) {
-    const componentScope = yield* FiberRef.get(CurrentComponentScope);
-    const scope = componentScope ?? (yield* Effect.scope);
+export const suspend = <Props, E, R>(
+  component: Component.Type<Props, E, R>,
+): SuspendMatcher<Props, E, R, false, false> => makeSuspendMatcher(component);
 
-    // Validate element.ts initialized the lazy impls before entering sync code
-    if (!_signalElementImpl || !_textElementImpl) {
-      return yield* Effect.die(
-        new SignalInitError({
-          message: "Signal module not initialized - element.ts must be imported first",
-        }),
+/**
+ * Register a suspend-state handler.
+ *
+ * `Pending` receives `{ stale }`.
+ * `Failure` receives `{ cause, stale }`.
+ *
+ * @since 1.0.0
+ */
+export const on =
+  <
+    Props,
+    E,
+    R,
+    HasPending extends boolean,
+    HasFailure extends boolean,
+    State extends SuspendState,
+    RHandler,
+  >(
+    state: State,
+    handler: StateHandler<State, RHandler>,
+  ) =>
+  (
+    self: SuspendMatcher<Props, E, R, HasPending, HasFailure>,
+  ): SuspendMatcher<
+    Props,
+    E,
+    R | RHandler,
+    State extends "Pending" ? true : HasPending,
+    State extends "Failure" ? true : HasFailure
+  > =>
+    state === "Pending"
+      ? makeSuspendMatcher(self.component, handler as PendingHandler<unknown>, self.failure)
+      : makeSuspendMatcher(self.component, self.pending, handler as FailureHandler<unknown>);
+
+/**
+ * Finalize the suspend matcher.
+ *
+ * The returned component preserves the wrapped component `Props`, `E`, and the
+ * accumulated requirements from both the wrapped component and state handlers.
+ *
+ * @since 1.0.0
+ */
+export const exhaustive = <Props, E, R>(
+  self: SuspendMatcher<Props, E, R, true, true>,
+): Effect.Effect<SuspendedComponent<Props, E, R>, never> =>
+  Effect.gen(function* () {
+    const { tagComponent } = yield* Effect.promise(() => import("./component.js"));
+    const pending = self.pending;
+    const failure = self.failure;
+
+    if (pending === undefined || failure === undefined) {
+      return unsafeTagCallable<SuspendedComponent<Props, E, R>>(
+        (_props: PropsInput<Props>) =>
+          makeComponentElement(() =>
+            Effect.die(
+              new SignalInitError({
+                message: "Signal.suspend exhaustive requires Pending and Failure handlers",
+              }),
+            ),
+          ),
+        {
+          _tag: "EffectComponent",
+          _layers: self.component._layers,
+          _signal: makeSync(makeTextElement("Signal.suspend unavailable")),
+        },
       );
     }
-    const signalElementFn = _signalElementImpl;
 
-    // Cache: dep-key -> last successful Element for that dep-key
-    const cache = new Map<string, SuspendElement>();
+    const initialSignal = makeSync<SuspendElement>(renderPending(pending, null));
 
-    // State signal for the current view
-    const viewSignal: Signal<SuspendElement> = yield* make<SuspendElement>(
-      typeof handlers.Pending === "function" ? handlers.Pending(null) : handlers.Pending,
-    );
-
-    // Render phase for tracking deps
-    const renderPhase = yield* makeRenderPhase;
-
-    let requestId = 0;
-    let isRunning = false;
-    let subscriptionCleanups: Array<Effect.Effect<void>> = [];
-
-    /**
-     * Serialize accessed signals' current values as a cache key.
-     * Uses peekSync to avoid running Effect inside Effect.
-     * @internal
-     */
-    const computeDepKey = (accessed: Set<AnySignal>): string => {
-      if (accessed.size === 0) return "";
-      const entries: Array<[string, unknown]> = [];
-      for (const signal of accessed) {
-        const value = peekSync(signal);
-        entries.push([signal._debugId, value]);
-      }
-      // Sort by debugId for deterministic key
-      entries.sort((a, b) => a[0].localeCompare(b[0]));
-      return JSON.stringify(entries.map(([, v]) => v));
-    };
-
-    const cleanupSubscriptions: () => Effect.Effect<void> = Effect.fn("Signal.suspend.cleanup")(
-      function* () {
-        const oldCleanups = subscriptionCleanups;
-        subscriptionCleanups = [];
-        for (const cleanup of oldCleanups) {
-          yield* cleanup;
-        }
-      },
-    );
-
-    const subscribeToSignals: (signals: Set<AnySignal>) => Effect.Effect<void> = Effect.fn(
-      "Signal.suspend.subscribe",
-    )(function* (signals: Set<AnySignal>) {
-      yield* cleanupSubscriptions();
-      if (signals.size === 0) return;
-
-      for (const signal of signals) {
-        const unsubscribe = yield* subscribe(signal, () => refresh);
-        subscriptionCleanups.push(unsubscribe);
-      }
-    });
-
-    /**
-     * Get the Success element. If it's a Component element, we need to
-     * extract and run its effect. Otherwise just return it.
-     * @internal
-     */
-    const renderSuccess = Effect.suspend(() =>
+    const runFn = (props: PropsInput<Props>): Effect.Effect<Element, never, R> =>
       Effect.gen(function* () {
-        const element = handlers.Success;
-        // Check if it's a Component element that needs to be run
-        if (typeof element === "object" && element !== null && element._tag === "Component") {
-          // element.run() has R = unknown (Element union type erasure).
-          // At render time all services are already in the fiber context.
-          return yield* unsafeEraseR(element.run()).pipe(
-            Effect.locally(CurrentRenderPhase, renderPhase),
+        const componentScope = yield* CurrentComponentScope;
+        const scope = componentScope ?? (yield* Scope.make());
+        const cache = new Map<string, SuspendElement>();
+        const viewSignal = yield* make(renderPending(pending, null));
+        const renderPhase = yield* makeRenderPhase;
+
+        let requestId = 0;
+        let isRunning = false;
+        let subscriptionCleanups: Array<Effect.Effect<void>> = [];
+
+        const computeDepKey = (accessed: Set<AnySignal>): string => {
+          if (accessed.size === 0) return "";
+          const entries: Array<[string, unknown]> = [];
+          for (const signal of accessed) {
+            entries.push([signal._debugId, peekSync(signal)]);
+          }
+          entries.sort((a, b) => a[0].localeCompare(b[0]));
+          return JSON.stringify(entries.map(([, value]) => value));
+        };
+
+        const cleanupSubscriptions = Effect.fn("Signal.suspend.cleanup")(function* () {
+          const oldCleanups = subscriptionCleanups;
+          subscriptionCleanups = [];
+          for (const cleanup of oldCleanups) {
+            yield* cleanup;
+          }
+        });
+
+        const refreshRef = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+
+        const setView = (element: SuspendElement): Effect.Effect<void> =>
+          SubscriptionRef.set(viewSignal._ref, element).pipe(
+            Effect.flatMap(() => notifyListeners(viewSignal)),
           );
-        }
-        // For non-Component elements, just return them
-        return element;
-      }),
-    ).pipe(Effect.withSpan("Signal.suspend.render"));
 
-    const runRender: (runId: number) => Effect.Effect<void> = Effect.fn("Signal.suspend.run")(
-      function* (runId: number) {
-        yield* resetRenderPhase(renderPhase);
+        const subscribeToSignals = Effect.fn("Signal.suspend.subscribe")(function* (signals: Set<AnySignal>) {
+          yield* cleanupSubscriptions();
+          if (signals.size === 0) return;
 
-        const exit = yield* Effect.exit(renderSuccess);
+          for (const signal of signals) {
+            const unsubscribe = yield* subscribe(signal, () =>
+              Ref.get(refreshRef).pipe(Effect.flatMap((refresh) => refresh)),
+            );
+            subscriptionCleanups.push(unsubscribe);
+          }
+        });
 
-        const latestRequest = requestId;
-        if (runId !== latestRequest) {
-          return yield* runRender(latestRequest);
-        }
+        const runRender = (runId: number): Effect.Effect<void> =>
+          Effect.gen(function* () {
+          yield* resetRenderPhase(renderPhase);
+          const exit = yield* Effect.exit(runSuspendRender(self.component, props, renderPhase));
 
-        // Compute dep key from accessed signals
-        const depKey = computeDepKey(renderPhase.accessed);
+          const latestRequest = requestId;
+          if (runId !== latestRequest) {
+            yield* runRender(latestRequest);
+            return;
+          }
 
-        if (Exit.isSuccess(exit)) {
-          // Cache the successful render for this dep-key
-          cache.set(depKey, exit.value);
+          const depKey = computeDepKey(renderPhase.accessed);
+          if (Exit.isSuccess(exit)) {
+            cache.set(depKey, exit.value);
+            yield* setView(exit.value);
+          } else {
+            const stale = cache.get(depKey) ?? null;
+            yield* setView(renderFailure(failure, exit.cause, stale));
+          }
 
-          yield* set(viewSignal, exit.value);
-        } else {
-          // Failure - show error handler with stale from cache (if this dep-key succeeded before)
-          const stale = cache.get(depKey) ?? null;
-          // exit.cause is Cause<unknown> — renderSuccess erases E to unknown.
-          // SuspendHandlers.Failure accepts Cause<unknown> so no cast needed.
-          const errorElement = handlers.Failure(exit.cause, stale);
-          yield* set(viewSignal, errorElement);
-        }
+          yield* subscribeToSignals(renderPhase.accessed);
 
-        yield* subscribeToSignals(renderPhase.accessed);
+          const nextRequest = requestId;
+          if (runId !== nextRequest) {
+            yield* runRender(nextRequest);
+          }
+          });
 
-        const nextRequest = requestId;
-        if (runId !== nextRequest) {
-          return yield* runRender(nextRequest);
-        }
-      },
-    );
+        const refresh: Effect.Effect<void> = Effect.gen(function* () {
+          requestId += 1;
+          const runId = requestId;
+          const peekDepKey = computeDepKey(renderPhase.accessed);
+          const stale = cache.get(peekDepKey) ?? null;
+          yield* setView(renderPending(pending, stale));
 
-    const refresh: Effect.Effect<void> = Effect.gen(function* () {
-      requestId += 1;
-      const runId = requestId;
+          if (isRunning) return;
+          isRunning = true;
+          yield* Effect.forkIn(
+            runRender(runId).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  isRunning = false;
+                }),
+              ),
+            ),
+            scope,
+          );
+        }).pipe(Effect.withSpan("Signal.suspend.refresh"));
 
-      // Compute what the new dep key will be (peek at current signal values)
-      // We need to peek without fully running to check if cached
-      const peekDepKey = computeDepKey(renderPhase.accessed);
-      const cached = cache.get(peekDepKey);
+        yield* Ref.set(refreshRef, refresh);
 
-      // Stale element is ONLY from cache for this specific dep-key
-      // If dep-key was never fetched, stale is null (shows Loading)
-      // If dep-key was previously fetched, stale is the cached element (shows stale)
-      const stale = cached ?? null;
+        yield* Scope.addFinalizer(scope, cleanupSubscriptions());
+        yield* refresh;
+        yield* SubscriptionRef.set(initialSignal._ref, makeSignalElement(viewSignal));
+        return makeSignalElement(viewSignal);
+      });
 
-      // Show pending state
-      const pendingElement =
-        typeof handlers.Pending === "function" ? handlers.Pending(stale) : handlers.Pending;
-      yield* set(viewSignal, pendingElement);
+    const suspendedComponent = (props: PropsInput<Props>): SuspendElement => makeComponentElement(() => runFn(props));
 
-      if (isRunning) return;
-      isRunning = true;
-
-      yield* Effect.forkIn(
-        runRender(runId).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              isRunning = false;
-            }),
-          ),
-        ),
-        scope,
-      );
-    }).pipe(Effect.withSpan("Signal.suspend.refresh"));
-
-    yield* Scope.addFinalizer(scope, cleanupSubscriptions());
-    yield* refresh;
-
-    // Return a ComponentType that renders the signal as a SignalElement
-    // This allows usage as <SuspendedView /> in JSX
-    const suspendedComponent = (_props: {}): SuspendElement => signalElementFn(viewSignal);
-
-    // Tag as EffectComponent and expose signal for testing
-    const tagged = "EffectComponent" as const;
-    return unsafeTagCallable<SuspendedComponent<E>>(suspendedComponent, {
-      _tag: tagged,
-      _signal: viewSignal,
+    return unsafeTagCallable<SuspendedComponent<Props, E, R>>(suspendedComponent, {
+      _tag: "EffectComponent",
+      _layers: self.component._layers,
+      _runFn: runFn,
+      _signal: initialSignal,
+      provide: tagComponent(suspendedComponent, self.component._layers, runFn).provide,
     });
-  },
-);
+  });
 
 /**
  * Key type for list items
@@ -999,10 +1086,6 @@ export interface EachOptions<T> {
   readonly key: (item: T, index: number) => ItemKey;
 }
 
-// Note: Signal.each creates a KeyedList Element.
-// We use a lazy getter to avoid circular dependency issues.
-// The actual implementation is in _setEachImpl, called by Element.ts
-
 /**
  * Render function return type for Signal.each.
  * Accepts either a plain Element or an Effect that produces an Element.
@@ -1014,39 +1097,17 @@ type EachFn = <T, E>(
   source: Signal<ReadonlyArray<T>>,
   renderFn: (item: T, index: number) => EachRenderResult<E>,
   options: EachOptions<T>,
-) => any;
+) => Element;
 
-let _eachImpl: EachFn | null = null;
-
-/**
- * @internal
- * Set the implementation of Signal.each (called by Element.ts to break circular dependency)
- */
-export const _setEachImpl = (impl: EachFn): void => {
-  _eachImpl = impl;
-};
-
-// Lazy reference to signalElement to break circular dependency
-let _signalElementImpl: ((signal: Signal<Element>) => Element) | null = null;
-
-// Lazy reference to Text constructor to break circular dependency
-let _textElementImpl: ((props: { content: string }) => Element) | null = null;
-
-/**
- * @internal
- * Set the implementation of signalElement (called by Element.ts to break circular dependency)
- */
-export const _setSignalElementImpl = (impl: (signal: Signal<Element>) => Element): void => {
-  _signalElementImpl = impl;
-};
-
-/**
- * @internal
- * Set the Text constructor (called by Element.ts to break circular dependency)
- */
-export const _setTextElementImpl = (impl: (props: { content: string }) => Element): void => {
-  _textElementImpl = impl;
-};
+const makeKeyedListElement = <T, E>(
+  source: Signal<ReadonlyArray<T>>,
+  renderFn: (item: T, index: number) => EachRenderResult<E>,
+  key: (item: T, index: number) => ItemKey,
+): Element =>
+  unsafeMakeKeyedListElement(source, (item, index) => {
+    const result = renderFn(item, index);
+    return Effect.isEffect(result) ? result : Effect.succeed(result);
+  }, key);
 
 /**
  * Create a keyed list from a Signal of arrays.
@@ -1081,19 +1142,5 @@ export const _setTextElementImpl = (impl: (props: { content: string }) => Elemen
  * @since 1.0.0
  */
 export const each: EachFn = (source, renderFn, options) => {
-  if (_eachImpl === null) {
-    // Return an Effect that fails instead of throwing synchronously
-    return Effect.fail(
-      new SignalInitError({
-        message:
-          "Signal.each is not initialized.\n\n" +
-          "This usually means you imported Signal directly from 'trygg/Signal' " +
-          "before the main 'trygg' module was loaded.\n\n" +
-          "Fix: Import from 'trygg' instead:\n" +
-          "  import { Signal } from 'trygg'\n\n" +
-          "Or ensure 'trygg' is imported before using Signal.each.",
-      }),
-    );
-  }
-  return _eachImpl(source, renderFn, options);
+  return makeKeyedListElement(source, renderFn, options.key);
 };

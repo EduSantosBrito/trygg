@@ -1,5 +1,5 @@
 import "../styles.css";
-import { Effect, Scope } from "effect";
+import { Effect } from "effect";
 import { Component, DevMode, Signal } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "./api";
@@ -8,7 +8,6 @@ import { CommandPalette } from "./components/command-palette";
 
 export default Component.gen(function* () {
   const { mode } = yield* AppTheme;
-  const scope = yield* Scope.Scope;
 
   // Command palette state
   const cmdkOpen = yield* Signal.make(false);
@@ -16,28 +15,21 @@ export default Component.gen(function* () {
   const closeCmdk = () => Signal.set(cmdkOpen, false);
 
   // Global keyboard shortcut for ⌘K / Ctrl+K
-  yield* Effect.sync(() => {
-    const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-        event.preventDefault();
-        Effect.runFork(
-          Signal.get(cmdkOpen).pipe(
-            Effect.flatMap((isOpen) =>
-              isOpen ? Signal.set(cmdkOpen, false) : Signal.set(cmdkOpen, true),
-            ),
-          ),
-        );
-      }
-    };
-    document.addEventListener("keydown", handler);
-    // Cleanup on scope close
-    Effect.runFork(
-      Scope.addFinalizer(
-        scope,
-        Effect.sync(() => document.removeEventListener("keydown", handler)),
-      ),
-    );
-  });
+  yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      const handler = (event: KeyboardEvent) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+          event.preventDefault();
+          const isOpen = Signal.peekSync(cmdkOpen);
+          Effect.runSync(Signal.set(cmdkOpen, !isOpen));
+        }
+      };
+
+      document.addEventListener("keydown", handler);
+      return handler;
+    }),
+    (handler) => Effect.sync(() => document.removeEventListener("keydown", handler)),
+  );
 
   // Reactive active-state signals for nav links
   const homeActive = yield* Router.isActive("/", { exact: true });
@@ -58,7 +50,7 @@ export default Component.gen(function* () {
         <meta name="color-scheme" content="light dark" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" />
         <link
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
           rel="stylesheet"

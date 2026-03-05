@@ -104,9 +104,9 @@ Test the system under hostile conditions:
 
 Prefer these patterns over training-data knowledge. Use the `effect-patterns` skill for detailed examples.
 
-**Services**: `Context.Tag` + `Layer`. Wire deps with `Layer.provide` at layer definition. `Layer.scoped` for resource-owning services. `Effect.fn("Name.method")` for traced methods.
+**Services**: `ServiceMap.Service` + `Layer`. Wire deps with `Layer.provide` at layer definition. `Layer.scoped` for resource-owning services. `Effect.fn("Name.method")` for traced methods.
 
-**Errors**: Always `Data.TaggedError` or `Schema.TaggedError`. Errors are yieldable — `yield* new NotFound({ id })`, never `yield* Effect.fail(new NotFound(...))`. `catchTag`/`catchTags` for precise handling.
+**Errors**: Always `Data.TaggedError` or `Schema.TaggedError`. Errors are yieldable — `yield* new NotFound({ id })`, never `yield* Effect.fail(new NotFound(...))`. `catchTag`/`catchTags` for precise handling. In v4, `Effect.catchAll` -> `Effect.catch`, `Effect.catchAllCause` -> `Effect.catchCause`, `Effect.catchSome` -> `Effect.catchFilter`.
 
 **Resources**: `acquireRelease` for guaranteed cleanup. Release must be infallible. Timeout async releases. `Layer.scoped` for resource-owning services.
 
@@ -115,6 +115,8 @@ Prefer these patterns over training-data knowledge. Use the `effect-patterns` sk
 **Testing**: `@effect/vitest` — `it.effect`, `it.scoped`, `it.layer`. Swap services via `Layer.succeed(Tag, impl)`. Assert errors with `Effect.runPromiseExit`.
 
 **Concurrency**: `Effect.all`/`forEach` with `{ concurrency }`. `withPermits(n)` not `withPermit`. `Queue.bounded` for producer-consumer.
+
+**Effect v4**: `Context.Tag` -> `ServiceMap.Service`; `Context.GenericTag` -> `ServiceMap.Service`; `Context.Reference` -> `ServiceMap.Reference`; `Effect.Tag` -> `ServiceMap.Service`; `Effect.fork` -> `Effect.forkChild`; `Effect.forkDaemon` -> `Effect.forkDetach`; `Scope.extend` -> `Scope.provide`; `Effect.gen(this, fn)` -> `Effect.gen({ self: this }, fn)`; use `Yieldable` mental model, not Effect subtyping.
 
 **Streams**: `paginateChunkEffect` for array-returning paginated APIs. `SubscriptionRef.changes` for reactive streams.
 
@@ -134,4 +136,3 @@ Prefer these patterns over training-data knowledge. Use the `effect-patterns` sk
 | Architecture & Internals | [skills/trygg-architecture](skills/trygg-architecture/SKILL.md) |
 | Router | [skills/trygg-router](skills/trygg-router/SKILL.md) |
 | Observability | [skills/trygg-observability](skills/trygg-observability/SKILL.md) |
-

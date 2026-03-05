@@ -24,7 +24,7 @@ export default Component.gen(function* () {
     Effect.gen(function* () {
       yield* Signal.set(modalOpen, false);
       yield* Router.navigate("/incidents", { replace: true });
-    });
+    }).pipe(Effect.ignore);
 
   // Check for ?declare=true query param to auto-open modal
   const querySignal = yield* Router.querySignal;
@@ -172,7 +172,7 @@ const IncidentRow = Component.gen(function* (Props: ComponentProps<{ incident: I
 
 interface DeclareModalProps {
   readonly open: Signal.Signal<boolean>;
-  readonly onClose: () => Effect.Effect<void, unknown, unknown>;
+  readonly onClose: () => Effect.Effect<void, never, Router.Router>;
 }
 
 const DeclareModal = Component.gen(function* (Props: ComponentProps<DeclareModalProps>) {
@@ -186,7 +186,10 @@ const DeclareModal = Component.gen(function* (Props: ComponentProps<DeclareModal
   return (
     <div
       className="modal-backdrop"
-      onClick={(e: MouseEvent) => {
+      onClick={(e: Event) => {
+        if (!(e instanceof MouseEvent)) {
+          return Effect.void;
+        }
         if (e.target === e.currentTarget) {
           return onClose();
         }

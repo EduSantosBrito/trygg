@@ -2,9 +2,12 @@
 //
 // Tests for middleware chaining, Router.redirect/forbidden typed failures,
 // boundary component storage, and nearest-wins resolution.
-import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Ref } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Data, Effect, Ref, Result } from "effect";
+import type * as LayerTypes from "effect/Layer";
 import * as Route from "../route.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 class TestError extends Data.TaggedError("TestError")<{ readonly message: string }> {}
 import { empty } from "../../primitives/element.js";
@@ -16,7 +19,7 @@ const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<import("effect").Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<LayerTypes.Any>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -64,35 +67,35 @@ describe("Middleware chaining", () => {
 // =============================================================================
 
 describe("routeRedirect", () => {
-  it.effect("should redirect via typed failure", () =>
+  it.scoped("should redirect via typed failure", () =>
     Effect.gen(function* () {
-      const result = yield* Route.routeRedirect("/login").pipe(Effect.either);
+      const result = yield* Route.routeRedirect("/login").pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.strictEqual(result.left._tag, "RouterRedirect");
-        assert.strictEqual(result.left.path, "/login");
-        assert.strictEqual(result.left.replace, false);
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "RouterRedirect");
+        assert.strictEqual(result.failure.path, "/login");
+        assert.strictEqual(result.failure.replace, false);
       }
     }),
   );
 
-  it.effect("should support replace option", () =>
+  it.scoped("should support replace option", () =>
     Effect.gen(function* () {
-      const result = yield* Route.routeRedirect("/login", { replace: true }).pipe(Effect.either);
+      const result = yield* Route.routeRedirect("/login", { replace: true }).pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.strictEqual(result.left.replace, true);
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.replace, true);
       }
     }),
   );
 
-  it.effect("should produce Effect<never, RouterRedirectError>", () =>
+  it.scoped("should produce Effect<never, RouterRedirectError>", () =>
     Effect.gen(function* () {
-      const result = yield* Route.routeRedirect("/login").pipe(Effect.either);
+      const result = yield* Route.routeRedirect("/login").pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 });
@@ -102,13 +105,13 @@ describe("routeRedirect", () => {
 // =============================================================================
 
 describe("routeForbidden", () => {
-  it.effect("should forbid via typed failure", () =>
+  it.scoped("should forbid via typed failure", () =>
     Effect.gen(function* () {
-      const result = yield* Route.routeForbidden().pipe(Effect.either);
+      const result = yield* Route.routeForbidden().pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.strictEqual(result.left._tag, "RouterForbidden");
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "RouterForbidden");
       }
     }),
   );
@@ -119,7 +122,7 @@ describe("routeForbidden", () => {
 // =============================================================================
 
 describe("runMiddlewareChain", () => {
-  it.effect("should return Continue when all middleware succeed", () =>
+  it.scoped("should return Continue when all middleware succeed", () =>
     Effect.gen(function* () {
       const m1 = Effect.void;
       const m2 = Effect.void;
@@ -130,7 +133,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should return Continue for empty middleware chain", () =>
+  it.scoped("should return Continue for empty middleware chain", () =>
     Effect.gen(function* () {
       const result = yield* Route.runMiddlewareChain([]);
 
@@ -138,7 +141,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should return Redirect on RouterRedirect failure", () =>
+  it.scoped("should return Redirect on RouterRedirect failure", () =>
     Effect.gen(function* () {
       const m1 = Effect.void;
       const m2 = Route.routeRedirect("/login");
@@ -152,7 +155,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should return Forbidden on RouterForbidden failure", () =>
+  it.scoped("should return Forbidden on RouterForbidden failure", () =>
     Effect.gen(function* () {
       const m1 = Effect.void;
       const m2 = Route.routeForbidden();
@@ -163,7 +166,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should return Error on other failures", () =>
+  it.scoped("should return Error on other failures", () =>
     Effect.gen(function* () {
       const m1 = Effect.void;
       const m2 = Effect.fail(new TestError({ message: "oops" }));
@@ -174,7 +177,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should not continue after redirect", () =>
+  it.scoped("should not continue after redirect", () =>
     Effect.gen(function* () {
       const counter = yield* Ref.make(0);
       const m1 = Route.routeRedirect("/login");
@@ -187,7 +190,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should not continue after forbidden", () =>
+  it.scoped("should not continue after forbidden", () =>
     Effect.gen(function* () {
       const counter = yield* Ref.make(0);
       const m1 = Route.routeForbidden();
@@ -200,7 +203,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should not continue after error", () =>
+  it.scoped("should not continue after error", () =>
     Effect.gen(function* () {
       const counter = yield* Ref.make(0);
       const m1 = Effect.fail(new TestError({ message: "oops" }));
@@ -213,7 +216,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should execute middleware in order", () =>
+  it.scoped("should execute middleware in order", () =>
     Effect.gen(function* () {
       const log = yield* Ref.make<string[]>([]);
       const m1 = Ref.update(log, (arr) => [...arr, "first"]);
@@ -227,7 +230,7 @@ describe("runMiddlewareChain", () => {
     }),
   );
 
-  it.effect("should stop at first redirect in chain", () =>
+  it.scoped("should stop at first redirect in chain", () =>
     Effect.gen(function* () {
       const log = yield* Ref.make<string[]>([]);
       const m1 = Ref.update(log, (arr) => [...arr, "first"]);

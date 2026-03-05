@@ -24,7 +24,7 @@
  * })
  * ```
  */
-import { Data, Effect, FiberRef, Scope } from "effect";
+import { Data, Effect, Scope } from "effect";
 import { gen, Component, type ComponentProps } from "./component.js";
 import { type Element, Element as ElementEnum, signalElement, empty } from "./element.js";
 import type { MaybeSignal } from "./element.js";
@@ -122,7 +122,7 @@ export const make = (
       document.body.appendChild(container);
 
       // Register cleanup: remove container when scope closes
-      const componentScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+      const componentScope = yield* Signal.CurrentComponentScope;
       const scope = componentScope ?? (yield* Effect.scope);
       yield* Scope.addFinalizer(
         scope,

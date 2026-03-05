@@ -9,7 +9,7 @@
  * - Verify relative URLs work
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
 import * as SafeUrl from "../safe-url.js";
 
 // Reset config before each test to ensure isolation
@@ -92,7 +92,7 @@ describe("SafeUrl.validate", () => {
 
         assert.isTrue(Exit.isFailure(exit));
         if (Exit.isFailure(exit)) {
-          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
           assert.isNotNull(error);
           assert.strictEqual(error?._tag, "UnsafeUrlError");
           assert.strictEqual(error?.reason, "unsafe_scheme");
@@ -110,7 +110,7 @@ describe("SafeUrl.validate", () => {
 
         assert.isTrue(Exit.isFailure(exit));
         if (Exit.isFailure(exit)) {
-          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
           assert.strictEqual(error?.reason, "unsafe_scheme");
         }
       }),
@@ -124,7 +124,7 @@ describe("SafeUrl.validate", () => {
 
         assert.isTrue(Exit.isFailure(exit));
         if (Exit.isFailure(exit)) {
-          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
           assert.strictEqual(error?.reason, "empty_url");
         }
       }),
@@ -138,7 +138,7 @@ describe("SafeUrl.validate", () => {
 
         assert.isTrue(Exit.isFailure(exit));
         if (Exit.isFailure(exit)) {
-          const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+          const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
           assert.strictEqual(error?.reason, "empty_url");
         }
       }),
@@ -220,7 +220,7 @@ describe("SafeUrl.validate (failure path)", () => {
 
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
-        const error = exit.cause._tag === "Fail" ? exit.cause.error : null;
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
         assert.isNotNull(error);
         assert.strictEqual(error?._tag, "UnsafeUrlError");
         assert.strictEqual(error?.reason, "unsafe_scheme");
@@ -364,10 +364,12 @@ describe("UnsafeUrlError", () => {
       const exit = yield* Effect.exit(SafeUrl.validate("javascript:alert(1)"));
 
       assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        assert.include(error.message, "javascript");
-        assert.include(error.message, "Unsafe URL scheme");
+      if (Exit.isFailure(exit)) {
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        if (error) {
+          assert.include(error.message, "javascript");
+          assert.include(error.message, "Unsafe URL scheme");
+        }
       }
       SafeUrl.resetConfig();
     }),
@@ -379,9 +381,11 @@ describe("UnsafeUrlError", () => {
       const exit = yield* Effect.exit(SafeUrl.validate(""));
 
       assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        assert.include(error.message, "Empty URL");
+      if (Exit.isFailure(exit)) {
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        if (error) {
+          assert.include(error.message, "Empty URL");
+        }
       }
       SafeUrl.resetConfig();
     }),
@@ -393,9 +397,11 @@ describe("UnsafeUrlError", () => {
       const exit = yield* Effect.exit(SafeUrl.validate("javascript:alert(1)"));
 
       assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        assert.strictEqual(error.url, "javascript:alert(1)");
+      if (Exit.isFailure(exit)) {
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        if (error) {
+          assert.strictEqual(error.url, "javascript:alert(1)");
+        }
       }
       SafeUrl.resetConfig();
     }),
@@ -407,10 +413,12 @@ describe("UnsafeUrlError", () => {
       const exit = yield* Effect.exit(SafeUrl.validate("javascript:alert(1)"));
 
       assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        assert.isDefined(error.allowedSchemes);
-        assert.isTrue(error.allowedSchemes.includes("https"));
+      if (Exit.isFailure(exit)) {
+        const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
+        if (error) {
+          assert.isDefined(error.allowedSchemes);
+          assert.isTrue(error.allowedSchemes.includes("https"));
+        }
       }
       SafeUrl.resetConfig();
     }),

@@ -19,11 +19,26 @@
  * - Every test manages its own fibers/scope to prevent memory leaks
  * - Tests are unbiased (no assumptions about internal implementation)
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Data, Deferred, Effect, Exit, Fiber, FiberRef, Ref, Scope, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Data, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
-import { Element, text, componentElement } from "../element.js";
+import { Element, text } from "../element.js";
+import * as Component from "../component.js";
+import { unsafeEraseR } from "../../internal/unsafe.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
+
+const withRenderPhase = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  phase: Signal.RenderPhase,
+): Effect.Effect<A, E, R> => Effect.provideService(effect, Signal.CurrentRenderPhase, phase);
+
+const withRenderScope = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  scope: Scope.Closeable,
+): Effect.Effect<A, E, R> => Effect.provideService(effect, Signal.CurrentRenderScope, scope);
 
 // =============================================================================
 // Signal.make - Create reactive state
@@ -65,7 +80,7 @@ describe("Signal.make", () => {
 
   it.scoped("should create standalone signal outside render phase", () =>
     Effect.gen(function* () {
-      const phase = yield* FiberRef.get(Signal.CurrentRenderPhase);
+      const phase = yield* Signal.CurrentRenderPhase;
       assert.isNull(phase);
 
       const signal = yield* Signal.make(10);
@@ -79,7 +94,7 @@ describe("Signal.make", () => {
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
-      const signal = yield* Signal.make(100).pipe(Effect.locally(Signal.CurrentRenderPhase, phase));
+      const signal = yield* withRenderPhase(Signal.make(100), phase);
 
       const signals = yield* Ref.get(phase.signals);
       assert.strictEqual(signals.length, 1);
@@ -91,13 +106,11 @@ describe("Signal.make", () => {
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
-      const signal1 = yield* Signal.make(1).pipe(Effect.locally(Signal.CurrentRenderPhase, phase));
+      const signal1 = yield* withRenderPhase(Signal.make(1), phase);
 
       yield* Signal.resetRenderPhase(phase);
 
-      const signal2 = yield* Signal.make(999).pipe(
-        Effect.locally(Signal.CurrentRenderPhase, phase),
-      );
+      const signal2 = yield* withRenderPhase(Signal.make(999), phase);
 
       assert.strictEqual(signal1, signal2);
       const value = yield* Signal.get(signal2);
@@ -109,8 +122,8 @@ describe("Signal.make", () => {
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
-      const signal1 = yield* Signal.make(1).pipe(Effect.locally(Signal.CurrentRenderPhase, phase));
-      const signal2 = yield* Signal.make(2).pipe(Effect.locally(Signal.CurrentRenderPhase, phase));
+      const signal1 = yield* withRenderPhase(Signal.make(1), phase);
+      const signal2 = yield* withRenderPhase(Signal.make(2), phase);
 
       assert.notStrictEqual(signal1, signal2);
 
@@ -162,7 +175,7 @@ describe("Signal.get", () => {
       const phase = yield* Signal.makeRenderPhase;
       const signal = yield* Signal.make(10);
 
-      yield* Signal.get(signal).pipe(Effect.locally(Signal.CurrentRenderPhase, phase));
+      yield* withRenderPhase(Signal.get(signal), phase);
 
       assert.isTrue(phase.accessed.has(signal));
     }),
@@ -278,14 +291,20 @@ describe("Signal.set", () => {
         }),
       ).pipe(Effect.asVoid);
 
-      const fiber = yield* Effect.fork(Signal.set(signal, 1));
+      const fiber = yield* Signal.set(signal, 1).pipe(Effect.forkChild);
       yield* TestClock.adjust(10);
       yield* Deferred.succeed(latch, undefined);
       yield* Fiber.join(fiber);
 
       assert.strictEqual(startTimes.length, 2);
-      const timeDiff = Math.abs(startTimes[0]! - startTimes[1]!);
-      assert.isBelow(timeDiff, 50);
+      const first = startTimes[0];
+      const second = startTimes[1];
+      assert.isDefined(first);
+      assert.isDefined(second);
+      if (first !== undefined && second !== undefined) {
+        const timeDiff = Math.abs(first - second);
+        assert.isBelow(timeDiff, 50);
+      }
     }),
   );
 
@@ -407,21 +426,17 @@ describe("Signal.modify", () => {
       const signal = yield* Signal.make(0);
       const results: number[] = [];
 
-      const fiber1 = yield* Effect.fork(
-        Effect.forEach(
-          Array.from({ length: 10 }),
-          () => Signal.modify(signal, (n) => [n, n + 1] as const),
-          { discard: false },
-        ),
-      );
+      const fiber1 = yield* Effect.forEach(
+        Array.from({ length: 10 }),
+        () => Signal.modify(signal, (n) => [n, n + 1] as const),
+        { discard: false },
+      ).pipe(Effect.forkChild);
 
-      const fiber2 = yield* Effect.fork(
-        Effect.forEach(
-          Array.from({ length: 10 }),
-          () => Signal.modify(signal, (n) => [n, n + 1] as const),
-          { discard: false },
-        ),
-      );
+      const fiber2 = yield* Effect.forEach(
+        Array.from({ length: 10 }),
+        () => Signal.modify(signal, (n) => [n, n + 1] as const),
+        { discard: false },
+      ).pipe(Effect.forkChild);
 
       const [r1, r2] = yield* Effect.all([Fiber.join(fiber1), Fiber.join(fiber2)]);
       results.push(...r1, ...r2);
@@ -613,9 +628,7 @@ describe("Signal.derive", () => {
       const source = yield* Signal.make(2);
       const renderScope = yield* Scope.make();
 
-      const derived = yield* Signal.derive(source, (n) => n * 4).pipe(
-        Effect.locally(Signal.CurrentRenderScope, renderScope),
-      );
+      const derived = yield* withRenderScope(Signal.derive(source, (n) => n * 4), renderScope);
 
       const value = yield* Signal.get(derived);
       assert.strictEqual(value, 8);
@@ -824,7 +837,7 @@ describe("Signal parallel notification", () => {
         }),
       ).pipe(Effect.asVoid);
 
-      const fiber = yield* Effect.fork(Signal.set(signal, 1));
+      const fiber = yield* Signal.set(signal, 1).pipe(Effect.forkChild);
       yield* TestClock.adjust(20);
 
       assert.include(executionOrder, "listener1-start");
@@ -1001,12 +1014,13 @@ describe("Signal memory management", () => {
       const scope = yield* Scope.make();
       let fiberStillRunning = true;
 
-      yield* Signal.subscribe(signal, () =>
+      const unsubscribe = yield* Signal.subscribe(signal, () =>
         Effect.gen(function* () {
           yield* TestClock.adjust(1000);
           fiberStillRunning = true;
         }),
-      ).pipe(Effect.asVoid, Scope.extend(scope));
+      );
+      yield* Scope.addFinalizer(scope, unsubscribe);
 
       yield* Scope.close(scope, Exit.void);
 
@@ -1028,37 +1042,40 @@ describe("Signal memory management", () => {
 
 describe("Signal.suspend", () => {
   const isText = Element.$is("Text");
+  const isSignalElement = Element.$is("SignalElement");
 
   /** Assert element is Text and return content */
   const textContent = (el: Element): string => {
     assert.isTrue(isText(el), `expected Text, got ${el._tag}`);
-    if (isText(el)) return el.content;
-    throw new Error("unreachable");
+    return isText(el) ? el.content : "";
   };
 
   /**
    * Build a mock component matching SuspendComponentType shape.
    * suspend only uses the first arg for type inference, so shape is sufficient.
    */
-  const mockComponent = (effect: Effect.Effect<Element, unknown>) => {
-    const comp = (_props: {}): Element => componentElement(() => effect, null);
-    return Object.assign(comp, { _tag: "EffectComponent" as const });
-  };
+  const mockComponent = <E>(effect: Effect.Effect<Element, E>) =>
+    Component.gen(function* () {
+      return yield* effect;
+    });
 
-  it.scoped("should produce SuspendedComponent that returns SignalElement", () =>
+  it.scoped("should produce SuspendedComponent that renders a SignalElement", () =>
     Effect.gen(function* () {
       const comp = mockComponent(Effect.succeed(text("hello")));
 
-      const suspended = yield* Signal.suspend(comp, {
-        Pending: text("loading"),
-        Failure: () => text("error"),
-        Success: componentElement(() => Effect.succeed(text("hello")), null),
-      });
+      const suspended = yield* Signal.suspend(comp).pipe(
+        Signal.on("Pending", text("loading")),
+        Signal.on("Failure", () => text("error")),
+        Signal.exhaustive,
+      );
 
       assert.strictEqual(suspended._tag, "EffectComponent");
       // Calling the component must not crash (regression: _textElementImpl! null deref)
       const element = suspended({});
-      assert.strictEqual(element._tag, "SignalElement");
+      assert.strictEqual(element._tag, "Component");
+
+      const rendered = yield* Effect.scoped(unsafeEraseR(element.run()));
+      assert.strictEqual(rendered._tag, "SignalElement");
     }),
   );
 
@@ -1066,11 +1083,11 @@ describe("Signal.suspend", () => {
     Effect.gen(function* () {
       const comp = mockComponent(Effect.succeed(text("done")));
 
-      const suspended = yield* Signal.suspend(comp, {
-        Pending: text("loading..."),
-        Failure: () => text("error"),
-        Success: componentElement(() => Effect.succeed(text("done")), null),
-      });
+      const suspended = yield* Signal.suspend(comp).pipe(
+        Signal.on("Pending", text("loading...")),
+        Signal.on("Failure", () => text("error")),
+        Signal.exhaustive,
+      );
 
       const initial = yield* Signal.get(suspended._signal);
       assert.strictEqual(textContent(initial), "loading...");
@@ -1082,18 +1099,25 @@ describe("Signal.suspend", () => {
       class RenderError extends Data.TaggedError("RenderError")<{}> {}
       const comp = mockComponent(Effect.fail(new RenderError()));
 
-      const suspended = yield* Signal.suspend(comp, {
-        Pending: text("loading"),
-        Failure: () => text("failed"),
-        Success: componentElement(() => Effect.fail(new RenderError()), null),
-      });
+      const suspended = yield* Signal.suspend(comp).pipe(
+        Signal.on("Pending", text("loading")),
+        Signal.on("Failure", () => text("failed")),
+        Signal.exhaustive,
+      );
+
+      const element = suspended({});
+      assert.strictEqual(element._tag, "Component");
+      yield* Effect.scoped(unsafeEraseR(element.run()));
 
       // Let the render fiber run
       yield* TestClock.adjust(0);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       const view = yield* Signal.get(suspended._signal);
-      assert.strictEqual(textContent(view), "failed");
+      assert.isTrue(isSignalElement(view), `expected SignalElement, got ${view._tag}`);
+
+      const failed = yield* Signal.get(isSignalElement(view) ? view.signal : suspended._signal);
+      assert.strictEqual(textContent(failed), "failed");
     }),
   );
 });

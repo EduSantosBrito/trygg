@@ -14,7 +14,7 @@
  * - Verify all element types construct correctly
  * - Verify normalization handles edge cases
  */
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, effect, it } from "@effect/vitest";
 import { Effect } from "effect";
 import {
   Element,
@@ -163,7 +163,7 @@ describe("portal", () => {
 // Scope: Creating KeyedList elements (efficient list rendering)
 
 describe("keyedList", () => {
-  it.scoped("should create KeyedList with source signal", () =>
+  effect("should create KeyedList with source signal", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make<ReadonlyArray<string>>([]);
       const renderFn = (item: string) => Effect.succeed(text(item));
@@ -176,7 +176,7 @@ describe("keyedList", () => {
     }),
   );
 
-  it.scoped("should store render function", () =>
+  effect("should store render function", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make<ReadonlyArray<number>>([]);
       const renderFn = (item: number) => Effect.succeed(text(String(item)));
@@ -189,7 +189,7 @@ describe("keyedList", () => {
     }),
   );
 
-  it.scoped("should store key function", () =>
+  effect("should store key function", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make<ReadonlyArray<{ id: number }>>([]);
       const renderFn = (item: { id: number }) => Effect.succeed(text(String(item.id)));
@@ -279,7 +279,7 @@ describe("normalizeChild", () => {
     assert.strictEqual(element, original);
   });
 
-  it.scoped("should convert Signal of primitive to SignalText", () =>
+  effect("should convert Signal of primitive to SignalText", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make("text value");
       const element = normalizeChild(signal);
@@ -288,7 +288,7 @@ describe("normalizeChild", () => {
     }),
   );
 
-  it.scoped("should convert Signal of Element to SignalElement", () =>
+  effect("should convert Signal of Element to SignalElement", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(intrinsic("span", {}, [text("content")]));
       const element = normalizeChild(signal);

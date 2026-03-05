@@ -5,8 +5,7 @@
  * Uses SSR-loaded handler factory for @effect/platform layer composition,
  * ensuring Router.Live identity matches between plugin and user code.
  */
-import { FileSystem } from "@effect/platform";
-import { Effect, Exit, Layer, Option, Ref, Runtime, Schema, Scope } from "effect";
+import { Effect, FileSystem, Layer, Option, Ref, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -63,7 +62,7 @@ const emptyState: HandlerState = {
 const initHandler = (
   state: Ref.Ref<HandlerState>,
   options: DevApiOptions,
-): Effect.Effect<void, ApiInitError> =>
+): Effect.Effect<void, ApiInitError, Scope.Scope> =>
   Effect.gen(function* () {
     // Dispose previous handler
     const current = yield* Ref.get(state);
@@ -113,21 +112,15 @@ const initHandler = (
         message: "createNodeHandler not available in handler factory",
       });
     }
-    const handlerScope = yield* Scope.make();
     const result = yield* factory.createNodeHandler(apiLive.value).pipe(
-      Scope.extend(handlerScope),
       Effect.mapError(
         (cause) => new ApiInitError({ message: "Failed to create API handler", cause }),
       ),
       Effect.tapError((cause) =>
-        Scope.close(handlerScope, Exit.fail(cause)).pipe(
-          Effect.flatMap(() =>
-            Effect.gen(function* () {
-              yield* Ref.set(state, { ...emptyState, lastError: Option.some(cause) });
-              yield* options.onError(cause);
-            }),
-          ),
-        ),
+        Effect.gen(function* () {
+          yield* Ref.set(state, { ...emptyState, lastError: Option.some(cause) });
+          yield* options.onError(cause);
+        }),
       ),
       Effect.option,
     );
@@ -135,7 +128,7 @@ const initHandler = (
 
     yield* Ref.set(state, {
       handler: Option.some(result.value.handler),
-      dispose: Option.some(Scope.close(handlerScope, Exit.void).pipe(Effect.ignore)),
+      dispose: Option.some(result.value.dispose),
       lastError: Option.none(),
     });
   });
@@ -145,16 +138,15 @@ const initHandler = (
 // =============================================================================
 
 export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem, ImportError> =
-  Layer.unwrapEffect(
+  Layer.unwrap(
     Effect.gen(function* () {
       const nodeFs = yield* importNodeFileSystem;
-      const fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = nodeFs.layer;
+      const fileSystemLayer = nodeFs.layer;
 
       const createDevApi = (
         options: DevApiOptions,
       ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
         Effect.gen(function* () {
-          const runtime = yield* Effect.runtime<never>();
           const state = yield* Ref.make<HandlerState>(emptyState);
 
           yield* initHandler(state, options);
@@ -189,10 +181,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
                   onSome: (e) => (e instanceof Error ? e.message : String(e)),
                 });
                 yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const ErrorResponseJson = Schema.parseJson(
-                  Schema.Struct({ error: Schema.String, message: Schema.String }),
-                );
-                const body = yield* Schema.encode(ErrorResponseJson)({
+                const body = JSON.stringify({
                   error: "API handler not available",
                   message: errorMessage,
                 });
@@ -205,7 +194,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
               currentState.handler.value(req, res);
             });
 
-            void Runtime.runPromise(runtime)(effect).catch((_error: unknown) => {
+            void Effect.runPromise(effect).catch((_error: unknown) => {
               if (!res.headersSent) {
                 res.statusCode = 500;
                 res.end("Internal Server Error");

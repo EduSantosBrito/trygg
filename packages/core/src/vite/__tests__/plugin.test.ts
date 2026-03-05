@@ -2,10 +2,9 @@
  * Tests for Vite plugin
  * @module
  */
-import { assert, describe, it } from "@effect/vitest";
-import { FileSystem } from "@effect/platform";
+import { assert, describe, it as baseIt } from "@effect/vitest";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Cause, Effect, Exit, Schema, Scope } from "effect";
+import { Cause, Effect, Exit, FileSystem, Schema, Scope } from "effect";
 import * as path from "path";
 import {
   trygg,
@@ -22,6 +21,8 @@ import {
   type ParsedRoute,
 } from "../plugin.js";
 
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
+
 /**
  * Create a scoped temporary directory with route files.
  * Cleanup is handled by Effect's Scope (finalizer removes dir on scope close).
@@ -37,8 +38,8 @@ const makeTempDir = (
       Effect.gen(function* () {
         const fullPath = path.join(dir, filePath);
         yield* fs.makeDirectory(path.dirname(fullPath), { recursive: true }).pipe(
-          Effect.catchTag("SystemError", (e) =>
-            e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e),
+          Effect.catchTag("PlatformError", (e) =>
+            e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
           ),
           Effect.orDie,
         );

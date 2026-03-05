@@ -5,7 +5,8 @@
  * Persist and retrieve string key-value pairs.
  * Two Tags: SessionStorage, LocalStorage — same interface, different browser backends.
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -31,15 +32,17 @@ export interface StorageService {
 // Tags
 // =============================================================================
 
-export class SessionStorage extends Context.Tag("trygg/platform/SessionStorage")<
-  SessionStorage,
-  StorageService
->() {}
+export interface SessionStorage extends ServiceMap.Service<SessionStorage, StorageService> {}
 
-export class LocalStorage extends Context.Tag("trygg/platform/LocalStorage")<
-  LocalStorage,
-  StorageService
->() {}
+export const SessionStorage = ServiceMap.Service<SessionStorage, StorageService>(
+  "trygg/platform/SessionStorage",
+);
+
+export interface LocalStorage extends ServiceMap.Service<LocalStorage, StorageService> {}
+
+export const LocalStorage = ServiceMap.Service<LocalStorage, StorageService>(
+  "trygg/platform/LocalStorage",
+);
 
 // =============================================================================
 // Browser layers

@@ -26,7 +26,7 @@ export const UsersList = Component.gen(function* (
             </span>
             <button
               className="px-4 py-2 text-base border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
-              onClick={Resource.invalidate(usersResource)}
+              onClick={() => Resource.invalidate(usersResource)}
               disabled={stale}
             >
               Refresh
@@ -39,7 +39,7 @@ export const UsersList = Component.gen(function* (
                 Effect.succeed(
                   <li
                     className="flex justify-between items-center px-3 py-2.5 my-1 rounded-md cursor-pointer transition-colors hover:bg-gray-50"
-                    onClick={onSelect(user.id)}
+                    onClick={() => onSelect(user.id)}
                   >
                     <span className="font-medium text-gray-700">{user.name}</span>
                     <span className="text-xs text-gray-400 bg-gray-100 py-0.5 px-2 rounded">
@@ -54,6 +54,6 @@ export const UsersList = Component.gen(function* (
       );
     },
 
-    Failure: (error) => <ErrorView error={error} onRetry={Resource.refresh(usersResource)} />,
+    Failure: (error) => <ErrorView error={error} onRetry={() => Resource.refresh(usersResource)} />,
   });
 });

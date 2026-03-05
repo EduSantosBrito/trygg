@@ -5,7 +5,8 @@
  * Observe DOM visibility and mutations with lifecycle.
  * Auto-disconnects on scope close.
  */
-import { Context, Data, Effect, Layer, Runtime, Scope } from "effect";
+import { Data, Effect, Layer, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -63,7 +64,9 @@ export interface TestObserverService extends ObserverService {
 // Tag
 // =============================================================================
 
-export class Observer extends Context.Tag("trygg/platform/Observer")<Observer, ObserverService>() {}
+export interface Observer extends ServiceMap.Service<Observer, ObserverService> {}
+
+export const Observer = ServiceMap.Service<Observer, ObserverService>("trygg/platform/Observer");
 
 // =============================================================================
 // Browser layer
@@ -74,8 +77,8 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
   Observer.of({
     intersection: (options) =>
       Effect.gen(function* () {
-        const runtime = yield* Effect.runtime<never>();
-        const runFork = Runtime.runFork(runtime);
+        const services = yield* Effect.services();
+        const runFork = Effect.runForkWith(services);
 
         const init: IntersectionObserverInit = {};
         if (options.threshold !== undefined) {
@@ -115,8 +118,8 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
 
     mutation: (target, options, handler) =>
       Effect.gen(function* () {
-        const runtime = yield* Effect.runtime<never>();
-        const runFork = Runtime.runFork(runtime);
+        const services = yield* Effect.services();
+        const runFork = Effect.runForkWith(services);
 
         const observer = new MutationObserver((mutations) => {
           runFork(handler(mutations));

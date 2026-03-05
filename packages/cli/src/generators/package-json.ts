@@ -8,7 +8,6 @@ import { PlatformConfig } from "../platform-config.js";
 import {
   TRYGG_VERSION,
   EFFECT_VERSION,
-  EFFECT_PLATFORM_VERSION,
   EFFECT_PLATFORM_BROWSER_VERSION,
   TYPESCRIPT_VERSION,
   VITE_VERSION,
@@ -45,7 +44,6 @@ export const generatePackageJson = (
 
     const dependencies: Record<string, string> = {
       effect: EFFECT_VERSION,
-      "@effect/platform": EFFECT_PLATFORM_VERSION,
       "@effect/platform-browser": EFFECT_PLATFORM_BROWSER_VERSION,
       trygg: TRYGG_VERSION,
     };

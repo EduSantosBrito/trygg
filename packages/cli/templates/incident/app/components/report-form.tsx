@@ -15,11 +15,11 @@ const SEVERITIES: ReadonlyArray<{ value: Severity; label: string; description: s
   { value: "SEV-4", label: "Low", description: "Minimal impact, cosmetic issues" },
 ];
 
-const parseSeverity = (value: string): Severity | undefined =>
-  SEVERITIES.find((s) => s.value === value)?.value;
+const parseSeverity = (value: string): Effect.Effect<Severity | undefined> =>
+  Effect.sync(() => SEVERITIES.find((s) => s.value === value)?.value);
 
 interface ReportFormProps {
-  readonly onSuccess?: () => Effect.Effect<void, unknown, unknown>;
+  readonly onSuccess?: () => Effect.Effect<void, never, unknown>;
 }
 
 export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportFormProps>) {
@@ -61,7 +61,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
         yield* onSuccess();
       }
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           yield* Effect.logError("Create incident failed", error);
           yield* Signal.set(submitting, false);
@@ -91,10 +91,11 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
     Effect.sync(() => {
       const target = event.target;
       if (target instanceof HTMLSelectElement) {
-        return parseSeverity(target.value);
+        return target.value;
       }
-      return undefined;
+      return "";
     }).pipe(
+      Effect.flatMap((value) => parseSeverity(value)),
       Effect.flatMap((next) => {
         if (next === undefined) {
           return Effect.void;
@@ -163,7 +164,6 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
           id="incident-summary"
           name="summary"
           className="input"
-          rows={3}
           placeholder="Think about what you'd like to read if you were coming to the incident with no context…"
           value={summary}
           onInput={onSummaryInput}
