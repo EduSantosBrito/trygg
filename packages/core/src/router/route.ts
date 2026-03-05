@@ -14,12 +14,15 @@
  *   .loading(UserSkeleton)
  * ```
  */
-import { Data, Effect, FiberRef, Layer, Pipeable, Schema } from "effect";
+import { Cause, Data, Effect, Option, Pipeable, Schema } from "effect";
+import type * as LayerTypes from "effect/Layer";
+import * as ServiceMap from "effect/ServiceMap";
 import type { ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
   unsafeAsOverload,
+  unsafeEraseR,
   unsafeEraseMiddlewareR,
   unsafeExtractFields,
 } from "../internal/unsafe.js";
@@ -86,9 +89,9 @@ export interface RouteDefinition {
   readonly children: ReadonlyArray<RouteDefinition>;
   readonly paramsSchema: unknown | undefined;
   readonly querySchema: unknown | undefined;
-  readonly renderStrategy: Layer.Layer<RenderStrategy> | undefined;
-  readonly scrollStrategy: Layer.Layer<ScrollStrategy> | undefined;
-  readonly layers: ReadonlyArray<Layer.Layer.Any>;
+  readonly renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined;
+  readonly scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined;
+  readonly layers: ReadonlyArray<LayerTypes.Any>;
 }
 
 // =============================================================================
@@ -538,29 +541,29 @@ export const isRouteBuilder = (
 // =============================================================================
 
 /** Known RenderStrategy layer instances for detection. @internal */
-const KNOWN_RENDER_STRATEGIES = new Set<Layer.Layer.Any>([
+const KNOWN_RENDER_STRATEGIES = new Set<LayerTypes.Any>([
   RenderStrategy.Lazy,
   RenderStrategy.Eager,
 ]);
 
 /** Known ScrollStrategy layer instances for detection. @internal */
-const KNOWN_SCROLL_STRATEGIES = new Set<Layer.Layer.Any>([
+const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Any>([
   ScrollStrategy.Auto,
   ScrollStrategy.None,
 ]);
 
 /** @internal */
-const isRenderStrategyLayer = (layer: Layer.Layer.Any): layer is Layer.Layer<RenderStrategy> =>
+const isRenderStrategyLayer = (layer: LayerTypes.Any): layer is LayerTypes.Layer<RenderStrategy> =>
   KNOWN_RENDER_STRATEGIES.has(layer);
 
 /** @internal */
-const isScrollStrategyLayer = (layer: Layer.Layer.Any): layer is Layer.Layer<ScrollStrategy> =>
+const isScrollStrategyLayer = (layer: LayerTypes.Any): layer is LayerTypes.Layer<ScrollStrategy> =>
   KNOWN_SCROLL_STRATEGIES.has(layer);
 
 /** @internal Distributive helper to extract layer's provided services */
-type LayerSuccess<L> = L extends Layer.Layer<infer A, infer _E, infer _R> ? A : never;
+type LayerSuccess<L> = L extends LayerTypes.Layer<infer A, infer _E, infer _R> ? A : never;
 /** @internal Distributive helper to extract layer's requirements */
-type LayerContext<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : never;
+type LayerContext<L> = L extends LayerTypes.Layer<infer _A, infer _E, infer R> ? R : never;
 
 /**
  * Apply Layers to a route. Detects layer type and stores appropriately:
@@ -583,7 +586,7 @@ type LayerContext<L> = L extends Layer.Layer<infer _A, infer _E, infer R> ? R : 
  * @since 1.0.0
  */
 export function provide<ROut, E2 = never, RIn = never>(
-  layer: Layer.Layer<ROut, E2, RIn>,
+  layer: LayerTypes.Layer<ROut, E2, RIn>,
 ): <
   Path extends string,
   R,
@@ -600,9 +603,9 @@ export function provide<ROut, E2 = never, RIn = never>(
  * @since 1.0.0
  */
 export function provide<
-  L1 extends Layer.Layer.Any,
-  L2 extends Layer.Layer.Any,
-  Rest extends Layer.Layer.Any[],
+  L1 extends LayerTypes.Any,
+  L2 extends LayerTypes.Any,
+  Rest extends LayerTypes.Any[],
 >(
   layer1: L1,
   layer2: L2,
@@ -626,7 +629,7 @@ export function provide<
 >;
 
 export function provide(
-  ...layers: ReadonlyArray<Layer.Layer.Any>
+  ...layers: ReadonlyArray<LayerTypes.Any>
 ): <
   Path extends string,
   R,
@@ -647,9 +650,9 @@ export function provide(
   >(
     builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
   ): RouteBuilder<Path, unknown, HC, HCh, NC, HEB> => {
-    let renderStrategy: Layer.Layer<RenderStrategy> | undefined = builder.definition.renderStrategy;
-    let scrollStrategy: Layer.Layer<ScrollStrategy> | undefined = builder.definition.scrollStrategy;
-    const otherLayers: Array<Layer.Layer.Any> = [...builder.definition.layers];
+    let renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined = builder.definition.renderStrategy;
+    let scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined = builder.definition.scrollStrategy;
+    const otherLayers: Array<LayerTypes.Any> = [...builder.definition.layers];
 
     for (const layer of layers) {
       if (isRenderStrategyLayer(layer)) {
@@ -690,12 +693,12 @@ export class ParamsDecodeError extends Data.TaggedError("ParamsDecodeError")<{
  *
  * @since 1.0.0
  */
-export const decodeParams = <A, I>(
-  schema: Schema.Schema<A, I>,
+export const decodeParams = <S extends Schema.Top>(
+  schema: S,
   rawParams: Record<string, string>,
   path: string,
-): Effect.Effect<A, ParamsDecodeError> =>
-  Schema.decode(schema)(rawParams as unknown as I).pipe(
+): Effect.Effect<S["Type"], ParamsDecodeError> =>
+  unsafeEraseR(Schema.decodeUnknownEffect(schema)(rawParams)).pipe(
     Effect.mapError((cause) => new ParamsDecodeError({ path, rawParams, cause })),
   );
 
@@ -718,8 +721,11 @@ export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
  * Set by the Outlet at match time after decoding via the route's query schema.
  * @since 1.0.0
  */
-export const CurrentRouteQuery: FiberRef.FiberRef<Record<string, unknown>> = FiberRef.unsafeMake(
-  {} as Record<string, unknown>,
+export const CurrentRouteQuery = ServiceMap.Reference<Record<string, unknown>>(
+  "trygg/Router/CurrentRouteQuery",
+  {
+    defaultValue: () => ({}),
+  },
 );
 
 /**
@@ -728,18 +734,18 @@ export const CurrentRouteQuery: FiberRef.FiberRef<Record<string, unknown>> = Fib
  *
  * @since 1.0.0
  */
-export const decodeQuery = <A, I>(
-  schema: Schema.Schema<A, I>,
+export const decodeQuery = <S extends Schema.Top>(
+  schema: S,
   searchParams: URLSearchParams,
   path: string,
-): Effect.Effect<A, QueryDecodeError> => {
+): Effect.Effect<S["Type"], QueryDecodeError> => {
   // Convert URLSearchParams to Record<string, string>
   const raw: Record<string, string> = {};
   searchParams.forEach((value, key) => {
     raw[key] = value;
   });
 
-  return Schema.decode(schema)(raw as unknown as I).pipe(
+  return unsafeEraseR(Schema.decodeUnknownEffect(schema)(raw)).pipe(
     Effect.mapError((cause) => new QueryDecodeError({ path, rawQuery: raw, cause })),
   );
 };
@@ -888,15 +894,14 @@ const findFailure = (cause: unknown): unknown => {
   if (cause === null || cause === undefined) return cause;
   if (typeof cause !== "object") return cause;
 
-  // Direct tagged error
+  if (Cause.isCause(cause)) {
+    return Option.getOrNull(Cause.findErrorOption(cause));
+  }
+
   if ("_tag" in cause) {
     const tagged = cause as { _tag: string };
     if (tagged._tag === "RouterRedirect" || tagged._tag === "RouterForbidden") {
       return cause;
-    }
-    // Cause.Fail wraps the error
-    if (tagged._tag === "Fail" && "error" in cause) {
-      return (cause as { error: unknown }).error;
     }
   }
 

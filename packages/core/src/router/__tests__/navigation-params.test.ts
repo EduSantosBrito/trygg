@@ -9,11 +9,13 @@
  * - Link prefetch strategies (intent, render, false)
  * - interpolateParams utility
  */
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, it as baseIt } from "@effect/vitest";
 import { Effect } from "effect";
 import * as Router from "../service.js";
 import { interpolateParams, buildPathWithParams } from "../types.js";
 import * as Signal from "../../primitives/signal.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // Router.get - Context.Tag accessor

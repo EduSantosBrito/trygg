@@ -2,22 +2,21 @@
  * @since 1.0.0
  * Outlet Internal Services
  *
- * Testable services used internally by the Outlet. Each has a Context.Tag
+ * Testable services used internally by the Outlet. Each has a service key
  * with Layer factories for production and testing.
  */
 import {
   Cause,
-  Context,
   Data,
   Effect,
   Exit,
   Fiber,
-  FiberRef,
   Layer,
   Option,
   Ref,
   Scope,
 } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import { type Element, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
@@ -39,6 +38,30 @@ import {
 } from "./matching.js";
 import { CurrentRouteParams, CurrentRouteError, CurrentOutletChild } from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
+import { unsafeEraseR } from "../internal/unsafe.js";
+
+const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
+  value === null || value === undefined ? Option.none() : Option.some(value);
+
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+    Effect.withFiber((fiber) =>
+      Effect.sync(() => {
+        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+      })),
+  locally: <A, B, E, R>(
+    reference: ServiceMap.Reference<A>,
+    value: A,
+    effect: Effect.Effect<B, E, R>,
+  ): Effect.Effect<B, E, R> =>
+    Effect.withFiber((fiber) => {
+      const services = fiber.services;
+      fiber.setServices(ServiceMap.add(services, reference, value));
+      return Effect.ensuring(effect, Effect.sync(() => fiber.setServices(services)));
+    }),
+};
 
 /**
  * Extract only string-valued entries from a decoded params object.
@@ -91,10 +114,9 @@ export interface OutletRendererShape {
  * OutletRenderer — component rendering with params/query injection.
  * @since 1.0.0
  */
-export class OutletRenderer extends Context.Tag("trygg/OutletRenderer")<
-  OutletRenderer,
-  OutletRendererShape
->() {
+export class OutletRenderer extends ServiceMap.Service<OutletRenderer, OutletRendererShape>()(
+  "trygg/OutletRenderer",
+) {
   static readonly Live: Layer.Layer<OutletRenderer> = Layer.succeed(OutletRenderer, {
     renderComponent: renderComponent,
     renderLayout: renderLayout,
@@ -120,16 +142,15 @@ export interface BoundaryResolverShape {
  * BoundaryResolver — nearest-wins boundary resolution.
  * @since 1.0.0
  */
-export class BoundaryResolver extends Context.Tag("trygg/BoundaryResolver")<
-  BoundaryResolver,
-  BoundaryResolverShape
->() {
+export class BoundaryResolver extends ServiceMap.Service<BoundaryResolver, BoundaryResolverShape>()(
+  "trygg/BoundaryResolver",
+) {
   static readonly make = (manifest: RoutesManifest): BoundaryResolverShape => ({
     resolveError: (route) => resolveErrorBoundary(route, manifest.error),
-    resolveErrorRoot: () => Option.fromNullable(manifest.error),
+    resolveErrorRoot: () => fromNullable(manifest.error),
     resolveLoading: (route) => resolveLoadingBoundary(route),
     resolveNotFound: (route) => resolveNotFoundBoundary(route, manifest.notFound),
-    resolveNotFoundRoot: () => Option.fromNullable(manifest.notFound),
+    resolveNotFoundRoot: () => fromNullable(manifest.notFound),
     resolveForbidden: (route) => resolveForbiddenBoundary(route, manifest.forbidden),
   });
 
@@ -172,7 +193,9 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<AsyncLoader, AsyncLoaderShape>() {
+export class AsyncLoader extends ServiceMap.Service<AsyncLoader, AsyncLoaderShape>()(
+  "trygg/AsyncLoader",
+) {
   /** Create a live AsyncLoader. Must be called within a Scope. */
   static readonly make = (
     loadingElement: Element,
@@ -192,7 +215,7 @@ export class AsyncLoader extends Context.Tag("trygg/AsyncLoader")<AsyncLoader, A
       );
 
       const lastElementRef = yield* Ref.make<Option.Option<Element>>(Option.none());
-      const currentFiberRef = yield* Ref.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(
+      const currentFiberRef = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
         Option.none(),
       );
       const matchKeyRef = yield* Ref.make<Option.Option<string>>(Option.none());
@@ -278,7 +301,7 @@ export function renderComponent(
   component: RouteComponent,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
-): Effect.Effect<Element, unknown, never> {
+): Effect.Effect<Element, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
 
   // RouteComponent can be Component.Type or Effect<Element>
@@ -289,8 +312,9 @@ export function renderComponent(
       return Effect.succeed(
         componentElement(() =>
           originalRun().pipe(
-            Effect.locally(CurrentRouteParams, params),
-            Effect.locally(CurrentRouteQuery, decodedQuery),
+            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+            unsafeEraseR,
           ),
         ),
       );
@@ -301,17 +325,18 @@ export function renderComponent(
   // Component is an Effect<Element> - wrap it
   if (isEffectElement(component)) {
     return Effect.succeed(
-      componentElement(() =>
-        component.pipe(
-          Effect.locally(CurrentRouteParams, params),
-          Effect.locally(CurrentRouteQuery, decodedQuery),
+        componentElement(() =>
+          component.pipe(
+            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+            unsafeEraseR,
+          ),
         ),
-      ),
-    );
+      );
   }
 
   // Should never reach here if RouteComponent type is correct
-  return new InvalidRouteComponent({ actual: component });
+  return Effect.fail(new InvalidRouteComponent({ actual: component }));
 }
 
 /**
@@ -323,7 +348,7 @@ export function renderLayout(
   child: Element,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
-): Effect.Effect<Element, unknown, never> {
+): Effect.Effect<Element, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
 
   // RouteComponent can be Component.Type or Effect<Element>
@@ -336,14 +361,15 @@ export function renderLayout(
           Effect.gen(function* () {
             yield* FiberRef.set(CurrentOutletChild, Option.some(child));
             const layoutElement = yield* originalRun().pipe(
-              Effect.locally(CurrentRouteParams, params),
-              Effect.locally(CurrentRouteQuery, decodedQuery),
+              (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+              (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+              unsafeEraseR,
             );
             // If layout returns a Provide element, merge its context with parent context
             // so children retain access to ancestor-provided services.
             if (layoutElement._tag === "Provide") {
-              const capturedContext = yield* Effect.context<never>();
-              const mergedContext = Context.merge(capturedContext, layoutElement.context);
+              const capturedContext = yield* Effect.services<unknown>();
+              const mergedContext = ServiceMap.merge(capturedContext, layoutElement.context);
               return { ...layoutElement, context: mergedContext };
             }
             return layoutElement;
@@ -359,15 +385,16 @@ export function renderLayout(
     return Effect.succeed(
       componentElement(() =>
         Effect.gen(function* () {
-          yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-          const layoutElement = yield* layout.pipe(
-            Effect.locally(CurrentRouteParams, params),
-            Effect.locally(CurrentRouteQuery, decodedQuery),
-          );
+            yield* FiberRef.set(CurrentOutletChild, Option.some(child));
+            const layoutElement = yield* layout.pipe(
+              (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+              (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+              unsafeEraseR,
+            );
           // If layout returns a Provide element, merge its context with parent context
           if (layoutElement._tag === "Provide") {
-            const capturedContext = yield* Effect.context<never>();
-            const mergedContext = Context.merge(capturedContext, layoutElement.context);
+            const capturedContext = yield* Effect.services<unknown>();
+            const mergedContext = ServiceMap.merge(capturedContext, layoutElement.context);
             return { ...layoutElement, context: mergedContext };
           }
           return layoutElement;
@@ -377,7 +404,7 @@ export function renderLayout(
   }
 
   // Should never reach here if RouteComponent type is correct
-  return new InvalidRouteComponent({ actual: layout });
+  return Effect.fail(new InvalidRouteComponent({ actual: layout }));
 }
 
 /**
@@ -406,7 +433,10 @@ export function renderError(
       if (element._tag === "Component") {
         const originalRun = element.run;
         return componentElement(() =>
-          originalRun().pipe(Effect.locally(CurrentRouteError, Option.some(errorInfo))),
+          originalRun().pipe(
+            (effect) => FiberRef.locally(CurrentRouteError, Option.some(errorInfo), effect),
+            unsafeEraseR,
+          ),
         );
       }
       return element;
@@ -415,7 +445,10 @@ export function renderError(
     // Error component is an Effect<Element> - wrap it
     if (isEffectElement(errorComp)) {
       return componentElement(() =>
-        errorComp.pipe(Effect.locally(CurrentRouteError, Option.some(errorInfo))),
+        errorComp.pipe(
+          (effect) => FiberRef.locally(CurrentRouteError, Option.some(errorInfo), effect),
+          unsafeEraseR,
+        ),
       );
     }
 

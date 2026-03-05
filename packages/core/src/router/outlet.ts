@@ -11,16 +11,16 @@ import {
   Array as Arr,
   Cause,
   Deferred,
-  Either,
   Effect,
-  FiberRef,
   Layer,
   Option,
   Ref,
+  Result,
   Schema,
   Scope,
   SubscriptionRef,
 } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Debug from "../debug/debug.js";
 import { type Element, text, signalElement, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
@@ -51,7 +51,17 @@ import {
 import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import { type ComponentInput, type ComponentLoader, type RouteComponent } from "./types.js";
-import { unsafeMergeLayers } from "../internal/unsafe.js";
+import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
+
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+    Effect.withFiber((fiber) =>
+      Effect.sync(() => {
+        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
+      })),
+};
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -190,14 +200,14 @@ const resolveComponent = (
       catch: (cause) => new RenderLoadError({ cause }),
     }).pipe(
       Effect.flatMap((m) =>
-        Schema.decodeUnknown(RouteComponentSchema)(m.default).pipe(
+        unsafeEraseR(Schema.decodeUnknownEffect(RouteComponentSchema)(m.default)).pipe(
           Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
         ),
       ),
     );
   }
   // Direct component (Component.gen result or Effect<Element>)
-  return Schema.decodeUnknown(RouteComponentSchema)(component).pipe(
+  return unsafeEraseR(Schema.decodeUnknownEffect(RouteComponentSchema)(component)).pipe(
     Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
   );
 };
@@ -303,7 +313,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       yield* Ref.set(router._prefetchRef, buildPrefetchResolver(currentMatcher.value));
     }
 
-    const componentScope = yield* FiberRef.get(Signal.CurrentComponentScope);
+    const componentScope = yield* Signal.CurrentComponentScope;
     const scope = componentScope ?? (yield* Effect.scope);
 
     // Create a unified view signal — holds the currently rendered element.
@@ -315,9 +325,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // the full discriminated union type to the router for _tag dispatch.
     const applyScroll = (strategyLayer: Layer.Layer<ScrollStrategy> | undefined) =>
       Effect.gen(function* () {
-        const strategy = yield* Effect.provide(
-          ScrollStrategy,
-          strategyLayer ?? ScrollStrategy.Auto,
+        const strategy = yield* Effect.service(ScrollStrategy).pipe(
+          Effect.provide(strategyLayer ?? ScrollStrategy.Auto),
         );
         yield* router._applyScroll({ strategy });
       }).pipe(Effect.ignore);
@@ -348,9 +357,9 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     });
 
     /** rAF fallback for when signal value is unchanged (dedup, same element). */
-    const afterFrame: Effect.Effect<void> = Effect.async((resume) => {
-      requestAnimationFrame(() => resume(Effect.void));
-    });
+    const afterFrame: Effect.Effect<void> = Effect.promise(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+    );
 
     /**
      * Set viewSignal and wait for the DOM swap to complete before returning.
@@ -395,8 +404,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
         const ancestorRawLayouts = Arr.filterMap(match.route.ancestors, (a) =>
           a !== undefined && a.definition.layout !== undefined
-            ? Option.some(a.definition.layout)
-            : Option.none(),
+            ? Result.succeed(a.definition.layout)
+            : Result.failVoid,
         );
         const allRawLayouts =
           match.route.definition.layout !== undefined
@@ -420,8 +429,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       ];
 
       return allLayers.length > 0
-        ? Effect.flatMap(unsafeMergeLayers(allLayers), (merged) =>
-            renderBase.pipe(Effect.provide(merged)),
+        ? Effect.flatMap(unsafeBuildContext<unknown>(allLayers), (services) =>
+            Effect.provideServices(renderBase, services),
           )
         : renderBase;
     };
@@ -438,7 +447,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           Effect.gen(function* () {
             const resolvedErrorComp = yield* resolveComponent(errorComp);
             const routeElement = yield* renderRoute.pipe(
-              Effect.catchAllCause((resolutionCause) =>
+              Effect.catchCause((resolutionCause) =>
                 renderError(resolvedErrorComp, resolutionCause, routePath),
               ),
             );
@@ -446,11 +455,9 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               Effect.gen(function* () {
                 if (routeElement._tag === "Component") {
                   return yield* routeElement.run().pipe(
-                    Effect.sandbox,
-                    Effect.catchAllCause((sandboxedCause) =>
+                    Effect.catchCause((sandboxedCause) =>
                       Effect.gen(function* () {
-                        const cause = Cause.flatten(sandboxedCause);
-                        const errorEl = yield* renderError(resolvedErrorComp, cause, routePath);
+                        const errorEl = yield* renderError(resolvedErrorComp, sandboxedCause, routePath);
                         if (errorEl._tag === "Component") {
                           return yield* errorEl.run();
                         }
@@ -480,17 +487,19 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         // pendingScroll is set after loader.track returns — the Refreshing
         // transition fires during track (sees null), only Ready consumes it.
         const _unsubLoader = yield* Signal.subscribe(loader.view, () =>
-          Effect.gen(function* () {
-            const val = yield* SubscriptionRef.get(loader.view._ref);
-            if (pendingScroll !== null) {
-              const { strategyLayer } = pendingScroll;
-              pendingScroll = null;
-              yield* setViewAndAwaitSwap(val);
-              yield* applyScroll(strategyLayer);
-            } else {
-              yield* Signal.set(viewSignal, val);
-            }
-          }),
+          unsafeEraseR(
+            Effect.gen(function* () {
+              const val = yield* SubscriptionRef.get(loader.view._ref);
+              if (pendingScroll !== null) {
+                const { strategyLayer } = pendingScroll;
+                pendingScroll = null;
+                yield* setViewAndAwaitSwap(val);
+                yield* applyScroll(strategyLayer);
+              } else {
+                yield* Signal.set(viewSignal, val);
+              }
+            }),
+          ),
         );
         yield* Scope.addFinalizer(scope, _unsubLoader);
 
@@ -581,20 +590,20 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       // Decode params + query (strict: schema failures route to error boundary)
       const decodedParamsResult = yield* decodeRouteParams(match.route, match.params).pipe(
-        Effect.either,
+        Effect.result,
       );
-      if (Either.isLeft(decodedParamsResult)) {
+      if (Result.isFailure(decodedParamsResult)) {
         const el = yield* Option.match(boundaries.resolveError(match.route), {
           onNone: () =>
             Debug.log({
               event: "router.outlet.error",
               phase: "decode_params",
               path: route.path,
-              error: decodedParamsResult.left,
+              error: decodedParamsResult.failure,
             }).pipe(Effect.as(text("Error"))),
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) =>
-              renderError(resolved, Cause.fail(decodedParamsResult.left), route.path),
+              renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
             ),
         });
         yield* setViewAndAwaitSwap(el);
@@ -604,20 +613,20 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       const queryString = route.query.toString();
       const decodedQueryResult = yield* decodeRouteQuery(match.route, route.query).pipe(
-        Effect.either,
+        Effect.result,
       );
-      if (Either.isLeft(decodedQueryResult)) {
+      if (Result.isFailure(decodedQueryResult)) {
         const el = yield* Option.match(boundaries.resolveError(match.route), {
           onNone: () =>
             Debug.log({
               event: "router.outlet.error",
               phase: "decode_query",
               path: route.path,
-              error: decodedQueryResult.left,
+              error: decodedQueryResult.failure,
             }).pipe(Effect.as(text("Error"))),
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) =>
-              renderError(resolved, Cause.fail(decodedQueryResult.left), route.path),
+              renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
             ),
         });
         yield* setViewAndAwaitSwap(el);
@@ -625,8 +634,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         return;
       }
 
-      const decodedParams = decodedParamsResult.right;
-      const decodedQuery = decodedQueryResult.right;
+      const decodedParams = decodedParamsResult.success;
+      const decodedQuery = decodedQueryResult.success;
 
       // Prefetch
       const prefetchFns = match.route.definition.prefetch;
@@ -639,7 +648,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const withError = wrapWithErrorBoundary(routeElement, match, route.path);
       yield* commitView(withError, match, queryString);
     }).pipe(
-      Effect.catchAllCause((cause) =>
+      Effect.catchCause((cause) =>
         Debug.log({
           event: "router.outlet.error",
           error: Cause.pretty(cause),
@@ -653,7 +662,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Subscribe to route changes — calls processRoute reactively.
     // Does NOT cause component re-render (subscription, not Signal.get).
     // Router signal outlives the outlet — must unsubscribe on scope close.
-    const unsubRouter = yield* Signal.subscribe(router.current, () => processRoute);
+    const unsubRouter = yield* Signal.subscribe(router.current, () => unsafeEraseR(processRoute));
     yield* Scope.addFinalizer(scope, unsubRouter);
 
     return signalElement(viewSignal, { onSwap: onSwapEffect });

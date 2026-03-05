@@ -4,7 +4,8 @@
  * Effect-based wrapper for @clack/prompts
  * @since 1.0.0
  */
-import { Context, Effect, Data } from "effect";
+import { Data, Effect } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // === Error Types ===
 
@@ -61,10 +62,10 @@ export interface ConfirmOptions {
 
 // === Service Interface ===
 
-export interface Prompts {
+export interface PromptsService {
   readonly text: (options: TextOptions) => Effect.Effect<string, PromptCancelledError>;
   readonly select: <T>(options: SelectOptions<T>) => Effect.Effect<T, PromptCancelledError>;
   readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
 }
 
-export const Prompts = Context.GenericTag<Prompts>("@trygg/Prompts");
+export class Prompts extends ServiceMap.Service<Prompts, PromptsService>()("@trygg/Prompts") {}

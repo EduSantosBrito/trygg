@@ -12,10 +12,13 @@
  * - Resource.clear: Remove from cache
  * - Deduplication: Concurrent fetch handling
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Effect, Option, Ref, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Deferred, Effect, Option, Ref } from "effect";
+import { TestClock } from "effect/testing";
 import * as Resource from "../resource.js";
 import * as Signal from "../signal.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // ResourceState constructors
@@ -240,6 +243,54 @@ describe("Resource.fetch reactive invalidate/refresh", () => {
       }
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
+
+  it.scoped("should not overwrite current key with stale previous key result", () =>
+    Effect.gen(function* () {
+      const gate1 = yield* Deferred.make<void>();
+      const gate2 = yield* Deferred.make<void>();
+
+      const factory = Resource.make(
+        (params: { id: string }) =>
+          Effect.gen(function* () {
+            if (params.id === "1") {
+              yield* Deferred.await(gate1);
+            }
+            if (params.id === "2") {
+              yield* Deferred.await(gate2);
+            }
+            return `user-${params.id}`;
+          }),
+        { key: (params) => `reactive-switch:${params.id}` },
+      );
+
+      const userId = yield* Signal.make("1");
+      const state = yield* Resource.fetch(factory, { id: userId });
+      yield* TestClock.adjust(0);
+
+      // Switch before the first request resolves.
+      yield* Signal.set(userId, "2");
+      yield* TestClock.adjust(0);
+
+      // Resolve stale request first; it must NOT win.
+      yield* Deferred.succeed(gate1, undefined);
+      yield* TestClock.adjust(0);
+
+      const afterStale = yield* Signal.get(state);
+      if (Resource.isSuccess(afterStale)) {
+        assert.notStrictEqual(afterStale.value, "user-1");
+      }
+
+      // Resolve current request; now output must be for id=2.
+      yield* Deferred.succeed(gate2, undefined);
+      yield* TestClock.adjust(0);
+
+      const final = yield* Signal.get(state);
+      assert.strictEqual(final._tag, "Success");
+      if (Resource.isSuccess(final)) {
+        assert.strictEqual(final.value, "user-2");
+      }
+    }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
+  );
 });
 
 describe("Resource.fetch reactive render phase", () => {
@@ -255,9 +306,7 @@ describe("Resource.fetch reactive render phase", () => {
       // Simulate component render phase
       const phase = yield* Signal.makeRenderPhase;
 
-      yield* Resource.fetch(factory, { id: userId }).pipe(
-        Effect.locally(Signal.CurrentRenderPhase, phase),
-      );
+      yield* Effect.provideService(Resource.fetch(factory, { id: userId }), Signal.CurrentRenderPhase, phase);
       yield* TestClock.adjust(0);
 
       // userId should NOT be in the accessed set —
@@ -282,8 +331,10 @@ describe("Resource.fetch reactive render phase", () => {
       const userId = yield* Signal.make("1");
       const phase = yield* Signal.makeRenderPhase;
 
-      const state = yield* Resource.fetch(factory, { id: userId }).pipe(
-        Effect.locally(Signal.CurrentRenderPhase, phase),
+      const state = yield* Effect.provideService(
+        Resource.fetch(factory, { id: userId }),
+        Signal.CurrentRenderPhase,
+        phase,
       );
       yield* TestClock.adjust(0);
 
@@ -326,9 +377,7 @@ describe("Resource.fetch static render phase isolation", () => {
       // Simulate component render phase
       const phase = yield* Signal.makeRenderPhase;
 
-      const state = yield* Resource.fetch(resource).pipe(
-        Effect.locally(Signal.CurrentRenderPhase, phase),
-      );
+      const state = yield* Effect.provideService(Resource.fetch(resource), Signal.CurrentRenderPhase, phase);
       yield* TestClock.adjust(0);
 
       // State signal should NOT be in the accessed set —
@@ -353,9 +402,7 @@ describe("Resource.fetch static render phase isolation", () => {
       // Second fetch inside render phase — should hit cache but NOT track
       const phase = yield* Signal.makeRenderPhase;
 
-      const state = yield* Resource.fetch(resource).pipe(
-        Effect.locally(Signal.CurrentRenderPhase, phase),
-      );
+      const state = yield* Effect.provideService(Resource.fetch(resource), Signal.CurrentRenderPhase, phase);
 
       // State signal should NOT be in the accessed set even for cached reads
       assert.isFalse(

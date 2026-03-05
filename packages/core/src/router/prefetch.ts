@@ -30,7 +30,7 @@ export const runPrefetch = (
 
   const effects = prefetchFns.map((fn) =>
     fn(ctx).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error: unknown) =>
         Effect.logWarning("Prefetch failed").pipe(
           Effect.annotateLogs("error", String(error)),
           Effect.asVoid,

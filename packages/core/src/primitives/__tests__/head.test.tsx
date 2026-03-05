@@ -10,8 +10,8 @@
  * - Browser Head: DOM mounting, keyed dedup, cleanup
  * - Test Head: In-memory entry collection
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, FiberRef, Option, Scope } from "effect";
+import { assert, describe, effect } from "@effect/vitest";
+import { Effect, Exit, Option, Scope } from "effect";
 import {
   deriveKey,
   HOISTABLE_TAGS,
@@ -29,7 +29,7 @@ import * as Signal from "../signal.js";
 // =============================================================================
 
 describe("isHoistable", () => {
-  it.effect("should recognize all hoistable tags", () =>
+  effect("should recognize all hoistable tags", () =>
     Effect.gen(function* () {
       assert.isTrue(yield* isHoistable("title"));
       assert.isTrue(yield* isHoistable("meta"));
@@ -40,7 +40,7 @@ describe("isHoistable", () => {
     }),
   );
 
-  it.effect("should reject non-hoistable tags", () =>
+  effect("should reject non-hoistable tags", () =>
     Effect.gen(function* () {
       assert.isFalse(yield* isHoistable("div"));
       assert.isFalse(yield* isHoistable("span"));
@@ -51,7 +51,7 @@ describe("isHoistable", () => {
     }),
   );
 
-  it.effect("should have exactly 6 hoistable tags", () =>
+  effect("should have exactly 6 hoistable tags", () =>
     Effect.gen(function* () {
       assert.strictEqual(HOISTABLE_TAGS.size, 6);
     }),
@@ -63,63 +63,63 @@ describe("isHoistable", () => {
 // =============================================================================
 
 describe("deriveKey", () => {
-  it.effect("should return 'title' for title tag", () =>
+  effect("should return 'title' for title tag", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("title", {});
       assert.deepStrictEqual(key, Option.some("title"));
     }),
   );
 
-  it.effect("should return 'base' for base tag", () =>
+  effect("should return 'base' for base tag", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("base", { href: "/" });
       assert.deepStrictEqual(key, Option.some("base"));
     }),
   );
 
-  it.effect("should derive key from meta[name]", () =>
+  effect("should derive key from meta[name]", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { name: "description" });
       assert.deepStrictEqual(key, Option.some("meta:name:description"));
     }),
   );
 
-  it.effect("should derive key from meta[property]", () =>
+  effect("should derive key from meta[property]", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { property: "og:title" });
       assert.deepStrictEqual(key, Option.some("meta:property:og:title"));
     }),
   );
 
-  it.effect("should derive key from meta[httpEquiv]", () =>
+  effect("should derive key from meta[httpEquiv]", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { httpEquiv: "content-type" });
       assert.deepStrictEqual(key, Option.some("meta:http-equiv:content-type"));
     }),
   );
 
-  it.effect("should derive key from meta[charset]", () =>
+  effect("should derive key from meta[charset]", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { charset: "UTF-8" });
       assert.deepStrictEqual(key, Option.some("meta:charset"));
     }),
   );
 
-  it.effect("should prefer name over property for meta", () =>
+  effect("should prefer name over property for meta", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { name: "author", property: "og:author" });
       assert.deepStrictEqual(key, Option.some("meta:name:author"));
     }),
   );
 
-  it.effect("should return None for meta without identifying prop", () =>
+  effect("should return None for meta without identifying prop", () =>
     Effect.gen(function* () {
       const key = yield* deriveKey("meta", { content: "value" });
       assert.deepStrictEqual(key, Option.none());
     }),
   );
 
-  it.effect("should return None for unkeyed tags", () =>
+  effect("should return None for unkeyed tags", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* deriveKey("link", { rel: "stylesheet" }), Option.none());
       assert.deepStrictEqual(yield* deriveKey("style", {}), Option.none());
@@ -127,7 +127,7 @@ describe("deriveKey", () => {
     }),
   );
 
-  it.effect("should return None for non-hoistable tags", () =>
+  effect("should return None for non-hoistable tags", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* deriveKey("div", {}), Option.none());
       assert.deepStrictEqual(yield* deriveKey("span", { name: "x" }), Option.none());
@@ -140,7 +140,7 @@ describe("deriveKey", () => {
 // =============================================================================
 
 describe("Browser Head", () => {
-  it.scoped("should mount unkeyed element to document.head", () =>
+  effect("should mount unkeyed element to document.head", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
       const node = document.createElement("link");
@@ -148,7 +148,7 @@ describe("Browser Head", () => {
       node.setAttribute("href", "/style.css");
 
       const mountScope = yield* Scope.make();
-      yield* head.mount("link", node, Option.none()).pipe(Scope.extend(mountScope));
+      yield* head.mount("link", node, Option.none()).pipe(Scope.provide(mountScope));
 
       assert.isTrue(document.head.contains(node));
 
@@ -157,14 +157,14 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should mount keyed element (title) to document.head", () =>
+  effect("should mount keyed element (title) to document.head", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
       const node = document.createElement("title");
       node.textContent = "My Page";
 
       const mountScope = yield* Scope.make();
-      yield* head.mount("title", node, Option.some("title")).pipe(Scope.extend(mountScope));
+      yield* head.mount("title", node, Option.some("title")).pipe(Scope.provide(mountScope));
 
       assert.isTrue(document.head.contains(node));
       assert.strictEqual(document.head.querySelector("title")?.textContent, "My Page");
@@ -174,7 +174,7 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should deduplicate keyed elements — deepest wins", () =>
+  effect("should deduplicate keyed elements — deepest wins", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
@@ -182,7 +182,7 @@ describe("Browser Head", () => {
       const parentTitle = document.createElement("title");
       parentTitle.textContent = "App";
       const parentScope = yield* Scope.make();
-      yield* head.mount("title", parentTitle, Option.some("title")).pipe(Scope.extend(parentScope));
+      yield* head.mount("title", parentTitle, Option.some("title")).pipe(Scope.provide(parentScope));
 
       assert.isTrue(document.head.contains(parentTitle));
 
@@ -190,7 +190,7 @@ describe("Browser Head", () => {
       const childTitle = document.createElement("title");
       childTitle.textContent = "About - App";
       const childScope = yield* Scope.make();
-      yield* head.mount("title", childTitle, Option.some("title")).pipe(Scope.extend(childScope));
+      yield* head.mount("title", childTitle, Option.some("title")).pipe(Scope.provide(childScope));
 
       assert.isFalse(document.head.contains(parentTitle));
       assert.isTrue(document.head.contains(childTitle));
@@ -206,24 +206,24 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should handle 3-level deep dedup stack", () =>
+  effect("should handle 3-level deep dedup stack", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
       const t1 = document.createElement("title");
       t1.textContent = "Root";
       const s1 = yield* Scope.make();
-      yield* head.mount("title", t1, Option.some("title")).pipe(Scope.extend(s1));
+      yield* head.mount("title", t1, Option.some("title")).pipe(Scope.provide(s1));
 
       const t2 = document.createElement("title");
       t2.textContent = "Section";
       const s2 = yield* Scope.make();
-      yield* head.mount("title", t2, Option.some("title")).pipe(Scope.extend(s2));
+      yield* head.mount("title", t2, Option.some("title")).pipe(Scope.provide(s2));
 
       const t3 = document.createElement("title");
       t3.textContent = "Page";
       const s3 = yield* Scope.make();
-      yield* head.mount("title", t3, Option.some("title")).pipe(Scope.extend(s3));
+      yield* head.mount("title", t3, Option.some("title")).pipe(Scope.provide(s3));
 
       // Only deepest visible
       assert.isFalse(document.head.contains(t1));
@@ -245,7 +245,7 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should allow multiple unkeyed elements of same tag", () =>
+  effect("should allow multiple unkeyed elements of same tag", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
@@ -256,8 +256,8 @@ describe("Browser Head", () => {
 
       const s1 = yield* Scope.make();
       const s2 = yield* Scope.make();
-      yield* head.mount("link", link1, Option.none()).pipe(Scope.extend(s1));
-      yield* head.mount("link", link2, Option.none()).pipe(Scope.extend(s2));
+      yield* head.mount("link", link1, Option.none()).pipe(Scope.provide(s1));
+      yield* head.mount("link", link2, Option.none()).pipe(Scope.provide(s2));
 
       // Both present
       assert.isTrue(document.head.contains(link1));
@@ -273,7 +273,7 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should deduplicate meta by name independently", () =>
+  effect("should deduplicate meta by name independently", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
@@ -282,14 +282,14 @@ describe("Browser Head", () => {
       m1.setAttribute("name", "description");
       m1.setAttribute("content", "Original");
       const s1 = yield* Scope.make();
-      yield* head.mount("meta", m1, Option.some("meta:name:description")).pipe(Scope.extend(s1));
+      yield* head.mount("meta", m1, Option.some("meta:name:description")).pipe(Scope.provide(s1));
 
       // Second meta[name=description] — overwrites first
       const m2 = document.createElement("meta");
       m2.setAttribute("name", "description");
       m2.setAttribute("content", "Updated");
       const s2 = yield* Scope.make();
-      yield* head.mount("meta", m2, Option.some("meta:name:description")).pipe(Scope.extend(s2));
+      yield* head.mount("meta", m2, Option.some("meta:name:description")).pipe(Scope.provide(s2));
 
       assert.isFalse(document.head.contains(m1));
       assert.isTrue(document.head.contains(m2));
@@ -299,7 +299,7 @@ describe("Browser Head", () => {
       m3.setAttribute("name", "author");
       m3.setAttribute("content", "John");
       const s3 = yield* Scope.make();
-      yield* head.mount("meta", m3, Option.some("meta:name:author")).pipe(Scope.extend(s3));
+      yield* head.mount("meta", m3, Option.some("meta:name:author")).pipe(Scope.provide(s3));
 
       assert.isTrue(document.head.contains(m2)); // description still there
       assert.isTrue(document.head.contains(m3)); // author added
@@ -313,7 +313,7 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should track entries correctly", () =>
+  effect("should track entries correctly", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
@@ -323,8 +323,8 @@ describe("Browser Head", () => {
 
       const s1 = yield* Scope.make();
       const s2 = yield* Scope.make();
-      yield* head.mount("title", title, Option.some("title")).pipe(Scope.extend(s1));
-      yield* head.mount("link", link, Option.none()).pipe(Scope.extend(s2));
+      yield* head.mount("title", title, Option.some("title")).pipe(Scope.provide(s1));
+      yield* head.mount("link", link, Option.none()).pipe(Scope.provide(s2));
 
       const entries = yield* head.entries;
       assert.strictEqual(entries.length, 2);
@@ -342,24 +342,24 @@ describe("Browser Head", () => {
     }),
   );
 
-  it.scoped("should handle middle-of-stack removal gracefully", () =>
+  effect("should handle middle-of-stack removal gracefully", () =>
     Effect.gen(function* () {
       const head = yield* makeBrowserHead();
 
       const t1 = document.createElement("title");
       t1.textContent = "First";
       const s1 = yield* Scope.make();
-      yield* head.mount("title", t1, Option.some("title")).pipe(Scope.extend(s1));
+      yield* head.mount("title", t1, Option.some("title")).pipe(Scope.provide(s1));
 
       const t2 = document.createElement("title");
       t2.textContent = "Second";
       const s2 = yield* Scope.make();
-      yield* head.mount("title", t2, Option.some("title")).pipe(Scope.extend(s2));
+      yield* head.mount("title", t2, Option.some("title")).pipe(Scope.provide(s2));
 
       const t3 = document.createElement("title");
       t3.textContent = "Third";
       const s3 = yield* Scope.make();
-      yield* head.mount("title", t3, Option.some("title")).pipe(Scope.extend(s3));
+      yield* head.mount("title", t3, Option.some("title")).pipe(Scope.provide(s3));
 
       // Remove middle (not top of stack) — top stays visible
       yield* Scope.close(s2, Exit.void);
@@ -381,14 +381,14 @@ describe("Browser Head", () => {
 // =============================================================================
 
 describe("Test Head", () => {
-  it.scoped("should collect entries without DOM manipulation", () =>
+  effect("should collect entries without DOM manipulation", () =>
     Effect.gen(function* () {
       const head = yield* makeTestHead();
       const node = document.createElement("title");
       node.textContent = "Test Title";
 
       const mountScope = yield* Scope.make();
-      yield* head.mount("title", node, Option.some("title")).pipe(Scope.extend(mountScope));
+      yield* head.mount("title", node, Option.some("title")).pipe(Scope.provide(mountScope));
 
       const entries = yield* head.entries;
       assert.strictEqual(entries.length, 1);
@@ -401,7 +401,7 @@ describe("Test Head", () => {
     }),
   );
 
-  it.scoped("should track multiple entries", () =>
+  effect("should track multiple entries", () =>
     Effect.gen(function* () {
       const head = yield* makeTestHead();
 
@@ -413,9 +413,9 @@ describe("Test Head", () => {
       const s2 = yield* Scope.make();
       const s3 = yield* Scope.make();
 
-      yield* head.mount("title", title, Option.some("title")).pipe(Scope.extend(s1));
-      yield* head.mount("meta", meta, Option.some("meta:name:desc")).pipe(Scope.extend(s2));
-      yield* head.mount("link", link, Option.none()).pipe(Scope.extend(s3));
+      yield* head.mount("title", title, Option.some("title")).pipe(Scope.provide(s1));
+      yield* head.mount("meta", meta, Option.some("meta:name:desc")).pipe(Scope.provide(s2));
+      yield* head.mount("link", link, Option.none()).pipe(Scope.provide(s3));
 
       const entries = yield* head.entries;
       assert.strictEqual(entries.length, 3);
@@ -437,7 +437,7 @@ describe("Test Head", () => {
 // =============================================================================
 
 describe("Renderer Integration", () => {
-  it.scoped("should hoist <title> to document.head", () =>
+  effect("should hoist <title> to document.head", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -463,7 +463,7 @@ describe("Renderer Integration", () => {
     }),
   );
 
-  it.scoped("should hoist <meta> to document.head", () =>
+  effect("should hoist <meta> to document.head", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -486,7 +486,7 @@ describe("Renderer Integration", () => {
     }),
   );
 
-  it.scoped("should keep mode='static' elements in-place", () =>
+  effect("should keep mode='static' elements in-place", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -506,7 +506,7 @@ describe("Renderer Integration", () => {
     }),
   );
 
-  it.scoped("should hoist <link> to document.head", () =>
+  effect("should hoist <link> to document.head", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -528,14 +528,14 @@ describe("Renderer Integration", () => {
     }),
   );
 
-  it.scoped("should clean up hoisted elements on unmount", () =>
+  effect("should clean up hoisted elements on unmount", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return <title>Cleanup Test</title>;
       });
 
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Scope.provide(scope));
 
       // Title present
       assert.isNotNull(document.head.querySelector("title"));
@@ -555,7 +555,7 @@ describe("Renderer Integration", () => {
 // =============================================================================
 
 describe("Document-Level Elements", () => {
-  it.scoped("should map <html> attributes to document.documentElement", () =>
+  effect("should map <html> attributes to document.documentElement", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -567,15 +567,14 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       assert.strictEqual(document.documentElement.getAttribute("lang"), "fr");
       assert.strictEqual(document.documentElement.getAttribute("class"), "dark");
     }),
   );
 
-  it.scoped("should map <body> attributes to document.body", () =>
+  effect("should map <body> attributes to document.body", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -587,14 +586,13 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       assert.strictEqual(document.body.getAttribute("class"), "antialiased");
     }),
   );
 
-  it.scoped("should render <body> children into document.body", () =>
+  effect("should render <body> children into document.body", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -606,8 +604,7 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       // Content should be in document.body
       const content = document.body.querySelector("[data-testid='doc-content']");
@@ -616,7 +613,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should hoist <head> children to document.head", () =>
+  effect("should hoist <head> children to document.head", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -632,8 +629,7 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       // Title and meta should be in document.head
       const title = document.head.querySelector("title");
@@ -646,7 +642,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should NOT map html/head/body when IsDocumentMount is false", () =>
+  effect("should NOT map html/head/body when IsDocumentMount is false", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {
         return (
@@ -672,7 +668,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should revert attributes on cleanup", () =>
+  effect("should revert attributes on cleanup", () =>
     Effect.gen(function* () {
       const prevLang = document.documentElement.getAttribute("lang");
 
@@ -686,9 +682,8 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
 
       assert.strictEqual(document.documentElement.getAttribute("lang"), "ja");
 
@@ -704,7 +699,7 @@ describe("Document-Level Elements", () => {
   // Signal-valued attributes on document elements
   // ---------------------------------------------------------------------------
 
-  it.scoped("should apply Signal-valued attribute on <html> and update reactively", () =>
+  effect("should apply Signal-valued attribute on <html> and update reactively", () =>
     Effect.gen(function* () {
       const theme = yield* Signal.make("dark");
 
@@ -718,8 +713,7 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       // Initial value applied
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
@@ -734,7 +728,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should revert Signal-valued attribute on cleanup", () =>
+  effect("should revert Signal-valued attribute on cleanup", () =>
     Effect.gen(function* () {
       const prevTheme = document.documentElement.getAttribute("data-theme");
 
@@ -750,9 +744,8 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
 
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
 
@@ -763,7 +756,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should unsubscribe from Signal on cleanup (no stale updates)", () =>
+  effect("should unsubscribe from Signal on cleanup (no stale updates)", () =>
     Effect.gen(function* () {
       const theme = yield* Signal.make("dark");
 
@@ -777,9 +770,8 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Scope.extend(scope));
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
 
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
 
@@ -792,7 +784,7 @@ describe("Document-Level Elements", () => {
     }),
   );
 
-  it.scoped("should handle multiple Signal-valued attributes on same document element", () =>
+  effect("should handle multiple Signal-valued attributes on same document element", () =>
     Effect.gen(function* () {
       const theme = yield* Signal.make("dark");
       const dir = yield* Signal.make("ltr");
@@ -807,8 +799,7 @@ describe("Document-Level Elements", () => {
         );
       });
 
-      yield* FiberRef.set(IsDocumentMount, true);
-      yield* render(<App />);
+      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true));
 
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
       assert.strictEqual(document.documentElement.getAttribute("data-dir"), "ltr");

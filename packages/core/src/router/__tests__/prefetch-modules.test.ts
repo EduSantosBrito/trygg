@@ -7,7 +7,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
-import type { Layer } from "effect";
+import type { Any as AnyLayer } from "effect/Layer";
 import * as Component from "../../primitives/component.js";
 import { empty } from "../../primitives/element.js";
 import * as Route from "../route.js";
@@ -25,7 +25,7 @@ const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Component.Type<never, unknown, unknown>,
   });

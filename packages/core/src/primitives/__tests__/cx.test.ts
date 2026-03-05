@@ -8,8 +8,9 @@
  * - Object notation
  * - Signal inputs (returns reactive Signal<string>)
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Exit, Scope, TestClock } from "effect";
+import { assert, describe, effect } from "@effect/vitest";
+import { Data, Effect, Exit, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 import { cx } from "../cx.js";
 
@@ -24,35 +25,35 @@ const expectSignal = (value: string | Signal.Signal<string>) =>
 // =============================================================================
 
 describe("cx - static", () => {
-  it.scoped("should combine multiple class strings", () =>
+  effect("should combine multiple class strings", () =>
     Effect.gen(function* () {
       const result = yield* cx("a", "b", "c");
       assert.strictEqual(result, "a b c");
     }),
   );
 
-  it.scoped("should filter out falsy values", () =>
+  effect("should filter out falsy values", () =>
     Effect.gen(function* () {
       const result = yield* cx("a", false, null, undefined, "b");
       assert.strictEqual(result, "a b");
     }),
   );
 
-  it.scoped("should handle conditional object syntax", () =>
+  effect("should handle conditional object syntax", () =>
     Effect.gen(function* () {
       const result = yield* cx("base", { active: true, disabled: false });
       assert.strictEqual(result, "base active");
     }),
   );
 
-  it.scoped("should return empty string for all falsy inputs", () =>
+  effect("should return empty string for all falsy inputs", () =>
     Effect.gen(function* () {
       const result = yield* cx(false, null, undefined);
       assert.strictEqual(result, "");
     }),
   );
 
-  it.scoped("should return plain string (not Signal) for static inputs", () =>
+  effect("should return plain string (not Signal) for static inputs", () =>
     Effect.gen(function* () {
       const result = yield* cx("flex", "gap-2");
       assert.strictEqual(typeof result, "string");
@@ -66,7 +67,7 @@ describe("cx - static", () => {
 // =============================================================================
 
 describe("cx - reactive", () => {
-  it.scoped("should return Signal<string> when inputs include signals", () =>
+  effect("should return Signal<string> when inputs include signals", () =>
     Effect.gen(function* () {
       const variant = yield* Signal.make("primary");
       const result = yield* cx("btn", variant);
@@ -75,7 +76,7 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should resolve signal values in class string", () =>
+  effect("should resolve signal values in class string", () =>
     Effect.gen(function* () {
       const variant = yield* Signal.make("primary");
       const result = yield* cx("btn", variant);
@@ -87,7 +88,7 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should update when signal changes", () =>
+  effect("should update when signal changes", () =>
     Effect.gen(function* () {
       const variant = yield* Signal.make("primary");
       const result = yield* cx("btn", variant);
@@ -102,7 +103,7 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should handle boolean signals", () =>
+  effect("should handle boolean signals", () =>
     Effect.gen(function* () {
       const active = yield* Signal.make(true);
       const result = yield* cx("nav-item", active);
@@ -113,7 +114,7 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should handle signal becoming falsy", () =>
+  effect("should handle signal becoming falsy", () =>
     Effect.gen(function* () {
       const extra = yield* Signal.make<string | boolean | null | undefined>("highlight");
       const result = yield* cx("base", extra);
@@ -128,12 +129,12 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should cleanup subscriptions when scope closes", () =>
+  effect("should cleanup subscriptions when scope closes", () =>
     Effect.gen(function* () {
       const variant = yield* Signal.make("primary");
       const innerScope = yield* Scope.make();
 
-      yield* cx("btn", variant).pipe(Effect.locally(Signal.CurrentRenderScope, innerScope));
+      yield* Effect.provideService(cx("btn", variant), Signal.CurrentRenderScope, innerScope);
 
       assert.strictEqual(variant._listeners.size, 1);
 
@@ -143,7 +144,7 @@ describe("cx - reactive", () => {
     }),
   );
 
-  it.scoped("should handle multiple signals", () =>
+  effect("should handle multiple signals", () =>
     Effect.gen(function* () {
       const size = yield* Signal.make("lg");
       const color = yield* Signal.make("blue");

@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { Signal, ErrorBoundary, Component } from "trygg";
+import { Signal, ErrorBoundary, Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../services/error-boundary";
 import { NetworkErrorDisplay } from "../components/error-boundary/network-error-display";
 import { ValidationErrorDisplay } from "../components/error-boundary/validation-error-display";
@@ -17,21 +17,28 @@ const defaultErrorTheme = Layer.succeed(ErrorTheme, {
 
 const ErrorBoundaryPage = Component.gen(function* () {
   const errorType = yield* Signal.make<"network" | "validation" | "unknown" | "none">("none");
+  const errorTypeValue = yield* Signal.get(errorType);
 
   const triggerError = (type: "network" | "validation" | "unknown" | "none") =>
     Signal.set(errorType, type);
 
-  // Create error-boundary-wrapped component with specific handlers + catchAll
-  const SafeRiskyComponent = yield* ErrorBoundary.catch(RiskyComponent)
-    .on("NetworkError", NetworkErrorDisplay)
-    .on("ValidationError", ValidationErrorDisplay)
-    .on("UnknownError", UnknownErrorDisplay)
-    .catchAll((cause) => (
+  const GenericErrorDisplay = Component.gen(function* (Props: ComponentProps<{ cause: Cause.Cause<unknown> }>) {
+    const { cause } = yield* Props;
+    return (
       <div className="p-4 rounded bg-red-100 text-red-800">
         <h3 className="mt-0">Unexpected Error</h3>
         <pre>{String(Cause.squash(cause))}</pre>
       </div>
-    ));
+    );
+  });
+
+  // Create error-boundary-wrapped component with specific handlers + catchAll
+  const SafeRiskyComponent = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+    ErrorBoundary.on("NetworkError", NetworkErrorDisplay),
+    ErrorBoundary.on("ValidationError", ValidationErrorDisplay),
+    ErrorBoundary.on("UnknownError", UnknownErrorDisplay),
+    ErrorBoundary.catchAll(GenericErrorDisplay),
+  );
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -64,7 +71,7 @@ const ErrorBoundaryPage = Component.gen(function* () {
 
       <div className="mt-6">
         <h3>Result:</h3>
-        <SafeRiskyComponent shouldFail={errorType} />
+        <SafeRiskyComponent shouldFail={errorTypeValue} />
       </div>
     </div>
   );

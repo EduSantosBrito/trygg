@@ -4,7 +4,8 @@
  *
  * Control and read viewport scroll position.
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -29,7 +30,9 @@ export interface ScrollService {
 // Tag
 // =============================================================================
 
-export class Scroll extends Context.Tag("trygg/platform/Scroll")<Scroll, ScrollService>() {}
+export interface Scroll extends ServiceMap.Service<Scroll, ScrollService> {}
+
+export const Scroll = ServiceMap.Service<Scroll, ScrollService>("trygg/platform/Scroll");
 
 // =============================================================================
 // Browser layer

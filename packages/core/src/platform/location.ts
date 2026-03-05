@@ -4,7 +4,8 @@
  *
  * Read current URL state.
  */
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -31,7 +32,9 @@ export interface LocationService {
 // Tag
 // =============================================================================
 
-export class Location extends Context.Tag("trygg/platform/Location")<Location, LocationService>() {}
+export interface Location extends ServiceMap.Service<Location, LocationService> {}
+
+export const Location = ServiceMap.Service<Location, LocationService>("trygg/platform/Location");
 
 // =============================================================================
 // Browser layer

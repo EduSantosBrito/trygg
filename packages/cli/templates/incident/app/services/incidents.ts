@@ -1,4 +1,5 @@
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import type { Severity } from "../errors/incidents";
 import { type Status, IncidentNotFound, InvalidTransition } from "../errors/incidents";
 
@@ -46,13 +47,13 @@ export interface IncidentService {
   readonly addTimelineEntry: (id: number, message: string) => Effect.Effect<void, IncidentNotFound>;
 }
 
-export class Incidents extends Context.Tag("Incidents")<Incidents, IncidentService>() {}
+export class Incidents extends ServiceMap.Service<Incidents, IncidentService>()("Incidents") {}
 
 // ---------------------------------------------------------------------------
 // Mock implementation (in-memory)
 // ---------------------------------------------------------------------------
 
-const now = () => new Date();
+const now: Effect.Effect<Date> = Effect.sync(() => new Date());
 
 const seed: ReadonlyArray<Incident> = [
   {
@@ -107,9 +108,9 @@ const makeIncidentService = (): IncidentService => {
     get: lookup,
 
     create: ({ title, severity }) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        const ts = yield* now;
         const id = nextId++;
-        const ts = now();
         const incident: Incident = {
           id,
           title,
@@ -133,7 +134,7 @@ const makeIncidentService = (): IncidentService => {
             validNext: valid,
           });
         }
-        const ts = now();
+        const ts = yield* now;
         const updated: Incident = {
           ...incident,
           status: to,
@@ -146,9 +147,10 @@ const makeIncidentService = (): IncidentService => {
     addTimelineEntry: (id, message) =>
       Effect.gen(function* () {
         const incident = yield* lookup(id);
+        const ts = yield* now;
         const updated: Incident = {
           ...incident,
-          timeline: [...incident.timeline, { timestamp: now(), message }],
+          timeline: [...incident.timeline, { timestamp: ts, message }],
         };
         store.set(id, updated);
       }),

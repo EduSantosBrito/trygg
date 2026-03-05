@@ -9,7 +9,7 @@
  * - Decode failures produce typed errors
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import {
@@ -24,14 +24,14 @@ import {
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer } from "effect";
+import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -44,7 +44,7 @@ const makeNamedComp = (name: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _name: name,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });
@@ -449,7 +449,7 @@ describe("decodeRouteParams", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(
         Route.make("/users/:id")
-          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .params(Schema.Struct({ id: Schema.FiniteFromString }))
           .component(Comp)
           .error(ErrorBoundary),
       ).manifest;
@@ -460,13 +460,13 @@ describe("decodeRouteParams", () => {
 
       if (Option.isSome(match)) {
         const result = yield* decodeRouteParams(match.value.route, match.value.params).pipe(
-          Effect.either,
+          Effect.result,
         );
-        assert.isTrue(result._tag === "Left");
-        if (result._tag === "Left") {
-          assert.strictEqual(result.left._tag, "ParamsDecodeError");
-          assert.strictEqual(result.left.path, "/users/:id");
-          assert.strictEqual(result.left.rawParams.id, "abc");
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "ParamsDecodeError");
+          assert.strictEqual(result.failure.path, "/users/:id");
+          assert.strictEqual(result.failure.rawParams.id, "abc");
         }
       }
     }),
@@ -609,11 +609,11 @@ describe("decodeRouteQuery", () => {
 
       if (Option.isSome(match)) {
         const searchParams = new URLSearchParams("");
-        const result = yield* decodeRouteQuery(match.value.route, searchParams).pipe(Effect.either);
-        assert.isTrue(result._tag === "Left");
-        if (result._tag === "Left") {
-          assert.strictEqual(result.left._tag, "QueryDecodeError");
-          assert.strictEqual(result.left.path, "/search");
+        const result = yield* decodeRouteQuery(match.value.route, searchParams).pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "QueryDecodeError");
+          assert.strictEqual(result.failure.path, "/search");
         }
       }
     }),
@@ -623,7 +623,7 @@ describe("decodeRouteQuery", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(
         Route.make("/items")
-          .query(Schema.Struct({ page: Schema.NumberFromString }))
+          .query(Schema.Struct({ page: Schema.FiniteFromString }))
           .component(Comp)
           .error(ErrorBoundary),
       ).manifest;
@@ -634,10 +634,10 @@ describe("decodeRouteQuery", () => {
 
       if (Option.isSome(match)) {
         const searchParams = new URLSearchParams("page=abc");
-        const result = yield* decodeRouteQuery(match.value.route, searchParams).pipe(Effect.either);
-        assert.isTrue(result._tag === "Left");
-        if (result._tag === "Left") {
-          assert.strictEqual(result.left._tag, "QueryDecodeError");
+        const result = yield* decodeRouteQuery(match.value.route, searchParams).pipe(Effect.result);
+        assert.isTrue(Result.isFailure(result));
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "QueryDecodeError");
         }
       }
     }),

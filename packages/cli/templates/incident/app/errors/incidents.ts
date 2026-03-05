@@ -1,26 +1,28 @@
-import { Schema } from "effect";
+import { Data, Schema } from "effect";
 
-export const Status = Schema.Literal(
-  "Detected",
-  "Investigating",
-  "Identified",
-  "Monitoring",
-  "Resolved",
-);
-export type Status = typeof Status.Type;
+export const Status = Schema.Union([
+  Schema.Literal("Detected"),
+  Schema.Literal("Investigating"),
+  Schema.Literal("Identified"),
+  Schema.Literal("Monitoring"),
+  Schema.Literal("Resolved"),
+]);
+export type Status = Schema.Schema.Type<typeof Status>;
 
-export const Severity = Schema.Literal("SEV-1", "SEV-2", "SEV-3", "SEV-4");
-export type Severity = typeof Severity.Type;
+export const Severity = Schema.Union([
+  Schema.Literal("SEV-1"),
+  Schema.Literal("SEV-2"),
+  Schema.Literal("SEV-3"),
+  Schema.Literal("SEV-4"),
+]);
+export type Severity = Schema.Schema.Type<typeof Severity>;
 
-export class InvalidTransition extends Schema.TaggedError<InvalidTransition>()(
-  "InvalidTransition",
-  {
-    from: Status,
-    to: Status,
-    validNext: Schema.Array(Status),
-  },
-) {}
+export class InvalidTransition extends Data.TaggedError("InvalidTransition")<{
+  readonly from: Status;
+  readonly to: Status;
+  readonly validNext: ReadonlyArray<Status>;
+}> {}
 
-export class IncidentNotFound extends Schema.TaggedError<IncidentNotFound>()("IncidentNotFound", {
-  id: Schema.Number,
-}) {}
+export class IncidentNotFound extends Data.TaggedError("IncidentNotFound")<{
+  readonly id: number;
+}> {}

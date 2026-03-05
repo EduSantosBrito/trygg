@@ -12,7 +12,7 @@ import * as Component from "../primitives/component.js";
 import { render } from "../testing/index.js";
 
 describe("JSX component validation", () => {
-  it.scoped("should reject direct Effect<Element> with InvalidComponentError", () =>
+  it.effect("should reject direct Effect<Element> with InvalidComponentError", () =>
     Effect.gen(function* () {
       const directEffect = Effect.succeed(<span data-testid="direct">Hello</span>);
       const DirectEffect = directEffect;
@@ -35,7 +35,7 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.scoped("should reject plain function components", () =>
+  it.effect("should reject plain function components", () =>
     Effect.gen(function* () {
       const Plain = () => <span data-testid="plain">Hello</span>;
 
@@ -56,7 +56,7 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.scoped("should accept Component.gen components", () =>
+  it.effect("should accept Component.gen components", () =>
     Effect.gen(function* () {
       const ValidComponent = Component.gen(function* () {
         return <span data-testid="valid">Hello from Component.gen</span>;
@@ -68,7 +68,7 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.scoped("should accept Component.gen with props", () =>
+  it.effect("should accept Component.gen with props", () =>
     Effect.gen(function* () {
       const ComponentWithProps = Component.gen(function* (
         Props: Component.ComponentProps<{ message: string }>,
@@ -83,7 +83,7 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.scoped("should accept intrinsic HTML elements", () =>
+  it.effect("should accept intrinsic HTML elements", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="intrinsic" className="test" />);
 

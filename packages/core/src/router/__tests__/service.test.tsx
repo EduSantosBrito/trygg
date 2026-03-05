@@ -14,8 +14,9 @@
  * - Verify cleanup on navigation
  * - Verify error boundaries catch re-render errors
  */
-import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Exit, Option, TestClock } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Cause, Data, Effect, Exit, Option } from "effect";
+import { TestClock } from "effect/testing";
 import * as Router from "../service.js";
 import type { RouteErrorInfo } from "../types.js";
 import { Outlet } from "../outlet.js";
@@ -25,6 +26,8 @@ import * as Signal from "../../primitives/signal.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../../primitives/component.js";
 import * as Route from "../route.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // Tagged error for testing route errors
 class TestRouteError extends Data.TaggedError("TestRouteError")<{ message: string }> {}
@@ -523,7 +526,7 @@ describe("Router.currentError", () => {
       );
       if (Option.isNone(captured.errorInfo)) return; // TypeScript guard
       assert.strictEqual(captured.errorInfo.value.path, "/test");
-      assert.isTrue(Option.isSome(Cause.failureOption(captured.errorInfo.value.cause)));
+      assert.isTrue(Cause.hasFails(captured.errorInfo.value.cause));
     }),
   );
 
@@ -537,7 +540,7 @@ describe("Router.currentError", () => {
       Exit.match(exit, {
         onFailure: (cause) => {
           // Should be a Die (defect), not a Fail
-          assert.isTrue(Cause.isDie(cause));
+          assert.isTrue(Cause.hasDies(cause));
         },
         onSuccess: () => {
           assert.fail("Expected currentError to die outside error boundary context");

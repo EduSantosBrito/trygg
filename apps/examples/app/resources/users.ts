@@ -31,9 +31,9 @@ export const userResource = Resource.make(
   (params: { id: string }) =>
     Effect.gen(function* () {
       const client = yield* ApiClient;
-      return yield* client.users.getUser({ path: params });
+      return yield* client.users.getUser({ params });
     }),
-  { key: (params) => Resource.hash("users.getUser", params) },
+  { key: ({ id }) => `users.getUser:${id}` },
 );
 
 /**
@@ -43,7 +43,7 @@ export const userPostsResource = Resource.make(
   (params: { id: string }) =>
     Effect.gen(function* () {
       const client = yield* ApiClient;
-      return yield* client.users.getUserPosts({ path: params });
+      return yield* client.users.getUserPosts({ params });
     }),
-  { key: (params) => Resource.hash("users.getUserPosts", params) },
+  { key: ({ id }) => `users.getUserPosts:${id}` },
 );

@@ -23,21 +23,22 @@
  */
 import type { ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
-import { FileSystem } from "@effect/platform";
 import {
   Array,
   Data,
   Effect,
   Exit,
-  HashMap,
+  FileSystem,
   Layer,
   Logger,
   LogLevel,
   Match,
   Option,
-  Runtime,
+  References,
+  Result,
   Scope,
 } from "effect";
+import type { Layer as LayerType } from "effect/Layer";
 import * as nodePath from "node:path";
 import type { TryggConfig, Platform } from "../config.js";
 import {
@@ -67,12 +68,12 @@ const RESOLVED_HANDLER_FACTORY_ID = "\0" + VIRTUAL_HANDLER_FACTORY_ID;
 /**
  * Shared handler factory logic for virtual modules.
  * Requires the user module to have a default export that is a composed Layer.
- * No platform-specific imports — only @effect/platform and effect.
+ * No platform-specific imports — only effect http/httpapi modules.
  * @internal
  */
 const SHARED_FACTORY_CODE = `
-import { HttpApiBuilder, HttpServer } from "@effect/platform";
-import { Data, Effect, Layer, Scope, Exit } from "effect";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { Data, Effect, Layer } from "effect";
 
 class FactoryError extends Data.TaggedError("FactoryError") {}
 
@@ -83,7 +84,7 @@ export const detectAndComposeLayer = (mod) =>
   Effect.gen(function* () {
     if (!("default" in mod) || !Layer.isLayer(mod.default)) {
       return yield* new FactoryError({
-        message: "app/api.ts must have a default export that is a composed Layer (e.g. export default HttpApiBuilder.api(Api).pipe(Layer.provide(handlers)))",
+        message: "app/api.ts must have a default export that is a composed Layer (e.g. export default HttpApiBuilder.layer(Api).pipe(Layer.provide(handlers)))",
       });
     }
 
@@ -91,42 +92,102 @@ export const detectAndComposeLayer = (mod) =>
   });
 
 export const createWebHandler = (apiLive) => {
-  const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerContext);
-  return HttpApiBuilder.toWebHandler(apiLayer);
+  const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerServices);
+  return HttpRouter.toWebHandler(apiLayer);
 };
 `;
 
 /**
- * Node handler factory — extends shared code with NodeHttpServer.makeHandler.
+ * Node handler factory — extends shared code with Request/Response bridge.
  * @internal
  */
 const NODE_HANDLER_FACTORY_CODE =
   SHARED_FACTORY_CODE +
   `
-import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+const collectBody = (req) => {
+  const method = req.method ?? "GET";
+  if (method === "GET" || method === "HEAD") {
+    return Promise.resolve(undefined);
+  }
+
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(new Uint8Array(chunk)));
+    req.on("end", () => {
+      const total = chunks.reduce((n, chunk) => n + chunk.length, 0);
+      const body = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        body.set(chunk, offset);
+        offset += chunk.length;
+      }
+      resolve(body);
+    });
+    req.on("error", reject);
+  });
+};
+
+const toWebRequest = async (req) => {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue;
+    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+  }
+
+  const body = await collectBody(req);
+  const init = { method: req.method ?? "GET", headers };
+  if (body !== undefined) {
+    init.body = body;
+  }
+
+  return new Request("http://" + (req.headers.host ?? "localhost") + (req.url ?? "/"), init);
+};
+
+const writeWebResponse = async (response, res) => {
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
+  });
+
+  if (!response.body) {
+    res.end();
+    return;
+  }
+
+  const reader = response.body.getReader();
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    await new Promise((resolve, reject) => {
+      res.write(chunk.value, (error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  res.end();
+};
 
 export const createNodeHandler = (apiLive) =>
-  Effect.gen(function* () {
-    const apiLayer = Layer.mergeAll(
-      apiLive,
-      HttpApiBuilder.Router.Live,
-      HttpApiBuilder.Middleware.layer,
-      HttpServer.layerContext,
-    );
-
-    const handlerScope = yield* Scope.make();
-    const runtime = yield* Layer.toRuntime(apiLayer).pipe(Scope.extend(handlerScope));
-    const httpApp = yield* Effect.provide(HttpApiBuilder.httpApp, runtime);
-    const handler = yield* NodeHttpServer.makeHandler(httpApp).pipe(
-      Effect.provide(runtime),
-      Scope.extend(handlerScope),
-    );
+  Effect.succeed((() => {
+    const webHandler = createWebHandler(apiLive);
 
     return {
-      handler,
-      dispose: Scope.close(handlerScope, Exit.void).pipe(Effect.ignore),
+      handler: (req, res) => {
+        void toWebRequest(req)
+          .then((request) => webHandler.handler(request))
+          .then((response) => writeWebResponse(response, res))
+          .catch(() => {
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.end("Internal Server Error");
+            }
+          });
+      },
+      dispose: Effect.tryPromise({
+        try: () => webHandler.dispose(),
+        catch: (cause) => cause,
+      }).pipe(Effect.orDie),
     };
-  });
+  })());
 `;
 
 /**
@@ -240,17 +301,14 @@ const logger = createConsola({ defaults: { tag: "trygg" } });
  * so it won't block I/O like raw console.log calls.
  * @internal
  */
-const PluginLogger = Logger.make(({ message, logLevel, annotations }) => {
+const PluginLogger = Logger.make(({ message, logLevel }) => {
   const text = String(message);
-  const style = HashMap.get(annotations, "style").pipe(Option.getOrUndefined);
 
-  if (LogLevel.greaterThanEqual(logLevel, LogLevel.Error)) {
+  if (LogLevel.isGreaterThanOrEqualTo(logLevel, "Error")) {
     logger.error(text);
-  } else if (LogLevel.greaterThanEqual(logLevel, LogLevel.Warning)) {
+  } else if (LogLevel.isGreaterThanOrEqualTo(logLevel, "Warn")) {
     logger.warn(text);
-  } else if (style === "success") {
-    logger.success(text);
-  } else if (LogLevel.lessThanEqual(logLevel, LogLevel.Debug)) {
+  } else if (LogLevel.isLessThanOrEqualTo(logLevel, "Debug")) {
     logger.debug(text);
   } else {
     logger.info(text);
@@ -278,16 +336,16 @@ const importBunDevPlatform = Effect.tryPromise({
  */
 const makePluginLayer = (
   platform: Platform,
-): Layer.Layer<FileSystem.FileSystem | DevPlatform | ServerPlatform, ImportError> => {
+): LayerType<FileSystem.FileSystem | DevPlatform | ServerPlatform, ImportError> => {
   const devLayer =
-    platform === "bun" ? Layer.unwrapEffect(importBunDevPlatform) : NodeDevPlatformLive;
+    platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
   const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
   return Layer.mergeAll(
     devLayer,
     serverLayer,
-    Logger.replace(Logger.defaultLogger, PluginLogger),
-    Logger.minimumLogLevel(LogLevel.Debug),
+    Logger.layer([PluginLogger]),
+    Layer.effect(References.MinimumLogLevel, Effect.succeed("Debug")),
   );
 };
 
@@ -358,7 +416,7 @@ export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArra
   Effect.gen(function* () {
     const segments = routePath.split("/").filter(Boolean);
     return Array.filterMap(segments, (segment) =>
-      segment.startsWith(":") ? Option.some(segment.slice(1)) : Option.none(),
+      segment.startsWith(":") ? Result.succeed(segment.slice(1)) : Result.failVoid,
     );
   });
 
@@ -941,8 +999,8 @@ const writeFileSafe = (
     const dir = nodePath.dirname(filePath);
 
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-      Effect.catchTag("SystemError", (e) =>
-        e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e),
+      Effect.catchTag("PlatformError", (e) =>
+        e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
       ),
       Effect.mapError(
         (cause) =>
@@ -1088,15 +1146,14 @@ export const generateServerEntry = (
 
     // Compose ProductionMiddleware (static/SPA/health) with logger.
     // HttpMiddleware is just (app) => app — compose via flow().
-    // With API: HttpApiBuilder.serve wraps the API HttpApp in middleware.
+    // With API: HttpRouter.serve wraps the API router layer in middleware.
     // Without API: HttpServer.serve applies middleware to a 404 fallback app
     //   (ProductionMiddleware handles all routes before the inner app is reached).
     const serverLive = hasApi
-      ? `const ServerLive = HttpApiBuilder.serve(
-  flow(ProductionMiddleware, HttpMiddleware.logger)
-).pipe(
-  Layer.provide(ApiLive),
-  Layer.provide(HttpServer.layerContext),
+      ? `const ServerLive = HttpRouter.serve(ApiLive, {
+  middleware: flow(ProductionMiddleware, HttpMiddleware.logger)
+}).pipe(
+  Layer.provide(HttpServer.layerServices),
   Layer.provide(${tpl.serverLayer})
 )`
       : `const NotFoundApp = Effect.succeed(HttpServerResponse.empty({ status: 404 }))
@@ -1111,11 +1168,7 @@ const ServerLive = HttpServer.serve(
  * Production server entry point
  * Auto-generated by trygg — DO NOT EDIT
  */
-import * as HttpApiBuilder from "@effect/platform/HttpApiBuilder"
-import * as HttpMiddleware from "@effect/platform/HttpMiddleware"
-import * as HttpServer from "@effect/platform/HttpServer"
-import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
-import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
+import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 ${tpl.imports}
 import { Layer, Effect, flow } from "effect"
 import * as nodePath from "node:path"
@@ -1356,7 +1409,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         ssr: {
           external: [
             "effect",
-            "@effect/platform",
+            "effect/unstable/http",
+            "effect/unstable/httpapi",
             "@effect/platform-node",
             "@effect/platform-bun",
             "@effect/platform-browser",
@@ -1388,8 +1442,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           }
 
           yield* fs.makeDirectory(generatedDir, { recursive: true }).pipe(
-            Effect.catchTag("SystemError", (e) =>
-              e.reason === "AlreadyExists" ? Effect.void : Effect.fail(e),
+            Effect.catchTag("PlatformError", (e) =>
+              e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
             ),
             Effect.mapError(
               (cause) =>
@@ -1414,9 +1468,6 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
     async configureServer(server: ViteDevServer) {
       const effect = Effect.gen(function* () {
-        // Extract runtime for use in non-Effect callbacks (Vite boundary)
-        const runtime = yield* Effect.runtime<FileSystem.FileSystem>();
-
         // Get DevPlatform service
         const devPlatform = yield* DevPlatform;
 
@@ -1451,7 +1502,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         );
 
         let apiHandle: Option.Option<DevApiHandle> = Option.none();
-        let apiScope: Option.Option<Scope.CloseableScope> = Option.none();
+        let apiScope: Option.Option<Scope.Closeable> = Option.none();
         const hasApi = yield* pathExists(apiPath);
 
         if (hasApi) {
@@ -1488,7 +1539,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           };
 
           // Create dev API using platform-specific implementation
-          const handle = yield* Scope.extend(
+          const handle = yield* Scope.provide(
             devPlatform.createDevApi({
               loadApiModule: () =>
                 Effect.tryPromise({
@@ -1522,34 +1573,36 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
         // Vite boundary: file watcher callbacks use extracted runtime
         server.watcher.on("change", async (file) => {
-          await Runtime.runPromise(runtime)(
-            Effect.gen(function* () {
-              // Routes file changed - regenerate types
-              if (routesFilePath !== undefined && file === routesFilePath) {
-                const fs = yield* FileSystem.FileSystem;
-                const routeSource = yield* fs
-                  .readFileString(routesFilePath)
-                  .pipe(Effect.orElseSucceed(() => ""));
-                if (routeSource.length > 0) {
-                  const parsed = yield* parseRoutes(routeSource);
-                  const content = yield* generateRouteTypes(parsed);
-                  yield* writeFileSafe(routeTypesPath, content);
-                  yield* Effect.logDebug("Regenerated routes.d.ts");
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                // Routes file changed - regenerate types
+                if (routesFilePath !== undefined && file === routesFilePath) {
+                  const fs = yield* FileSystem.FileSystem;
+                  const routeSource = yield* fs
+                    .readFileString(routesFilePath)
+                    .pipe(Effect.orElseSucceed(() => ""));
+                  if (routeSource.length > 0) {
+                    const parsed = yield* parseRoutes(routeSource);
+                    const content = yield* generateRouteTypes(parsed);
+                    yield* writeFileSafe(routeTypesPath, content);
+                    yield* Effect.logDebug("Regenerated routes.d.ts");
+                  }
                 }
-              }
 
-              if (file.endsWith("api.ts") && Option.isSome(apiHandle)) {
-                yield* apiHandle.value.reload;
-                yield* Effect.logDebug("Reloaded API handlers");
-              }
-            }),
+                if (file.endsWith("api.ts") && Option.isSome(apiHandle)) {
+                  yield* apiHandle.value.reload;
+                  yield* Effect.logDebug("Reloaded API handlers");
+                }
+              }),
+            ).pipe(Effect.provide(pluginLayer)),
           );
         });
 
         // Vite boundary: close scope when server closes (triggers finalizer)
         server.httpServer?.on("close", () => {
           if (Option.isSome(apiScope)) {
-            void Runtime.runPromise(runtime)(Scope.close(apiScope.value, Exit.void));
+            void Effect.runPromise(Scope.close(apiScope.value, Exit.void).pipe(Effect.provide(pluginLayer)));
           }
         });
 
@@ -1577,9 +1630,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
               res.statusCode = 200;
               res.setHeader("Content-Type", "text/html");
               res.end(html);
-            }).pipe(Effect.catchAllCause(() => Effect.sync(() => next())));
+            }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
 
-            void Runtime.runPromise(runtime)(effect);
+            void Effect.runPromise(effect.pipe(Effect.provide(pluginLayer)));
           });
         };
       }).pipe(Effect.provide(pluginLayer));

@@ -9,7 +9,7 @@
  * - Verify metrics are recorded correctly
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, FiberRef } from "effect";
+import { Effect, ServiceMap } from "effect";
 import * as Debug from "../debug.js";
 import * as Metrics from "../metrics.js";
 
@@ -469,9 +469,21 @@ describe("Trace context", () => {
 
   it.effect("should clear all trace context fields", () =>
     Effect.gen(function* () {
-      yield* FiberRef.set(Debug.CurrentTraceId, "trace_abc");
-      yield* FiberRef.set(Debug.CurrentSpanId, "span_123");
-      yield* FiberRef.set(Debug.CurrentParentSpanId, "span_parent");
+      yield* Effect.withFiber((fiber) =>
+        Effect.sync(() => {
+          fiber.setServices(
+            ServiceMap.add(
+              ServiceMap.add(
+                ServiceMap.add(fiber.services, Debug.CurrentTraceId, "trace_abc"),
+                Debug.CurrentSpanId,
+                "span_123",
+              ),
+              Debug.CurrentParentSpanId,
+              "span_parent",
+            ),
+          );
+        }),
+      );
 
       yield* Debug.clearTraceContext;
 

@@ -76,8 +76,8 @@ describe("SessionStorage", () => {
   it.effect("stores JSON-serialized objects", () =>
     Effect.gen(function* () {
       const storage = yield* SessionStorage;
-      const PointJson = Schema.parseJson(Schema.Struct({ x: Schema.Number, y: Schema.Number }));
-      const data = yield* Schema.encode(PointJson)({ x: 100, y: 200 });
+      const PointJson = Schema.fromJsonString(Schema.Struct({ x: Schema.Number, y: Schema.Number }));
+      const data = Schema.encodeSync(PointJson)({ x: 100, y: 200 });
       yield* storage.set("scroll:page-1", data);
       const result = yield* storage.get("scroll:page-1");
       assert.strictEqual(result, data);

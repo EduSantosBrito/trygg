@@ -4,9 +4,12 @@
  *
  * Resolves relative child paths to absolute paths and builds a trie-based
  * matcher for the route format. All public functions return Effects.
- * RouteMatcher is a Context.Tag with Layer factories for production and test.
+ * RouteMatcher is a service key with Layer factories for production and test.
  */
-import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
+import { Effect, Layer, Option, Ref, Schema } from "effect";
+import type { Layer as LayerType } from "effect/Layer";
+import * as ServiceMap from "effect/ServiceMap";
+import { unsafeEraseR } from "../internal/unsafe.js";
 import type { RouteDefinition } from "./route.js";
 import {
   IndexMarker,
@@ -19,6 +22,23 @@ import type { RoutesManifest } from "./routes.js";
 import type { RenderStrategy } from "./render-strategy.js";
 import type { ScrollStrategy } from "./scroll-strategy.js";
 import type { ComponentInput, RouteParams } from "./types.js";
+
+const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
+  value === null || value === undefined ? Option.none() : Option.some(value);
+
+const isSchemaTop = (value: unknown): value is Schema.Top =>
+  typeof value === "object" && value !== null && "ast" in value;
+
+const toUnknownRecord = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = entry;
+  }
+  return out;
+};
 
 // Resolved Route
 // =============================================================================
@@ -75,12 +95,11 @@ export interface RouteMatcherShape {
  *
  * @since 1.0.0
  */
-export class RouteMatcher extends Context.Tag("trygg/RouteMatcher")<
-  RouteMatcher,
-  RouteMatcherShape
->() {
+export class RouteMatcher extends ServiceMap.Service<RouteMatcher, RouteMatcherShape>()(
+  "trygg/RouteMatcher",
+) {
   /** Create a RouteMatcher Layer from a RoutesManifest using trie-based matching. */
-  static readonly make = (manifest: RoutesManifest): Layer.Layer<RouteMatcher> =>
+  static readonly make = (manifest: RoutesManifest): LayerType<RouteMatcher> =>
     Layer.effect(
       RouteMatcher,
       Effect.gen(function* () {
@@ -94,7 +113,7 @@ export class RouteMatcher extends Context.Tag("trygg/RouteMatcher")<
     );
 
   /** Create a RouteMatcher Layer from resolved routes using linear scan (for testing). */
-  static readonly test = (routes: ReadonlyArray<ResolvedRoute>): Layer.Layer<RouteMatcher> =>
+  static readonly test = (routes: ReadonlyArray<ResolvedRoute>): LayerType<RouteMatcher> =>
     Layer.succeed(RouteMatcher, {
       match: (path: string) => Effect.succeed(linearMatch(routes, path)),
       routes: Effect.succeed(routes),
@@ -551,7 +570,7 @@ export const resolveErrorBoundary = (
     }
   }
 
-  return Option.fromNullable(rootError);
+  return fromNullable(rootError);
 };
 
 /**
@@ -575,7 +594,7 @@ export const resolveNotFoundBoundary = (
     }
   }
 
-  return Option.fromNullable(rootNotFound);
+  return fromNullable(rootNotFound);
 };
 
 /**
@@ -599,7 +618,7 @@ export const resolveForbiddenBoundary = (
     }
   }
 
-  return Option.fromNullable(rootForbidden);
+  return fromNullable(rootForbidden);
 };
 
 /**
@@ -638,7 +657,7 @@ export const resolveLoadingBoundary = (route: ResolvedRoute): Option.Option<Comp
  */
 export const resolveRenderStrategy = (
   route: ResolvedRoute,
-): Layer.Layer<RenderStrategy> | undefined => {
+): LayerType<RenderStrategy> | undefined => {
   if (route.definition.renderStrategy !== undefined) {
     return route.definition.renderStrategy;
   }
@@ -666,7 +685,7 @@ export const resolveRenderStrategy = (
  */
 export const resolveScrollStrategy = (
   route: ResolvedRoute,
-): Layer.Layer<ScrollStrategy> | undefined => {
+): LayerType<ScrollStrategy> | undefined => {
   if (route.definition.scrollStrategy !== undefined) {
     return route.definition.scrollStrategy;
   }
@@ -695,13 +714,20 @@ export const decodeRouteParams = (
 ): Effect.Effect<Record<string, unknown>, ParamsDecodeError> => {
   const schema = route.definition.paramsSchema;
 
-  if (schema === undefined) {
-    return Effect.succeed(rawParams as Record<string, unknown>);
+  if (schema === undefined || !isSchemaTop(schema)) {
+    const params: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rawParams)) {
+      params[key] = value;
+    }
+    return Effect.succeed(params);
   }
 
-  return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
-    rawParams as unknown,
-  ).pipe(Effect.mapError((cause) => new ParamsDecodeError({ path: route.path, rawParams, cause })));
+  return unsafeEraseR(
+    Schema.decodeUnknownEffect(schema)(rawParams).pipe(
+      Effect.map(toUnknownRecord),
+      Effect.mapError((cause) => new ParamsDecodeError({ path: route.path, rawParams, cause })),
+    ),
+  );
 };
 
 /**
@@ -716,8 +742,8 @@ export const decodeRouteQuery = (
 ): Effect.Effect<Record<string, unknown>, QueryDecodeError> => {
   const schema = route.definition.querySchema;
 
-  if (schema === undefined) {
-    return Effect.succeed({} as Record<string, unknown>);
+  if (schema === undefined || !isSchemaTop(schema)) {
+    return Effect.succeed({});
   }
 
   const raw: Record<string, string> = {};
@@ -725,10 +751,11 @@ export const decodeRouteQuery = (
     raw[key] = value;
   });
 
-  return Schema.decode(schema as Schema.Schema<Record<string, unknown>, unknown>)(
-    raw as unknown,
-  ).pipe(
-    Effect.mapError((cause) => new QueryDecodeError({ path: route.path, rawQuery: raw, cause })),
+  return unsafeEraseR(
+    Schema.decodeUnknownEffect(schema)(raw).pipe(
+      Effect.map(toUnknownRecord),
+      Effect.mapError((cause) => new QueryDecodeError({ path: route.path, rawQuery: raw, cause })),
+    ),
   );
 };
 

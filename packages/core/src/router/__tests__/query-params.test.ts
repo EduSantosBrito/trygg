@@ -2,9 +2,17 @@
 //
 // Tests for .query(schema), query decode, CurrentRouteQuery FiberRef,
 // and handling of optional/required/extra query params.
-import { assert, describe, it } from "@effect/vitest";
-import { Effect, FiberRef, Schema } from "effect";
+import { assert, describe, it as baseIt } from "@effect/vitest";
+import { Effect, Result, Schema } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
+
+const FiberRef = {
+  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
+};
 
 // =============================================================================
 // .query() - Schema stored on route
@@ -22,7 +30,7 @@ describe(".query() schema storage", () => {
     const schema = Schema.Struct({
       q: Schema.String,
       page: Schema.optional(Schema.NumberFromString),
-      sort: Schema.optional(Schema.Literal("asc", "desc")),
+      sort: Schema.optional(Schema.Literals(["asc", "desc"])),
     });
     const route = Route.make("/search").query(schema);
 
@@ -32,7 +40,7 @@ describe(".query() schema storage", () => {
   it("should combine with params schema", () => {
     const paramsSchema = Schema.Struct({ id: Schema.NumberFromString });
     const querySchema = Schema.Struct({
-      filter: Schema.optional(Schema.Literal("published", "draft")),
+      filter: Schema.optional(Schema.Literals(["published", "draft"])),
     });
 
     const route = Route.make("/users/:id/posts").params(paramsSchema).query(querySchema);
@@ -56,7 +64,7 @@ describe(".query() schema storage", () => {
 // =============================================================================
 
 describe("decodeQuery", () => {
-  it.effect("should decode query params at match time", () =>
+  it.scoped("should decode query params at match time", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -70,7 +78,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.effect("should return undefined for optional missing params", () =>
+  it.scoped("should return undefined for optional missing params", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -85,7 +93,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.effect("should fail on missing required params", () =>
+  it.scoped("should fail on missing required params", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -93,17 +101,17 @@ describe("decodeQuery", () => {
       });
       const searchParams = new URLSearchParams("page=2");
 
-      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.either);
+      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.strictEqual(result.left._tag, "QueryDecodeError");
-        assert.strictEqual(result.left.path, "/search");
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "QueryDecodeError");
+        assert.strictEqual(result.failure.path, "/search");
       }
     }),
   );
 
-  it.effect("should handle empty query string with all optional fields", () =>
+  it.scoped("should handle empty query string with all optional fields", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.optional(Schema.String),
@@ -118,7 +126,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.effect("should ignore extra query params not in schema", () =>
+  it.scoped("should ignore extra query params not in schema", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -132,10 +140,10 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.effect("should decode literal types", () =>
+  it.scoped("should decode literal types", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
-        sort: Schema.Literal("asc", "desc"),
+        sort: Schema.Literals(["asc", "desc"]),
       });
       const searchParams = new URLSearchParams("sort=asc");
 
@@ -145,32 +153,32 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.effect("should fail on invalid literal value", () =>
+  it.scoped("should fail on invalid literal value", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
-        sort: Schema.Literal("asc", "desc"),
+        sort: Schema.Literals(["asc", "desc"]),
       });
       const searchParams = new URLSearchParams("sort=invalid");
 
-      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.either);
+      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 
-  it.effect("should preserve query decode error cause", () =>
+  it.scoped("should preserve query decode error cause", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
-        page: Schema.NumberFromString,
+        page: Schema.FiniteFromString,
       });
       const searchParams = new URLSearchParams("page=abc");
 
-      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.either);
+      const result = yield* Route.decodeQuery(schema, searchParams, "/search").pipe(Effect.result);
 
-      assert.isTrue(result._tag === "Left");
-      if (result._tag === "Left") {
-        assert.isDefined(result.left.cause);
-        assert.deepStrictEqual(result.left.rawQuery, { page: "abc" });
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.isDefined(result.failure.cause);
+        assert.deepStrictEqual(result.failure.rawQuery, { page: "abc" });
       }
     }),
   );
@@ -181,20 +189,19 @@ describe("decodeQuery", () => {
 // =============================================================================
 
 describe("CurrentRouteQuery FiberRef", () => {
-  it.effect("should provide decoded query via FiberRef", () =>
+  it.scoped("should provide decoded query via FiberRef", () =>
     Effect.gen(function* () {
       const decoded = { q: "hello", page: 2 };
 
-      const result = yield* Effect.locally(
-        Route.CurrentRouteQuery,
-        decoded,
-      )(FiberRef.get(Route.CurrentRouteQuery));
+      const result = yield* FiberRef.get(Route.CurrentRouteQuery).pipe(
+        Effect.provideService(Route.CurrentRouteQuery, decoded),
+      );
 
       assert.deepStrictEqual(result, decoded);
     }),
   );
 
-  it.effect("should default to empty object", () =>
+  it.scoped("should default to empty object", () =>
     Effect.gen(function* () {
       const result = yield* FiberRef.get(Route.CurrentRouteQuery);
 
@@ -202,14 +209,18 @@ describe("CurrentRouteQuery FiberRef", () => {
     }),
   );
 
-  it.effect("should be isolated per fiber", () =>
+  it.scoped("should be isolated per fiber", () =>
     Effect.gen(function* () {
       const query1 = { q: "first" };
       const query2 = { q: "second" };
 
       const [r1, r2] = yield* Effect.all([
-        Effect.locally(Route.CurrentRouteQuery, query1)(FiberRef.get(Route.CurrentRouteQuery)),
-        Effect.locally(Route.CurrentRouteQuery, query2)(FiberRef.get(Route.CurrentRouteQuery)),
+        FiberRef.get(Route.CurrentRouteQuery).pipe(
+          Effect.provideService(Route.CurrentRouteQuery, query1),
+        ),
+        FiberRef.get(Route.CurrentRouteQuery).pipe(
+          Effect.provideService(Route.CurrentRouteQuery, query2),
+        ),
       ]);
 
       assert.deepStrictEqual(r1, query1);

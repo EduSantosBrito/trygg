@@ -3,13 +3,14 @@
  * Defines the interface for platform-specific configuration (Node.js vs Bun)
  * @since 1.0.0
  */
-import { Context, Layer } from "effect";
+import * as Layer from "effect/Layer";
+import * as ServiceMap from "effect/ServiceMap";
 
 /**
  * Platform-specific configuration for scaffolding
  * @since 1.0.0
  */
-export interface PlatformConfig {
+export interface PlatformConfigService {
   readonly name: "node" | "bun";
   readonly devScript: string;
   readonly devDependencies: Readonly<Record<string, string>>;
@@ -21,17 +22,19 @@ export interface PlatformConfig {
  * Context tag for PlatformConfig service
  * @since 1.0.0
  */
-export const PlatformConfig = Context.GenericTag<PlatformConfig>("trygg/PlatformConfig");
+export class PlatformConfig extends ServiceMap.Service<PlatformConfig, PlatformConfigService>()(
+  "trygg/PlatformConfig",
+) {}
 
 /**
  * Helper to create platform config
  * @since 1.0.0
  */
-export const make = (config: PlatformConfig): PlatformConfig => config;
+export const make = (config: PlatformConfigService): PlatformConfigService => config;
 
 /**
  * Layer constructor for PlatformConfig
  * @since 1.0.0
  */
-export const layer = (config: PlatformConfig): Layer.Layer<PlatformConfig> =>
+export const layer = (config: PlatformConfigService): Layer.Layer<PlatformConfig> =>
   Layer.succeed(PlatformConfig, config);

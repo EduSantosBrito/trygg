@@ -6,7 +6,8 @@
  * Internally acquires a runtime, creates a sync listener that forks the handler,
  * and registers a finalizer that removes the listener.
  */
-import { Context, Data, Effect, Layer, Runtime, Scope } from "effect";
+import { Data, Effect, Layer, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -41,10 +42,12 @@ export interface TestEventTargetService extends EventTargetService {
 // Tag
 // =============================================================================
 
-export class PlatformEventTarget extends Context.Tag("trygg/platform/EventTarget")<
-  PlatformEventTarget,
-  EventTargetService
->() {}
+export interface PlatformEventTarget
+  extends ServiceMap.Service<PlatformEventTarget, EventTargetService> {}
+
+export const PlatformEventTarget = ServiceMap.Service<PlatformEventTarget, EventTargetService>(
+  "trygg/platform/EventTarget",
+);
 
 // =============================================================================
 // Browser layer
@@ -55,8 +58,8 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
   PlatformEventTarget.of({
     on: (target, event, handler) =>
       Effect.gen(function* () {
-        const runtime = yield* Effect.runtime<never>();
-        const runFork = Runtime.runFork(runtime);
+        const services = yield* Effect.services();
+        const runFork = Effect.runForkWith(services);
         const listener = (e: Event) => {
           runFork(handler(e as never));
         };

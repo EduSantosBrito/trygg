@@ -11,7 +11,7 @@
  * - Function union: unsafeCallNoArgs (no-arg factory invocation)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 
 import {
   unsafeMergeLayers,
@@ -24,8 +24,8 @@ import {
 // Test Services
 // =============================================================================
 
-class ServiceA extends Context.Tag("ServiceA")<ServiceA, { readonly value: string }>() {}
-class ServiceB extends Context.Tag("ServiceB")<ServiceB, { readonly count: number }>() {}
+class ServiceA extends ServiceMap.Service<ServiceA, { readonly value: string }>()("ServiceA") {}
+class ServiceB extends ServiceMap.Service<ServiceB, { readonly count: number }>()("ServiceB") {}
 
 const layerA = Layer.succeed(ServiceA, { value: "alpha" });
 const layerB = Layer.succeed(ServiceB, { count: 42 });
@@ -36,40 +36,40 @@ const layerA2 = Layer.succeed(ServiceA, { value: "overridden" });
 // =============================================================================
 
 describe("unsafeMergeLayers", () => {
-  it.scoped("should return Layer.empty for empty array", () =>
+  it.effect("should return Layer.empty for empty array", () =>
     Effect.gen(function* () {
       const merged = yield* unsafeMergeLayers([]);
       // Building a context from empty layer should succeed with empty context
-      const ctx = yield* Effect.provide(Effect.context<never>(), merged);
+      const ctx = yield* unsafeBuildContext<never>([merged]);
       assert.isDefined(ctx);
     }),
   );
 
-  it.scoped("should return the single layer unchanged", () =>
+  it.effect("should return the single layer unchanged", () =>
     Effect.gen(function* () {
       const merged = yield* unsafeMergeLayers([layerA]);
-      const ctx = yield* Effect.provide(Effect.context<ServiceA>(), merged);
-      const svc = Context.get(ctx, ServiceA);
+      const ctx = yield* unsafeBuildContext<ServiceA>([merged]);
+      const svc = ServiceMap.get(ctx, ServiceA);
       assert.strictEqual(svc.value, "alpha");
     }),
   );
 
-  it.scoped("should merge multiple heterogeneous layers", () =>
+  it.effect("should merge multiple heterogeneous layers", () =>
     Effect.gen(function* () {
       const merged = yield* unsafeMergeLayers([layerA, layerB]);
-      const ctx = yield* Effect.provide(Effect.context<ServiceA | ServiceB>(), merged);
-      const a = Context.get(ctx, ServiceA);
-      const b = Context.get(ctx, ServiceB);
+      const ctx = yield* unsafeBuildContext<ServiceA | ServiceB>([merged]);
+      const a = ServiceMap.get(ctx, ServiceA);
+      const b = ServiceMap.get(ctx, ServiceB);
       assert.strictEqual(a.value, "alpha");
       assert.strictEqual(b.count, 42);
     }),
   );
 
-  it.scoped("should apply last-write-wins for duplicate services", () =>
+  it.effect("should apply last-write-wins for duplicate services", () =>
     Effect.gen(function* () {
       const merged = yield* unsafeMergeLayers([layerA, layerA2]);
-      const ctx = yield* Effect.provide(Effect.context<ServiceA>(), merged);
-      const svc = Context.get(ctx, ServiceA);
+      const ctx = yield* unsafeBuildContext<ServiceA>([merged]);
+      const svc = ServiceMap.get(ctx, ServiceA);
       assert.strictEqual(svc.value, "overridden");
     }),
   );
@@ -80,35 +80,35 @@ describe("unsafeMergeLayers", () => {
 // =============================================================================
 
 describe("unsafeBuildContext", () => {
-  it.scoped("should return empty context for empty layers", () =>
+  it.effect("should return empty context for empty layers", () =>
     Effect.gen(function* () {
       const ctx = yield* unsafeBuildContext<never>([]);
       assert.isDefined(ctx);
     }),
   );
 
-  it.scoped("should build context with single service layer", () =>
+  it.effect("should build context with single service layer", () =>
     Effect.gen(function* () {
       const ctx = yield* unsafeBuildContext<ServiceA>([layerA]);
-      const svc = Context.get(ctx, ServiceA);
+      const svc = ServiceMap.get(ctx, ServiceA);
       assert.strictEqual(svc.value, "alpha");
     }),
   );
 
-  it.scoped("should build context with multiple service layers", () =>
+  it.effect("should build context with multiple service layers", () =>
     Effect.gen(function* () {
       const ctx = yield* unsafeBuildContext<ServiceA | ServiceB>([layerA, layerB]);
-      const a = Context.get(ctx, ServiceA);
-      const b = Context.get(ctx, ServiceB);
+      const a = ServiceMap.get(ctx, ServiceA);
+      const b = ServiceMap.get(ctx, ServiceB);
       assert.strictEqual(a.value, "alpha");
       assert.strictEqual(b.count, 42);
     }),
   );
 
-  it.scoped("should apply last-write-wins for conflicting services", () =>
+  it.effect("should apply last-write-wins for conflicting services", () =>
     Effect.gen(function* () {
       const ctx = yield* unsafeBuildContext<ServiceA>([layerA, layerA2]);
-      const svc = Context.get(ctx, ServiceA);
+      const svc = ServiceMap.get(ctx, ServiceA);
       assert.strictEqual(svc.value, "overridden");
     }),
   );

@@ -8,8 +8,7 @@
  * Dynamic imports avoid hard dependencies on @effect/platform-bun
  * when running in Node mode.
  */
-import { FileSystem } from "@effect/platform";
-import { Effect, Layer, Option, Ref, Runtime, Schema, Scope } from "effect";
+import { Effect, FileSystem, Layer, Option, Ref, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -155,11 +154,11 @@ const emptyState: HandlerState = {
 // Bun DevPlatform Implementation
 // =============================================================================
 
-export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem, ImportError> =
-  Layer.unwrapEffect(
+export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform, ImportError> =
+  Layer.unwrap(
     Effect.gen(function* () {
       const bunFs = yield* importBunFileSystem;
-      const fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = bunFs.layer;
+      const fileSystemLayer = bunFs.layer;
 
       const createDevApi = (
         options: DevApiOptions,
@@ -228,8 +227,6 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
           yield* initHandler;
           yield* Effect.addFinalizer(() => disposeHandler);
 
-          const runtime = yield* Effect.runtime<never>();
-
           const middleware: Connect.NextHandleFunction = (req, res, next) => {
             if (!req.url?.startsWith("/api/")) {
               return next();
@@ -243,10 +240,7 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
                   onSome: (e) => (e instanceof Error ? e.message : String(e)),
                 });
                 yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const ErrorResponseJson = Schema.parseJson(
-                  Schema.Struct({ error: Schema.String, message: Schema.String }),
-                );
-                const body = yield* Schema.encode(ErrorResponseJson)({
+                const body = JSON.stringify({
                   error: "API handler not available",
                   message: errorMessage,
                 });
@@ -267,7 +261,7 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
                 catch: (cause) => new ApiInitError({ message: "Request handling failed", cause }),
               });
             }).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error: ApiInitError) =>
                 Effect.gen(function* () {
                   yield* Effect.logError(`[trygg] API handler failed: ${String(error)}`);
                   yield* options.onError(error);
@@ -279,7 +273,7 @@ export const BunDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem
               ),
             );
 
-            void Runtime.runPromise(runtime)(effect).catch((_error: unknown) => {
+            void Effect.runPromise(effect).catch((_error: unknown) => {
               if (!res.headersSent) {
                 res.statusCode = 500;
                 res.end("Internal Server Error");

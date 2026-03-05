@@ -33,7 +33,7 @@ export const incidentResource = Resource.make(
   (params: { id: number }) =>
     Effect.gen(function* () {
       const client = yield* ApiClient;
-      return yield* client.incidents.get({ path: params });
+      return yield* client.incidents.get({ params });
     }),
   { key: (params) => Resource.hash("incidents.get", params) },
 );

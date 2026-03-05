@@ -38,7 +38,6 @@
  */
 import {
   Cause,
-  Context,
   Deferred,
   Effect,
   Fiber,
@@ -50,6 +49,7 @@ import {
   Scope,
   SynchronizedRef,
 } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import * as Debug from "../debug/debug.js";
@@ -264,9 +264,12 @@ export const hash = (prefix: string, params: object): string => {
 interface RegistryEntry {
   readonly state: Signal.Signal<ResourceState<unknown, unknown>>;
   readonly inFlight: Ref.Ref<Option.Option<Deferred.Deferred<void, never>>>;
-  readonly currentFiber: Ref.Ref<Option.Option<Fiber.RuntimeFiber<void, never>>>;
+  readonly currentFiber: Ref.Ref<Option.Option<Fiber.Fiber<void, never>>>;
   readonly timestamp: Ref.Ref<number>;
 }
+
+const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
+  value === null || value === undefined ? Option.none() : Option.some(value);
 
 /**
  * ResourceRegistry service for caching and deduplication.
@@ -289,10 +292,10 @@ export interface ResourceRegistry {
  * ResourceRegistry service tag.
  * @since 1.0.0
  */
-export class ResourceRegistryTag extends Context.Tag("trygg/ResourceRegistry")<
+export class ResourceRegistryTag extends ServiceMap.Service<
   ResourceRegistryTag,
   ResourceRegistry
->() {}
+>()("trygg/ResourceRegistry") {}
 
 /**
  * Create a ResourceRegistry layer with an in-memory cache.
@@ -305,7 +308,7 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
     const cache = yield* SynchronizedRef.make(new Map<string, RegistryEntry>());
 
     const get = (key: string): Effect.Effect<Option.Option<RegistryEntry>> =>
-      SynchronizedRef.get(cache).pipe(Effect.map((map) => Option.fromNullable(map.get(key))));
+      SynchronizedRef.get(cache).pipe(Effect.map((map) => fromNullable(map.get(key))));
 
     const getOrCreate = (key: string): Effect.Effect<RegistryEntry> =>
       SynchronizedRef.modifyEffect(cache, (map) =>
@@ -330,7 +333,7 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
           const inFlight = yield* Ref.make<Option.Option<Deferred.Deferred<void, never>>>(
             Option.none(),
           );
-          const currentFiber = yield* Ref.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(
+          const currentFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
             Option.none(),
           );
           const timestamp = yield* Ref.make(0);
@@ -373,8 +376,9 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
 const fetchInternal = <A, E, R>(
   resource: Resource<A, E, R>,
   entry: RegistryEntry,
-  ctx: Context.Context<R>,
-): Effect.Effect<Fiber.RuntimeFiber<void, never>> =>
+  ctx: ServiceMap.ServiceMap<R>,
+  startImmediately: boolean = false,
+): Effect.Effect<Fiber.Fiber<void, never>> =>
   Effect.gen(function* () {
     const state = unsafeEntrySignal<A, E>(entry.state);
 
@@ -387,7 +391,7 @@ const fetchInternal = <A, E, R>(
     const deferred = yield* Deferred.make<void, never>();
     yield* Ref.set(entry.inFlight, Option.some(deferred));
 
-    const fiber = yield* Debug.log({
+    const fiber: Fiber.Fiber<void, never> = yield* Debug.log({
       event: "resource.fetch.fork_running",
       key: resource.key,
     }).pipe(
@@ -401,7 +405,7 @@ const fetchInternal = <A, E, R>(
           length: Array.isArray(value) ? value.length : undefined,
         }),
       ),
-      Effect.tapErrorCause((cause) =>
+      Effect.tapCause((cause) =>
         Debug.log({
           event: "resource.fetch.error",
           key: resource.key,
@@ -438,7 +442,7 @@ const fetchInternal = <A, E, R>(
             yield* Signal.set(state, Failure<A, E>(unsafeAsError<E>(error), staleValue));
           }),
       }),
-      Effect.catchAllCause((cause) =>
+      Effect.catchCause((cause) =>
         Debug.log({
           event: "resource.fetch.unhandled",
           key: resource.key,
@@ -458,7 +462,7 @@ const fetchInternal = <A, E, R>(
           yield* Ref.set(entry.timestamp, Date.now());
         }),
       ),
-      Effect.forkDaemon,
+      Effect.forkDetach({ startImmediately }),
     );
 
     yield* Ref.set(entry.currentFiber, Option.some(fiber));
@@ -534,7 +538,7 @@ const fetchStatic = <A, E, R>(
       key: resource.key,
     });
 
-    const ctx = yield* Effect.context<R>();
+    const ctx = yield* Effect.services<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
     const state = unsafeEntrySignal<A, E>(entry.state);
@@ -555,7 +559,7 @@ const fetchStatic = <A, E, R>(
     // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
     // If we tracked this read, the component would re-render when state changes,
     // causing keyed-list teardown/remount race that blanks rendered items.
-    const currentState = yield* Effect.locally(Signal.get(state), Signal.CurrentRenderPhase, null);
+    const currentState = yield* Effect.provideService(Signal.get(state), Signal.CurrentRenderPhase, null);
     if (currentState._tag !== "Pending") {
       yield* Debug.log({
         event: "resource.fetch.cached",
@@ -590,14 +594,14 @@ const fetchReactive = <P extends object, A, E, R>(
   ResourceRegistryTag | R | Scope.Scope
 > =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.context<ResourceRegistryTag | R>();
+    const ctx = yield* Effect.services<ResourceRegistryTag | R>();
     const scope = yield* Effect.scope;
 
     // Unwrap current values from reactive params.
     // Wrapped in locally(CurrentRenderPhase, null) so Signal.get reads don't
     // register as component dependencies — reactivity is handled by subscriptions.
     const unwrapParams = (): Effect.Effect<P> =>
-      Effect.locally(
+      Effect.provideService(
         Effect.gen(function* () {
           const result: Record<string, unknown> = {};
           for (const [key, value] of Object.entries(reactiveParams)) {
@@ -629,7 +633,7 @@ const fetchReactive = <P extends object, A, E, R>(
     const outputState = yield* Signal.make<ResourceState<A, E>>(Pending());
 
     // Track current in-flight fiber for cancellation (SynchronizedRef for atomic updates)
-    const activeFiber = yield* SynchronizedRef.make<Option.Option<Fiber.RuntimeFiber<void, never>>>(
+    const activeFiber = yield* SynchronizedRef.make<Option.Option<Fiber.Fiber<void, never>>>(
       Option.none(),
     );
 
@@ -646,6 +650,14 @@ const fetchReactive = <P extends object, A, E, R>(
         yield* Ref.set(activeKey, resource.key);
         yield* Signal.set(outputState, Pending<A, E>());
 
+        const setOutputIfActive = (next: ResourceState<A, E>): Effect.Effect<void> =>
+          Effect.gen(function* () {
+            const currentKey = yield* Ref.get(activeKey);
+            if (currentKey === resource.key) {
+              yield* Signal.set(outputState, next);
+            }
+          });
+
         // Atomically: interrupt previous daemon → fork new daemon → store reference
         yield* SynchronizedRef.updateEffect(activeFiber, (prevFiber) =>
           Effect.gen(function* () {
@@ -661,9 +673,13 @@ const fetchReactive = <P extends object, A, E, R>(
               const entryState = unsafeEntrySignal<A, E>(entry.state);
 
               // Check if already cached
-              const cached = yield* Signal.get(entryState);
+              const cached = yield* Effect.provideService(
+                Signal.get(entryState),
+                Signal.CurrentRenderPhase,
+                null,
+              );
               if (cached._tag !== "Pending") {
-                yield* Signal.set(outputState, cached);
+                yield* setOutputIfActive(cached);
               } else {
                 // Dedupe: if fetch already in-flight for this key, wait for it
                 const currentInFlight = yield* Ref.get(entry.inFlight);
@@ -671,29 +687,38 @@ const fetchReactive = <P extends object, A, E, R>(
                   yield* Deferred.await(currentInFlight.value);
                 } else {
                   // Start fetch and wait for completion
-                  const fiber = yield* fetchInternal(
-                    resource,
-                    entry,
-                    unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
-                  );
+                    const fiber = yield* fetchInternal(
+                      resource,
+                      entry,
+                      unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+                      true,
+                    );
                   yield* Fiber.join(fiber);
                 }
                 // Sync resolved state to output
-                const finalState = yield* Signal.get(entryState);
-                yield* Signal.set(outputState, finalState);
+                const finalState = yield* Effect.provideService(
+                  Signal.get(entryState),
+                  Signal.CurrentRenderPhase,
+                  null,
+                );
+                yield* setOutputIfActive(finalState);
               }
 
               // Subscribe to entry state so invalidate/refresh propagates to outputState.
               // The daemon stays alive until interrupted by the next doFetch call.
               const unsubscribe = yield* Signal.subscribe(entryState, () =>
-                Signal.get(entryState).pipe(Effect.flatMap((s) => Signal.set(outputState, s))),
+                Effect.provideService(
+                  Signal.get(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
+                  Signal.CurrentRenderPhase,
+                  null,
+                ),
               );
               return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
             }).pipe(
               Effect.provide(ctx),
-              Effect.catchAllCause(() => Effect.void),
-              Effect.forkDaemon,
-            );
+               Effect.catchCause(() => Effect.void),
+               Effect.forkDetach({ startImmediately: true }),
+             );
 
             return Option.some(daemon);
           }),
@@ -806,7 +831,7 @@ export const invalidate = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<void, never, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.context<R>();
+    const ctx = yield* Effect.services<R>();
     const registry = yield* ResourceRegistryTag;
     const maybeEntry = yield* registry.get(resource.key);
 
@@ -850,7 +875,7 @@ export const refresh = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<void, never, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.context<R>();
+    const ctx = yield* Effect.services<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
     const state = unsafeEntrySignal<A, E>(entry.state);

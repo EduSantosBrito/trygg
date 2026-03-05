@@ -20,7 +20,8 @@
  * Route.make("/").component(HomePage).pipe(Route.provide(RenderStrategy.Eager))
  * ```
  */
-import { Context, Data, Layer } from "effect";
+import { Data, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Strategy Variants (discriminated union)
@@ -69,7 +70,7 @@ export class RenderLoadError extends Data.TaggedError("RenderLoadError")<{
 }> {}
 
 // =============================================================================
-// Context.Tag + Layer Factories
+// Service Keys + Layer Factories
 // =============================================================================
 
 /** @internal */
@@ -79,7 +80,7 @@ const eager: Eager = { _tag: "Eager" };
 const lazy: Lazy = { _tag: "Lazy" };
 
 /**
- * RenderStrategy Context.Tag — controls how route components are loaded/rendered.
+ * RenderStrategy service key — controls how route components are loaded/rendered.
  *
  * Consumed by:
  * - **Build time (Vite plugin)**: reads `_tag` via string matching to decide transform
@@ -88,14 +89,13 @@ const lazy: Lazy = { _tag: "Lazy" };
  *
  * - **Runtime (Outlet)**: dispatches structurally on ComponentInput shape
  *   - Eager/Lazy → loader function vs direct reference (no Context read needed)
- *   - Future: Server/Island → outlet reads strategy from Context for dispatch
+ *   - Future: Server/Island → outlet reads strategy from services for dispatch
  *
  * @since 1.0.0
  */
-export class RenderStrategy extends Context.Tag("trygg/RenderStrategy")<
-  RenderStrategy,
-  RenderStrategyType
->() {
+export class RenderStrategy extends ServiceMap.Service<RenderStrategy, RenderStrategyType>()(
+  "trygg/RenderStrategy",
+) {
   /**
    * Eager rendering — component in main bundle.
    * Singleton Layer (no config).

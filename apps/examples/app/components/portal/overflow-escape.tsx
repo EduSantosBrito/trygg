@@ -19,7 +19,7 @@ export const OverflowEscape = Component.gen(function* () {
     Effect.gen(function* () {
       const fiber = yield* Signal.set(showTooltip, false).pipe(
         Effect.delay("100 millis"),
-        Effect.forkDaemon,
+        Effect.forkDetach,
       );
       yield* Ref.set(hideFiber, Option.some(fiber));
     });

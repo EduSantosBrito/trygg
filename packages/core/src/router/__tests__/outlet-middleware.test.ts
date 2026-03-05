@@ -19,7 +19,7 @@ import { createMatcher, collectRouteMiddleware, runRouteMiddleware } from "../ma
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer } from "effect";
+import type { Any as AnyLayer } from "effect/Layer";
 
 class TestMiddlewareError extends Data.TaggedError("TestMiddlewareError")<{
   readonly message: string;
@@ -30,7 +30,7 @@ const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });

@@ -2,11 +2,12 @@
  * @since 1.0.0
  * DevPlatform service for abstracting platform-specific APIs
  *
- * Uses Context.Tag pattern to provide platform-agnostic dev API handling
+ * Uses ServiceMap.Service pattern to provide platform-agnostic dev API handling
  * for both Bun and Node.js runtimes.
  */
-import { FileSystem } from "@effect/platform";
-import { Context, Data, Effect, Layer, Scope } from "effect";
+import { FileSystem } from "effect";
+import { Data, Effect, Layer, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 
@@ -51,7 +52,7 @@ export interface DevApiHandle {
   /** Connect middleware for Vite integration */
   readonly middleware: Connect.NextHandleFunction;
   /** Reload the API (call after api.ts changes) */
-  readonly reload: Effect.Effect<void, DevApiErrors>;
+  readonly reload: Effect.Effect<void, DevApiErrors, Scope.Scope>;
   /** Dispose of the API and cleanup resources */
   readonly dispose: Effect.Effect<void>;
 }
@@ -120,17 +121,16 @@ export interface DevPlatformService {
 }
 
 // =============================================================================
-// Context Tag
+// Service Keys
 // =============================================================================
 
 /**
- * Context.Tag for the DevPlatform service
+ * Service key for the DevPlatform service
  * @since 1.0.0
  */
-export class DevPlatform extends Context.Tag("trygg/DevPlatform")<
-  DevPlatform,
-  DevPlatformService
->() {}
+export interface DevPlatform extends ServiceMap.Service<DevPlatform, DevPlatformService> {}
+
+export const DevPlatform = ServiceMap.Service<DevPlatform, DevPlatformService>("trygg/DevPlatform");
 
 // =============================================================================
 // ServerPlatform — codegen fragments for the production server entry
@@ -152,13 +152,14 @@ export interface ServerPlatformService {
 }
 
 /**
- * Context.Tag for platform-specific production server codegen.
+ * Service key for platform-specific production server codegen.
  * @since 1.0.0
  */
-export class ServerPlatform extends Context.Tag("trygg/ServerPlatform")<
-  ServerPlatform,
-  ServerPlatformService
->() {}
+export interface ServerPlatform extends ServiceMap.Service<ServerPlatform, ServerPlatformService> {}
+
+export const ServerPlatform = ServiceMap.Service<ServerPlatform, ServerPlatformService>(
+  "trygg/ServerPlatform",
+);
 
 /** Node.js server platform — @effect/platform-node subpath imports */
 export const NodeServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {

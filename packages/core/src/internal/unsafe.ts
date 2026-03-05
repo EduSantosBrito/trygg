@@ -8,7 +8,7 @@
  * - Runtime-effectful operations use Debug.log for observability
  * - This is the ONLY file where `as` casts are permitted
  */
-import { Context, Effect, Layer } from "effect";
+import { Effect, Layer, ServiceMap } from "effect";
 import * as Debug from "../debug/debug.js";
 import type { Element, ComponentElementWithRequirements } from "../primitives/element.js";
 import type { Component } from "../primitives/component.js";
@@ -28,20 +28,20 @@ import type { ResourceState } from "../primitives/resource.js";
  * which validate each layer individually before accumulation.
  */
 export const unsafeMergeLayers = (
-  layers: ReadonlyArray<Layer.Layer.Any>,
-): Effect.Effect<Layer.Layer<unknown, never, never>> =>
+  layers: ReadonlyArray<Layer.Any>,
+): Effect.Effect<Layer.Any, never, never> =>
   Effect.gen(function* () {
     yield* Debug.log({
       event: "unsafe.mergeLayers",
       layer_count: layers.length,
     });
     if (layers.length === 0) return Layer.empty;
-    const first = layers[0];
+    const [first, second, ...rest] = layers;
     if (first === undefined) return Layer.empty;
-    if (layers.length === 1) return first;
-    const mergeAll = Layer.mergeAll as (...ls: ReadonlyArray<Layer.Layer.Any>) => Layer.Layer.Any;
-    return mergeAll(first, ...layers.slice(1));
-  }) as Effect.Effect<Layer.Layer<unknown, never, never>>;
+    if (second === undefined) return first;
+    const mergeAll = Layer.mergeAll as (...ls: ReadonlyArray<Layer.Any>) => Layer.Any;
+    return mergeAll(first, second, ...rest);
+  });
 
 // =============================================================================
 // Context Extraction
@@ -55,19 +55,19 @@ export const unsafeMergeLayers = (
  * The generic A is a phantom representing the accumulated service types.
  */
 export const unsafeBuildContext = <A>(
-  layers: ReadonlyArray<Layer.Layer.Any>,
-): Effect.Effect<Context.Context<A>, never, never> =>
+  layers: ReadonlyArray<Layer.Any>,
+): Effect.Effect<ServiceMap.ServiceMap<A>, never, never> =>
   Effect.gen(function* () {
     yield* Debug.log({
       event: "unsafe.buildContext",
       layer_count: layers.length,
     });
     if (layers.length === 0) {
-      return Context.unsafeMake(new Map());
+      return ServiceMap.empty() as ServiceMap.ServiceMap<A>;
     }
     const merged = yield* unsafeMergeLayers(layers);
-    return yield* Effect.provide(Effect.context<A>(), merged as Layer.Layer<A, never, never>);
-  }) as Effect.Effect<Context.Context<A>, never, never>;
+    return yield* Effect.scoped(Layer.build(merged as Parameters<typeof Layer.build>[0]));
+  }) as Effect.Effect<ServiceMap.ServiceMap<A>, never, never>;
 
 // =============================================================================
 // Component Tagging
@@ -83,6 +83,25 @@ export const unsafeBuildContext = <A>(
  */
 export const unsafeTagCallable = <T>(fn: Function, metadata: Record<string, unknown>): T =>
   Object.assign(fn, metadata) as T;
+
+/**
+ * Construct a KeyedList element across Signal invariance boundaries.
+ *
+ * SAFETY: KeyedList stores opaque callbacks plus the source signal for the
+ * renderer. The renderer feeds values produced by `source` back into `renderFn`
+ * and `keyFn`, so the item type remains correlated with `T` at runtime.
+ */
+export const unsafeMakeKeyedListElement = <T, E>(
+  source: Signal<ReadonlyArray<T>>,
+  renderFn: (item: T, index: number) => Effect.Effect<Element, E, unknown>,
+  keyFn: (item: T, index: number) => string | number,
+): Element =>
+  ({
+    _tag: "KeyedList",
+    source,
+    renderFn,
+    keyFn,
+  }) as Element;
 
 // =============================================================================
 // JSX Element Type Narrowing
@@ -179,13 +198,23 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
 // =============================================================================
 
 /**
- * Narrow a Context to a subset of its services.
+ * Narrow a service map to a subset of its services.
  *
- * SAFETY: Context<A | B> contains all services for both A and B.
- * Narrowing to Context<A> is sound because the services are still there.
+ * SAFETY: ServiceMap<A | B> contains all services for both A and B.
+ * Narrowing to ServiceMap<A> is sound because the services are still there.
  */
-export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Context<R> =>
-  ctx as unknown as Context.Context<R>;
+export const unsafeNarrowContext = <R, S>(ctx: ServiceMap.ServiceMap<S>): ServiceMap.ServiceMap<R> =>
+  ctx as unknown as ServiceMap.ServiceMap<R>;
+
+/**
+ * Widen a specific service map to unknown for untyped boundaries.
+ *
+ * SAFETY: ServiceMap<R> contains runtime services regardless of R phantom.
+ * Widening to unknown only erases compile-time detail.
+ */
+export const unsafeWidenContext = <R>(
+  ctx: ServiceMap.ServiceMap<R>,
+): ServiceMap.ServiceMap<unknown> => ctx as unknown as ServiceMap.ServiceMap<unknown>;
 
 // =============================================================================
 // Overloaded Function Dispatch
@@ -218,6 +247,29 @@ export const unsafeAsOverload = <T>(fn: Function): T => fn as T;
 export const unsafeEraseR = <A, E>(
   effect: Effect.Effect<A, E, unknown>,
 ): Effect.Effect<A, E, never> => effect as Effect.Effect<A, E, never>;
+
+/**
+ * Run a component while restoring its erased error type.
+ *
+ * SAFETY: Component.Type<Props, E, R> guarantees the callable and optional
+ * _runFn represent the same component body and error channel E. The runtime
+ * stores _runFn as unknown on the structural interface, so callers that still
+ * know E can safely recover it here.
+ */
+export const unsafeRunComponent = <Props, E>(
+  component: Component.Type<Props, E, unknown>,
+  props: [Props] extends [never] ? {} : Props,
+): Effect.Effect<Element, E, never> => {
+  const runFn = component._runFn;
+  if (runFn !== undefined) {
+    return unsafeEraseR(runFn(props)) as Effect.Effect<Element, E, never>;
+  }
+  const element = component(props);
+  if (element._tag === "Component") {
+    return unsafeEraseR(element.run()) as Effect.Effect<Element, E, never>;
+  }
+  return Effect.succeed(element);
+};
 
 // =============================================================================
 // Route Params Narrowing

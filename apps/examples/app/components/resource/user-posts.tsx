@@ -39,9 +39,11 @@ export const UserPosts = Component.gen(function* (
           <div>
             <button
               className="text-sm px-3 py-1.5 border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
-              onClick={Signal.get(userId).pipe(
-                Effect.flatMap((id) => Resource.invalidate(userPostsResource({ id }))),
-              )}
+              onClick={() =>
+                Signal.get(userId).pipe(
+                  Effect.flatMap((id) => Resource.invalidate(userPostsResource({ id }))),
+                )
+              }
               disabled={stale}
             >
               {stale ? "Refreshing..." : "Refresh"}
@@ -56,9 +58,9 @@ export const UserPosts = Component.gen(function* (
         onNone: () => (
           <ErrorView
             error={error}
-            onRetry={Signal.get(userId).pipe(
-              Effect.flatMap((id) => Resource.refresh(userPostsResource({ id }))),
-            )}
+            onRetry={() =>
+              Signal.get(userId).pipe(Effect.flatMap((id) => Resource.refresh(userPostsResource({ id }))))
+            }
           />
         ),
         onSome: (posts) => {

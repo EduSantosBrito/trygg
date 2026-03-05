@@ -46,7 +46,7 @@ type ElementFor<Type> =
  * @internal
  */
 const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
-  typeof value === "object" && value !== null && Effect.EffectTypeId in value;
+  Effect.isEffect(value);
 
 /**
  * Check if a value is a valid ElementKey

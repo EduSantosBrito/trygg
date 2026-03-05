@@ -2,16 +2,17 @@
  * @since 1.0.0
  * Virtual DOM Element representation for trygg
  */
-import { Cause, Context, Data, Effect, Scope } from "effect";
-import type { Signal, EachOptions, EachRenderResult } from "./signal.js";
-import { _setEachImpl, _setSignalElementImpl, _setTextElementImpl, peekSync } from "./signal.js";
+import { Cause, Data, Effect, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
+import type { Signal } from "./signal.js";
+import { peekSync } from "./signal.js";
 
 /**
  * Check if a value is an Effect
  * @internal
  */
 export const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
-  typeof value === "object" && value !== null && Effect.EffectTypeId in value;
+  Effect.isEffect(value);
 
 /**
  * Key type for list reconciliation.
@@ -258,9 +259,9 @@ export type Element = Data.TaggedEnum<{
   /**
    * Context boundary - provides a captured context to child components.
    * @internal
-   */
+    */
   readonly Provide: {
-    readonly context: Context.Context<unknown>;
+    readonly context: ServiceMap.ServiceMap<unknown>;
     readonly child: Element;
   };
   /**
@@ -362,7 +363,7 @@ export const componentElement = <E, R>(
  * Create a context boundary element.
  * @internal
  */
-export const provideElement = (context: Context.Context<unknown>, child: Element): Element =>
+export const provideElement = (context: ServiceMap.ServiceMap<unknown>, child: Element): Element =>
   Element.Provide({ context, child });
 
 /**
@@ -397,22 +398,6 @@ export const keyedList = <T>(
     ) => Effect.Effect<Element, unknown, unknown>,
     keyFn: keyFn as (item: unknown, index: number) => string | number,
   });
-
-// Initialize Signal.each implementation to break circular dependency
-_setEachImpl(
-  <T, E>(
-    source: Signal<ReadonlyArray<T>>,
-    renderFn: (item: T, index: number) => EachRenderResult<E>,
-    options: EachOptions<T>,
-  ): Element => {
-    // Normalize renderFn to always return Effect<Element>
-    const normalizedRenderFn = (item: T, index: number): Effect.Effect<Element, E, unknown> => {
-      const result = renderFn(item, index);
-      return isEffect(result) ? result : Effect.succeed(result);
-    };
-    return keyedList(source, normalizedRenderFn, options.key);
-  },
-);
 
 /**
  * Empty element singleton (empty fragment)
@@ -467,12 +452,6 @@ export const signalElement = (
   signal: Signal<Element>,
   options?: { readonly onSwap?: Effect.Effect<void> },
 ): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
-
-// Initialize signalElement implementation in signal.ts to break circular dependency
-_setSignalElementImpl(signalElement);
-
-// Initialize Text constructor in signal.ts to break circular dependency
-_setTextElementImpl((props: { content: string }) => Element.Text(props));
 
 /**
  * Normalize a child value to an Element

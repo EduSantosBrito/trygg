@@ -6,9 +6,9 @@
  * Works with @effect/vitest for Effect-based testing.
  */
 import { Data, Duration, Effect, Layer, Option, Schedule, Scope } from "effect";
+import { unsafeEraseR } from "../internal/unsafe.js";
 import { Element, isElement } from "../primitives/element.js";
 import { browserLayer, Renderer } from "../primitives/renderer.js";
-import * as Router from "../router/index.js";
 
 /**
  * Result of rendering an element for testing
@@ -90,6 +90,9 @@ export class ElementNotFoundError extends Data.TaggedError("ElementNotFoundError
  * @internal
  */
 const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "container"> => {
+  const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
+    value === null || value === undefined ? Option.none() : Option.some(value);
+
   // Internal sync helpers
   const findByText = (text: string): HTMLElement | null => {
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, {
@@ -158,13 +161,13 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
 
   // Public Effect-returning functions
   const queryByText = (text: string): Effect.Effect<Option.Option<HTMLElement>> =>
-    Effect.sync(() => Option.fromNullable(findByText(text)));
+    Effect.sync(() => fromNullable(findByText(text)));
 
   const queryByTestId = (testId: string): Effect.Effect<Option.Option<HTMLElement>> =>
-    Effect.sync(() => Option.fromNullable(findByTestId(testId)));
+    Effect.sync(() => fromNullable(findByTestId(testId)));
 
   const queryByRole = (role: string): Effect.Effect<Option.Option<HTMLElement>> =>
-    Effect.sync(() => Option.fromNullable(findByRole(role)));
+    Effect.sync(() => fromNullable(findByRole(role)));
 
   const querySelectorAll = <T extends HTMLElement = HTMLElement>(
     selector: string,
@@ -212,7 +215,7 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
   const queryBySelector = <T extends HTMLElement = HTMLElement>(
     selector: string,
   ): Effect.Effect<Option.Option<T>> =>
-    Effect.sync(() => Option.fromNullable(container.querySelector<T>(selector)));
+    Effect.sync(() => fromNullable(container.querySelector<T>(selector)));
 
   return {
     getByText,
@@ -252,7 +255,7 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
  *
  * @since 1.0.0
  */
-export const renderElement = Effect.fn("renderElement")(function* (element: Element) {
+const renderElementImpl = Effect.fn("renderElement")(function* (element: Element) {
   const renderer = yield* Renderer;
 
   // Create a container for the rendered element
@@ -276,6 +279,9 @@ export const renderElement = Effect.fn("renderElement")(function* (element: Elem
   } satisfies TestRenderResult;
 });
 
+export const renderElement: (element: Element) => Effect.Effect<TestRenderResult, unknown, Scope.Scope> =
+  (element) => unsafeEraseR(renderElementImpl(element));
+
 /**
  * Test layer that provides the browser renderer
  *
@@ -292,7 +298,7 @@ export const renderElement = Effect.fn("renderElement")(function* (element: Elem
  *
  * @since 1.0.0
  */
-export const testLayer: Layer.Layer<Renderer> = Layer.provide(browserLayer, Router.testLayer());
+export const testLayer: Layer.Layer<Renderer> = browserLayer;
 
 /**
  * Simulate a click event on an element
@@ -373,7 +379,7 @@ export const waitFor = <T>(
   });
 
   // Schedule: retry at interval, max retries based on timeout
-  const schedule = Schedule.intersect(
+  const schedule = Schedule.both(
     Schedule.spaced(Duration.millis(interval)),
     Schedule.recurs(maxRetries),
   );
@@ -438,7 +444,7 @@ export const render = (
 ): Effect.Effect<TestRenderResult, unknown, Scope.Scope> => {
   // Check if input is an Element (has _tag property) or an Effect
   if (isElement(input)) {
-    return renderElement(input).pipe(Effect.provide(testLayer));
+    return unsafeEraseR(renderElement(input).pipe(Effect.provide(testLayer)));
   }
 
   // Input is an Effect<Element, E, never>
@@ -453,6 +459,8 @@ export const render = (
       key: null,
     });
 
-    return yield* renderElement(componentElement).pipe(Effect.provideService(Scope.Scope, scope));
-  }).pipe(Effect.provide(testLayer));
+    return yield* unsafeEraseR(
+      renderElement(componentElement).pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+  }).pipe(Effect.provide(testLayer), unsafeEraseR);
 };

@@ -15,7 +15,8 @@
  *   .pipe(Route.provide(ScrollStrategy.None))
  * ```
  */
-import { Context, Layer } from "effect";
+import { Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 /**
  * Auto — save/restore scroll per history entry via sessionStorage.
@@ -41,7 +42,7 @@ export interface ScrollNone {
 export type ScrollStrategyType = ScrollAuto | ScrollNone;
 
 /**
- * ScrollStrategy Context.Tag.
+ * ScrollStrategy service key.
  * @since 1.0.0
  */
 /** @internal */
@@ -51,7 +52,7 @@ const autoStrategy: ScrollAuto = { _tag: "Auto" };
 const noneStrategy: ScrollNone = { _tag: "None" };
 
 /**
- * ScrollStrategy Context.Tag — controls scroll position management per route.
+ * ScrollStrategy service key — controls scroll position management per route.
  *
  * Consumed by the outlet after route matching. The resolved strategy type is
  * passed to the router's `_applyScroll`, which dispatches on `_tag`:
@@ -60,10 +61,9 @@ const noneStrategy: ScrollNone = { _tag: "None" };
  *
  * @since 1.0.0
  */
-export class ScrollStrategy extends Context.Tag("trygg/ScrollStrategy")<
-  ScrollStrategy,
-  ScrollStrategyType
->() {
+export class ScrollStrategy extends ServiceMap.Service<ScrollStrategy, ScrollStrategyType>()(
+  "trygg/ScrollStrategy",
+) {
   /**
    * Auto scroll management:
    * - New navigation: scroll to top

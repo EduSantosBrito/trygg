@@ -6,7 +6,7 @@
  * returns a Signal<string> that updates reactively. Otherwise returns a plain string.
  * Used directly in className props — the renderer resolves the Effect internally.
  */
-import { Effect, FiberRef, Scope, SubscriptionRef } from "effect";
+import { Effect, Scope, SubscriptionRef } from "effect";
 import * as Signal from "./signal.js";
 
 /**
@@ -126,7 +126,7 @@ export const cx = (
     }
 
     // Has signals — create reactive output Signal
-    const renderScope = yield* FiberRef.get(Signal.CurrentRenderScope);
+    const renderScope = yield* Signal.CurrentRenderScope;
     const scope = renderScope ?? (yield* Effect.scope);
 
     const initial = yield* computeClassesEffect(inputs);

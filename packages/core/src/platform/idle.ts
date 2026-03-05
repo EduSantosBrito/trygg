@@ -4,7 +4,8 @@
  *
  * Schedule low-priority work during browser idle periods.
  */
-import { Context, Data, Effect, Layer, Runtime, Scope } from "effect";
+import { Data, Effect, Layer, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 
 // =============================================================================
 // Error type
@@ -30,7 +31,9 @@ export interface IdleService {
 // Tag
 // =============================================================================
 
-export class Idle extends Context.Tag("trygg/platform/Idle")<Idle, IdleService>() {}
+export interface Idle extends ServiceMap.Service<Idle, IdleService> {}
+
+export const Idle = ServiceMap.Service<Idle, IdleService>("trygg/platform/Idle");
 
 // =============================================================================
 // Browser layer
@@ -41,8 +44,8 @@ export const browser: Layer.Layer<Idle> = Layer.succeed(
   Idle.of({
     request: (handler, options) =>
       Effect.gen(function* () {
-        const runtime = yield* Effect.runtime<never>();
-        const runFork = Runtime.runFork(runtime);
+        const services = yield* Effect.services();
+        const runFork = Effect.runForkWith(services);
         const opts = options?.timeout !== undefined ? { timeout: options.timeout } : undefined;
         const id = requestIdleCallback(() => {
           runFork(handler());

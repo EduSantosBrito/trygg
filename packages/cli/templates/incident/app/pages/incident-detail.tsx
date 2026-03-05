@@ -12,6 +12,7 @@ import { ErrorView } from "../components/error-view";
 import { formatRelative } from "../utils/date";
 
 const STATUS_JOURNEY: ReadonlyArray<Status> = [
+  "Detected",
   "Investigating",
   "Identified",
   "Monitoring",
@@ -243,13 +244,13 @@ const DetailActions = Component.gen(function* (Props: ComponentProps<{ incident:
             yield* Signal.set(transitioning, true);
             const client = yield* ApiClient;
             yield* client.incidents.transition({
-              path: { id: incident.id },
+              params: { id: incident.id },
               payload: { to: nextStatus },
             });
             yield* Resource.invalidate(incidentResource({ id: incident.id }));
             yield* Resource.invalidate(incidentsResource);
           }).pipe(
-            Effect.catchAll((error) => Effect.logError("Transition failed", error)),
+            Effect.catch((error) => Effect.logError("Transition failed", error)),
             Effect.ensuring(Signal.set(transitioning, false)),
           )
         }

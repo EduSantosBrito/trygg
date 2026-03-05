@@ -12,30 +12,27 @@
  *
  * The outlet.ts code has explicit workarounds (lines 704, 727) confirming this bug.
  */
-import { describe, it } from "@effect/vitest";
-import { Context, Deferred, Effect, Layer } from "effect";
+import { describe, effect } from "@effect/vitest";
+import { Deferred, Effect, Layer, ServiceMap } from "effect";
 import * as Component from "../component.js";
 import { Element } from "../element.js";
 import { click, render } from "../../testing/index.js";
+import { unsafeWidenContext } from "../../internal/unsafe.js";
 
 // Two distinct services
-class ThemeService extends Context.Tag("test/ThemeService")<
-  ThemeService,
-  { readonly color: string }
->() {}
-class AuthService extends Context.Tag("test/AuthService")<
-  AuthService,
-  { readonly user: string }
->() {}
+class ThemeService extends ServiceMap.Service<ThemeService, { readonly color: string }>()(
+  "test/ThemeService",
+) {}
+class AuthService extends ServiceMap.Service<AuthService, { readonly user: string }>()(
+  "test/AuthService",
+) {}
 
 // Create a Provide element wrapping a child with a partial context.
-// Uses Context.unsafeMake<unknown> (same pattern as renderer.ts:52) to bypass
-// Context invariance — we need partial contexts to test the merge behavior.
-const wrapProvide = (key: string, value: unknown, child: Element): Element =>
-  Element.Provide({ context: Context.unsafeMake<unknown>(new Map([[key, value]])), child });
+const wrapProvide = <I, S>(key: ServiceMap.Key<I, S>, value: S, child: Element): Element =>
+  Element.Provide({ context: unsafeWidenContext(ServiceMap.make(key, value)), child });
 
 describe("Provide context merging", () => {
-  it.scoped("nested Provide elements merge contexts for event handlers", () =>
+  effect("nested Provide elements merge contexts for event handlers", () =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<string>();
 
@@ -58,15 +55,15 @@ describe("Provide context merging", () => {
       // Inner provides Theme only, outer provides Auth only.
       // The renderer must merge them so the button handler sees both.
       const tree = wrapProvide(
-        AuthService.key,
+        AuthService,
         { user: "alice" },
-        wrapProvide(ThemeService.key, { color: "blue" }, button),
+        wrapProvide(ThemeService, { color: "blue" }, button),
       );
 
       const { getByTestId } = yield* render(tree);
       const btn = yield* getByTestId("btn");
       yield* click(btn);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
       yield* Effect.sync(() => {
@@ -77,7 +74,7 @@ describe("Provide context merging", () => {
     }),
   );
 
-  it.scoped("inner Provide overrides same service from outer (last-write-wins)", () =>
+  effect("inner Provide overrides same service from outer (last-write-wins)", () =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<string>();
 
@@ -98,15 +95,15 @@ describe("Provide context merging", () => {
       // Outer provides Theme=blue, inner provides Theme=red
       // Inner should win (last-write-wins / closer scope)
       const tree = wrapProvide(
-        ThemeService.key,
+        ThemeService,
         { color: "blue" },
-        wrapProvide(ThemeService.key, { color: "red" }, button),
+        wrapProvide(ThemeService, { color: "red" }, button),
       );
 
       const { getByTestId } = yield* render(tree);
       const btn = yield* getByTestId("btn");
       yield* click(btn);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
       yield* Effect.sync(() => {
@@ -117,7 +114,7 @@ describe("Provide context merging", () => {
     }),
   );
 
-  it.scoped("Component.provide() nesting preserves all ancestor services in event handlers", () =>
+  effect("Component.provide() nesting preserves all ancestor services in event handlers", () =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<string>();
 
@@ -149,7 +146,7 @@ describe("Provide context merging", () => {
       const { getByTestId } = yield* render(<App />);
       const btn = yield* getByTestId("btn");
       yield* click(btn);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
       yield* Effect.sync(() => {

@@ -8,9 +8,8 @@
     "preview": "node dist/server.js"
   },
   "dependencies": {
-    "@effect/platform": "^0.94.1",
-    "@effect/platform-browser": "^0.74.0",
-    "effect": "^3.19.15",
+    "@effect/platform-browser": "^4.0.0-beta.27",
+    "effect": "^4.0.0-beta.27",
     "trygg": "workspace:*"
   },
   "devDependencies": {

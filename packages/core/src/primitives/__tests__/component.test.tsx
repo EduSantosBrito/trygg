@@ -17,15 +17,16 @@
  * - Verify provide propagates to children
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer, Result, ServiceMap } from "effect";
 
 // Tagged error for testing component failures
 class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
 import * as Component from "../component.js";
+import { unsafeBuildContext } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
 
 // Test service for DI tests
-class TestService extends Context.Tag("TestService")<TestService, { value: string }>() {}
+class TestService extends ServiceMap.Service<TestService, { value: string }>()("TestService") {}
 const testServiceLayer = Layer.succeed(TestService, { value: "test-value" });
 
 // =============================================================================
@@ -52,7 +53,7 @@ describe("Component.gen without props", () => {
     assert.strictEqual(element._tag, "Component");
   });
 
-  it.scoped("should execute generator body during render", () =>
+  it.effect("should execute generator body during render", () =>
     Effect.gen(function* () {
       let executed = false;
 
@@ -67,7 +68,7 @@ describe("Component.gen without props", () => {
     }),
   );
 
-  it.scoped("should support yielding effects inside generator", () =>
+  it.effect("should support yielding effects inside generator", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const result = yield* Effect.succeed(42);
@@ -80,7 +81,7 @@ describe("Component.gen without props", () => {
     }),
   );
 
-  it.scoped("should allow yielding services from context", () =>
+  it.effect("should allow yielding services from context", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
@@ -111,7 +112,7 @@ describe("Component.gen with props", () => {
     assert.strictEqual(MyComponent._tag, "EffectComponent");
   });
 
-  it.scoped("should receive props via yield* Props", () =>
+  it.effect("should receive props via yield* Props", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ title: string }>,
@@ -126,7 +127,7 @@ describe("Component.gen with props", () => {
     }),
   );
 
-  it.scoped("should support optional props", () =>
+  it.effect("should support optional props", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ title?: string }>,
@@ -141,7 +142,7 @@ describe("Component.gen with props", () => {
     }),
   );
 
-  it.scoped("should combine props and services", () =>
+  it.effect("should combine props and services", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ prefix: string }>,
@@ -192,7 +193,7 @@ describe("Component Type", () => {
 // Scope: Providing layers to satisfy service requirements
 
 describe("Component.provide", () => {
-  it.scoped("should provide layer services to component", () =>
+  it.effect("should provide layer services to component", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
@@ -205,7 +206,7 @@ describe("Component.provide", () => {
     }),
   );
 
-  it.scoped("should propagate services to child components", () =>
+  it.effect("should propagate services to child components", () =>
     Effect.gen(function* () {
       const Child = Component.gen(function* () {
         const service = yield* TestService;
@@ -226,7 +227,7 @@ describe("Component.provide", () => {
     }),
   );
 
-  it.scoped("should support providing services at parent level", () =>
+  it.effect("should support providing services at parent level", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         return <div data-testid="wrapped">Content</div>;
@@ -238,12 +239,11 @@ describe("Component.provide", () => {
     }),
   );
 
-  it.scoped("should merge with existing context from parent", () =>
+  it.effect("should merge with existing context from parent", () =>
     Effect.gen(function* () {
-      class AnotherService extends Context.Tag("AnotherService")<
-        AnotherService,
-        { other: string }
-      >() {}
+      class AnotherService extends ServiceMap.Service<AnotherService, { other: string }>()(
+        "AnotherService",
+      ) {}
 
       const Child = Component.gen(function* () {
         const test = yield* TestService;
@@ -265,10 +265,10 @@ describe("Component.provide", () => {
     }),
   );
 
-  it.scoped("should support chaining multiple provides on same component", () =>
+  it.effect("should support chaining multiple provides on same component", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Tag("ServiceA")<ServiceA, { a: string }>() {}
-      class ServiceB extends Context.Tag("ServiceB")<ServiceB, { b: string }>() {}
+      class ServiceA extends ServiceMap.Service<ServiceA, { a: string }>()("ServiceA") {}
+      class ServiceB extends ServiceMap.Service<ServiceB, { b: string }>()("ServiceB") {}
 
       const MyComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -291,7 +291,7 @@ describe("Component.provide", () => {
 // Scope: Components yielding services from context
 
 describe("Service access", () => {
-  it.scoped("should yield service from provided layer", () =>
+  it.effect("should yield service from provided layer", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
@@ -304,7 +304,7 @@ describe("Service access", () => {
     }),
   );
 
-  it.scoped("should fail when service is not provided", () =>
+  it.effect("should fail when service is not provided", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
@@ -312,10 +312,14 @@ describe("Service access", () => {
       });
 
       // Intentionally not providing - this test verifies error handling when service is missing
-      const result = yield* Effect.either(render(<MyComponent />).pipe(Effect.sandbox));
+      const context = yield* unsafeBuildContext<unknown>([]);
+      const result = yield* render(<MyComponent />).pipe(
+        Effect.sandbox,
+        Effect.provideServices(context),
+        Effect.result,
+      );
 
-      // The error should be a failure (Left) because TestService is not available
-      assert.strictEqual(result._tag, "Left");
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 });
@@ -326,19 +330,20 @@ describe("Service access", () => {
 // Scope: Component error handling
 
 describe("Error handling", () => {
-  it.scoped("should propagate errors from component", () =>
+  it.effect("should propagate errors from component", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         return yield* new ComponentError({ message: "Component failed" });
       });
 
-      const result = yield* Effect.either(render(<MyComponent />));
+      const context = yield* unsafeBuildContext<unknown>([]);
+      const result = yield* render(<MyComponent />).pipe(Effect.provideServices(context), Effect.result);
 
-      assert.isTrue(result._tag === "Left");
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 
-  it.scoped("should handle errors in nested components", () =>
+  it.effect("should handle errors in nested components", () =>
     Effect.gen(function* () {
       const ErrorChild = Component.gen(function* () {
         return yield* new ComponentError({ message: "Child error" });
@@ -352,9 +357,10 @@ describe("Error handling", () => {
         );
       });
 
-      const result = yield* Effect.either(render(<Parent />));
+      const context = yield* unsafeBuildContext<unknown>([]);
+      const result = yield* render(<Parent />).pipe(Effect.provideServices(context), Effect.result);
 
-      assert.isTrue(result._tag === "Left");
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 });
@@ -431,7 +437,7 @@ describe("Component function API", () => {
     assert.strictEqual(MyComponent._tag, "EffectComponent");
   });
 
-  it.scoped("should work with props", () =>
+  it.effect("should work with props", () =>
     Effect.gen(function* () {
       const MyComponent = Component.Component<{ message: string }>()((Props) =>
         Effect.gen(function* () {
@@ -446,7 +452,7 @@ describe("Component function API", () => {
     }),
   );
 
-  it.scoped("should support services with Component() API", () =>
+  it.effect("should support services with Component() API", () =>
     Effect.gen(function* () {
       const MyComponent = Component.Component()(() =>
         Effect.gen(function* () {
@@ -468,9 +474,9 @@ describe("Component function API", () => {
 // Scope: Verify last-write-wins semantics
 
 describe("Layer Precedence", () => {
-  it.scoped("should override via chaining (last provision wins)", () =>
+  it.effect("should override via chaining (last provision wins)", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -488,9 +494,9 @@ describe("Layer Precedence", () => {
     }),
   );
 
-  it.scoped("should override via array order (last in array wins)", () =>
+  it.effect("should override via array order (last in array wins)", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -506,9 +512,9 @@ describe("Layer Precedence", () => {
     }),
   );
 
-  it.scoped("should allow override after full provision", () =>
+  it.effect("should allow override after full provision", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Tag("Theme")<Theme, { color: string }>() {}
+      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -546,10 +552,10 @@ describe("Immutability", () => {
     assert.strictEqual(ProvidedComponent._layers.length, 1);
   });
 
-  it.scoped("should create independent variants from base", () =>
+  it.effect("should create independent variants from base", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Tag("ServiceA")<ServiceA, { value: string }>() {}
-      class ServiceB extends Context.Tag("ServiceB")<ServiceB, { value: string }>() {}
+      class ServiceA extends ServiceMap.Service<ServiceA, { value: string }>()("ServiceA") {}
+      class ServiceB extends ServiceMap.Service<ServiceB, { value: string }>()("ServiceB") {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -571,10 +577,10 @@ describe("Immutability", () => {
     }),
   );
 
-  it.scoped("should fail when partial provision leaves unsatisfied services", () =>
+  it.effect("should fail when partial provision leaves unsatisfied services", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Tag("ServiceA")<ServiceA, { value: string }>() {}
-      class ServiceB extends Context.Tag("ServiceB")<ServiceB, { value: string }>() {}
+      class ServiceA extends ServiceMap.Service<ServiceA, { value: string }>()("ServiceA") {}
+      class ServiceB extends ServiceMap.Service<ServiceB, { value: string }>()("ServiceB") {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -589,8 +595,13 @@ describe("Immutability", () => {
       // Only provide ServiceA — ServiceB is missing
       const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" }));
 
-      const result = yield* Effect.either(render(<VariantA />).pipe(Effect.sandbox));
-      assert.strictEqual(result._tag, "Left");
+      const context = yield* unsafeBuildContext<unknown>([]);
+      const result = yield* render(<VariantA />).pipe(
+        Effect.sandbox,
+        Effect.provideServices(context),
+        Effect.result,
+      );
+      assert.isTrue(Result.isFailure(result));
     }),
   );
 
@@ -615,7 +626,7 @@ describe("Immutability", () => {
 // Scope: Boundary conditions and unusual scenarios
 
 describe("Edge Cases", () => {
-  it.scoped("should handle providing to component with no requirements", () =>
+  it.effect("should handle providing to component with no requirements", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         return <div data-testid="no-req">No requirements</div>;
@@ -629,7 +640,7 @@ describe("Edge Cases", () => {
     }),
   );
 
-  it.scoped("should preserve props after provision", () =>
+  it.effect("should preserve props after provision", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ title: string }>,
@@ -644,7 +655,7 @@ describe("Edge Cases", () => {
     }),
   );
 
-  it.scoped("should handle already satisfied service (extra provision)", () =>
+  it.effect("should handle already satisfied service (extra provision)", () =>
     Effect.gen(function* () {
       // Component with no requirements
       const MyComponent = Component.gen(function* () {

@@ -1,25 +1,26 @@
-import { Cause, Predicate } from "effect";
+import { Cause, Effect, Predicate } from "effect";
 import { Component } from "trygg";
 import * as Router from "trygg/router";
 
-const errorCopy = (error: unknown): { title: string; message: string } => {
-  if (Predicate.isTagged(error, "ParamsDecodeError")) {
-    return {
-      title: "Invalid Incident URL",
-      message: "Incident ID must be numeric, e.g. /incidents/1.",
-    };
-  }
+const errorCopy = (error: unknown): Effect.Effect<{ title: string; message: string }> =>
+  Effect.sync(() => {
+    if (Predicate.isTagged(error, "ParamsDecodeError")) {
+      return {
+        title: "Invalid Incident URL",
+        message: "Incident ID must be numeric, e.g. /incidents/1.",
+      };
+    }
 
-  return {
-    title: "Could Not Load Page",
-    message: "Something failed while resolving this route.",
-  };
-};
+    return {
+      title: "Could Not Load Page",
+      message: "Something failed while resolving this route.",
+    };
+  });
 
 export const RouteErrorView = Component.gen(function* () {
   const { cause } = yield* Router.currentError;
   const error = Cause.squash(cause);
-  const { title, message } = errorCopy(error);
+  const { title, message } = yield* errorCopy(error);
 
   return (
     <>

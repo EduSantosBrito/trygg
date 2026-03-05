@@ -9,7 +9,7 @@
  * - Index route matching
  * - Re-match on path change (via router signal)
  */
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, it as baseIt } from "@effect/vitest";
 import { Effect, Option } from "effect";
 import * as Route from "../route.js";
 import { IndexMarker } from "../route.js";
@@ -20,14 +20,16 @@ import * as Signal from "../../primitives/signal.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-import type { Layer } from "effect";
+import type { Any as AnyLayer } from "effect/Layer";
+
+const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
   const fn = () => empty;
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<Layer.Layer.Any>,
+    _layers: [] as ReadonlyArray<AnyLayer>,
 
     provide: () => comp as Component.Type<never, unknown, unknown>,
   });

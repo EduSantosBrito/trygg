@@ -2,7 +2,7 @@
  * Project scaffolding orchestration
  * @since 1.0.0
  */
-import { FileSystem } from "@effect/platform";
+import * as FileSystem from "effect/FileSystem";
 import { Effect, Layer } from "effect";
 import * as path from "node:path";
 import type { ProjectOptions } from "./prompts";
