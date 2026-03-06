@@ -982,16 +982,20 @@ const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.E
   Effect.withFiber((fiber) =>
     Effect.sync(() => {
       fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-    }));
+    }),
+  );
 
 /**
  * Reference for current trace ID.
  * Set by router on navigate, propagated through Effect context.
  * @since 1.0.0
  */
-export const CurrentTraceId = ServiceMap.Reference<string | undefined>("trygg/Debug/CurrentTraceId", {
-  defaultValue: () => undefined,
-});
+export const CurrentTraceId = ServiceMap.Reference<string | undefined>(
+  "trygg/Debug/CurrentTraceId",
+  {
+    defaultValue: () => undefined,
+  },
+);
 
 /**
  * Reference for current span ID.
@@ -1369,14 +1373,16 @@ export const withSpan = <A, E, R>(
           event: "trace.span.end",
           name,
           status: "ok",
-        })),
+        }),
+      ),
       Effect.tapError((error) =>
         log({
           event: "trace.span.end",
           name,
           status: "error",
           error: String(error),
-        })),
+        }),
+      ),
       Effect.ensuring(
         Effect.all(
           [

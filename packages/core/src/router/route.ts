@@ -547,10 +547,7 @@ const KNOWN_RENDER_STRATEGIES = new Set<LayerTypes.Any>([
 ]);
 
 /** Known ScrollStrategy layer instances for detection. @internal */
-const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Any>([
-  ScrollStrategy.Auto,
-  ScrollStrategy.None,
-]);
+const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Any>([ScrollStrategy.Auto, ScrollStrategy.None]);
 
 /** @internal */
 const isRenderStrategyLayer = (layer: LayerTypes.Any): layer is LayerTypes.Layer<RenderStrategy> =>
@@ -650,8 +647,10 @@ export function provide(
   >(
     builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
   ): RouteBuilder<Path, unknown, HC, HCh, NC, HEB> => {
-    let renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined = builder.definition.renderStrategy;
-    let scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined = builder.definition.scrollStrategy;
+    let renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined =
+      builder.definition.renderStrategy;
+    let scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined =
+      builder.definition.scrollStrategy;
     const otherLayers: Array<LayerTypes.Any> = [...builder.definition.layers];
 
     for (const layer of layers) {

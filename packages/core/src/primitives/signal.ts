@@ -8,23 +8,17 @@
  * - Passed to JSX for fine-grained DOM updates
  * - Composed with derive for computed values
  */
-import {
-  Cause,
-  Data,
-  Effect,
-  Equal,
-  Exit,
-  Pipeable,
-  Ref,
-  Scope,
-  SubscriptionRef,
-} from "effect";
+import { Cause, Data, Effect, Equal, Exit, Pipeable, Ref, Scope, SubscriptionRef } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
 import { type Component } from "./component.js";
-import { unsafeMakeKeyedListElement, unsafeRunComponent, unsafeTagCallable } from "../internal/unsafe.js";
+import {
+  unsafeMakeKeyedListElement,
+  unsafeRunComponent,
+  unsafeTagCallable,
+} from "../internal/unsafe.js";
 
 /**
  * Error raised when Signal module is not properly initialized.
@@ -97,15 +91,16 @@ export interface RenderPhase {
  * @internal
  */
 export const CurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> =
-  globalThis.__tryggSignalCurrentRenderPhase ??=
-    ServiceMap.Reference<RenderPhase | null>("trygg/Signal/CurrentRenderPhase", {
+  (globalThis.__tryggSignalCurrentRenderPhase ??= ServiceMap.Reference<RenderPhase | null>(
+    "trygg/Signal/CurrentRenderPhase",
+    {
       defaultValue: () => null,
-    });
+    },
+  ));
 
 // Debug: unique ID to detect module duplication
 export const _currentRenderPhaseId =
-  globalThis.__tryggSignalCurrentRenderPhaseId ??=
-    `reference_${Math.random().toString(36).slice(2, 8)}`;
+  (globalThis.__tryggSignalCurrentRenderPhaseId ??= `reference_${Math.random().toString(36).slice(2, 8)}`);
 
 /**
  * Reference to track current component lifetime scope.
@@ -114,10 +109,12 @@ export const _currentRenderPhaseId =
  * @internal
  */
 export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> =
-  globalThis.__tryggSignalCurrentComponentScope ??=
-    ServiceMap.Reference<Scope.Closeable | null>("trygg/Signal/CurrentComponentScope", {
+  (globalThis.__tryggSignalCurrentComponentScope ??= ServiceMap.Reference<Scope.Closeable | null>(
+    "trygg/Signal/CurrentComponentScope",
+    {
       defaultValue: () => null,
-    });
+    },
+  ));
 
 /**
  * Reference to track current render scope (cleared on re-render).
@@ -126,10 +123,12 @@ export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null>
  * @internal
  */
 export const CurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> =
-  globalThis.__tryggSignalCurrentRenderScope ??=
-    ServiceMap.Reference<Scope.Closeable | null>("trygg/Signal/CurrentRenderScope", {
+  (globalThis.__tryggSignalCurrentRenderScope ??= ServiceMap.Reference<Scope.Closeable | null>(
+    "trygg/Signal/CurrentRenderScope",
+    {
       defaultValue: () => null,
-    });
+    },
+  ));
 
 /**
  * Create a new RenderPhase for a component.
@@ -674,13 +673,13 @@ const notifyListeners: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fn
 
   // Notify all listeners in parallel with error isolation
   yield* Effect.forEach(
-      listeners,
-      (listener, index) =>
-        listener().pipe(
-          Effect.catchCause((cause) =>
-            Debug.log({
-              event: "signal.listener.error",
-              signal_id: signal._debugId,
+    listeners,
+    (listener, index) =>
+      listener().pipe(
+        Effect.catchCause((cause) =>
+          Debug.log({
+            event: "signal.listener.error",
+            signal_id: signal._debugId,
             cause: Cause.pretty(cause),
             listener_index: index,
           }),
@@ -786,8 +785,11 @@ type ValidHandler<State extends SuspendState, Handler> = State extends "Pending"
  *
  * @since 1.0.0
  */
-export interface SuspendedComponent<Props = never, E = never, R = never>
-  extends Component.Type<Props, E, R> {
+export interface SuspendedComponent<Props = never, E = never, R = never> extends Component.Type<
+  Props,
+  E,
+  R
+> {
   readonly _signal: Signal<SuspendElement>;
 }
 
@@ -800,13 +802,8 @@ export interface SuspendedComponent<Props = never, E = never, R = never>
  *
  * @since 1.0.0
  */
-export interface SuspendMatcher<
-  Props,
-  E,
-  R,
-  HasPending extends boolean,
-  HasFailure extends boolean,
-> extends Pipeable.Pipeable {
+export interface SuspendMatcher<Props, E, R, HasPending extends boolean, HasFailure extends boolean>
+  extends Pipeable.Pipeable {
   readonly _tag: "SuspendMatcher";
   readonly component: Component.Type<Props, E, R>;
   readonly pending?: PendingHandler<unknown>;
@@ -842,9 +839,14 @@ const makeSignalElement = (signal: Signal<Element>): SuspendElement =>
 const makeComponentElement = <E, R>(
   run: () => Effect.Effect<SuspendElement, E, R>,
 ): SuspendElement =>
-  ({ _tag: "Component", run, key: null }) satisfies Extract<SuspendElement, { readonly _tag: "Component" }>;
+  ({ _tag: "Component", run, key: null }) satisfies Extract<
+    SuspendElement,
+    { readonly _tag: "Component" }
+  >;
 
-const isEffectComponentLike = (value: unknown): value is Component.Type<unknown, unknown, unknown> =>
+const isEffectComponentLike = (
+  value: unknown,
+): value is Component.Type<unknown, unknown, unknown> =>
   typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
 
 const isPendingComponent = <R>(handler: PendingHandler<R>): handler is PendingComponentHandler<R> =>
@@ -855,13 +857,13 @@ const isFailureComponent = <R>(handler: FailureHandler<R>): handler is FailureCo
 
 const isPendingStateHandler = (
   state: SuspendState,
-  handler: PendingHandler<unknown> | FailureHandler<unknown>,
-): handler is PendingHandler<unknown> => state === "Pending";
+  _handler: PendingHandler<unknown> | FailureHandler<unknown>,
+): _handler is PendingHandler<unknown> => state === "Pending";
 
 const isFailureStateHandler = (
   state: SuspendState,
-  handler: PendingHandler<unknown> | FailureHandler<unknown>,
-): handler is FailureHandler<unknown> => state === "Failure";
+  _handler: PendingHandler<unknown> | FailureHandler<unknown>,
+): _handler is FailureHandler<unknown> => state === "Failure";
 
 const renderPending = (
   handler: PendingHandler<unknown>,
@@ -916,30 +918,24 @@ export const suspend = <Props, E, R>(
  * @since 1.0.0
  */
 export const on =
-  <
-    State extends SuspendState,
-    Handler,
-  >(
-    state: State,
-    handler: ValidHandler<State, Handler>,
-  ) =>
-    <Props, E, R, HasPending extends boolean, HasFailure extends boolean>(
-      self: SuspendMatcher<Props, E, R, HasPending, HasFailure>,
-    ): SuspendMatcher<
-      Props,
-      E,
-      R | HandlerRequirements<State, Handler>,
-      State extends "Pending" ? true : HasPending,
-      State extends "Failure" ? true : HasFailure
-    > => {
-      if (isPendingStateHandler(state, handler)) {
-        return makeSuspendMatcher(self.component, handler, self.failure);
-      }
-      if (isFailureStateHandler(state, handler)) {
-        return makeSuspendMatcher(self.component, self.pending, handler);
-      }
-      return makeSuspendMatcher(self.component, self.pending, self.failure);
-    };
+  <State extends SuspendState, Handler>(state: State, handler: ValidHandler<State, Handler>) =>
+  <Props, E, R, HasPending extends boolean, HasFailure extends boolean>(
+    self: SuspendMatcher<Props, E, R, HasPending, HasFailure>,
+  ): SuspendMatcher<
+    Props,
+    E,
+    R | HandlerRequirements<State, Handler>,
+    State extends "Pending" ? true : HasPending,
+    State extends "Failure" ? true : HasFailure
+  > => {
+    if (isPendingStateHandler(state, handler)) {
+      return makeSuspendMatcher(self.component, handler, self.failure);
+    }
+    if (isFailureStateHandler(state, handler)) {
+      return makeSuspendMatcher(self.component, self.pending, handler);
+    }
+    return makeSuspendMatcher(self.component, self.pending, self.failure);
+  };
 
 /**
  * Finalize the suspend matcher.
@@ -1014,7 +1010,9 @@ export const exhaustive = <Props, E, R>(
             Effect.flatMap(() => notifyListeners(viewSignal)),
           );
 
-        const subscribeToSignals = Effect.fn("Signal.suspend.subscribe")(function* (signals: Set<AnySignal>) {
+        const subscribeToSignals = Effect.fn("Signal.suspend.subscribe")(function* (
+          signals: Set<AnySignal>,
+        ) {
           yield* cleanupSubscriptions();
           if (signals.size === 0) return;
 
@@ -1089,7 +1087,8 @@ export const exhaustive = <Props, E, R>(
         return makeSignalElement(viewSignal);
       });
 
-    const suspendedComponent = (props: PropsInput<Props>): SuspendElement => makeComponentElement(() => runFn(props));
+    const suspendedComponent = (props: PropsInput<Props>): SuspendElement =>
+      makeComponentElement(() => runFn(props));
 
     return unsafeTagCallable<SuspendedComponent<Props, E, R>>(suspendedComponent, {
       _tag: "EffectComponent",
@@ -1136,10 +1135,14 @@ const makeKeyedListElement = <T, E>(
   renderFn: (item: T, index: number) => EachRenderResult<E>,
   key: (item: T, index: number) => ItemKey,
 ): Element =>
-  unsafeMakeKeyedListElement(source, (item, index) => {
-    const result = renderFn(item, index);
-    return Effect.isEffect(result) ? result : Effect.succeed(result);
-  }, key);
+  unsafeMakeKeyedListElement(
+    source,
+    (item, index) => {
+      const result = renderFn(item, index);
+      return Effect.isEffect(result) ? result : Effect.succeed(result);
+    },
+    key,
+  );
 
 /**
  * Create a keyed list from a Signal of arrays.

@@ -4,16 +4,7 @@
  *
  * Handles mounting Element trees to the DOM.
  */
-import {
-  Cause,
-  Data,
-  Effect,
-  Exit,
-  Layer,
-  Match,
-  Option,
-  Scope,
-} from "effect";
+import { Cause, Data, Effect, Exit, Layer, Match, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import {
   Element,
@@ -106,10 +97,14 @@ export interface RenderContext {
 }
 
 const Runtime = {
-  runFork: (_runtime: unknown) => <A, E>(effect: Effect.Effect<A, E, unknown>) =>
-    Effect.runFork(unsafeEraseR(effect)),
-  runSync: (_runtime: unknown) => <A, E>(effect: Effect.Effect<A, E, unknown>) =>
-    Effect.runSync(unsafeEraseR(effect)),
+  runFork:
+    (_runtime: unknown) =>
+    <A, E>(effect: Effect.Effect<A, E, unknown>) =>
+      Effect.runFork(unsafeEraseR(effect)),
+  runSync:
+    (_runtime: unknown) =>
+    <A, E>(effect: Effect.Effect<A, E, unknown>) =>
+      Effect.runSync(unsafeEraseR(effect)),
 };
 
 const FiberRef = {
@@ -119,7 +114,8 @@ const FiberRef = {
     Effect.withFiber((fiber) =>
       Effect.sync(() => {
         fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      })),
+      }),
+    ),
 };
 
 /**
@@ -1242,7 +1238,11 @@ const renderElement = (
           // Execute render function with render phase context and parent context
           const renderEffect = provideRenderContext(renderFn(item, index), context);
 
-          const element = yield* Effect.provideService(renderEffect, Signal.CurrentRenderPhase, renderPhase);
+          const element = yield* Effect.provideService(
+            renderEffect,
+            Signal.CurrentRenderPhase,
+            renderPhase,
+          );
 
           const listParent = parentOverride ?? anchor.parentNode ?? parent;
 
@@ -2126,13 +2126,15 @@ export const mount = <E>(
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
 
   // Dynamic import to avoid bundling platform-browser for non-browser usage
-  Promise.all([import("@effect/platform-browser/BrowserRuntime"), import("../router/index.js")]).then(([
-    { runMain },
-    Router,
-  ]) => {
+  Promise.all([
+    import("@effect/platform-browser/BrowserRuntime"),
+    import("../router/index.js"),
+  ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
     const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
-    runMain(unsafeEraseR(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer))));
+    runMain(
+      unsafeEraseR(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer))),
+    );
   });
 };
 
@@ -2226,14 +2228,16 @@ export const mountDocument = <E>(
 ): void => {
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
 
-  Promise.all([import("@effect/platform-browser/BrowserRuntime"), import("../router/index.js")]).then(([
-    { runMain },
-    Router,
-  ]) => {
+  Promise.all([
+    import("@effect/platform-browser/BrowserRuntime"),
+    import("../router/index.js"),
+  ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
     const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
     runMain(
-      unsafeEraseR(renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer))),
+      unsafeEraseR(
+        renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer)),
+      ),
     );
   });
 };

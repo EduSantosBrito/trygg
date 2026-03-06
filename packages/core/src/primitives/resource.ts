@@ -44,6 +44,7 @@ import {
   Hash,
   Layer,
   Option,
+  Pipeable,
   pipe,
   Ref,
   Scope,
@@ -52,6 +53,7 @@ import {
 import * as ServiceMap from "effect/ServiceMap";
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
+import { type Component } from "./component.js";
 import * as Debug from "../debug/debug.js";
 import {
   unsafeEntrySignal,
@@ -559,7 +561,11 @@ const fetchStatic = <A, E, R>(
     // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
     // If we tracked this read, the component would re-render when state changes,
     // causing keyed-list teardown/remount race that blanks rendered items.
-    const currentState = yield* Effect.provideService(Signal.get(state), Signal.CurrentRenderPhase, null);
+    const currentState = yield* Effect.provideService(
+      Signal.get(state),
+      Signal.CurrentRenderPhase,
+      null,
+    );
     if (currentState._tag !== "Pending") {
       yield* Debug.log({
         event: "resource.fetch.cached",
@@ -687,12 +693,12 @@ const fetchReactive = <P extends object, A, E, R>(
                   yield* Deferred.await(currentInFlight.value);
                 } else {
                   // Start fetch and wait for completion
-                    const fiber = yield* fetchInternal(
-                      resource,
-                      entry,
-                      unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
-                      true,
-                    );
+                  const fiber = yield* fetchInternal(
+                    resource,
+                    entry,
+                    unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+                    true,
+                  );
                   yield* Fiber.join(fiber);
                 }
                 // Sync resolved state to output
@@ -716,9 +722,9 @@ const fetchReactive = <P extends object, A, E, R>(
               return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
             }).pipe(
               Effect.provide(ctx),
-               Effect.catchCause(() => Effect.void),
-               Effect.forkDetach({ startImmediately: true }),
-             );
+              Effect.catchCause(() => Effect.void),
+              Effect.forkDetach({ startImmediately: true }),
+            );
 
             return Option.some(daemon);
           }),
@@ -766,49 +772,258 @@ const fetchReactive = <P extends object, A, E, R>(
 // Public API - match, invalidate, refresh, clear
 // =============================================================================
 
+type MatchState = "Pending" | "Success" | "Failure";
+
+type PendingPayload<A> = { readonly stale: Option.Option<A> };
+type SuccessPayload<A> = { readonly value: A; readonly stale: boolean };
+type FailurePayload<A, E> = { readonly error: E; readonly stale: Option.Option<A> };
+
+type PendingComponentHandler<R> = Component.Type<any, unknown, R>;
+type SuccessComponentHandler<R> = Component.Type<any, unknown, R>;
+type FailureComponentHandler<R> = Component.Type<any, unknown, R>;
+
+type PendingFunctionHandler = (payload: PendingPayload<any>) => ElementType;
+type SuccessFunctionHandler = (payload: SuccessPayload<any>) => ElementType;
+type FailureFunctionHandler = (payload: FailurePayload<any, any>) => ElementType;
+
+type PendingHandler<R> = PendingComponentHandler<R> | PendingFunctionHandler | ElementType;
+type SuccessHandler<R> = SuccessComponentHandler<R> | SuccessFunctionHandler;
+type FailureHandler<R> = FailureComponentHandler<R> | FailureFunctionHandler;
+
+const isEffectComponentLike = (value: unknown): value is Component.Type<any, unknown, unknown> =>
+  typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
+
+const isPendingComponent = <R>(handler: PendingHandler<R>): handler is PendingComponentHandler<R> =>
+  isEffectComponentLike(handler);
+
+const isSuccessComponent = <R>(handler: SuccessHandler<R>): handler is SuccessComponentHandler<R> =>
+  isEffectComponentLike(handler);
+
+const isFailureComponent = <R>(handler: FailureHandler<R>): handler is FailureComponentHandler<R> =>
+  isEffectComponentLike(handler);
+
+const isPendingStateHandler = (
+  state: MatchState,
+  _handler: PendingHandler<unknown> | SuccessHandler<unknown> | FailureHandler<unknown>,
+): _handler is PendingHandler<unknown> => state === "Pending";
+
+const isSuccessStateHandler = (
+  state: MatchState,
+  _handler: PendingHandler<unknown> | SuccessHandler<unknown> | FailureHandler<unknown>,
+): _handler is SuccessHandler<unknown> => state === "Success";
+
+const isFailureStateHandler = (
+  state: MatchState,
+  _handler: PendingHandler<unknown> | SuccessHandler<unknown> | FailureHandler<unknown>,
+): _handler is FailureHandler<unknown> => state === "Failure";
+
+const renderPending = <A>(
+  handler: PendingHandler<unknown>,
+  payload: PendingPayload<A>,
+): ElementType => {
+  if (isPendingComponent(handler)) {
+    return handler(payload);
+  }
+  if (typeof handler === "function") {
+    return handler(payload);
+  }
+  return handler;
+};
+
+const renderSuccess = <A>(
+  handler: SuccessHandler<unknown>,
+  payload: SuccessPayload<A>,
+): ElementType => {
+  if (isSuccessComponent(handler)) {
+    return handler(payload);
+  }
+  return handler(payload);
+};
+
+const renderFailure = <A, E>(
+  handler: FailureHandler<unknown>,
+  payload: FailurePayload<A, E>,
+): ElementType => {
+  if (isFailureComponent(handler)) {
+    return handler(payload);
+  }
+  return handler(payload);
+};
+
 /**
- * Pattern match on resource state for rendering.
+ * Pipeable matcher for Resource state rendering.
  *
- * Uses Signal.derive for fine-grained updates - component renders once,
- * derived signal updates Element when state changes.
+ * @since 1.0.0
+ */
+export interface ResourceMatcher<
+  A,
+  E,
+  R,
+  HasPending extends boolean,
+  HasSuccess extends boolean,
+  HasFailure extends boolean,
+>
+  extends Pipeable.Pipeable {
+  readonly _tag: "ResourceMatcher";
+  readonly state: Signal.Signal<ResourceState<A, E>>;
+  readonly pending?: PendingHandler<unknown>;
+  readonly success?: SuccessHandler<unknown>;
+  readonly failure?: FailureHandler<unknown>;
+  readonly _R?: R;
+  readonly _hasPending?: HasPending;
+  readonly _hasSuccess?: HasSuccess;
+  readonly _hasFailure?: HasFailure;
+}
+
+const makeMatcher = <
+  A,
+  E,
+  R,
+  HasPending extends boolean,
+  HasSuccess extends boolean,
+  HasFailure extends boolean,
+>(
+  state: Signal.Signal<ResourceState<A, E>>,
+  pending?: PendingHandler<unknown>,
+  success?: SuccessHandler<unknown>,
+  failure?: FailureHandler<unknown>,
+): ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure> => ({
+  _tag: "ResourceMatcher",
+  state,
+  ...(pending === undefined ? {} : { pending }),
+  ...(success === undefined ? {} : { success }),
+  ...(failure === undefined ? {} : { failure }),
+  pipe() {
+    return Pipeable.pipeArguments(this, arguments);
+  },
+});
+
+/**
+ * Start Resource state matching.
  *
  * @example
  * ```tsx
- * return yield* Resource.match(state, {
- *   Pending: () => <Spinner />,
- *   Success: (user, stale) => <UserCard user={user} opacity={stale ? 0.5 : 1} />,
- *   Failure: (error, staleValue) =>
- *     Option.match(staleValue, {
- *       onNone: () => <ErrorView error={error} />,
- *       onSome: (user) => <StaleUserCard user={user} error={error} />
- *     })
- * })
+ * const view = yield* Resource.match(state).pipe(
+ *   Resource.on("Pending", () => <Spinner />),
+ *   Resource.on("Success", ({ value, stale }) => <UserCard user={value} stale={stale} />),
+ *   Resource.on("Failure", ({ error, stale }) => <ErrorView error={error} stale={stale} />),
+ *   Resource.exhaustive,
+ * )
  * ```
  *
  * @since 1.0.0
  */
 export const match = <A, E>(
   state: Signal.Signal<ResourceState<A, E>>,
-  handlers: {
-    readonly Pending: () => ElementType;
-    readonly Success: (value: A, stale: boolean) => ElementType;
-    readonly Failure: (error: E, staleValue: Option.Option<A>) => ElementType;
-  },
-): Effect.Effect<ElementType, never, Scope.Scope> =>
+): ResourceMatcher<A, E, never, false, false, false> => makeMatcher(state);
+
+/**
+ * Register a state handler on a Resource matcher.
+ *
+ * - `Pending` payload: `{ stale: Option.Option<A> }`
+ * - `Success` payload: `{ value: A, stale: boolean }`
+ * - `Failure` payload: `{ error: E, stale: Option.Option<A> }`
+ *
+ * @since 1.0.0
+ */
+export function on<RHandler>(
+  state: "Pending",
+  handler: PendingComponentHandler<RHandler>,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R | RHandler, true, HasSuccess, HasFailure>;
+
+export function on(
+  state: "Pending",
+  handler: PendingFunctionHandler | ElementType,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R, true, HasSuccess, HasFailure>;
+
+export function on<RHandler>(
+  state: "Success",
+  handler: SuccessComponentHandler<RHandler>,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R | RHandler, HasPending, true, HasFailure>;
+
+export function on(
+  state: "Success",
+  handler: SuccessFunctionHandler,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R, HasPending, true, HasFailure>;
+
+export function on<RHandler>(
+  state: "Failure",
+  handler: FailureComponentHandler<RHandler>,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R | RHandler, HasPending, HasSuccess, true>;
+
+export function on(
+  state: "Failure",
+  handler: FailureFunctionHandler,
+): <A, E, R, HasPending extends boolean, HasSuccess extends boolean, HasFailure extends boolean>(
+  self: ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure>,
+) => ResourceMatcher<A, E, R, HasPending, HasSuccess, true>;
+
+export function on(
+  state: MatchState,
+  handler: PendingHandler<unknown> | SuccessHandler<unknown> | FailureHandler<unknown>,
+) {
+  return (
+    self: ResourceMatcher<unknown, unknown, unknown, boolean, boolean, boolean>,
+  ): ResourceMatcher<unknown, unknown, unknown, boolean, boolean, boolean> => {
+    if (isPendingStateHandler(state, handler)) {
+      return makeMatcher(self.state, handler, self.success, self.failure);
+    }
+    if (isSuccessStateHandler(state, handler)) {
+      return makeMatcher(self.state, self.pending, handler, self.failure);
+    }
+    if (isFailureStateHandler(state, handler)) {
+      return makeMatcher(self.state, self.pending, self.success, handler);
+    }
+    return makeMatcher(self.state, self.pending, self.success, self.failure);
+  };
+}
+
+/**
+ * Finalize a Resource matcher into an Element.
+ *
+ * Requires handlers for all states.
+ *
+ * @since 1.0.0
+ */
+export const exhaustive = <A, E, R>(
+  self: ResourceMatcher<A, E, R, true, true, true>,
+): Effect.Effect<ElementType, never, Scope.Scope | R> =>
   Effect.gen(function* () {
-    // Derive a Signal<Element> from the state signal
-    const elementSignal = yield* Signal.derive(state, (s): ElementType => {
+    const pending = self.pending;
+    const success = self.success;
+    const failure = self.failure;
+
+    if (pending === undefined || success === undefined || failure === undefined) {
+      return Element.Text({ content: "Resource.match unavailable" });
+    }
+
+    let staleForPending: Option.Option<A> = Option.none();
+
+    const elementSignal = yield* Signal.derive(self.state, (s): ElementType => {
       switch (s._tag) {
         case "Pending":
-          return handlers.Pending();
-        case "Success":
-          return handlers.Success(s.value, s.stale);
-        case "Failure":
-          return handlers.Failure(s.error, s.staleValue);
+          return renderPending(pending, { stale: staleForPending });
+        case "Success": {
+          staleForPending = Option.some(s.value);
+          return renderSuccess(success, { value: s.value, stale: s.stale });
+        }
+        case "Failure": {
+          staleForPending = s.staleValue;
+          return renderFailure(failure, { error: s.error, stale: s.staleValue });
+        }
       }
     });
 
-    // Return SignalElement for fine-grained updates
     return Element.SignalElement({ signal: elementSignal, onSwap: undefined });
   }).pipe(Effect.withSpan("Resource.match"));
 

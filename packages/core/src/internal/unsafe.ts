@@ -203,8 +203,9 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
  * SAFETY: ServiceMap<A | B> contains all services for both A and B.
  * Narrowing to ServiceMap<A> is sound because the services are still there.
  */
-export const unsafeNarrowContext = <R, S>(ctx: ServiceMap.ServiceMap<S>): ServiceMap.ServiceMap<R> =>
-  ctx as unknown as ServiceMap.ServiceMap<R>;
+export const unsafeNarrowContext = <R, S>(
+  ctx: ServiceMap.ServiceMap<S>,
+): ServiceMap.ServiceMap<R> => ctx as unknown as ServiceMap.ServiceMap<R>;
 
 /**
  * Widen a specific service map to unknown for untyped boundaries.

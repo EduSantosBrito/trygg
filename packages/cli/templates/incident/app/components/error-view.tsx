@@ -25,7 +25,7 @@ const getErrorInfo = (error: unknown): Effect.Effect<{ title: string; message: s
 export const ErrorView = Component.gen(function* (
   Props: ComponentProps<{
     error: unknown;
-    onRetry?: Effect.Effect<void, never, unknown>;
+    onRetry?: () => Effect.Effect<void, never, unknown>;
   }>,
 ) {
   const { error, onRetry } = yield* Props;
@@ -37,7 +37,7 @@ export const ErrorView = Component.gen(function* (
       <p className="error-view__message">{message}</p>
       {onRetry && (
         <div className="error-view__actions">
-          <button type="button" className="btn btn--secondary btn--sm" onClick={() => onRetry}>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={onRetry}>
             Retry
           </button>
         </div>

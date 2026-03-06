@@ -630,7 +630,10 @@ describe("Signal.derive", () => {
       const source = yield* Signal.make(2);
       const renderScope = yield* Scope.make();
 
-      const derived = yield* withRenderScope(Signal.derive(source, (n) => n * 4), renderScope);
+      const derived = yield* withRenderScope(
+        Signal.derive(source, (n) => n * 4),
+        renderScope,
+      );
 
       const value = yield* Signal.get(derived);
       assert.strictEqual(value, 8);

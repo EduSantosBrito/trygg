@@ -81,17 +81,7 @@ export const componentRenderCounter: Metric.Counter<number> = Metric.counter(
  * @since 1.0.0
  */
 export const renderDurationBoundaries: ReadonlyArray<number> = Metric.boundariesFromIterable([
-  0,
-  1,
-  2,
-  5,
-  10,
-  25,
-  50,
-  100,
-  250,
-  500,
-  1000,
+  0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000,
 ]);
 
 /**
@@ -284,11 +274,11 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
   const currentSnapshot = yield* snapshot;
 
   for (const sink of _sinks.values()) {
-      yield* sink.export(currentSnapshot).pipe(
-        Effect.catchCause((cause) =>
-          Effect.sync(() => {
-            metricsLogger.error(`Metrics sink "${sink.name}" error:`, cause);
-          }),
+    yield* sink.export(currentSnapshot).pipe(
+      Effect.catchCause((cause) =>
+        Effect.sync(() => {
+          metricsLogger.error(`Metrics sink "${sink.name}" error:`, cause);
+        }),
       ),
     );
   }

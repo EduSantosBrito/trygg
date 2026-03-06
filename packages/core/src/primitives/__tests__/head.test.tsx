@@ -182,7 +182,9 @@ describe("Browser Head", () => {
       const parentTitle = document.createElement("title");
       parentTitle.textContent = "App";
       const parentScope = yield* Scope.make();
-      yield* head.mount("title", parentTitle, Option.some("title")).pipe(Scope.provide(parentScope));
+      yield* head
+        .mount("title", parentTitle, Option.some("title"))
+        .pipe(Scope.provide(parentScope));
 
       assert.isTrue(document.head.contains(parentTitle));
 
@@ -683,7 +685,10 @@ describe("Document-Level Elements", () => {
       });
 
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
+      yield* render(<App />).pipe(
+        Effect.provideService(IsDocumentMount, true),
+        Scope.provide(scope),
+      );
 
       assert.strictEqual(document.documentElement.getAttribute("lang"), "ja");
 
@@ -745,7 +750,10 @@ describe("Document-Level Elements", () => {
       });
 
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
+      yield* render(<App />).pipe(
+        Effect.provideService(IsDocumentMount, true),
+        Scope.provide(scope),
+      );
 
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
 
@@ -771,7 +779,10 @@ describe("Document-Level Elements", () => {
       });
 
       const scope = yield* Scope.make();
-      yield* render(<App />).pipe(Effect.provideService(IsDocumentMount, true), Scope.provide(scope));
+      yield* render(<App />).pipe(
+        Effect.provideService(IsDocumentMount, true),
+        Scope.provide(scope),
+      );
 
       assert.strictEqual(document.documentElement.getAttribute("data-theme"), "dark");
 

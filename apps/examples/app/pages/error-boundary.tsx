@@ -22,7 +22,9 @@ const ErrorBoundaryPage = Component.gen(function* () {
   const triggerError = (type: "network" | "validation" | "unknown" | "none") =>
     Signal.set(errorType, type);
 
-  const GenericErrorDisplay = Component.gen(function* (Props: ComponentProps<{ cause: Cause.Cause<unknown> }>) {
+  const GenericErrorDisplay = Component.gen(function* (
+    Props: ComponentProps<{ cause: Cause.Cause<unknown> }>,
+  ) {
     const { cause } = yield* Props;
     return (
       <div className="p-4 rounded bg-red-100 text-red-800">

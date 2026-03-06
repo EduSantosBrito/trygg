@@ -18,11 +18,13 @@ import { Signal, Component, type ComponentProps } from "trygg";
 // Services — three layers of context
 // =============================================================================
 
-class Locale extends ServiceMap.Service<Locale,
+class Locale extends ServiceMap.Service<
+  Locale,
   { readonly lang: string; readonly greeting: string }
 >()("demo/Locale") {}
 
-class CardStyle extends ServiceMap.Service<CardStyle,
+class CardStyle extends ServiceMap.Service<
+  CardStyle,
   { readonly bg: string; readonly border: string; readonly accent: string }
 >()("demo/CardStyle") {}
 
@@ -134,8 +136,8 @@ const NestedProvidePage = Component.gen(function* () {
     <div>
       <h2 className="m-0 mb-1 text-xl font-semibold">Nested Provide</h2>
       <p className="text-gray-500 m-0 mb-6 text-sm">
-        Three layers of services with dynamic layer switching. Locale swaps at runtime via signal
-        — each click rebuilds the component tree with a new layer. The "Greet from handler" button
+        Three layers of services with dynamic layer switching. Locale swaps at runtime via signal —
+        each click rebuilds the component tree with a new layer. The "Greet from handler" button
         accesses Locale at click time via Effect.gen, proving the ancestor context propagates
         through nested Provide elements into event handlers.
       </p>

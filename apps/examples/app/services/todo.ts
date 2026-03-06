@@ -1,6 +1,7 @@
 import * as ServiceMap from "effect/ServiceMap";
 
-export class TodoTheme extends ServiceMap.Service<TodoTheme,
+export class TodoTheme extends ServiceMap.Service<
+  TodoTheme,
   {
     readonly completedColor: string;
     readonly activeColor: string;

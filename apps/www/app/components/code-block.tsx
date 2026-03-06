@@ -11,8 +11,7 @@ import type { Element as HastElement, Text as HastText, RootContent, Root as Has
 type HastNode = HastElement | HastText;
 
 // Type guards for HAST nodes
-const isHastElement = (node: RootContent): node is HastElement =>
-  node.type === "element";
+const isHastElement = (node: RootContent): node is HastElement => node.type === "element";
 
 const isHastNode = (node: RootContent): node is HastNode =>
   node.type === "element" || node.type === "text";
@@ -137,7 +136,10 @@ export const CodeBlock = Component.gen(function* (
           )}
         </div>
       )}
-      <pre className="m-0 py-3 lg:py-5 overflow-x-auto leading-relaxed text-xs lg:text-sm" tabIndex={0}>
+      <pre
+        className="m-0 py-3 lg:py-5 overflow-x-auto leading-relaxed text-xs lg:text-sm"
+        tabIndex={0}
+      >
         <code>
           {lines.map((line: HighlightedLine) => (
             <div key={line.lineNumber} className="flex px-3 lg:px-5">

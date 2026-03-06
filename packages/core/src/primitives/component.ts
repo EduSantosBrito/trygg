@@ -94,9 +94,7 @@ const effectComponentTag = "EffectComponent" as const;
  * This prevents unnecessary layer accumulation while preserving last-write-wins semantics
  * @internal
  */
-const deduplicateLayers = (
-  layers: ReadonlyArray<Layer.Any>,
-): ReadonlyArray<Layer.Any> => {
+const deduplicateLayers = (layers: ReadonlyArray<Layer.Any>): ReadonlyArray<Layer.Any> => {
   // For now, we keep all layers and let Layer.mergeAll handle precedence
   // In a more sophisticated implementation, we could track service tags and deduplicate
   // But Layer.mergeAll already handles "last layer wins" correctly
@@ -215,7 +213,9 @@ export declare namespace Component {
   export interface Type<Props = never, _E = never, _R = never> {
     readonly _tag: "EffectComponent";
     readonly _layers: ReadonlyArray<Layer.Any>;
-    readonly _runFn?: (props: ComponentCallProps<Props>) => Effect.Effect<Element, unknown, unknown>;
+    readonly _runFn?: (
+      props: ComponentCallProps<Props>,
+    ) => Effect.Effect<Element, unknown, unknown>;
     readonly _displayName?: string;
     (props: ComponentCallProps<Props>): ComponentElementWithRequirements<_R>;
 
@@ -302,15 +302,13 @@ type ExtractContext<Eff> = [Eff] extends [never]
  * Create component without props from generator function.
  * @internal
  */
-function genNoProps<
-  Eff extends ComponentYieldable,
-  AEff extends ComponentResult,
->(
+function genNoProps<Eff extends ComponentYieldable, AEff extends ComponentResult>(
   f: (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
 ): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>> {
   type E = ExtractError<Eff>;
 
-  const runFn = (): Effect.Effect<Element, E, unknown> => normalizeResult(Effect.gen(() => f(undefined)));
+  const runFn = (): Effect.Effect<Element, E, unknown> =>
+    normalizeResult(Effect.gen(() => f(undefined)));
 
   const componentFn = (_props: {}): Element => componentElement(runFn);
 
@@ -345,7 +343,11 @@ function genWithProps<P extends object>(): <
 
     const componentFn = (props: P): Element => componentElement(() => runFn(props));
 
-    return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(componentFn, [], runFn);
+    return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(
+      componentFn,
+      [],
+      runFn,
+    );
   };
 }
 
@@ -400,11 +402,7 @@ type Gen = {
   ): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>>;
   <
     P extends object = {},
-    Eff extends ComponentYieldable = EffectYieldable<
-      unknown,
-      unknown,
-      unknown
-    >,
+    Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
   >(
     f: (
       Props: ServiceMap.Service<PropsMarker<P>, P>,
@@ -412,11 +410,7 @@ type Gen = {
     ) => Generator<Eff, ComponentResult, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
   <P extends object = {}>(): <
-    Eff extends ComponentYieldable = EffectYieldable<
-      unknown,
-      unknown,
-      unknown
-    >,
+    Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
   >(
     f: (
       Props: ServiceMap.Service<PropsMarker<P>, P>,

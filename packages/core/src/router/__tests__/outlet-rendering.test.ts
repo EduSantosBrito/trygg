@@ -34,7 +34,8 @@ const FiberRef = {
     Effect.withFiber((fiber) =>
       Effect.sync(() => {
         fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      })),
+      }),
+    ),
 };
 
 // =============================================================================

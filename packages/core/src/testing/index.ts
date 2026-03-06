@@ -279,8 +279,10 @@ const renderElementImpl = Effect.fn("renderElement")(function* (element: Element
   } satisfies TestRenderResult;
 });
 
-export const renderElement: (element: Element) => Effect.Effect<TestRenderResult, unknown, Scope.Scope> =
-  (element) => unsafeEraseR(renderElementImpl(element));
+export const renderElement: (
+  element: Element,
+) => Effect.Effect<TestRenderResult, unknown, Scope.Scope> = (element) =>
+  unsafeEraseR(renderElementImpl(element));
 
 /**
  * Test layer that provides the browser renderer

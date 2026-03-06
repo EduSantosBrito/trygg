@@ -199,9 +199,9 @@ describe("ErrorBoundary basic functionality", () => {
 
   it.effect("unwraps symbol-key props", () =>
     Effect.gen(function* () {
-        const SymbolKey = Symbol.for("error-boundary-symbol");
+      const SymbolKey = Symbol.for("error-boundary-symbol");
 
-        const SymbolComponent = Component.gen(function* (
+      const SymbolComponent = Component.gen(function* (
         Props: Component.ComponentProps<{ [SymbolKey]: Signal.Signal<string> }>,
       ) {
         const props = yield* Props;
