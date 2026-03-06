@@ -24,12 +24,11 @@ import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
 
 /**
- * Type guard to check if a value is an EventHandler (function or Effect)
+ * Type guard to check if a value is an EventHandler function
  * This asserts the type at the boundary where we iterate over props
  * @internal
  */
-const isEventHandler = (value: unknown): value is EventHandler =>
-  typeof value === "function" || Effect.isEffect(value);
+const isEventHandler = (value: unknown): value is EventHandler => typeof value === "function";
 
 /**
  * Type guard for Effect values in props (e.g. from cx()).
@@ -43,14 +42,10 @@ const emptyContext = ServiceMap.empty();
 
 const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
+  _renderContext: RenderContext,
   context: ServiceMap.ServiceMap<unknown> | null,
 ): Effect.Effect<A, E, unknown> =>
-  context === null
-    ? effect
-    : Effect.gen(function* () {
-        const services = yield* Effect.services<unknown>();
-        return yield* unsafeEraseR(Effect.provide(effect, ServiceMap.merge(context, services)));
-      });
+  context === null ? effect : Effect.provideServices(effect, context);
 
 /**
  * Omit a single key from a props object.
@@ -87,24 +82,37 @@ export class ComponentAnchorError extends Data.TaggedError("ComponentAnchorError
   readonly message: string;
 }> {}
 
+export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHandlerError")<{
+  readonly prop: string;
+}> {
+  override get message() {
+    return `Invalid event handler for ${this.prop}: expected function returning Effect`;
+  }
+}
+
 /**
  * Render context passed through the rendering tree
  * @since 1.0.0
  */
 export interface RenderContext {
-  readonly runtime: unknown;
+  readonly services: ServiceMap.ServiceMap<unknown>;
   readonly scope: Scope.Scope;
 }
 
-const Runtime = {
-  runFork:
-    (_runtime: unknown) =>
-    <A, E>(effect: Effect.Effect<A, E, unknown>) =>
-      Effect.runFork(unsafeEraseR(effect)),
-  runSync:
-    (_runtime: unknown) =>
-    <A, E>(effect: Effect.Effect<A, E, unknown>) =>
-      Effect.runSync(unsafeEraseR(effect)),
+const mergeRenderServices = (
+  renderContext: RenderContext,
+  context: ServiceMap.ServiceMap<unknown> | null,
+): ServiceMap.ServiceMap<unknown> =>
+  context === null ? renderContext.services : ServiceMap.merge(context, renderContext.services);
+
+const runForkInRenderContext = <A, E>(
+  effect: Effect.Effect<A, E, unknown>,
+  renderContext: RenderContext,
+  context: ServiceMap.ServiceMap<unknown> | null,
+): void => {
+  Effect.runForkWith(mergeRenderServices(renderContext, context))(
+    effect.pipe(Scope.provide(renderContext.scope)),
+  );
 };
 
 const FiberRef = {
@@ -135,7 +143,7 @@ export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
  */
 export interface RenderResult {
   readonly node: Node;
-  readonly cleanup: Effect.Effect<void>;
+  readonly cleanup: Effect.Effect<void, unknown, unknown>;
 }
 
 /**
@@ -262,25 +270,25 @@ const applyPropValue = (node: HTMLElement, key: string, value: unknown): void =>
 const applyProps = Effect.fn("applyProps")(function* (
   node: HTMLElement,
   props: ElementProps,
-  runtime: unknown,
+  renderContext: RenderContext,
   context: ServiceMap.ServiceMap<unknown> | null,
 ) {
-  const cleanups: Array<() => void> = [];
+  const cleanups: Array<Effect.Effect<void>> = [];
 
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined) continue;
 
-    if (key.startsWith("on") && isEventHandler(value)) {
-      // Event handler: wrap in runtime execution with provided context
+    if (key.startsWith("on")) {
+      if (!isEventHandler(value)) {
+        return yield* new InvalidEventHandlerError({ prop: key });
+      }
+
       const eventName = key.slice(2).toLowerCase();
-      const handler = value;
       const listener = (event: Event) => {
-        // Support both function handlers and plain Effects
-        const effect = typeof handler === "function" ? handler(event) : handler;
-        Runtime.runFork(runtime)(context !== null ? Effect.provide(effect, context) : effect);
+        runForkInRenderContext(value(event), renderContext, context);
       };
       node.addEventListener(eventName, listener);
-      cleanups.push(() => node.removeEventListener(eventName, listener));
+      cleanups.push(Effect.sync(() => node.removeEventListener(eventName, listener)));
     } else if (Signal.isSignal(value)) {
       // Signal prop: fine-grained reactivity!
       // Read initial value and subscribe for updates
@@ -310,9 +318,12 @@ const applyProps = Effect.fn("applyProps")(function* (
           applyPropValue(node, key, newValue);
         }),
       );
-      // unsubscribe is an Effect, wrap in sync runner for cleanup array
-      cleanups.push(() => Runtime.runSync(runtime)(unsubscribe));
+      cleanups.push(unsubscribe);
     } else if (isEffectProp(value)) {
+      if (key.startsWith("on")) {
+        return yield* new InvalidEventHandlerError({ prop: key });
+      }
+
       // Effect prop: resolve the Effect, then handle result as Signal or static
       const resolved = yield* value;
       if (Signal.isSignal(resolved)) {
@@ -326,7 +337,7 @@ const applyProps = Effect.fn("applyProps")(function* (
             applyPropValue(node, key, newValue);
           }),
         );
-        cleanups.push(() => Runtime.runSync(runtime)(unsubscribe));
+        cleanups.push(unsubscribe);
       } else {
         // Resolved to a static value
         applyPropValue(node, key, resolved);
@@ -351,7 +362,7 @@ const renderDocumentElement = (
   props: ElementProps,
   children: ReadonlyArray<Element>,
   _parent: Node,
-  runtime: unknown,
+  renderContext: RenderContext,
   context: ServiceMap.ServiceMap<unknown> | null,
   options: RenderOptions,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
@@ -377,7 +388,7 @@ const renderDocumentElement = (
 
     // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
     const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
-    const signalCleanups: Array<() => void> = [];
+    const signalCleanups: Array<Effect.Effect<void>> = [];
     if (tag !== "head") {
       for (const key of Object.keys(domProps)) {
         if (key === "children" || key === "key") continue;
@@ -411,7 +422,7 @@ const renderDocumentElement = (
               applyPropValue(targetNode, key, newValue);
             }),
           );
-          signalCleanups.push(() => Runtime.runSync(runtime)(unsubscribe));
+          signalCleanups.push(unsubscribe);
         } else if (typeof value === "string") {
           const prev = targetNode.getAttribute(attrName);
           targetNode.setAttribute(attrName, value);
@@ -423,7 +434,7 @@ const renderDocumentElement = (
     // Render children into the target node
     const childResults: Array<RenderResult> = [];
     for (const child of children) {
-      const result = yield* renderElement(child, renderTarget, runtime, context, options);
+      const result = yield* renderElement(child, renderTarget, renderContext, context, options);
       childResults.push(result);
     }
 
@@ -435,7 +446,7 @@ const renderDocumentElement = (
       node: anchor,
       cleanup: Effect.gen(function* () {
         for (const cleanup of signalCleanups) {
-          cleanup();
+          yield* cleanup;
         }
         for (const child of childResults) {
           yield* child.cleanup;
@@ -460,7 +471,7 @@ const renderDocumentElement = (
 const renderElement = (
   element: Element,
   parent: Node,
-  runtime: unknown,
+  runtime: RenderContext,
   context: ServiceMap.ServiceMap<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
@@ -529,7 +540,7 @@ const renderElement = (
         const renderValue = (value: unknown): Element =>
           isElement(value) ? value : Element.Text({ content: String(value) });
 
-        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
           if (currentResult !== null) {
             yield* currentResult.cleanup;
             currentResult = null;
@@ -545,10 +556,10 @@ const renderElement = (
           value: unknown,
         ) => Effect.Effect<{ result: RenderResult; scope: Scope.Closeable }, unknown, unknown> =
           Effect.fnUntraced(function* (value: unknown) {
-            const scope = yield* Scope.make();
+            const scope = yield* Scope.fork(yield* Effect.scope);
             const element = renderValue(value);
             const result = yield* renderElement(element, parent, runtime, context, options).pipe(
-              Effect.provideService(Scope.Scope, scope),
+              Scope.provide(scope),
               Effect.onError(() => Scope.close(scope, Exit.void)),
             );
             return { result, scope };
@@ -576,14 +587,14 @@ const renderElement = (
             // Increment version to invalidate any in-flight renders
             const myVersion = ++swapVersion;
 
-            Runtime.runFork(runtime)(
+            runForkInRenderContext(
               Effect.gen(function* () {
                 const newValue = yield* Signal.get(signal);
 
                 // Render into a temporary off-DOM fragment to prevent
                 // content from becoming visible before version check
                 const tempFragment = document.createDocumentFragment();
-                const scope = yield* Scope.make();
+                const scope = yield* Scope.fork(yield* Effect.scope);
                 const element = renderValue(newValue);
                 const result = yield* renderElement(
                   element,
@@ -592,7 +603,7 @@ const renderElement = (
                   context,
                   options,
                 ).pipe(
-                  Effect.provideService(Scope.Scope, scope),
+                  Scope.provide(scope),
                   Effect.onError(() => Scope.close(scope, Exit.void)),
                 );
 
@@ -643,6 +654,8 @@ const renderElement = (
                   }),
                 ),
               ),
+              runtime,
+              context,
             );
           }),
         );
@@ -732,7 +745,7 @@ const renderElement = (
                 yield* child.cleanup;
               }
               for (const cleanup of propCleanups) {
-                cleanup();
+                yield* cleanup;
               }
               anchor.remove();
             }),
@@ -751,7 +764,7 @@ const renderElement = (
             }
             // Clean up props (event listeners)
             for (const cleanup of propCleanups) {
-              cleanup();
+              yield* cleanup;
             }
             // Remove node
             node.remove();
@@ -764,7 +777,7 @@ const renderElement = (
       Effect.gen(function* () {
         // Create the effect from the thunk
         const effect = run();
-        const effectWithContext = provideRenderContext(effect, context);
+        const effectWithContext = provideRenderContext(effect, runtime, context);
 
         // Create a placeholder comment as anchor for this component
         const anchor = document.createComment("component");
@@ -779,7 +792,7 @@ const renderElement = (
         let renderCount = 0;
 
         // Component lifetime scope (persists across re-renders)
-        const componentScope = yield* Scope.make();
+        const componentScope = yield* Scope.fork(yield* Effect.scope);
 
         // Create render phase for this component (persists across re-renders)
         const renderPhase = yield* Signal.makeRenderPhase;
@@ -787,9 +800,9 @@ const renderElement = (
         const rendererScope = yield* Effect.scope;
 
         // Track active subscription cleanups (each is an Effect that unsubscribes)
-        let subscriptionCleanups: Array<Effect.Effect<void>> = [];
+        let subscriptionCleanups: Array<Effect.Effect<void, unknown, unknown>> = [];
 
-        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
           if (currentResult !== null) {
             yield* currentResult.cleanup;
             currentResult = null;
@@ -806,20 +819,19 @@ const renderElement = (
           unknown,
           unknown
         > = Effect.fnUntraced(function* () {
-          const renderScope = yield* Scope.make();
+          const renderScope = yield* Scope.fork(componentScope);
           const element = yield* Effect.provideService(
             Effect.provideService(
-              Effect.provideService(
-                Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
-                Signal.CurrentComponentScope,
-                componentScope,
-              ),
-              Scope.Scope,
+              Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
+              Signal.CurrentComponentScope,
               componentScope,
             ),
             Signal.CurrentRenderScope,
             renderScope,
-          ).pipe(Effect.onError(() => Scope.close(renderScope, Exit.void)));
+          ).pipe(
+            Scope.provide(componentScope),
+            Effect.onError(() => Scope.close(renderScope, Exit.void)),
+          );
           return { element, scope: renderScope };
         });
 
@@ -958,10 +970,10 @@ const renderElement = (
                 pendingRerender = false;
               }),
             ),
-            Effect.provideService(Scope.Scope, rendererScope),
+            Scope.provide(rendererScope),
           );
 
-          Runtime.runFork(runtime)(rerenderEffect);
+          runForkInRenderContext(rerenderEffect, runtime, context);
         };
 
         // Schedule a re-render via microtask
@@ -982,25 +994,28 @@ const renderElement = (
 
         // Function to subscribe to accessed signals
         // Returns Effects for unsubscribing
-        const subscribeToSignals: (signals: Set<Signal.Signal<unknown>>) => Effect.Effect<void> =
-          Effect.fnUntraced(function* (signals: Set<Signal.Signal<unknown>>) {
-            // Clear old subscriptions
-            const oldCleanups = subscriptionCleanups;
-            for (const cleanup of oldCleanups) {
-              yield* cleanup;
-            }
-            subscriptionCleanups = [];
+        const subscribeToSignals: (
+          signals: Set<Signal.Signal<unknown>>,
+        ) => Effect.Effect<void, unknown, unknown> = Effect.fnUntraced(function* (
+          signals: Set<Signal.Signal<unknown>>,
+        ) {
+          // Clear old subscriptions
+          const oldCleanups = subscriptionCleanups;
+          for (const cleanup of oldCleanups) {
+            yield* cleanup;
+          }
+          subscriptionCleanups = [];
 
-            if (signals.size === 0) return;
+          if (signals.size === 0) return;
 
-            for (const signal of signals) {
-              // Subscribe with Effect-based listener that triggers sync rerender
-              const unsubscribe = yield* Signal.subscribe(signal, () =>
-                Effect.sync(scheduleRerender),
-              );
-              subscriptionCleanups.push(unsubscribe);
-            }
-          });
+          for (const signal of signals) {
+            // Subscribe with Effect-based listener that triggers sync rerender
+            const unsubscribe = yield* Signal.subscribe(signal, () =>
+              Effect.sync(scheduleRerender),
+            );
+            subscriptionCleanups.push(unsubscribe);
+          }
+        });
 
         // Execute the component effect with render phase context and track duration
         const renderStart = performance.now();
@@ -1236,7 +1251,7 @@ const renderElement = (
           }
 
           // Execute render function with render phase context and parent context
-          const renderEffect = provideRenderContext(renderFn(item, index), context);
+          const renderEffect = provideRenderContext(renderFn(item, index), runtime, context);
 
           const element = yield* Effect.provideService(
             renderEffect,
@@ -1337,7 +1352,7 @@ const renderElement = (
 
           isUpdating = true;
 
-          Runtime.runFork(runtime)(
+          runForkInRenderContext(
             Effect.scoped(
               Effect.gen(function* () {
                 yield* Debug.log({
@@ -1482,7 +1497,7 @@ const renderElement = (
                         }
                         currentState.isRerendering = true;
 
-                        Runtime.runFork(runtime)(
+                        runForkInRenderContext(
                           Effect.scoped(
                             Effect.gen(function* () {
                               // Re-render with same phase (preserves signals).
@@ -1562,6 +1577,8 @@ const renderElement = (
                               );
                             }),
                           ),
+                          runtime,
+                          context,
                         );
                       });
 
@@ -1716,6 +1733,8 @@ const renderElement = (
                 }),
               ),
             ),
+            runtime,
+            context,
           );
         }
 
@@ -1763,7 +1782,7 @@ const renderElement = (
         const cleanupRendered = (
           result: RenderResult | null,
           scope: Scope.Closeable | null,
-        ): Effect.Effect<void> =>
+        ): Effect.Effect<void, unknown, unknown> =>
           Effect.gen(function* () {
             if (result !== null) {
               yield* result.cleanup;
@@ -1773,7 +1792,7 @@ const renderElement = (
             }
           });
 
-        const cleanupCurrent: Effect.Effect<void> = Effect.gen(function* () {
+        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
           const result = currentResult;
           const scope = currentScope;
           currentResult = null;
@@ -1821,7 +1840,7 @@ const renderElement = (
               return null;
             }
 
-            const fallbackScope = yield* Scope.make();
+            const fallbackScope = yield* Scope.fork(yield* Effect.scope);
             const fallbackResult = yield* renderElement(
               fallbackElement,
               renderParent,
@@ -1829,7 +1848,7 @@ const renderElement = (
               context,
               defaultRenderOptions,
             ).pipe(
-              Effect.provideService(Scope.Scope, fallbackScope),
+              Scope.provide(fallbackScope),
               Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
             );
 
@@ -1847,7 +1866,7 @@ const renderElement = (
           if (isUnmounted || hasErrored) return;
           hasErrored = true;
 
-          Runtime.runFork(runtime)(
+          runForkInRenderContext(
             Effect.gen(function* () {
               yield* Debug.log({
                 event: "render.errorboundary.caught",
@@ -1888,6 +1907,8 @@ const renderElement = (
                 }),
               ),
             ),
+            runtime,
+            context,
           );
         };
 
@@ -1927,7 +1948,7 @@ const renderElement = (
         });
 
         // Render child with error handler in options - catch BOTH initial and re-render errors
-        const childScope = yield* Scope.make();
+        const childScope = yield* Scope.fork(yield* Effect.scope);
         const childRenderResult = yield* renderElement(
           child,
           parent,
@@ -1935,7 +1956,7 @@ const renderElement = (
           context,
           childOptions,
         ).pipe(
-          Effect.provideService(Scope.Scope, childScope),
+          Scope.provide(childScope),
           Effect.onError(() => Scope.close(childScope, Exit.void)),
           Effect.map((result) => ({ success: true as const, result, scope: childScope })),
           Effect.catchCause((cause) =>
@@ -1994,16 +2015,17 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       container: HTMLElement,
       element: Element,
     ) {
-      const runtime = {};
       const scope = yield* Effect.scope;
-      const services = yield* Effect.services<unknown>();
-
-      // Set up render context
-      yield* FiberRef.set(CurrentRenderContext, { runtime, scope });
 
       // Create Head service for head element hoisting
       const headService = yield* Head.makeBrowserHead();
       yield* FiberRef.set(Head.CurrentHead, headService);
+
+      const services = yield* Effect.services<unknown>();
+      const renderContext: RenderContext = { services, scope };
+
+      // Set up render context after renderer-local FiberRefs are installed
+      yield* FiberRef.set(CurrentRenderContext, renderContext);
 
       // Create an anchor comment to mark the mount point
       // This replaces innerHTML="" clearing - we only manage our own nodes
@@ -2013,24 +2035,31 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       // Render the element tree - content is inserted before the anchor
       // by the renderElement function (for Component, Fragment, etc.)
       // For elements that append directly, they go after existing content
-      const result = yield* renderElement(element, container, runtime, services);
+      const result = yield* renderElement(element, container, renderContext, null);
 
       // Move rendered content before the anchor for consistent ordering
       container.insertBefore(result.node, mountAnchor);
 
       // Register cleanup on scope finalization using acquireRelease pattern
       yield* Effect.addFinalizer(() =>
-        Effect.gen(function* () {
-          yield* result.cleanup;
-          mountAnchor.remove();
-        }),
+        Effect.catchCause(
+          Effect.provideServices(
+            Effect.gen(function* () {
+              yield* result.cleanup;
+              mountAnchor.remove();
+            }),
+            services,
+          ),
+          () => Effect.void,
+        ),
       );
     });
 
     const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
-      const runtime = {};
+      const scope = yield* Effect.scope;
       const services = yield* Effect.services<unknown>();
-      return yield* renderElement(element, parent, runtime, services);
+      const renderContext: RenderContext = { services, scope };
+      return yield* renderElement(element, parent, renderContext, null);
     });
 
     return Renderer.of({ mount: mountElement, render: renderToParent });

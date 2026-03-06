@@ -106,14 +106,14 @@ const PrefetchPage = Component.gen(function* () {
       <div className="mt-12 p-4 bg-amber-50 border border-amber-200 rounded text-center text-amber-800">
         There's another one! Scroll down.
       </div>
-      <div style={{ height: "100vh" }} />
+      <div style={{ height: "220vh" }} />
       <div className="p-5 bg-white rounded-lg border border-gray-200">
         <div className="flex items-baseline gap-3 mb-2">
           <h2 className="m-0 text-lg text-blue-600">Viewport (below fold)</h2>
           <code className="text-xs text-gray-400">prefetch="viewport"</code>
         </div>
         <p className="m-0 mb-2 text-sm text-gray-500">
-          This link was below the fold. Prefetch fires only when you scroll it into view.
+          This link starts well below the fold. Prefetch fires only when you scroll it near view.
         </p>
         <p className="m-0 mb-3 text-xs text-gray-400 italic">
           Console shows router.prefetch.start when this section becomes visible.

@@ -22,29 +22,33 @@ export const isEffect = (value: unknown): value is Effect.Effect<Element, unknow
 export type ElementKey = string | number;
 
 /**
- * Event handler type - either a function that receives the event and returns an Effect,
- * or a plain Effect (when you don't need the event).
+ * Event handler type - a function that receives the event and returns an Effect.
  *
  * @example
  * ```tsx
  * // Function form - when you need the event
  * <input onInput={(e) => handleInput(e.target.value)} />
  *
- * // Effect form - when you don't need the event
- * <button onClick={submitForm}>Submit</button>
- * <button onClick={reset}>Retry</button>
+ * // Thunk form - when you don't need the event
+ * <button onClick={() => submitForm}>Submit</button>
+ * <button onClick={() => reset}>Retry</button>
  * ```
  *
  * @since 1.0.0
  */
-export type EventHandler<A = void, E = never, R = never> =
-  | ((event: Event) => Effect.Effect<A, E, R>)
-  | Effect.Effect<A, E, R>;
+export type EventHandler<A = void, E = never, R = never> = (event: Event) => Effect.Effect<A, E, R>;
+
+export class InvalidJsxChildError extends Data.TaggedError("InvalidJsxChildError")<{
+  readonly reason: "effect";
+}> {
+  override get message() {
+    return "Invalid JSX child: raw Effect values are not allowed; wrap in Component.gen";
+  }
+}
 
 /**
- * A Signal of any type (for JSX children).
- * Uses `any` to work around Signal's type invariance - Signal<T> is not
- * assignable to Signal<unknown> because the type parameter is invariant.
+ * A Signal of arbitrary type (for JSX children).
+ * Internal existential wrapper around Signal invariance.
  * @internal
  */
 type AnySignal = Signal<any>;
@@ -247,7 +251,7 @@ export type Element = Data.TaggedEnum<{
    * ```
    */
   readonly SignalElement: {
-    readonly signal: Signal<Element>;
+    readonly signal: AnySignal;
     /**
      * Optional Effect invoked synchronously after the renderer's `insertBefore`
      * during a DOM swap. Used by the router outlet to synchronize scroll
@@ -448,8 +452,8 @@ export const signalText = (signal: Signal<unknown>): Element => Element.SignalTe
  * Updates DOM directly when signal changes without component re-render.
  * @since 1.0.0
  */
-export const signalElement = (
-  signal: Signal<Element>,
+export const signalElement = <A>(
+  signal: Signal<A>,
   options?: { readonly onSwap?: Effect.Effect<void> },
 ): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
 
@@ -475,7 +479,7 @@ export const normalizeChild = (child: unknown): Element => {
     const currentValue = peekSync(child);
     if (isElement(currentValue)) {
       // Signal<Element> - use SignalElement for DOM swapping
-      return signalElement(child as Signal<Element>);
+      return signalElement(child);
     }
     // Signal<primitive> - use SignalText for text node updates
     return signalText(child);
@@ -484,9 +488,7 @@ export const normalizeChild = (child: unknown): Element => {
     return child;
   }
   if (isEffect(child)) {
-    // Effect child - wrap as Component element
-    // Wrap in thunk to defer execution
-    return componentElement(() => child);
+    return componentElement(() => Effect.fail(new InvalidJsxChildError({ reason: "effect" })));
   }
 
   // Unknown child type - silently ignore

@@ -6,29 +6,6 @@
 import { Schema } from "effect";
 import { Route, Routes } from "trygg/router";
 
-// Pages
-import HomePage from "./pages/home";
-import CounterPage from "./pages/counter";
-import SuspendPage from "./pages/suspend";
-import TodoPage from "./pages/todo";
-import ThemePage from "./pages/theme";
-import FormPage from "./pages/form";
-import ErrorBoundaryPage from "./pages/error-boundary";
-import ErrorDemoPage from "./pages/error-demo";
-import PortalPage from "./pages/portal";
-import NestedProvidePage from "./pages/nested-provide";
-import DashboardPage from "./pages/dashboard";
-import ResourcePage from "./pages/resource";
-import PrefetchPage from "./pages/prefetch";
-import LoginPage from "./pages/login";
-import ProtectedPage from "./pages/protected";
-import UsersListPage from "./pages/users/list";
-import UserDetailPage from "./pages/users/detail";
-import SettingsLayout from "./pages/settings/layout";
-import SettingsOverview from "./pages/settings/overview";
-import SettingsProfile from "./pages/settings/profile";
-import SettingsSecurity from "./pages/settings/security";
-
 // Boundary components
 import { ErrorFallback } from "./components/error-fallback";
 import { LoadingFallback } from "./components/loading-fallback";
@@ -36,12 +13,34 @@ import { LoadingFallback } from "./components/loading-fallback";
 // Middleware
 import { requireAuth } from "./resources/auth";
 
+const HomePage = () => import("./pages/home");
+const CounterPage = () => import("./pages/counter");
+const SuspendPage = () => import("./pages/suspend");
+const TodoPage = () => import("./pages/todo");
+const ThemePage = () => import("./pages/theme");
+const FormPage = () => import("./pages/form");
+const ErrorBoundaryPage = () => import("./pages/error-boundary");
+const ErrorDemoPage = () => import("./pages/error-demo");
+const PortalPage = () => import("./pages/portal");
+const NestedProvidePage = () => import("./pages/nested-provide");
+const DashboardPage = () => import("./pages/dashboard");
+const ResourcePage = () => import("./pages/resource");
+const PrefetchPage = () => import("./pages/prefetch");
+const LoginPage = () => import("./pages/login");
+const ProtectedPage = () => import("./pages/protected");
+const UsersListPage = () => import("./pages/users/list");
+const UserDetailPage = () => import("./pages/users/detail");
+const SettingsLayout = () => import("./pages/settings/layout");
+const SettingsOverview = () => import("./pages/settings/overview");
+const SettingsProfile = () => import("./pages/settings/profile");
+const SettingsSecurity = () => import("./pages/settings/security");
+
 // =============================================================================
 // Route Definitions
 // =============================================================================
 
 export const routes = Routes.make()
-  .add(Route.make("/").component(HomePage))
+  .add(Route.make("/").component(HomePage).loading(LoadingFallback))
   .add(Route.make("/counter").component(CounterPage).loading(LoadingFallback))
   .add(Route.make("/suspend").component(SuspendPage).loading(LoadingFallback))
   .add(Route.make("/todo").component(TodoPage).loading(LoadingFallback))

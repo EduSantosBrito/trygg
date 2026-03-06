@@ -530,6 +530,35 @@ describe("Renderer Integration", () => {
     }),
   );
 
+  effect("should keep hoisting on component re-render", () =>
+    Effect.gen(function* () {
+      const page = Signal.makeSync("A");
+
+      const App = Component.gen(function* () {
+        const current = yield* Signal.get(page);
+        return (
+          <>
+            <title>{`Page ${current}`}</title>
+            <div data-testid="content">{current}</div>
+          </>
+        );
+      });
+
+      const { container, getByTestId } = yield* render(<App />);
+
+      assert.strictEqual((yield* getByTestId("content")).textContent, "A");
+      assert.isNull(container.querySelector("title"));
+      assert.strictEqual(document.head.querySelector("title")?.textContent, "Page A");
+
+      yield* Signal.set(page, "B");
+      yield* Effect.yieldNow;
+
+      assert.strictEqual((yield* getByTestId("content")).textContent, "B");
+      assert.isNull(container.querySelector("title"));
+      assert.strictEqual(document.head.querySelector("title")?.textContent, "Page B");
+    }),
+  );
+
   effect("should clean up hoisted elements on unmount", () =>
     Effect.gen(function* () {
       const App = Component.gen(function* () {

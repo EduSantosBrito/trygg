@@ -39,6 +39,7 @@ import {
 } from "./matching.js";
 import { get as getRouter, CurrentOutletChild } from "./service.js";
 import { runPrefetch } from "./prefetch.js";
+import { parsePath } from "./utils.js";
 import {
   BoundaryResolver,
   AsyncLoader,
@@ -161,23 +162,49 @@ export const buildPrefetchResolver =
   (matcher: RouteMatcherShape): ((path: string) => Effect.Effect<void>) =>
   (path: string) =>
     Effect.gen(function* () {
-      const matchOption = yield* matcher.match(path);
+      const parsed = yield* parsePath(path);
+      const matchOption = yield* matcher.match(parsed.path);
       if (Option.isNone(matchOption)) return;
 
-      const targets = collectPrefetchTargets(matchOption.value);
-      const loaders = targets.filter(isComponentLoader);
-      if (loaders.length === 0) return;
+      const match = matchOption.value;
 
-      // Call all loaders in parallel — browser module cache handles dedup
-      yield* Effect.forEach(
-        loaders,
-        (loader) =>
-          Effect.tryPromise({
-            try: () => loader(),
-            catch: () => undefined,
-          }).pipe(Effect.ignore),
-        { concurrency: "unbounded" },
-      );
+      const targets = collectPrefetchTargets(match);
+      const loaders = targets.filter(isComponentLoader);
+
+      const loadModules =
+        loaders.length === 0
+          ? Effect.void
+          : Effect.forEach(
+              loaders,
+              (loader) =>
+                Effect.tryPromise({
+                  try: () => loader(),
+                  catch: () => undefined,
+                }).pipe(Effect.ignore),
+              { concurrency: "unbounded" },
+            ).pipe(Effect.asVoid);
+
+      const runRoutePrefetch = Effect.gen(function* () {
+        const prefetchFns = match.route.definition.prefetch;
+        if (prefetchFns.length === 0) return;
+
+        const decodedParamsResult = yield* decodeRouteParams(match.route, match.params).pipe(
+          Effect.result,
+        );
+        if (Result.isFailure(decodedParamsResult)) return;
+
+        const decodedQueryResult = yield* decodeRouteQuery(match.route, parsed.query).pipe(
+          Effect.result,
+        );
+        if (Result.isFailure(decodedQueryResult)) return;
+
+        yield* runPrefetch(prefetchFns, {
+          params: decodedParamsResult.success,
+          query: decodedQueryResult.success,
+        });
+      });
+
+      yield* Effect.all([loadModules, runRoutePrefetch], { concurrency: "unbounded" });
     }).pipe(Effect.ignore);
 
 /**
@@ -641,12 +668,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       const decodedParams = decodedParamsResult.success;
       const decodedQuery = decodedQueryResult.success;
-
-      // Prefetch
-      const prefetchFns = match.route.definition.prefetch;
-      if (prefetchFns.length > 0) {
-        yield* runPrefetch(prefetchFns, { params: decodedParams, query: decodedQuery });
-      }
 
       // Build → wrap → commit
       const routeElement = buildRouteElement(match, decodedParams, decodedQuery);
