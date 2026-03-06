@@ -60,7 +60,8 @@ const FiberRef = {
     Effect.withFiber((fiber) =>
       Effect.sync(() => {
         fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      })),
+      }),
+    ),
 };
 
 // =============================================================================
@@ -457,7 +458,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                   return yield* routeElement.run().pipe(
                     Effect.catchCause((sandboxedCause) =>
                       Effect.gen(function* () {
-                        const errorEl = yield* renderError(resolvedErrorComp, sandboxedCause, routePath);
+                        const errorEl = yield* renderError(
+                          resolvedErrorComp,
+                          sandboxedCause,
+                          routePath,
+                        );
                         if (errorEl._tag === "Component") {
                           return yield* errorEl.run();
                         }

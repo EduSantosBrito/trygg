@@ -5,17 +5,7 @@
  * Testable services used internally by the Outlet. Each has a service key
  * with Layer factories for production and testing.
  */
-import {
-  Cause,
-  Data,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Ref,
-  Scope,
-} from "effect";
+import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { type Element, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
@@ -50,7 +40,8 @@ const FiberRef = {
     Effect.withFiber((fiber) =>
       Effect.sync(() => {
         fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      })),
+      }),
+    ),
   locally: <A, B, E, R>(
     reference: ServiceMap.Reference<A>,
     value: A,
@@ -59,7 +50,10 @@ const FiberRef = {
     Effect.withFiber((fiber) => {
       const services = fiber.services;
       fiber.setServices(ServiceMap.add(services, reference, value));
-      return Effect.ensuring(effect, Effect.sync(() => fiber.setServices(services)));
+      return Effect.ensuring(
+        effect,
+        Effect.sync(() => fiber.setServices(services)),
+      );
     }),
 };
 
@@ -325,14 +319,14 @@ export function renderComponent(
   // Component is an Effect<Element> - wrap it
   if (isEffectElement(component)) {
     return Effect.succeed(
-        componentElement(() =>
-          component.pipe(
-            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-            unsafeEraseR,
-          ),
+      componentElement(() =>
+        component.pipe(
+          (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+          (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+          unsafeEraseR,
         ),
-      );
+      ),
+    );
   }
 
   // Should never reach here if RouteComponent type is correct
@@ -385,12 +379,12 @@ export function renderLayout(
     return Effect.succeed(
       componentElement(() =>
         Effect.gen(function* () {
-            yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-            const layoutElement = yield* layout.pipe(
-              (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-              (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-              unsafeEraseR,
-            );
+          yield* FiberRef.set(CurrentOutletChild, Option.some(child));
+          const layoutElement = yield* layout.pipe(
+            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
+            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
+            unsafeEraseR,
+          );
           // If layout returns a Provide element, merge its context with parent context
           if (layoutElement._tag === "Provide") {
             const capturedContext = yield* Effect.services<unknown>();

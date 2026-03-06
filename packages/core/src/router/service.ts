@@ -40,7 +40,8 @@ const FiberRef = {
     Effect.withFiber((fiber) =>
       Effect.sync(() => {
         fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      })),
+      }),
+    ),
 };
 
 /** @internal */
@@ -177,9 +178,12 @@ export const Router = ServiceMap.Service<Router, RouterService>("@trygg/Router")
  * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
  * @internal
  */
-export const CurrentRouteParams = ServiceMap.Reference<RouteParams>("trygg/Router/CurrentRouteParams", {
-  defaultValue: () => ({}),
-});
+export const CurrentRouteParams = ServiceMap.Reference<RouteParams>(
+  "trygg/Router/CurrentRouteParams",
+  {
+    defaultValue: () => ({}),
+  },
+);
 
 /**
  * FiberRef to store the current router service.
@@ -312,16 +316,18 @@ export const navigate = (
  * Go back in history
  * @since 1.0.0
  */
-export const back: Effect.Effect<void, never, Router> = Effect.flatMap(Router.asEffect(), (router) =>
-  router.back(),
+export const back: Effect.Effect<void, never, Router> = Effect.flatMap(
+  Router.asEffect(),
+  (router) => router.back(),
 );
 
 /**
  * Go forward in history
  * @since 1.0.0
  */
-export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(Router.asEffect(), (router) =>
-  router.forward(),
+export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(
+  Router.asEffect(),
+  (router) => router.forward(),
 );
 
 /**

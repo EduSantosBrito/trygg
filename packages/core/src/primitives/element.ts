@@ -259,7 +259,7 @@ export type Element = Data.TaggedEnum<{
   /**
    * Context boundary - provides a captured context to child components.
    * @internal
-    */
+   */
   readonly Provide: {
     readonly context: ServiceMap.ServiceMap<unknown>;
     readonly child: Element;

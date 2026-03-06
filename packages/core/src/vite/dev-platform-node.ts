@@ -5,7 +5,7 @@
  * Uses SSR-loaded handler factory for @effect/platform layer composition,
  * ensuring Router.Live identity matches between plugin and user code.
  */
-import { Effect, FileSystem, Layer, Option, Ref, Scope } from "effect";
+import { Effect, FileSystem, Layer, Option, Ref, Schema, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -32,6 +32,13 @@ const importNodeFileSystem = Effect.tryPromise({
       cause,
     }),
 });
+
+const ApiUnavailableBody = Schema.fromJsonString(
+  Schema.Struct({
+    error: Schema.String,
+    message: Schema.String,
+  }),
+);
 
 // =============================================================================
 // Internal State
@@ -181,7 +188,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
                   onSome: (e) => (e instanceof Error ? e.message : String(e)),
                 });
                 yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const body = JSON.stringify({
+                const body = Schema.encodeSync(ApiUnavailableBody)({
                   error: "API handler not available",
                   message: errorMessage,
                 });

@@ -128,11 +128,12 @@ export type Error<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Error<E>["Typ
  * @since 1.0.0
  * @category type utilities
  */
-export type Path<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Params<E> extends {
-  readonly Type: unknown;
-}
-  ? HttpApiEndpoint.Params<E>["Type"]
-  : never;
+export type Path<E extends HttpApiEndpoint.Any> =
+  HttpApiEndpoint.Params<E> extends {
+    readonly Type: unknown;
+  }
+    ? HttpApiEndpoint.Params<E>["Type"]
+    : never;
 
 /**
  * Extract the URL params type from an endpoint.
@@ -140,11 +141,12 @@ export type Path<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Params<E> exte
  * @since 1.0.0
  * @category type utilities
  */
-export type UrlParams<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Query<E> extends {
-  readonly Type: unknown;
-}
-  ? HttpApiEndpoint.Query<E>["Type"]
-  : never;
+export type UrlParams<E extends HttpApiEndpoint.Any> =
+  HttpApiEndpoint.Query<E> extends {
+    readonly Type: unknown;
+  }
+    ? HttpApiEndpoint.Query<E>["Type"]
+    : never;
 
 /**
  * Extract the payload type from an endpoint.
@@ -152,11 +154,12 @@ export type UrlParams<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Query<E> 
  * @since 1.0.0
  * @category type utilities
  */
-export type Payload<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Payload<E> extends {
-  readonly Type: unknown;
-}
-  ? HttpApiEndpoint.Payload<E>["Type"]
-  : never;
+export type Payload<E extends HttpApiEndpoint.Any> =
+  HttpApiEndpoint.Payload<E> extends {
+    readonly Type: unknown;
+  }
+    ? HttpApiEndpoint.Payload<E>["Type"]
+    : never;
 
 /**
  * Extract the headers type from an endpoint.
@@ -164,8 +167,9 @@ export type Payload<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Payload<E> 
  * @since 1.0.0
  * @category type utilities
  */
-export type Headers<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Headers<E> extends {
-  readonly Type: unknown;
-}
-  ? HttpApiEndpoint.Headers<E>["Type"]
-  : never;
+export type Headers<E extends HttpApiEndpoint.Any> =
+  HttpApiEndpoint.Headers<E> extends {
+    readonly Type: unknown;
+  }
+    ? HttpApiEndpoint.Headers<E>["Type"]
+    : never;

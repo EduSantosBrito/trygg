@@ -24,8 +24,8 @@ export default Component.gen(function* () {
   const numericId = Number(id);
   const state = yield* Resource.fetch(incidentResource({ id: numericId }));
 
-  return yield* Resource.match(state, {
-    Pending: () => (
+  return yield* Resource.match(state).pipe(
+    Resource.on("Pending", () => (
       <>
         <header className="content-header">
           <div className="content-header__left">
@@ -39,9 +39,9 @@ export default Component.gen(function* () {
           <IncidentSkeleton />
         </main>
       </>
-    ),
+    )),
 
-    Success: (incident, stale) => (
+    Resource.on("Success", ({ value: incident, stale }: { value: Incident; stale: boolean }) => (
       <>
         <header className="content-header">
           <div className="content-header__left">
@@ -180,13 +180,13 @@ export default Component.gen(function* () {
           </div>
         </main>
       </>
-    ),
+    )),
 
-    Failure: (error) => {
+    Resource.on("Failure", ({ error }) => {
       const retry =
         error instanceof IncidentNotFound
           ? undefined
-          : Resource.refresh(incidentResource({ id: numericId }));
+          : () => Resource.refresh(incidentResource({ id: numericId }));
 
       return (
         <>
@@ -212,8 +212,9 @@ export default Component.gen(function* () {
           </main>
         </>
       );
-    },
-  });
+    }),
+    Resource.exhaustive,
+  );
 });
 
 // ---------------------------------------------------------------------------

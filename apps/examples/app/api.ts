@@ -6,7 +6,13 @@
 import { Data, Effect, Layer, Schema } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { FetchHttpClient } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiClient,
+  HttpApiEndpoint,
+  HttpApiGroup,
+} from "effect/unstable/httpapi";
 
 // =============================================================================
 // Schemas

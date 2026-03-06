@@ -42,8 +42,10 @@ export interface TestEventTargetService extends EventTargetService {
 // Tag
 // =============================================================================
 
-export interface PlatformEventTarget
-  extends ServiceMap.Service<PlatformEventTarget, EventTargetService> {}
+export interface PlatformEventTarget extends ServiceMap.Service<
+  PlatformEventTarget,
+  EventTargetService
+> {}
 
 export const PlatformEventTarget = ServiceMap.Service<PlatformEventTarget, EventTargetService>(
   "trygg/platform/EventTarget",

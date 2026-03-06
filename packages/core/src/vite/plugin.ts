@@ -337,8 +337,7 @@ const importBunDevPlatform = Effect.tryPromise({
 const makePluginLayer = (
   platform: Platform,
 ): LayerType<FileSystem.FileSystem | DevPlatform | ServerPlatform, ImportError> => {
-  const devLayer =
-    platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
+  const devLayer = platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
   const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
   return Layer.mergeAll(
@@ -1602,7 +1601,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         // Vite boundary: close scope when server closes (triggers finalizer)
         server.httpServer?.on("close", () => {
           if (Option.isSome(apiScope)) {
-            void Effect.runPromise(Scope.close(apiScope.value, Exit.void).pipe(Effect.provide(pluginLayer)));
+            void Effect.runPromise(
+              Scope.close(apiScope.value, Exit.void).pipe(Effect.provide(pluginLayer)),
+            );
           }
         });
 

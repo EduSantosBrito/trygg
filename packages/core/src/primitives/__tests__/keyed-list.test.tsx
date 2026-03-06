@@ -658,9 +658,9 @@ describe("KeyedList with SignalElement swap", () => {
         s._tag === "Success" ? s.value : EMPTY_ITEMS,
       );
 
-      const dataRegion = yield* Resource.match(state, {
-        Pending: () => <div data-testid="pending">pending</div>,
-        Success: () => (
+      const dataRegion = yield* Resource.match(state).pipe(
+        Resource.on("Pending", () => <div data-testid="pending">pending</div>),
+        Resource.on("Success", () => (
           <section>
             {Signal.each(
               items,
@@ -674,9 +674,10 @@ describe("KeyedList with SignalElement swap", () => {
               { key: (item) => item.id },
             )}
           </section>
-        ),
-        Failure: () => <div data-testid="error">error</div>,
-      });
+        )),
+        Resource.on("Failure", () => <div data-testid="error">error</div>),
+        Resource.exhaustive,
+      );
 
       const { container } = yield* render(<div>{dataRegion}</div>);
 
@@ -734,11 +735,12 @@ describe("KeyedList with SignalElement swap", () => {
       );
       const showContent = yield* Signal.derive(state, (s) => s._tag === "Success");
 
-      const fallbackRegion = yield* Resource.match(state, {
-        Pending: () => <div data-testid="skeleton">loading</div>,
-        Success: () => <></>,
-        Failure: () => <div data-testid="error">error</div>,
-      });
+      const fallbackRegion = yield* Resource.match(state).pipe(
+        Resource.on("Pending", () => <div data-testid="skeleton">loading</div>),
+        Resource.on("Success", () => <></>),
+        Resource.on("Failure", () => <div data-testid="error">error</div>),
+        Resource.exhaustive,
+      );
 
       const contentRegion = yield* Signal.derive(showContent, (visible) =>
         visible ? (

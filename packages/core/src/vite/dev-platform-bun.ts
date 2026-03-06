@@ -8,7 +8,7 @@
  * Dynamic imports avoid hard dependencies on @effect/platform-bun
  * when running in Node mode.
  */
-import { Effect, FileSystem, Layer, Option, Ref, Scope } from "effect";
+import { Effect, FileSystem, Layer, Option, Ref, Schema, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -34,6 +34,13 @@ const importBunFileSystem = Effect.tryPromise({
       cause,
     }),
 });
+
+const ApiUnavailableBody = Schema.fromJsonString(
+  Schema.Struct({
+    error: Schema.String,
+    message: Schema.String,
+  }),
+);
 
 // =============================================================================
 // Node IncomingMessage → Web Request bridge
@@ -240,7 +247,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
                   onSome: (e) => (e instanceof Error ? e.message : String(e)),
                 });
                 yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const body = JSON.stringify({
+                const body = Schema.encodeSync(ApiUnavailableBody)({
                   error: "API handler not available",
                   message: errorMessage,
                 });

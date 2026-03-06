@@ -306,7 +306,11 @@ describe("Resource.fetch reactive render phase", () => {
       // Simulate component render phase
       const phase = yield* Signal.makeRenderPhase;
 
-      yield* Effect.provideService(Resource.fetch(factory, { id: userId }), Signal.CurrentRenderPhase, phase);
+      yield* Effect.provideService(
+        Resource.fetch(factory, { id: userId }),
+        Signal.CurrentRenderPhase,
+        phase,
+      );
       yield* TestClock.adjust(0);
 
       // userId should NOT be in the accessed set —
@@ -377,7 +381,11 @@ describe("Resource.fetch static render phase isolation", () => {
       // Simulate component render phase
       const phase = yield* Signal.makeRenderPhase;
 
-      const state = yield* Effect.provideService(Resource.fetch(resource), Signal.CurrentRenderPhase, phase);
+      const state = yield* Effect.provideService(
+        Resource.fetch(resource),
+        Signal.CurrentRenderPhase,
+        phase,
+      );
       yield* TestClock.adjust(0);
 
       // State signal should NOT be in the accessed set —
@@ -402,7 +410,11 @@ describe("Resource.fetch static render phase isolation", () => {
       // Second fetch inside render phase — should hit cache but NOT track
       const phase = yield* Signal.makeRenderPhase;
 
-      const state = yield* Effect.provideService(Resource.fetch(resource), Signal.CurrentRenderPhase, phase);
+      const state = yield* Effect.provideService(
+        Resource.fetch(resource),
+        Signal.CurrentRenderPhase,
+        phase,
+      );
 
       // State signal should NOT be in the accessed set even for cached reads
       assert.isFalse(

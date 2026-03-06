@@ -6,7 +6,11 @@ import { Cause, Data, Effect, Pipeable } from "effect";
 import { Component, tagComponent } from "./component.js";
 import { type Element, Element as ElementEnum, componentElement } from "./element.js";
 
-type ErrorTags<E> = E extends { readonly _tag: infer Tag } ? (Tag extends string ? Tag : never) : never;
+type ErrorTags<E> = E extends { readonly _tag: infer Tag }
+  ? Tag extends string
+    ? Tag
+    : never
+  : never;
 
 type ErrorForTag<E, Tag extends ErrorTags<E>> = Extract<E, { readonly _tag: Tag }>;
 
@@ -32,7 +36,8 @@ export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError
  *
  * @since 1.0.0
  */
-export interface ErrorBoundaryMatcher<Props, E, R, HandledTags extends string> extends Pipeable.Pipeable {
+export interface ErrorBoundaryMatcher<Props, E, R, HandledTags extends string>
+  extends Pipeable.Pipeable {
   readonly _tag: "ErrorBoundaryMatcher";
   readonly component: Component.Type<Props, E, R>;
   readonly handlers: ReadonlyMap<string, ErrorHandler>;
@@ -117,16 +122,29 @@ export const catch_ = <Props, E, R>(
  * @since 1.0.0
  */
 export const on =
-  <Props, E, R, HandledTags extends string, Tag extends Exclude<ErrorTags<E>, HandledTags>, RHandler>(
+  <
+    Props,
+    E,
+    R,
+    HandledTags extends string,
+    Tag extends Exclude<ErrorTags<E>, HandledTags>,
+    RHandler,
+  >(
     tag: Tag,
     component: Component.Type<{ error: ErrorForTag<E, Tag> }, unknown, RHandler>,
   ) =>
   (
     self: ErrorBoundaryMatcher<Props, E, R, HandledTags>,
-  ): ErrorBoundaryMatcher<Props, Exclude<E, { readonly _tag: Tag }>, R | RHandler, HandledTags | Tag> => {
+  ): ErrorBoundaryMatcher<
+    Props,
+    Exclude<E, { readonly _tag: Tag }>,
+    R | RHandler,
+    HandledTags | Tag
+  > => {
     const handlers = new Map(self.handlers);
     handlers.set(tag, {
-      render: (error, cause) => (isErrorTag<E, Tag>(tag, error) ? component({ error }) : unhandledErrorElement(cause)),
+      render: (error, cause) =>
+        isErrorTag<E, Tag>(tag, error) ? component({ error }) : unhandledErrorElement(cause),
     });
     return makeMatcher(self.component, handlers);
   };
@@ -147,7 +165,9 @@ export const catchAll =
     self: ErrorBoundaryMatcher<Props, E, R, any>,
   ): Effect.Effect<Component.Type<Props, never, R | RHandler>> =>
     Effect.sync(() => {
-      const safeComponentRunFn = (props: PropsInput<Props>): Effect.Effect<Element, never, R | RHandler> =>
+      const safeComponentRunFn = (
+        props: PropsInput<Props>,
+      ): Effect.Effect<Element, never, R | RHandler> =>
         Effect.succeed(
           ElementEnum.ErrorBoundaryElement({
             child: self.component(props),
@@ -195,7 +215,8 @@ export const exhaustive = <Props, E, R, HandledTags extends string>(
         }),
       );
 
-    const safeComponentFn = (props: PropsInput<Props>): Element => componentElement(() => safeComponentRunFn(props));
+    const safeComponentFn = (props: PropsInput<Props>): Element =>
+      componentElement(() => safeComponentRunFn(props));
 
     return tagComponent<Props, PropsInput<Props>, never, R>(
       safeComponentFn,

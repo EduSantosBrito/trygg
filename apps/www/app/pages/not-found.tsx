@@ -11,10 +11,7 @@ export default Component.gen(function* () {
       <title>404 — Page not found | trygg</title>
       <meta name="robots" content="noindex" />
 
-      <main
-        id="main-content"
-        className="bg-grid min-h-screen px-6 py-16 flex items-center"
-      >
+      <main id="main-content" className="bg-grid min-h-screen px-6 py-16 flex items-center">
         <section
           aria-labelledby="not-found-title"
           className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--color-border)] bg-[rgba(5,5,8,0.86)] backdrop-blur-sm"

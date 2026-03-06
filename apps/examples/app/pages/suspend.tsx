@@ -22,7 +22,9 @@ const SuspendUiLive = Layer.succeed(SuspendUi, {
   failurePrefix: "Boundary",
 });
 
-const UserPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+const UserPending = Component.gen(function* (
+  Props: ComponentProps<{ stale: import("trygg").Element | null }>,
+) {
   yield* Props;
   const ui = yield* SuspendUi;
   return (
@@ -33,7 +35,9 @@ const UserPending = Component.gen(function* (Props: ComponentProps<{ stale: impo
   );
 });
 
-const StatsPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+const StatsPending = Component.gen(function* (
+  Props: ComponentProps<{ stale: import("trygg").Element | null }>,
+) {
   yield* Props;
   const ui = yield* SuspendUi;
   return (
@@ -44,7 +48,9 @@ const StatsPending = Component.gen(function* (Props: ComponentProps<{ stale: imp
   );
 });
 
-const PostsPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+const PostsPending = Component.gen(function* (
+  Props: ComponentProps<{ stale: import("trygg").Element | null }>,
+) {
   yield* Props;
   const ui = yield* SuspendUi;
   return (

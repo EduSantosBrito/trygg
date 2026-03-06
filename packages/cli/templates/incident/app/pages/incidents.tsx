@@ -59,9 +59,9 @@ export default Component.gen(function* () {
     ),
   );
 
-  const listContent = yield* Resource.match(state, {
-    Pending: () => <IncidentSkeleton />,
-    Success: () => (
+  const listContent = yield* Resource.match(state).pipe(
+    Resource.on("Pending", () => <IncidentSkeleton />),
+    Resource.on("Success", () => (
       <div className="incidents-list">
         {Signal.each(
           filteredIncidents,
@@ -71,9 +71,12 @@ export default Component.gen(function* () {
           { key: (incident: Incident) => incident.id },
         )}
       </div>
-    ),
-    Failure: (error) => <ErrorView error={error} onRetry={Resource.refresh(incidentsResource)} />,
-  });
+    )),
+    Resource.on("Failure", ({ error }) => (
+      <ErrorView error={error} onRetry={() => Resource.refresh(incidentsResource)} />
+    )),
+    Resource.exhaustive,
+  );
 
   return (
     <>
