@@ -871,16 +871,18 @@ describe("Event handlers", () => {
     }),
   );
 
-  it.scoped("should execute Effect handler on event", () =>
+  it.scoped("should execute thunk handler without event usage", () =>
     Effect.gen(function* () {
       let handlerExecuted = false;
 
       const { getByTestId } = yield* render(
         <button
           data-testid="effect-btn"
-          onClick={Effect.sync(() => {
-            handlerExecuted = true;
-          })}
+          onClick={() =>
+            Effect.sync(() => {
+              handlerExecuted = true;
+            })
+          }
         >
           Click
         </button>,
@@ -902,12 +904,16 @@ describe("Event handlers", () => {
         <input
           data-testid="multi-event"
           type="text"
-          onClick={Effect.sync(() => {
-            clicked = true;
-          })}
-          onFocus={Effect.sync(() => {
-            focused = true;
-          })}
+          onClick={() =>
+            Effect.sync(() => {
+              clicked = true;
+            })
+          }
+          onFocus={() =>
+            Effect.sync(() => {
+              focused = true;
+            })
+          }
         />,
       );
 
@@ -918,6 +924,19 @@ describe("Event handlers", () => {
 
       assert.isTrue(clicked);
       assert.isTrue(focused);
+    }),
+  );
+
+  it.scoped("should reject direct Effect event handlers", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        render(
+          // @ts-expect-error hard break: direct Effect handlers invalid
+          <button data-testid="bad-handler" onClick={Effect.void} />,
+        ),
+      );
+
+      assert.isTrue(Exit.isFailure(exit));
     }),
   );
 });

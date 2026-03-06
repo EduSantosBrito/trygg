@@ -112,6 +112,11 @@ const setupViewportPrefetch = (
             event: "router.prefetch.viewport",
             path,
           });
+          yield* Debug.log({
+            event: "router.prefetch.trigger",
+            path,
+            trigger: "viewport",
+          });
           yield* router.prefetch(path);
         }).pipe(Effect.ignore),
     });

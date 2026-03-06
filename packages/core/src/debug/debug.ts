@@ -647,6 +647,12 @@ type RouterPrefetchNoMatchEvent = BaseEvent & {
   readonly path: string;
 };
 
+type RouterPrefetchTriggerEvent = BaseEvent & {
+  readonly event: "router.prefetch.trigger";
+  readonly path: string;
+  readonly trigger: "render" | "intent_hover" | "intent_focus" | "viewport";
+};
+
 /** F-001: Viewport prefetch trigger event */
 type RouterPrefetchViewportEvent = BaseEvent & {
   readonly event: "router.prefetch.viewport";
@@ -863,6 +869,7 @@ export type DebugEvent =
   | RouterPrefetchStartEvent
   | RouterPrefetchCompleteEvent
   | RouterPrefetchNoMatchEvent
+  | RouterPrefetchTriggerEvent
   | RouterPrefetchViewportEvent
   | RouterViewportObserverAddedEvent
   | RouterViewportObserverRemovedEvent

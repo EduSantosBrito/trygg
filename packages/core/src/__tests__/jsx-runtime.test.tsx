@@ -56,6 +56,25 @@ describe("JSX component validation", () => {
     }),
   );
 
+  it.effect("should reject direct Effect children", () =>
+    Effect.gen(function* () {
+      const childEffect = Effect.succeed(<span data-testid="effect-child">Hello</span>);
+
+      const exit = yield* Effect.exit(
+        render(
+          <div>
+            {/* @ts-expect-error hard break: raw Effect children invalid */}
+            {childEffect}
+          </div>,
+        ),
+      );
+
+      if (Exit.isSuccess(exit)) {
+        throw new Error("Expected failure but got success");
+      }
+    }),
+  );
+
   it.effect("should accept Component.gen components", () =>
     Effect.gen(function* () {
       const ValidComponent = Component.gen(function* () {

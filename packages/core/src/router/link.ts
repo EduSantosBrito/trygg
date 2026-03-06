@@ -210,16 +210,24 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
       let hoverFiber: Fiber.Fiber<void, never> | null = null;
 
       // Trigger prefetch once (guarded by flag)
-      const triggerPrefetch = Effect.gen(function* () {
-        if (prefetchTriggered) return;
-        prefetchTriggered = true;
-        yield* router.prefetch(resolvedPath);
-      });
+      const triggerPrefetch = (
+        trigger: "render" | "intent_hover" | "intent_focus",
+      ): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          if (prefetchTriggered) return;
+          prefetchTriggered = true;
+          yield* Debug.log({
+            event: "router.prefetch.trigger",
+            path: href,
+            trigger,
+          });
+          yield* router.prefetch(href);
+        });
 
-      // Mouse enter handler — 50ms debounce via scoped fiber.
+      // Pointer move handler — 50ms debounce via scoped fiber.
       // Uses forkIn(componentScope) so the fiber is tied to the component
       // lifecycle: auto-interrupted on unmount, no floating fibers.
-      const handleMouseEnter =
+      const handlePointerMove =
         prefetch === "intent" && prefetchScope !== null
           ? Effect.fnUntraced(function* () {
               if (prefetchTriggered) return;
@@ -229,7 +237,7 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
               }
               const fiber = yield* Effect.forkIn(
                 Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
-                  Effect.flatMap(() => triggerPrefetch),
+                  Effect.flatMap(() => triggerPrefetch("intent_hover")),
                 ),
                 prefetchScope,
               );
@@ -253,7 +261,7 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         prefetch === "intent"
           ? Effect.fnUntraced(function* () {
               if (prefetchTriggered) return;
-              yield* triggerPrefetch;
+              yield* triggerPrefetch("intent_focus");
             })
           : undefined;
 
@@ -291,7 +299,14 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
 
       // F-001: Trigger prefetch immediately for "render" strategy
       if (prefetch === "render") {
-        yield* triggerPrefetch;
+        if (prefetchScope !== null) {
+          yield* Effect.forkIn(
+            Effect.yieldNow.pipe(Effect.flatMap(() => triggerPrefetch("render"))),
+            prefetchScope,
+          );
+        } else {
+          yield* triggerPrefetch("render");
+        }
       }
 
       // Build props for the anchor element
@@ -299,14 +314,14 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         href,
         onClick: handleClick,
         ...(className ? { className } : {}),
-        ...(handleMouseEnter ? { onMouseEnter: handleMouseEnter } : {}),
+        ...(handlePointerMove ? { onPointerMove: handlePointerMove } : {}),
         ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
         ...(handleFocus ? { onFocus: handleFocus } : {}),
         // F-001: Viewport prefetch uses data attributes + global observer
         ...(prefetch === "viewport"
           ? {
               "data-trygg-prefetch": "viewport",
-              "data-trygg-prefetch-path": resolvedPath,
+              "data-trygg-prefetch-path": href,
             }
           : {}),
         // Forward data-* and aria-* attributes to <a>
