@@ -77,6 +77,9 @@ const isSignal = (value: unknown): value is Signal.Signal<unknown> => {
   return value._tag === "Signal";
 };
 
+const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<boolean> =>
+  isSignal(value);
+
 // =============================================================================
 // Portal.make
 // =============================================================================
@@ -157,7 +160,7 @@ export const make = (
       }
 
       // Static boolean
-      if (!isSignal(visible)) {
+      if (!isBooleanSignal(visible)) {
         if (visible) {
           return ElementEnum.Portal({ target, children: [content] });
         }
@@ -166,7 +169,7 @@ export const make = (
 
       // Signal<boolean> → derive reactive element
       const derived = yield* Signal.derive(
-        visible as Signal.Signal<boolean>,
+        visible,
         (show): Element => (show ? ElementEnum.Portal({ target, children: [content] }) : empty),
       );
 

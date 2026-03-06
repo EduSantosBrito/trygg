@@ -1,5 +1,6 @@
-import { Cause } from "effect";
-import { Signal, Component } from "trygg";
+import { Cause, Layer } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
+import { Signal, Component, type ComponentProps } from "trygg";
 import { UserProfileAsync } from "../components/suspend/user-profile-async";
 import { StatsAsync } from "../components/suspend/stats-async";
 import { PostsAsync } from "../components/suspend/posts-async";
@@ -8,24 +9,94 @@ import { UserSkeleton } from "../components/suspend/user-skeleton";
 import { StatsSkeleton } from "../components/suspend/stats-skeleton";
 import { PostsSkeleton } from "../components/suspend/posts-skeleton";
 
+class SuspendUi extends ServiceMap.Service<
+  SuspendUi,
+  {
+    readonly pendingHint: string;
+    readonly failurePrefix: string;
+  }
+>()("examples/SuspendUi") {}
+
+const SuspendUiLive = Layer.succeed(SuspendUi, {
+  pendingHint: "Pending UI resolved from service requirement",
+  failurePrefix: "Boundary",
+});
+
+const UserPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+  yield* Props;
+  const ui = yield* SuspendUi;
+  return (
+    <div>
+      <p className="m-0 mb-2 text-xs text-gray-400">{ui.pendingHint}</p>
+      <UserSkeleton />
+    </div>
+  );
+});
+
+const StatsPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+  yield* Props;
+  const ui = yield* SuspendUi;
+  return (
+    <div>
+      <p className="m-0 mb-2 text-xs text-gray-400">{ui.pendingHint}</p>
+      <StatsSkeleton />
+    </div>
+  );
+});
+
+const PostsPending = Component.gen(function* (Props: ComponentProps<{ stale: import("trygg").Element | null }>) {
+  yield* Props;
+  const ui = yield* SuspendUi;
+  return (
+    <div>
+      <p className="m-0 mb-2 text-xs text-gray-400">{ui.pendingHint}</p>
+      <PostsSkeleton />
+    </div>
+  );
+});
+
+const UserFailure = Component.gen(function* (
+  Props: ComponentProps<{ cause: Cause.Cause<unknown>; stale: import("trygg").Element | null }>,
+) {
+  const { cause } = yield* Props;
+  const ui = yield* SuspendUi;
+  return <ErrorCard label={`${ui.failurePrefix} User`} cause={cause} />;
+});
+
+const StatsFailure = Component.gen(function* (
+  Props: ComponentProps<{ cause: Cause.Cause<unknown>; stale: import("trygg").Element | null }>,
+) {
+  const { cause } = yield* Props;
+  const ui = yield* SuspendUi;
+  return <ErrorCard label={`${ui.failurePrefix} Stats`} cause={cause} />;
+});
+
+const PostsFailure = Component.gen(function* (
+  Props: ComponentProps<{ cause: Cause.Cause<unknown>; stale: import("trygg").Element | null }>,
+) {
+  const { cause } = yield* Props;
+  const ui = yield* SuspendUi;
+  return <ErrorCard label={`${ui.failurePrefix} Posts`} cause={cause} />;
+});
+
 const SuspendPage = Component.gen(function* () {
   const userId = yield* Signal.make(1);
 
   const SuspendedUserProfile = yield* Signal.suspend(UserProfileAsync).pipe(
-    Signal.on("Pending", <UserSkeleton />),
-    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="User" cause={cause} />),
+    Signal.on("Pending", UserPending),
+    Signal.on("Failure", UserFailure),
     Signal.exhaustive,
   );
 
   const SuspendedStats = yield* Signal.suspend(StatsAsync).pipe(
-    Signal.on("Pending", <StatsSkeleton />),
-    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="Stats" cause={cause} />),
+    Signal.on("Pending", StatsPending),
+    Signal.on("Failure", StatsFailure),
     Signal.exhaustive,
   );
 
   const SuspendedPosts = yield* Signal.suspend(PostsAsync).pipe(
-    Signal.on("Pending", <PostsSkeleton />),
-    Signal.on("Failure", (cause: Cause.Cause<unknown>) => <ErrorCard label="Posts" cause={cause} />),
+    Signal.on("Pending", PostsPending),
+    Signal.on("Failure", PostsFailure),
     Signal.exhaustive,
   );
 
@@ -36,6 +107,9 @@ const SuspendPage = Component.gen(function* () {
       <h2 className="m-0 mb-1 text-2xl">Suspend</h2>
       <p className="text-gray-500 m-0 mb-6 text-[0.95rem]">
         Async component state with Signal.suspend and dep-based caching
+      </p>
+      <p className="text-gray-400 m-0 mb-6 text-xs">
+        Pending/Failure handlers require SuspendUi service (provided at page boundary)
       </p>
 
       <div className="flex gap-2 mb-6">
@@ -65,6 +139,6 @@ const SuspendPage = Component.gen(function* () {
       </div>
     </div>
   );
-});
+}).provide(SuspendUiLive);
 
 export default SuspendPage;

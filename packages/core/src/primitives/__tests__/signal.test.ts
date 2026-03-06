@@ -20,13 +20,15 @@
  * - Tests are unbiased (no assumptions about internal implementation)
  */
 import { assert, describe, it as baseIt } from "@effect/vitest";
-import { Data, Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Scope } from "effect";
+import * as ServiceMap from "effect/ServiceMap";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
 import { Element, text } from "../element.js";
 import * as Component from "../component.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
+import { render } from "../../testing/index.js";
 
 const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
@@ -1118,6 +1120,32 @@ describe("Signal.suspend", () => {
 
       const failed = yield* Signal.get(isSignalElement(view) ? view.signal : suspended._signal);
       assert.strictEqual(textContent(failed), "failed");
+    }),
+  );
+
+  it.scoped("should accumulate handler requirements in inferred component R", () =>
+    Effect.gen(function* () {
+      class PendingTheme extends ServiceMap.Service<PendingTheme, { readonly label: string }>()(
+        "PendingTheme",
+      ) {}
+
+      const PendingView = Component.gen(function* (
+        Props: Component.ComponentProps<{ stale: Element | null }>,
+      ) {
+        yield* Props;
+        const theme = yield* PendingTheme;
+        return text(theme.label);
+      });
+
+      const suspended = yield* Signal.suspend(mockComponent(Effect.never)).pipe(
+        Signal.on("Pending", PendingView),
+        Signal.on("Failure", () => text("failed")),
+        Signal.exhaustive,
+      );
+
+      const Provided = suspended.provide(Layer.succeed(PendingTheme, { label: "loading" }));
+      const result = yield* Effect.exit(render(Provided({})));
+      assert.isTrue(Exit.isSuccess(result));
     }),
   );
 });
