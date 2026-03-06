@@ -739,18 +739,46 @@ type SuspendElement = import("./element.js").Element;
 
 type SuspendState = "Pending" | "Failure";
 
-type PendingHandler<R> =
-  | Component.Type<{ stale: SuspendElement | null }, unknown, R>
-  | SuspendElement
-  | ((stale: SuspendElement | null) => SuspendElement);
+type PendingComponentHandler<R> = Component.Type<{ stale: SuspendElement | null }, unknown, R>;
 
-type FailureHandler<R> =
-  | Component.Type<{ cause: Cause.Cause<unknown>; stale: SuspendElement | null }, unknown, R>
-  | ((cause: Cause.Cause<unknown>, stale: SuspendElement | null) => SuspendElement);
+type PendingRenderFunction = ((stale: SuspendElement | null) => SuspendElement) & {
+  readonly _tag?: never;
+};
 
-type StateHandler<State extends SuspendState, R> = State extends "Pending"
-  ? PendingHandler<R>
-  : FailureHandler<R>;
+type PendingRenderHandler = SuspendElement | PendingRenderFunction;
+
+type PendingHandler<R> = PendingComponentHandler<R> | PendingRenderHandler;
+
+type FailureComponentHandler<R> = Component.Type<
+  { cause: Cause.Cause<unknown>; stale: SuspendElement | null },
+  unknown,
+  R
+>;
+
+type FailureRenderHandler = ((
+  cause: Cause.Cause<unknown>,
+  stale: SuspendElement | null,
+) => SuspendElement) & {
+  readonly _tag?: never;
+};
+
+type FailureHandler<R> = FailureComponentHandler<R> | FailureRenderHandler;
+
+type HandlerRequirements<State extends SuspendState, Handler> = State extends "Pending"
+  ? Handler extends PendingComponentHandler<infer RHandler>
+    ? RHandler
+    : never
+  : Handler extends FailureComponentHandler<infer RHandler>
+    ? RHandler
+    : never;
+
+type ValidHandler<State extends SuspendState, Handler> = State extends "Pending"
+  ? Handler extends PendingHandler<unknown>
+    ? Handler
+    : never
+  : Handler extends FailureHandler<unknown>
+    ? Handler
+    : never;
 
 /**
  * Suspended component preserving `Props`, `E`, `R` and exposing the internal
@@ -819,14 +847,21 @@ const makeComponentElement = <E, R>(
 const isEffectComponentLike = (value: unknown): value is Component.Type<unknown, unknown, unknown> =>
   typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
 
-const isPendingComponent = (
-  handler: PendingHandler<unknown>,
-): handler is Component.Type<{ stale: SuspendElement | null }, unknown, unknown> => isEffectComponentLike(handler);
-
-const isFailureComponent = (
-  handler: FailureHandler<unknown>,
-): handler is Component.Type<{ cause: Cause.Cause<unknown>; stale: SuspendElement | null }, unknown, unknown> =>
+const isPendingComponent = <R>(handler: PendingHandler<R>): handler is PendingComponentHandler<R> =>
   isEffectComponentLike(handler);
+
+const isFailureComponent = <R>(handler: FailureHandler<R>): handler is FailureComponentHandler<R> =>
+  isEffectComponentLike(handler);
+
+const isPendingStateHandler = (
+  state: SuspendState,
+  handler: PendingHandler<unknown> | FailureHandler<unknown>,
+): handler is PendingHandler<unknown> => state === "Pending";
+
+const isFailureStateHandler = (
+  state: SuspendState,
+  handler: PendingHandler<unknown> | FailureHandler<unknown>,
+): handler is FailureHandler<unknown> => state === "Failure";
 
 const renderPending = (
   handler: PendingHandler<unknown>,
@@ -851,15 +886,6 @@ const renderFailure = (
   }
   return handler(cause, stale);
 };
-
-const runSuspendRender = <Props, E>(
-  component: Component.Type<Props, E, unknown>,
-  props: PropsInput<Props>,
-  renderPhase: RenderPhase,
-): Effect.Effect<SuspendElement, E> =>
-  Effect.provideService(unsafeRunComponent(component, props), CurrentRenderPhase, renderPhase).pipe(
-    Effect.withSpan("Signal.suspend.render"),
-  );
 
 /**
  * Start building a suspended component.
@@ -891,29 +917,29 @@ export const suspend = <Props, E, R>(
  */
 export const on =
   <
-    Props,
-    E,
-    R,
-    HasPending extends boolean,
-    HasFailure extends boolean,
     State extends SuspendState,
-    RHandler,
+    Handler,
   >(
     state: State,
-    handler: StateHandler<State, RHandler>,
+    handler: ValidHandler<State, Handler>,
   ) =>
-  (
-    self: SuspendMatcher<Props, E, R, HasPending, HasFailure>,
-  ): SuspendMatcher<
-    Props,
-    E,
-    R | RHandler,
-    State extends "Pending" ? true : HasPending,
-    State extends "Failure" ? true : HasFailure
-  > =>
-    state === "Pending"
-      ? makeSuspendMatcher(self.component, handler as PendingHandler<unknown>, self.failure)
-      : makeSuspendMatcher(self.component, self.pending, handler as FailureHandler<unknown>);
+    <Props, E, R, HasPending extends boolean, HasFailure extends boolean>(
+      self: SuspendMatcher<Props, E, R, HasPending, HasFailure>,
+    ): SuspendMatcher<
+      Props,
+      E,
+      R | HandlerRequirements<State, Handler>,
+      State extends "Pending" ? true : HasPending,
+      State extends "Failure" ? true : HasFailure
+    > => {
+      if (isPendingStateHandler(state, handler)) {
+        return makeSuspendMatcher(self.component, handler, self.failure);
+      }
+      if (isFailureStateHandler(state, handler)) {
+        return makeSuspendMatcher(self.component, self.pending, handler);
+      }
+      return makeSuspendMatcher(self.component, self.pending, self.failure);
+    };
 
 /**
  * Finalize the suspend matcher.
@@ -1002,30 +1028,36 @@ export const exhaustive = <Props, E, R>(
 
         const runRender = (runId: number): Effect.Effect<void> =>
           Effect.gen(function* () {
-          yield* resetRenderPhase(renderPhase);
-          const exit = yield* Effect.exit(runSuspendRender(self.component, props, renderPhase));
+            yield* resetRenderPhase(renderPhase);
+            const exit = yield* Effect.exit(
+              Effect.provideService(
+                unsafeRunComponent(self.component, props),
+                CurrentRenderPhase,
+                renderPhase,
+              ).pipe(Effect.withSpan("Signal.suspend.render")),
+            );
 
-          const latestRequest = requestId;
-          if (runId !== latestRequest) {
-            yield* runRender(latestRequest);
-            return;
-          }
+            const latestRequest = requestId;
+            if (runId !== latestRequest) {
+              yield* runRender(latestRequest);
+              return;
+            }
 
-          const depKey = computeDepKey(renderPhase.accessed);
-          if (Exit.isSuccess(exit)) {
-            cache.set(depKey, exit.value);
-            yield* setView(exit.value);
-          } else {
-            const stale = cache.get(depKey) ?? null;
-            yield* setView(renderFailure(failure, exit.cause, stale));
-          }
+            const depKey = computeDepKey(renderPhase.accessed);
+            if (Exit.isSuccess(exit)) {
+              cache.set(depKey, exit.value);
+              yield* setView(exit.value);
+            } else {
+              const stale = cache.get(depKey) ?? null;
+              yield* setView(renderFailure(failure, exit.cause, stale));
+            }
 
-          yield* subscribeToSignals(renderPhase.accessed);
+            yield* subscribeToSignals(renderPhase.accessed);
 
-          const nextRequest = requestId;
-          if (runId !== nextRequest) {
-            yield* runRender(nextRequest);
-          }
+            const nextRequest = requestId;
+            if (runId !== nextRequest) {
+              yield* runRender(nextRequest);
+            }
           });
 
         const refresh: Effect.Effect<void> = Effect.gen(function* () {
