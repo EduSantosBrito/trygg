@@ -2,7 +2,7 @@
  * @since 1.0.0
  * Router service for trygg
  */
-import { Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
+import { Data, Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { CurrentRouteQuery } from "./route.js";
 
@@ -31,18 +31,8 @@ import { History } from "../platform/history.js";
 import { Location } from "../platform/location.js";
 import { PlatformEventTarget } from "../platform/event-target.js";
 import { Observer } from "../platform/observer.js";
+import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-    Effect.withFiber((fiber) =>
-      Effect.sync(() => {
-        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      }),
-    ),
-};
 
 /** @internal */
 const ScrollPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
@@ -234,6 +224,10 @@ export const CurrentOutletChild = ServiceMap.Reference<Option.Option<Element>>(
   },
 );
 
+export class CurrentErrorOutsideBoundaryError extends Data.TaggedError(
+  "CurrentErrorOutsideBoundaryError",
+)<{}> {}
+
 /**
  * Get the current router service.
  * Uses the Router service key which is provided to all components
@@ -298,7 +292,7 @@ export const querySignal: Effect.Effect<Signal.Signal<URLSearchParams>, never, R
  */
 export const query = <Path extends RoutePath>(
   _path: Path,
-): Effect.Effect<Record<string, unknown>> => FiberRef.get(CurrentRouteQuery);
+): Effect.Effect<Record<string, unknown>> => getFiberRef(CurrentRouteQuery);
 
 /**
  * Navigate to a path. Supports param interpolation via options.params.
@@ -347,7 +341,7 @@ export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(
  * @since 1.0.0
  */
 export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<RouteParamsFor<Path>> =>
-  unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams));
+  unsafeNarrowParams<RouteParamsFor<Path>>(getFiberRef(CurrentRouteParams));
 
 /**
  * Derive a reactive Signal\<boolean\> that tracks whether a path is active.
@@ -416,15 +410,10 @@ export const prefetch = (path: string): Effect.Effect<void, never, Router> =>
  * @since 1.0.0
  */
 export const currentError: Effect.Effect<RouteErrorInfo> = Effect.flatMap(
-  FiberRef.get(CurrentRouteError),
+  getFiberRef(CurrentRouteError),
   (maybeError) => {
     if (Option.isNone(maybeError)) {
-      return Effect.die(
-        new Error(
-          "Router.currentError called outside of an error boundary.\n" +
-            "This should only be used in .error() boundary components.",
-        ),
-      );
+      return Effect.die(new CurrentErrorOutsideBoundaryError());
     }
     return Effect.succeed(maybeError.value);
   },
@@ -707,7 +696,7 @@ export const browserLayer: Layer.Layer<
       forward: () => Effect.ignore(history.forward),
 
       params: <Path extends RoutePath>(_path: Path) =>
-        unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
+        unsafeNarrowParams<RouteParamsFor<Path>>(getFiberRef(CurrentRouteParams)),
 
       isActive: (targetPath: string, options?: IsActiveOptions) =>
         Effect.gen(function* () {
@@ -749,7 +738,7 @@ export const browserLayer: Layer.Layer<
     // Store router in FiberRef during layer building.
     // ManagedRuntime captures FiberRefs at layer build time and propagates
     // them to all forked fibers, solving the fiber-local variable problem.
-    yield* FiberRef.set(CurrentRouter, Option.some(routerService));
+    yield* setFiberRef(CurrentRouter, Option.some(routerService));
 
     // F-001: Setup viewport prefetch observer
     // Uses Observer + Dom services, auto-cleanup via Scope. Best-effort.
@@ -884,7 +873,7 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
           }),
 
         params: <Path extends RoutePath>(_path: Path) =>
-          unsafeNarrowParams<RouteParamsFor<Path>>(FiberRef.get(CurrentRouteParams)),
+          unsafeNarrowParams<RouteParamsFor<Path>>(getFiberRef(CurrentRouteParams)),
 
         isActive: (targetPath: string, options?: IsActiveOptions) =>
           Effect.gen(function* () {
@@ -913,7 +902,7 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
       };
 
       // Store router in FiberRef
-      yield* FiberRef.set(CurrentRouter, Option.some(routerService));
+      yield* setFiberRef(CurrentRouter, Option.some(routerService));
 
       return routerService;
     }),

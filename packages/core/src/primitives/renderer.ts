@@ -16,6 +16,7 @@ import {
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
+import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import { ResourceRegistryLive } from "./resource.js";
 import * as SafeUrl from "../security/safe-url.js";
@@ -113,17 +114,6 @@ const runForkInRenderContext = <A, E>(
   Effect.runForkWith(mergeRenderServices(renderContext, context))(
     effect.pipe(Scope.provide(renderContext.scope)),
   );
-};
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-    Effect.withFiber((fiber) =>
-      Effect.sync(() => {
-        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      }),
-    ),
 };
 
 /**
@@ -685,7 +675,7 @@ const renderElement = (
     Match.tag("Intrinsic", ({ tag, props, children }) =>
       Effect.gen(function* () {
         // Document-level elements: map to existing DOM nodes (only in mountDocument mode)
-        const isDocumentMount = yield* FiberRef.get(Head.IsDocumentMount);
+        const isDocumentMount = yield* getFiberRef(Head.IsDocumentMount);
         if (isDocumentMount && Head.DOCUMENT_TAGS.has(tag)) {
           return yield* renderDocumentElement(
             tag,
@@ -707,7 +697,7 @@ const renderElement = (
         });
 
         // Check for head element hoisting
-        const headService = yield* FiberRef.get(Head.CurrentHead);
+        const headService = yield* getFiberRef(Head.CurrentHead);
         const rawProps = props as Record<string, unknown>;
         const mode = rawProps["mode"];
         const isHoistableTag = yield* Head.isHoistable(tag);
@@ -2019,13 +2009,13 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
 
       // Create Head service for head element hoisting
       const headService = yield* Head.makeBrowserHead();
-      yield* FiberRef.set(Head.CurrentHead, headService);
+      yield* setFiberRef(Head.CurrentHead, headService);
 
       const services = yield* Effect.services<unknown>();
       const renderContext: RenderContext = { services, scope };
 
       // Set up render context after renderer-local FiberRefs are installed
-      yield* FiberRef.set(CurrentRenderContext, renderContext);
+      yield* setFiberRef(CurrentRenderContext, renderContext);
 
       // Create an anchor comment to mark the mount point
       // This replaces innerHTML="" clearing - we only manage our own nodes
@@ -2203,12 +2193,12 @@ export const renderDocument = <E>(
     const renderer = yield* Renderer;
 
     // Enable document-level element mapping
-    yield* FiberRef.set(Head.IsDocumentMount, true);
+    yield* setFiberRef(Head.IsDocumentMount, true);
 
     // Set routes manifest if provided (enables <Router.Outlet /> without props)
     if (options?.manifest !== undefined) {
       const Router = yield* Effect.promise(() => import("../router/index.js"));
-      yield* FiberRef.set(Router.CurrentRoutesManifest, Option.some(options.manifest));
+      yield* setFiberRef(Router.CurrentRoutesManifest, Option.some(options.manifest));
     }
 
     // Wrap the app Effect in a Component element for reactive re-rendering

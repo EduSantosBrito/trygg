@@ -169,7 +169,7 @@ describe("Prefetch page", () => {
         return;
       }
 
-      intentLink.dispatchEvent(new MouseEvent("mouseenter"));
+      intentLink.dispatchEvent(new Event("pointermove"));
       yield* TestClock.adjust(60);
       assert.deepStrictEqual(yield* Ref.get(log), ["/form", "/counter"]);
 

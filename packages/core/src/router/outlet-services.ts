@@ -7,10 +7,11 @@
  */
 import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
-import { type Element, componentElement } from "../primitives/element.js";
+import { type Element, componentElement, provideElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
+import { locallyFiberRef } from "../internal/fiber-ref.js";
 import type { RoutesManifest } from "./routes.js";
 import {
   InvalidRouteComponent,
@@ -32,30 +33,6 @@ import { unsafeEraseR } from "../internal/unsafe.js";
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-    Effect.withFiber((fiber) =>
-      Effect.sync(() => {
-        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      }),
-    ),
-  locally: <A, B, E, R>(
-    reference: ServiceMap.Reference<A>,
-    value: A,
-    effect: Effect.Effect<B, E, R>,
-  ): Effect.Effect<B, E, R> =>
-    Effect.withFiber((fiber) => {
-      const services = fiber.services;
-      fiber.setServices(ServiceMap.add(services, reference, value));
-      return Effect.ensuring(
-        effect,
-        Effect.sync(() => fiber.setServices(services)),
-      );
-    }),
-};
 
 /**
  * Extract only string-valued entries from a decoded params object.
@@ -297,6 +274,12 @@ export function renderComponent(
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
+  const withRouteContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    locallyFiberRef(
+      CurrentRouteParams,
+      params,
+      locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
+    );
 
   // RouteComponent can be Component.Type or Effect<Element>
   if (Component.isEffectComponent(component)) {
@@ -305,11 +288,13 @@ export function renderComponent(
       const originalRun = element.run;
       return Effect.succeed(
         componentElement(() =>
-          originalRun().pipe(
-            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-            unsafeEraseR,
-          ),
+          withRouteContext(
+            Effect.gen(function* () {
+              const routeElement = yield* originalRun();
+              const capturedContext = yield* Effect.services<unknown>();
+              return provideElement(capturedContext, routeElement);
+            }),
+          ).pipe(unsafeEraseR),
         ),
       );
     }
@@ -320,11 +305,13 @@ export function renderComponent(
   if (isEffectElement(component)) {
     return Effect.succeed(
       componentElement(() =>
-        component.pipe(
-          (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-          (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-          unsafeEraseR,
-        ),
+        withRouteContext(
+          Effect.gen(function* () {
+            const routeElement = yield* component;
+            const capturedContext = yield* Effect.services<unknown>();
+            return provideElement(capturedContext, routeElement);
+          }),
+        ).pipe(unsafeEraseR),
       ),
     );
   }
@@ -344,6 +331,16 @@ export function renderLayout(
   decodedQuery: Record<string, unknown> = {},
 ): Effect.Effect<Element, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
+  const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    locallyFiberRef(
+      CurrentRouteParams,
+      params,
+      locallyFiberRef(
+        CurrentRouteQuery,
+        decodedQuery,
+        locallyFiberRef(CurrentOutletChild, Option.some(child), effect),
+      ),
+    );
 
   // RouteComponent can be Component.Type or Effect<Element>
   if (Component.isEffectComponent(layout)) {
@@ -352,22 +349,13 @@ export function renderLayout(
       const originalRun = element.run;
       return Effect.succeed(
         componentElement(() =>
-          Effect.gen(function* () {
-            yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-            const layoutElement = yield* originalRun().pipe(
-              (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-              (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-              unsafeEraseR,
-            );
-            // If layout returns a Provide element, merge its context with parent context
-            // so children retain access to ancestor-provided services.
-            if (layoutElement._tag === "Provide") {
+          withLayoutContext(
+            Effect.gen(function* () {
+              const layoutElement = yield* originalRun();
               const capturedContext = yield* Effect.services<unknown>();
-              const mergedContext = ServiceMap.merge(capturedContext, layoutElement.context);
-              return { ...layoutElement, context: mergedContext };
-            }
-            return layoutElement;
-          }),
+              return provideElement(capturedContext, layoutElement);
+            }),
+          ).pipe(unsafeEraseR),
         ),
       );
     }
@@ -378,21 +366,13 @@ export function renderLayout(
   if (isEffectElement(layout)) {
     return Effect.succeed(
       componentElement(() =>
-        Effect.gen(function* () {
-          yield* FiberRef.set(CurrentOutletChild, Option.some(child));
-          const layoutElement = yield* layout.pipe(
-            (effect) => FiberRef.locally(CurrentRouteParams, params, effect),
-            (effect) => FiberRef.locally(CurrentRouteQuery, decodedQuery, effect),
-            unsafeEraseR,
-          );
-          // If layout returns a Provide element, merge its context with parent context
-          if (layoutElement._tag === "Provide") {
+        withLayoutContext(
+          Effect.gen(function* () {
+            const layoutElement = yield* layout;
             const capturedContext = yield* Effect.services<unknown>();
-            const mergedContext = ServiceMap.merge(capturedContext, layoutElement.context);
-            return { ...layoutElement, context: mergedContext };
-          }
-          return layoutElement;
-        }),
+            return provideElement(capturedContext, layoutElement);
+          }),
+        ).pipe(unsafeEraseR),
       ),
     );
   }
@@ -427,10 +407,15 @@ export function renderError(
       if (element._tag === "Component") {
         const originalRun = element.run;
         return componentElement(() =>
-          originalRun().pipe(
-            (effect) => FiberRef.locally(CurrentRouteError, Option.some(errorInfo), effect),
-            unsafeEraseR,
-          ),
+          locallyFiberRef(
+            CurrentRouteError,
+            Option.some(errorInfo),
+            Effect.gen(function* () {
+              const errorElement = yield* originalRun();
+              const capturedContext = yield* Effect.services<unknown>();
+              return provideElement(capturedContext, errorElement);
+            }),
+          ).pipe(unsafeEraseR),
         );
       }
       return element;
@@ -439,10 +424,15 @@ export function renderError(
     // Error component is an Effect<Element> - wrap it
     if (isEffectElement(errorComp)) {
       return componentElement(() =>
-        errorComp.pipe(
-          (effect) => FiberRef.locally(CurrentRouteError, Option.some(errorInfo), effect),
-          unsafeEraseR,
-        ),
+        locallyFiberRef(
+          CurrentRouteError,
+          Option.some(errorInfo),
+          Effect.gen(function* () {
+            const errorElement = yield* errorComp;
+            const capturedContext = yield* Effect.services<unknown>();
+            return provideElement(capturedContext, errorElement);
+          }),
+        ).pipe(unsafeEraseR),
       );
     }
 

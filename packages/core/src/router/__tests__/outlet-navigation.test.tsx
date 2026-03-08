@@ -16,14 +16,16 @@
  * The route reading should happen inside the AsyncLoader's tracking, not
  * in the component body.
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import * as Components from "../../primitives/component.js";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
-import { renderElement } from "../../testing/index.js";
+import { render, renderElement } from "../../testing/index.js";
 import { browserLayer, Renderer } from "../../primitives/renderer.js";
 import { componentElement, text, signalElement } from "../../primitives/element.js";
 import { Element } from "../../index.js";
@@ -32,8 +34,6 @@ import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
 import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // Helpers
@@ -92,7 +92,7 @@ const testLayerAt = (path: string): LayerType<Renderer | Router.Router> =>
 // =============================================================================
 
 describe("AsyncLoader - view signal during track", () => {
-  it.scoped("view signal is stale (Refreshing) immediately after track returns", () =>
+  scoped("view signal is stale (Refreshing) immediately after track returns", () =>
     Effect.gen(function* () {
       // Proves the stale read window exists:
       // After track() sets Refreshing, the view signal returns the PREVIOUS
@@ -129,7 +129,7 @@ describe("AsyncLoader - view signal during track", () => {
     }),
   );
 
-  it.scoped("SignalElement from stale view signal eventually shows correct value", () =>
+  scoped("SignalElement from stale view signal eventually shows correct value", () =>
     Effect.gen(function* () {
       // Even though the initial read is stale, the swap should fix it
       // (this passes in tests because the scheduler is favorable)
@@ -169,7 +169,7 @@ describe("AsyncLoader - view signal during track", () => {
 // =============================================================================
 
 describe("Outlet - Component re-render on navigation (root cause)", () => {
-  it.scoped("Outlet component body should run only ONCE (not re-render on route change)", () =>
+  scoped("Outlet component body should run only ONCE (not re-render on route change)", () =>
     Effect.gen(function* () {
       // The real Outlet uses SubscriptionRef.get (not Signal.get) to read the
       // route, so it does NOT register router.current as a component dependency.
@@ -230,7 +230,7 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
     }).pipe(Effect.provide(testLayerAt("/dashboard"))),
   );
 
-  it.scoped("view signal subscription should not be torn down on navigation", () =>
+  scoped("view signal subscription should not be torn down on navigation", () =>
     Effect.gen(function* () {
       // When the component re-renders, it returns a NEW signalElement(view).
       // The renderer tears down the OLD SignalElement (unsubscribes) and
@@ -281,7 +281,38 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
 // =============================================================================
 
 describe("Outlet - Navigation integration", () => {
-  it.scoped("should show new route content after navigation", () =>
+  scoped("should render lazy nested layout child once", () =>
+    Effect.gen(function* () {
+      const Layout = Components.gen(function* () {
+        return (
+          <div>
+            <h2>Settings</h2>
+            <Outlet />
+          </div>
+        );
+      });
+
+      const Overview = Components.gen(function* () {
+        return <h1>Overview</h1>;
+      });
+
+      const routes = Routes.make().add(
+        Route.make("/settings")
+          .layout(() => Promise.resolve({ default: Layout }))
+          .children(Route.index(() => Promise.resolve({ default: Overview }))),
+      );
+
+      const { container, getByText } = yield* render(<Outlet routes={routes.manifest} />).pipe(
+        Effect.provide(Router.testLayer("/settings")),
+      );
+
+      yield* getByText("Overview");
+      assert.strictEqual(container.querySelectorAll("h2").length, 1);
+      assert.strictEqual(container.querySelectorAll("h1").length, 1);
+    }),
+  );
+
+  scoped("should show new route content after navigation", () =>
     Effect.gen(function* () {
       const DashComp = identifiableComp("dashboard", "Dashboard Page");
       const UsersComp = identifiableComp("users", "Users Page");
@@ -315,7 +346,7 @@ describe("Outlet - Navigation integration", () => {
     }).pipe(Effect.provide(testLayerAt("/dashboard"))),
   );
 
-  it.scoped("should show new route after navigating back and forth", () =>
+  scoped("should show new route after navigating back and forth", () =>
     Effect.gen(function* () {
       const DashComp = identifiableComp("dashboard", "Dashboard Page");
       const UsersComp = identifiableComp("users", "Users Page");

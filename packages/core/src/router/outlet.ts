@@ -20,7 +20,6 @@ import {
   Scope,
   SubscriptionRef,
 } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
 import * as Debug from "../debug/debug.js";
 import { type Element, text, signalElement, componentElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
@@ -52,18 +51,8 @@ import {
 import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import { type ComponentInput, type ComponentLoader, type RouteComponent } from "./types.js";
+import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-    Effect.withFiber((fiber) =>
-      Effect.sync(() => {
-        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      }),
-    ),
-};
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -164,7 +153,13 @@ export const buildPrefetchResolver =
     Effect.gen(function* () {
       const parsed = yield* parsePath(path);
       const matchOption = yield* matcher.match(parsed.path);
-      if (Option.isNone(matchOption)) return;
+      if (Option.isNone(matchOption)) {
+        yield* Debug.log({
+          event: "router.prefetch.no_match",
+          path,
+        });
+        return;
+      }
 
       const match = matchOption.value;
 
@@ -205,7 +200,20 @@ export const buildPrefetchResolver =
       });
 
       yield* Effect.all([loadModules, runRoutePrefetch], { concurrency: "unbounded" });
-    }).pipe(Effect.ignore);
+      yield* Debug.log({
+        event: "router.prefetch.complete",
+        path,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Debug.log({
+          event: "router.prefetch.error",
+          path,
+          phase: "resolver",
+          error_message: String(Cause.squash(cause)),
+        }),
+      ),
+    );
 
 /**
  * Resolve a route component — handles both direct references and loader functions.
@@ -292,15 +300,15 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     const cachedManifestRef = yield* Ref.make<Option.Option<RoutesManifest>>(Option.none());
     const asyncLoaderRef = yield* Ref.make<Option.Option<AsyncLoaderShape>>(Option.none());
     // Nested outlet check: if there's child content, render it
-    const childContent = yield* FiberRef.get(CurrentOutletChild);
+    const childContent = yield* getFiberRef(CurrentOutletChild);
     if (Option.isSome(childContent)) {
-      yield* FiberRef.set(CurrentOutletChild, Option.none());
+      yield* setFiberRef(CurrentOutletChild, Option.none());
       return childContent.value;
     }
 
     // Resolve manifest: explicit prop takes priority, then FiberRef
     const manifest: RoutesManifest | undefined =
-      routes ?? Option.getOrUndefined(yield* FiberRef.get(CurrentRoutesManifest));
+      routes ?? Option.getOrUndefined(yield* getFiberRef(CurrentRoutesManifest));
 
     // No routes available - render empty
     if (manifest === undefined || manifest.routes.length === 0) {
@@ -675,9 +683,14 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       yield* commitView(withError, match, queryString);
     }).pipe(
       Effect.catchCause((cause) =>
-        Debug.log({
-          event: "router.outlet.error",
-          error: Cause.pretty(cause),
+        Effect.gen(function* () {
+          const currentRoute = yield* SubscriptionRef.get(router.current._ref);
+          yield* Debug.log({
+            event: "router.outlet.error",
+            phase: "process_route",
+            path: currentRoute.path,
+            error: Cause.pretty(cause),
+          });
         }),
       ),
     );

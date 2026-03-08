@@ -4,9 +4,10 @@
  * Tests the in-memory test layer for EventTarget.
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Scope } from "effect";
+import { Deferred, Effect, Exit, Ref, Scope } from "effect";
 import {
   PlatformEventTarget,
+  browser as eventTargetBrowser,
   test as eventTargetTest,
   type TestEventTargetService,
 } from "../event-target.js";
@@ -113,5 +114,30 @@ describe("EventTarget", () => {
       yield* (et as TestEventTargetService).dispatch(target, "mouseover", new Event("mouseover"));
       assert.deepStrictEqual(received, ["click", "mouseover"]);
     }).pipe(Effect.provide(eventTargetTest)),
+  );
+
+  it.effect("browser handlers are interrupted when registration scope closes", () =>
+    Effect.gen(function* () {
+      const et = yield* PlatformEventTarget;
+      const target = new EventTarget();
+      const gate = yield* Deferred.make<void>();
+      const interrupted = yield* Ref.make(false);
+
+      const scope = yield* Scope.make();
+
+      yield* et
+        .on(target, "click", (_e: Event) =>
+          Deferred.await(gate).pipe(Effect.onInterrupt(() => Ref.set(interrupted, true))),
+        )
+        .pipe(Effect.provideService(Scope.Scope, scope));
+
+      yield* Effect.sync(() => {
+        target.dispatchEvent(new Event("click"));
+      });
+
+      yield* Scope.close(scope, Exit.void);
+
+      assert.isTrue(yield* Ref.get(interrupted));
+    }).pipe(Effect.provide(eventTargetBrowser)),
   );
 });

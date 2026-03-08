@@ -12,13 +12,12 @@
  * - Resource.clear: Remove from cache
  * - Deduplication: Concurrent fetch handling
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Deferred, Effect, Option, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import * as Resource from "../resource.js";
 import * as Signal from "../signal.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // ResourceState constructors
@@ -96,7 +95,7 @@ describe("Resource.make", () => {
 // =============================================================================
 
 describe("Resource.fetch", () => {
-  it.scoped("should return Pending initially then Success after fetch completes", () =>
+  scoped("should return Pending initially then Success after fetch completes", () =>
     Effect.gen(function* () {
       const resource = Resource.make(() => Effect.succeed({ name: "Alice" }), { key: "user:1" });
 
@@ -118,7 +117,7 @@ describe("Resource.fetch", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should return cached state on subsequent fetch", () =>
+  scoped("should return cached state on subsequent fetch", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -148,7 +147,7 @@ describe("Resource.fetch", () => {
 // =============================================================================
 
 describe("Resource.fetch reactive invalidate/refresh", () => {
-  it.scoped("should reflect invalidate on reactive fetch output signal", () =>
+  scoped("should reflect invalidate on reactive fetch output signal", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const gate = yield* Deferred.make<void>();
@@ -200,7 +199,7 @@ describe("Resource.fetch reactive invalidate/refresh", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should reflect refresh (pending transition) on reactive fetch output", () =>
+  scoped("should reflect refresh (pending transition) on reactive fetch output", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const gate = yield* Deferred.make<void>();
@@ -244,7 +243,7 @@ describe("Resource.fetch reactive invalidate/refresh", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should not overwrite current key with stale previous key result", () =>
+  scoped("should not overwrite current key with stale previous key result", () =>
     Effect.gen(function* () {
       const gate1 = yield* Deferred.make<void>();
       const gate2 = yield* Deferred.make<void>();
@@ -294,7 +293,7 @@ describe("Resource.fetch reactive invalidate/refresh", () => {
 });
 
 describe("Resource.fetch reactive render phase", () => {
-  it.scoped("should not register param signals in component render phase accessed set", () =>
+  scoped("should not register param signals in component render phase accessed set", () =>
     Effect.gen(function* () {
       const factory = Resource.make(
         (params: { id: string }) => Effect.succeed(`user-${params.id}`),
@@ -322,7 +321,7 @@ describe("Resource.fetch reactive render phase", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should re-fetch when params change even inside a render phase context", () =>
+  scoped("should re-fetch when params change even inside a render phase context", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -372,7 +371,7 @@ describe("Resource.fetch reactive render phase", () => {
 // causing keyed-list teardown/remount race that blanks rendered items.
 
 describe("Resource.fetch static render phase isolation", () => {
-  it.scoped("should NOT register state signal in component render phase accessed set", () =>
+  scoped("should NOT register state signal in component render phase accessed set", () =>
     Effect.gen(function* () {
       const resource = Resource.make(() => Effect.succeed("data"), {
         key: "phase-isolation:static:1",
@@ -397,7 +396,7 @@ describe("Resource.fetch static render phase isolation", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should NOT register state signal even when checking cached state", () =>
+  scoped("should NOT register state signal even when checking cached state", () =>
     Effect.gen(function* () {
       const resource = Resource.make(() => Effect.succeed("cached-data"), {
         key: "phase-isolation:static:2",
@@ -437,7 +436,7 @@ describe("Resource.fetch static render phase isolation", () => {
 // =============================================================================
 
 describe("Resource.fetch deduplication", () => {
-  it.scoped("should return same signal for same key", () =>
+  scoped("should return same signal for same key", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -454,7 +453,7 @@ describe("Resource.fetch deduplication", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should only fetch once for same key", () =>
+  scoped("should only fetch once for same key", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -480,7 +479,7 @@ describe("Resource.fetch deduplication", () => {
 // =============================================================================
 
 describe("Resource.invalidate", () => {
-  it.scoped("should mark state as stale and trigger refetch", () =>
+  scoped("should mark state as stale and trigger refetch", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const secondFetchComplete = yield* Deferred.make<void>();
@@ -532,7 +531,7 @@ describe("Resource.invalidate", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should not invalidate non-existent resource", () =>
+  scoped("should not invalidate non-existent resource", () =>
     Effect.gen(function* () {
       const resource = Resource.make(() => Effect.succeed("value"), {
         key: "invalidate:nonexistent:1",
@@ -554,7 +553,7 @@ describe("Resource.invalidate", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should preserve stale value on refetch failure", () =>
+  scoped("should preserve stale value on refetch failure", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -596,7 +595,7 @@ describe("Resource.invalidate", () => {
 // =============================================================================
 
 describe("Resource.refresh", () => {
-  it.scoped("should transition to Pending and refetch", () =>
+  scoped("should transition to Pending and refetch", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const secondFetchComplete = yield* Deferred.make<void>();
@@ -636,7 +635,7 @@ describe("Resource.refresh", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should refetch after initial fetch completes", () =>
+  scoped("should refetch after initial fetch completes", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -674,7 +673,7 @@ describe("Resource.refresh", () => {
 // =============================================================================
 
 describe("Resource.clear", () => {
-  it.scoped("should remove resource from cache", () =>
+  scoped("should remove resource from cache", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -701,6 +700,49 @@ describe("Resource.clear", () => {
       assert.strictEqual(count, 2);
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
+
+  scoped("should interrupt in-flight fetch when clearing cache", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const interrupted = yield* Ref.make(false);
+
+      const resource = Resource.make(
+        () =>
+          Deferred.await(gate).pipe(
+            Effect.onInterrupt(() => Ref.set(interrupted, true)),
+            Effect.as("done"),
+          ),
+        { key: "clear:interrupt" },
+      );
+
+      yield* Resource.fetch(resource);
+      yield* TestClock.adjust(0);
+
+      yield* Resource.clear(resource);
+      yield* TestClock.adjust(0);
+
+      assert.isTrue(yield* Ref.get(interrupted));
+    }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
+  );
+
+  scoped("should not publish interruption failure to cleared state", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+
+      const resource = Resource.make(() => Deferred.await(gate).pipe(Effect.as("done")), {
+        key: "clear:no-failure",
+      });
+
+      const state = yield* Resource.fetch(resource);
+      yield* TestClock.adjust(0);
+
+      yield* Resource.clear(resource);
+      yield* TestClock.adjust(0);
+
+      const current = yield* Signal.get(state);
+      assert.strictEqual(current._tag, "Pending");
+    }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
+  );
 });
 
 // =============================================================================
@@ -708,7 +750,7 @@ describe("Resource.clear", () => {
 // =============================================================================
 
 describe("Resource key isolation", () => {
-  it.scoped("should maintain separate state for different keys", () =>
+  scoped("should maintain separate state for different keys", () =>
     Effect.gen(function* () {
       const resource1 = Resource.make(() => Effect.succeed("Alice"), { key: "user:1" });
 
@@ -736,7 +778,7 @@ describe("Resource key isolation", () => {
 // =============================================================================
 
 describe("Resource.fetch reactive", () => {
-  it.scoped("should fetch once per key — no duplicate fetches for same key", () =>
+  scoped("should fetch once per key — no duplicate fetches for same key", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -766,7 +808,7 @@ describe("Resource.fetch reactive", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should re-fetch when signal changes and resolve correct value", () =>
+  scoped("should re-fetch when signal changes and resolve correct value", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -803,7 +845,7 @@ describe("Resource.fetch reactive", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should cancel in-flight fetch when key changes before completion", () =>
+  scoped("should cancel in-flight fetch when key changes before completion", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const gate1 = yield* Deferred.make<void>();
@@ -842,7 +884,7 @@ describe("Resource.fetch reactive", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should not duplicate fetches when signal changes rapidly", () =>
+  scoped("should not duplicate fetches when signal changes rapidly", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 
@@ -874,7 +916,7 @@ describe("Resource.fetch reactive", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should deduplicate when async fetch is already in-flight for same key", () =>
+  scoped("should deduplicate when async fetch is already in-flight for same key", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
       const gate = yield* Deferred.make<void>();
@@ -913,7 +955,7 @@ describe("Resource.fetch reactive", () => {
     }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped(
+  scoped(
     "should not start multiple fetches for same new key when signal changes during async fetch",
     () =>
       Effect.gen(function* () {
@@ -954,7 +996,7 @@ describe("Resource.fetch reactive", () => {
       }).pipe(Effect.provide(Resource.ResourceRegistryLive)),
   );
 
-  it.scoped("should not re-fetch when signal changes to same value", () =>
+  scoped("should not re-fetch when signal changes to same value", () =>
     Effect.gen(function* () {
       const fetchCount = yield* Ref.make(0);
 

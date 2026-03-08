@@ -26,7 +26,7 @@ const LoginPage = Component.gen(function* () {
       yield* setAuth(Option.some(newUser));
 
       const router = yield* Router.get;
-      yield* router.navigate("/protected");
+      yield* Effect.ignore(router.navigate("/protected"));
     });
 
   if (Option.isSome(user)) {

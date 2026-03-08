@@ -44,11 +44,11 @@ export const browser: Layer.Layer<Idle> = Layer.succeed(
   Idle.of({
     request: (handler, options) =>
       Effect.gen(function* () {
+        const scope = yield* Effect.scope;
         const services = yield* Effect.services();
-        const runFork = Effect.runForkWith(services);
         const opts = options?.timeout !== undefined ? { timeout: options.timeout } : undefined;
         const id = requestIdleCallback(() => {
-          runFork(handler());
+          Effect.runForkWith(services)(Effect.forkIn(handler(), scope, { startImmediately: true }));
         }, opts);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {

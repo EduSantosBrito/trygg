@@ -14,7 +14,7 @@ const ProtectedPage = Component.gen(function* () {
     Effect.gen(function* () {
       yield* setAuth(Option.none());
       const router = yield* Router.get;
-      yield* router.navigate("/login");
+      yield* Effect.ignore(router.navigate("/login"));
     });
 
   return (

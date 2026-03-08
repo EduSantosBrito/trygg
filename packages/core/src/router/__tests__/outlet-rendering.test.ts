@@ -10,10 +10,10 @@
  * - Parent loading component fallback
  * - Cleanup on navigation (different match results)
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Cause, Effect, Exit, Option, Schema, Scope } from "effect";
 import type * as LayerTypes from "effect/Layer";
-import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
@@ -22,21 +22,9 @@ import { OutletRenderer } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
 import { componentElement, text } from "../../primitives/element.js";
 import type { Element, ElementKey } from "../../primitives/element.js";
+import { getFiberRef, setFiberRef } from "../../internal/fiber-ref.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-  set: <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-    Effect.withFiber((fiber) =>
-      Effect.sync(() => {
-        fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-      }),
-    ),
-};
 
 // =============================================================================
 // Helper: Create RouteComponent
@@ -59,9 +47,9 @@ const layoutComp = (_name: string): RouteComponent => {
   const fn = () =>
     componentElement(() =>
       Effect.gen(function* () {
-        const childContent = yield* FiberRef.get(Router.CurrentOutletChild);
+        const childContent = yield* getFiberRef(Router.CurrentOutletChild);
         if (Option.isSome(childContent)) {
-          yield* FiberRef.set(Router.CurrentOutletChild, Option.none());
+          yield* setFiberRef(Router.CurrentOutletChild, Option.none());
           return childContent.value;
         }
         return text("empty-layout");
@@ -129,7 +117,7 @@ describe("Outlet - Rendering", () => {
   // Eager route rendering (no loading component = direct render)
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render eager route immediately", () =>
+  scoped("should render eager route immediately", () =>
     Effect.gen(function* () {
       const HomeComp = textComp("Home Page");
 
@@ -143,7 +131,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render route matching current path", () =>
+  scoped("should render route matching current path", () =>
     Effect.gen(function* () {
       const HomeComp = textComp("Home");
       const UsersComp = textComp("Users");
@@ -163,7 +151,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should not produce SignalElement when no loading defined", () =>
+  scoped("should not produce SignalElement when no loading defined", () =>
     Effect.gen(function* () {
       const PageComp = textComp("Direct");
 
@@ -185,7 +173,7 @@ describe("Outlet - Rendering", () => {
   // Loading state (lazy route simulation)
   // ---------------------------------------------------------------------------
 
-  it.scoped("should show loading then component for lazy route", () =>
+  scoped("should show loading then component for lazy route", () =>
     Effect.gen(function* () {
       const LoadingComp = textComp("Loading...");
       const PageComp = textComp("Page Content");
@@ -210,7 +198,7 @@ describe("Outlet - Rendering", () => {
   // Layout wrapping
   // ---------------------------------------------------------------------------
 
-  it.scoped("should wrap with layout (root-to-leaf)", () =>
+  scoped("should wrap with layout (root-to-leaf)", () =>
     Effect.gen(function* () {
       const AdminLayout = layoutComp("AdminLayout");
       const UsersLayout = layoutComp("UsersLayout");
@@ -237,7 +225,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render component without layout when none defined", () =>
+  scoped("should render component without layout when none defined", () =>
     Effect.gen(function* () {
       const PageComp = textComp("Simple Page");
 
@@ -254,7 +242,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should apply leaf layout when only leaf has layout", () =>
+  scoped("should apply leaf layout when only leaf has layout", () =>
     Effect.gen(function* () {
       const LeafLayout = layoutComp("LeafLayout");
       const PageComp = textComp("Content");
@@ -280,7 +268,7 @@ describe("Outlet - Rendering", () => {
   // Nested Outlet (layout child rendering)
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render Outlet inside layout for child content", () =>
+  scoped("should render Outlet inside layout for child content", () =>
     Effect.gen(function* () {
       const ChildComp = textComp("Child Content");
       const ParentLayout = layoutComp("Parent");
@@ -302,10 +290,10 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render child content when CurrentOutletChild is set", () =>
+  scoped("should render child content when CurrentOutletChild is set", () =>
     Effect.gen(function* () {
       // Pre-set CurrentOutletChild (simulates layout setting child)
-      yield* FiberRef.set(Router.CurrentOutletChild, Option.some(text("Child from parent")));
+      yield* setFiberRef(Router.CurrentOutletChild, Option.some(text("Child from parent")));
 
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
@@ -317,14 +305,14 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should clear CurrentOutletChild after reading", () =>
+  scoped("should clear CurrentOutletChild after reading", () =>
     Effect.gen(function* () {
-      yield* FiberRef.set(Router.CurrentOutletChild, Option.some(text("Child")));
+      yield* setFiberRef(Router.CurrentOutletChild, Option.some(text("Child")));
 
       const outlet = Outlet({});
       yield* runOutletEffect(outlet);
 
-      const remaining = yield* FiberRef.get(Router.CurrentOutletChild);
+      const remaining = yield* getFiberRef(Router.CurrentOutletChild);
       assert.isTrue(Option.isNone(remaining));
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
@@ -333,7 +321,7 @@ describe("Outlet - Rendering", () => {
   // Loading component resolution (nearest wins)
   // ---------------------------------------------------------------------------
 
-  it.scoped("should use nearest loading component", () =>
+  scoped("should use nearest loading component", () =>
     Effect.gen(function* () {
       const ParentLoading = textComp("Parent Loading");
       const ChildLoading = textComp("Child Loading");
@@ -358,7 +346,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should fall back to parent loading component", () =>
+  scoped("should fall back to parent loading component", () =>
     Effect.gen(function* () {
       const ParentLoading = textComp("Parent Loading");
       const PageComp = textComp("Page");
@@ -382,7 +370,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should not show loading when none defined in chain", () =>
+  scoped("should not show loading when none defined in chain", () =>
     Effect.gen(function* () {
       const PageComp = textComp("Direct Page");
 
@@ -404,7 +392,7 @@ describe("Outlet - Rendering", () => {
   // Not Found handling
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render root notFound for unmatched path", () =>
+  scoped("should render root notFound for unmatched path", () =>
     Effect.gen(function* () {
       const NotFoundComp = textComp("Not Found Page");
 
@@ -423,7 +411,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render default text when no notFound component defined", () =>
+  scoped("should render default text when no notFound component defined", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/home").component(textComp("Home"))).manifest;
 
@@ -445,7 +433,7 @@ describe("Outlet - Rendering", () => {
   // Middleware integration
   // ---------------------------------------------------------------------------
 
-  it.scoped("should redirect when middleware returns redirect", () =>
+  scoped("should redirect when middleware returns redirect", () =>
     Effect.gen(function* () {
       const redirectMiddleware = Route.routeRedirect("/login");
       const ProtectedComp = textComp("Protected");
@@ -466,7 +454,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render forbidden component when middleware forbids", () =>
+  scoped("should render forbidden component when middleware forbids", () =>
     Effect.gen(function* () {
       const forbidMiddleware = Route.routeForbidden();
       const ForbiddenComp = textComp("Access Denied");
@@ -490,7 +478,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should use root forbidden when route has none", () =>
+  scoped("should use root forbidden when route has none", () =>
     Effect.gen(function* () {
       const forbidMiddleware = Route.routeForbidden();
       const RootForbidden = textComp("Root Forbidden");
@@ -511,7 +499,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render default forbidden text when none defined", () =>
+  scoped("should render default forbidden text when none defined", () =>
     Effect.gen(function* () {
       const forbidMiddleware = Route.routeForbidden();
       const ProtectedComp = textComp("Protected");
@@ -537,7 +525,7 @@ describe("Outlet - Rendering", () => {
   // Error boundary integration
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render error boundary on middleware error", () =>
+  scoped("should render error boundary on middleware error", () =>
     Effect.gen(function* () {
       const failingMiddleware = Effect.die(new Error("Middleware died"));
       const ErrorComp = textComp("Error Occurred");
@@ -559,7 +547,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render default error text when no error boundary defined", () =>
+  scoped("should render default error text when no error boundary defined", () =>
     Effect.gen(function* () {
       const failingMiddleware = Effect.die(new Error("oops"));
       const PageComp = textComp("Page");
@@ -581,7 +569,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render error boundary on params decode failure", () =>
+  scoped("should render error boundary on params decode failure", () =>
     Effect.gen(function* () {
       const ErrorComp = textComp("Invalid params");
       const PageComp = textComp("User");
@@ -603,7 +591,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render default error text on params decode failure without boundary", () =>
+  scoped("should render default error text on params decode failure without boundary", () =>
     Effect.gen(function* () {
       const PageComp = textComp("User");
 
@@ -626,7 +614,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render default error text on query decode failure without boundary", () =>
+  scoped("should render default error text on query decode failure without boundary", () =>
     Effect.gen(function* () {
       const PageComp = textComp("Search");
 
@@ -653,7 +641,7 @@ describe("Outlet - Rendering", () => {
   // Empty/no routes
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render 'No routes configured' when routes is undefined", () =>
+  scoped("should render 'No routes configured' when routes is undefined", () =>
     Effect.gen(function* () {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
@@ -665,7 +653,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render 'No routes configured' when routes is empty", () =>
+  scoped("should render 'No routes configured' when routes is empty", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().manifest;
 
@@ -683,7 +671,7 @@ describe("Outlet - Rendering", () => {
   // Path change produces different results
   // ---------------------------------------------------------------------------
 
-  it.scoped("should produce different results for different paths", () =>
+  scoped("should produce different results for different paths", () =>
     Effect.gen(function* () {
       const HomeComp = textComp("Home");
       const AboutComp = textComp("About");
@@ -712,7 +700,7 @@ describe("Outlet - Rendering", () => {
   // Index route matching
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render index route for parent path", () =>
+  scoped("should render index route for parent path", () =>
     Effect.gen(function* () {
       const IndexComp = textComp("Settings Index");
       const ProfileComp = textComp("Profile");
@@ -734,7 +722,7 @@ describe("Outlet - Rendering", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render child route when navigating deeper", () =>
+  scoped("should render child route when navigating deeper", () =>
     Effect.gen(function* () {
       const IndexComp = textComp("Index");
       const ProfileComp = textComp("Profile");
@@ -762,14 +750,14 @@ describe("Outlet - Rendering", () => {
 // =============================================================================
 
 describe("Outlet - Implicit Manifest", () => {
-  it.scoped("should read manifest from CurrentRoutesManifest FiberRef", () =>
+  scoped("should read manifest from CurrentRoutesManifest FiberRef", () =>
     Effect.gen(function* () {
       const HomeComp = textComp("Home");
 
       const manifest = Routes.make().add(Route.make("/").component(HomeComp)).manifest;
 
       // Set manifest via FiberRef (simulates what entry module does)
-      yield* FiberRef.set(Routes.CurrentRoutesManifest, Option.some(manifest));
+      yield* setFiberRef(Routes.CurrentRoutesManifest, Option.some(manifest));
 
       // Outlet without routes prop — should read from FiberRef
       const outlet = Outlet({});
@@ -779,7 +767,7 @@ describe("Outlet - Implicit Manifest", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should prefer explicit routes prop over FiberRef", () =>
+  scoped("should prefer explicit routes prop over FiberRef", () =>
     Effect.gen(function* () {
       const HomeComp = textComp("Home");
       const OtherComp = textComp("Other");
@@ -789,7 +777,7 @@ describe("Outlet - Implicit Manifest", () => {
       ).manifest;
       const propManifest = Routes.make().add(Route.make("/").component(HomeComp)).manifest;
 
-      yield* FiberRef.set(Routes.CurrentRoutesManifest, Option.some(fiberRefManifest));
+      yield* setFiberRef(Routes.CurrentRoutesManifest, Option.some(fiberRefManifest));
 
       // Explicit prop should be used (matches "/")
       const outlet = Outlet({ routes: propManifest });
@@ -799,7 +787,7 @@ describe("Outlet - Implicit Manifest", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should render 'No routes configured' when neither prop nor FiberRef", () =>
+  scoped("should render 'No routes configured' when neither prop nor FiberRef", () =>
     Effect.gen(function* () {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
@@ -849,7 +837,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
   // Happy path: valid loader → Component renders
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render component from valid lazy loader", () =>
+  scoped("should render component from valid lazy loader", () =>
     Effect.gen(function* () {
       const PageComp = textComp("Lazy Page");
       const manifest: Routes.RoutesManifest = {
@@ -872,7 +860,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
   // Failure: no error boundary → catchAllCause absorbs, view stays empty
   // ---------------------------------------------------------------------------
 
-  it.scoped("should not crash when loader returns invalid default export", () =>
+  scoped("should not crash when loader returns invalid default export", () =>
     Effect.gen(function* () {
       const manifest: Routes.RoutesManifest = {
         routes: [loaderDefinition("/bad", () => Promise.resolve({ default: "not-a-component" }))],
@@ -894,7 +882,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should not crash when loader rejects", () =>
+  scoped("should not crash when loader rejects", () =>
     Effect.gen(function* () {
       const manifest: Routes.RoutesManifest = {
         routes: [loaderDefinition("/fail", () => Promise.reject(new Error("network error")))],
@@ -920,7 +908,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
   // Failure with error boundary → error boundary renders
   // ---------------------------------------------------------------------------
 
-  it.scoped("should render error boundary when loader returns invalid component", () =>
+  scoped("should render error boundary when loader returns invalid component", () =>
     Effect.gen(function* () {
       const ErrorComp = textComp("Error Boundary Hit");
       const defWithError: Route.RouteDefinition = {

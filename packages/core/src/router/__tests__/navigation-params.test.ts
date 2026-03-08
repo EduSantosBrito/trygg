@@ -9,20 +9,19 @@
  * - Link prefetch strategies (intent, render, false)
  * - interpolateParams utility
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Effect } from "effect";
 import * as Router from "../service.js";
 import { interpolateParams, buildPathWithParams } from "../types.js";
 import * as Signal from "../../primitives/signal.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // Router.get - Context.Tag accessor
 // =============================================================================
 
 describe("Router.get", () => {
-  it.scoped("should return RouterService", () =>
+  scoped("should return RouterService", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -37,7 +36,7 @@ describe("Router.get", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should be the same as getRouter (backward compat)", () =>
+  scoped("should be the same as getRouter (backward compat)", () =>
     Effect.gen(function* () {
       const fromGet = yield* Router.get;
       const fromGetRouter = yield* Router.getRouter;
@@ -52,7 +51,7 @@ describe("Router.get", () => {
 // =============================================================================
 
 describe("navigate with params", () => {
-  it.scoped("should interpolate params into path", () =>
+  scoped("should interpolate params into path", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -63,7 +62,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should interpolate multiple params", () =>
+  scoped("should interpolate multiple params", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -76,7 +75,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should handle number params (toString)", () =>
+  scoped("should handle number params (toString)", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -87,7 +86,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should handle number params with multiple segments", () =>
+  scoped("should handle number params with multiple segments", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -100,7 +99,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should combine params and query", () =>
+  scoped("should combine params and query", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -115,7 +114,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should combine params with replace", () =>
+  scoped("should combine params with replace", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -132,7 +131,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should navigate without params when none provided", () =>
+  scoped("should navigate without params when none provided", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -143,7 +142,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should not modify path when params is empty object", () =>
+  scoped("should not modify path when params is empty object", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -154,7 +153,7 @@ describe("navigate with params", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should handle zero as param value", () =>
+  scoped("should handle zero as param value", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
 
@@ -270,7 +269,7 @@ describe("buildPathWithParams", () => {
 // =============================================================================
 
 describe("Router.navigate (module-level)", () => {
-  it.scoped("should interpolate params when calling module-level navigate", () =>
+  scoped("should interpolate params when calling module-level navigate", () =>
     Effect.gen(function* () {
       yield* Router.navigate("/users/:id", { params: { id: 456 } });
 

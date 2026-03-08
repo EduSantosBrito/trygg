@@ -21,7 +21,7 @@ export const CounterButton = Component.gen(function* (
     <button
       className={baseClass}
       onClick={onClick}
-      style={{ color: variant === "icon" ? theme.text : undefined }}
+      style={variant === "icon" ? { color: theme.text } : {}}
     >
       {label}
     </button>

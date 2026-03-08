@@ -2,17 +2,11 @@
 //
 // Tests for .query(schema), query decode, CurrentRouteQuery FiberRef,
 // and handling of optional/required/extra query params.
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Effect, Result, Schema } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
 import * as Route from "../route.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
-
-const FiberRef = {
-  get: <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-    Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference))),
-};
+import { getFiberRef } from "../../internal/fiber-ref.js";
 
 // =============================================================================
 // .query() - Schema stored on route
@@ -64,7 +58,7 @@ describe(".query() schema storage", () => {
 // =============================================================================
 
 describe("decodeQuery", () => {
-  it.scoped("should decode query params at match time", () =>
+  scoped("should decode query params at match time", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -78,7 +72,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should return undefined for optional missing params", () =>
+  scoped("should return undefined for optional missing params", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -93,7 +87,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should fail on missing required params", () =>
+  scoped("should fail on missing required params", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -111,7 +105,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should handle empty query string with all optional fields", () =>
+  scoped("should handle empty query string with all optional fields", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.optional(Schema.String),
@@ -126,7 +120,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should ignore extra query params not in schema", () =>
+  scoped("should ignore extra query params not in schema", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         q: Schema.String,
@@ -140,7 +134,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should decode literal types", () =>
+  scoped("should decode literal types", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         sort: Schema.Literals(["asc", "desc"]),
@@ -153,7 +147,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should fail on invalid literal value", () =>
+  scoped("should fail on invalid literal value", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         sort: Schema.Literals(["asc", "desc"]),
@@ -166,7 +160,7 @@ describe("decodeQuery", () => {
     }),
   );
 
-  it.scoped("should preserve query decode error cause", () =>
+  scoped("should preserve query decode error cause", () =>
     Effect.gen(function* () {
       const schema = Schema.Struct({
         page: Schema.FiniteFromString,
@@ -189,11 +183,11 @@ describe("decodeQuery", () => {
 // =============================================================================
 
 describe("CurrentRouteQuery FiberRef", () => {
-  it.scoped("should provide decoded query via FiberRef", () =>
+  scoped("should provide decoded query via FiberRef", () =>
     Effect.gen(function* () {
       const decoded = { q: "hello", page: 2 };
 
-      const result = yield* FiberRef.get(Route.CurrentRouteQuery).pipe(
+      const result = yield* getFiberRef(Route.CurrentRouteQuery).pipe(
         Effect.provideService(Route.CurrentRouteQuery, decoded),
       );
 
@@ -201,24 +195,24 @@ describe("CurrentRouteQuery FiberRef", () => {
     }),
   );
 
-  it.scoped("should default to empty object", () =>
+  scoped("should default to empty object", () =>
     Effect.gen(function* () {
-      const result = yield* FiberRef.get(Route.CurrentRouteQuery);
+      const result = yield* getFiberRef(Route.CurrentRouteQuery);
 
       assert.deepStrictEqual(result, {});
     }),
   );
 
-  it.scoped("should be isolated per fiber", () =>
+  scoped("should be isolated per fiber", () =>
     Effect.gen(function* () {
       const query1 = { q: "first" };
       const query2 = { q: "second" };
 
       const [r1, r2] = yield* Effect.all([
-        FiberRef.get(Route.CurrentRouteQuery).pipe(
+        getFiberRef(Route.CurrentRouteQuery).pipe(
           Effect.provideService(Route.CurrentRouteQuery, query1),
         ),
-        FiberRef.get(Route.CurrentRouteQuery).pipe(
+        getFiberRef(Route.CurrentRouteQuery).pipe(
           Effect.provideService(Route.CurrentRouteQuery, query2),
         ),
       ]);
