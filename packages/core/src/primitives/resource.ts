@@ -38,8 +38,10 @@
  */
 import {
   Cause,
+  Data,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   Hash,
   Layer,
@@ -268,7 +270,12 @@ interface RegistryEntry {
   readonly inFlight: Ref.Ref<Option.Option<Deferred.Deferred<void, never>>>;
   readonly currentFiber: Ref.Ref<Option.Option<Fiber.Fiber<void, never>>>;
   readonly timestamp: Ref.Ref<number>;
+  readonly scope: Scope.Scope;
 }
+
+class ResourceFactoryParamsRequiredError extends Data.TaggedError(
+  "ResourceFactoryParamsRequiredError",
+)<{}> {}
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
@@ -308,6 +315,7 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
   ResourceRegistryTag,
   Effect.gen(function* () {
     const cache = yield* SynchronizedRef.make(new Map<string, RegistryEntry>());
+    const registryScope = yield* Effect.scope;
 
     const get = (key: string): Effect.Effect<Option.Option<RegistryEntry>> =>
       SynchronizedRef.get(cache).pipe(Effect.map((map) => fromNullable(map.get(key))));
@@ -339,8 +347,9 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
             Option.none(),
           );
           const timestamp = yield* Ref.make(0);
+          const scope = yield* Scope.fork(registryScope);
 
-          const entry: RegistryEntry = { state, inFlight, currentFiber, timestamp };
+          const entry: RegistryEntry = { state, inFlight, currentFiber, timestamp, scope };
           const newMap = new Map(map);
           newMap.set(key, entry);
 
@@ -350,11 +359,20 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
       );
 
     const deleteEntry = (key: string): Effect.Effect<void> =>
-      SynchronizedRef.update(cache, (map) => {
-        const newMap = new Map(map);
-        newMap.delete(key);
-        return newMap;
-      });
+      SynchronizedRef.modifyEffect(cache, (map) =>
+        Effect.gen(function* () {
+          const newMap = new Map(map);
+          const entry = newMap.get(key);
+          newMap.delete(key);
+
+          if (entry !== undefined) {
+            yield* Scope.close(entry.scope, Exit.void);
+          }
+
+          const result: readonly [void, Map<string, RegistryEntry>] = [undefined, newMap];
+          return result;
+        }),
+      );
 
     return {
       _tag: "ResourceRegistry" satisfies ResourceRegistry["_tag"],
@@ -432,17 +450,23 @@ const fetchInternal = <A, E, R>(
             yield* Signal.set(state, Success<A, E>(value, false));
           }),
         onFailure: (cause) =>
-          Effect.gen(function* () {
-            const error = Cause.squash(cause);
-            yield* Debug.log({
-              event: "resource.fetch.set_failure",
-              key: resource.key,
-              error: String(error),
-            });
-            const prev = yield* Signal.get(state);
-            const staleValue = prev._tag === "Success" ? Option.some(prev.value) : Option.none();
-            yield* Signal.set(state, Failure<A, E>(unsafeAsError<E>(error), staleValue));
-          }),
+          Cause.hasInterruptsOnly(cause)
+            ? Debug.log({
+                event: "resource.fetch.interrupted",
+                key: resource.key,
+              })
+            : Effect.gen(function* () {
+                const error = Cause.squash(cause);
+                yield* Debug.log({
+                  event: "resource.fetch.set_failure",
+                  key: resource.key,
+                  error: String(error),
+                });
+                const prev = yield* Signal.get(state);
+                const staleValue =
+                  prev._tag === "Success" ? Option.some(prev.value) : Option.none();
+                yield* Signal.set(state, Failure<A, E>(unsafeAsError<E>(error), staleValue));
+              }),
       }),
       Effect.catchCause((cause) =>
         Debug.log({
@@ -464,7 +488,7 @@ const fetchInternal = <A, E, R>(
           yield* Ref.set(entry.timestamp, Date.now());
         }),
       ),
-      Effect.forkDetach({ startImmediately }),
+      Effect.forkIn(entry.scope, { startImmediately }),
     );
 
     yield* Ref.set(entry.currentFiber, Option.some(fiber));
@@ -519,7 +543,7 @@ export const fetch: {
   ) => {
     if (typeof resourceOrFactory === "function") {
       if (params === undefined) {
-        return Effect.die("Resource.fetch: params required when using a factory");
+        return Effect.die(new ResourceFactoryParamsRequiredError());
       }
       return fetchReactive(resourceOrFactory, params);
     }
@@ -722,8 +746,17 @@ const fetchReactive = <P extends object, A, E, R>(
               return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
             }).pipe(
               Effect.provide(ctx),
-              Effect.catchCause(() => Effect.void),
-              Effect.forkDetach({ startImmediately: true }),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Debug.log({
+                      event: "resource.fetch.unhandled",
+                      key: resource.key,
+                      error: Cause.squash(cause),
+                      error_message: String(Cause.squash(cause)),
+                    }),
+              ),
+              Effect.forkIn(scope, { startImmediately: true }),
             );
 
             return Option.some(daemon);

@@ -16,7 +16,8 @@
  * - Every test manages its own fibers/scope to prevent memory leaks
  * - Tests verify DOM structure and cleanup
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Data, Effect, Exit, Layer, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { TestClock } from "effect/testing";
@@ -30,15 +31,13 @@ import type { ComponentProps } from "../component.js";
 import * as Router from "../../router/index.js";
 import { Element, Fragment } from "../../index.js";
 
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
-
 // =============================================================================
 // mount - App entry point
 // =============================================================================
 // Scope: Mounting an app to a DOM container
 
 describe("mount", () => {
-  it.scoped("should render Effect<Element> to container", () =>
+  scoped("should render Effect<Element> to container", () =>
     Effect.gen(function* () {
       const app = Effect.succeed(<div data-testid="app">App content</div>);
       const { getByTestId } = yield* render(app);
@@ -47,7 +46,7 @@ describe("mount", () => {
     }),
   );
 
-  it.scoped("should render Element directly to container", () =>
+  scoped("should render Element directly to container", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="direct">Direct element</div>);
 
@@ -55,7 +54,7 @@ describe("mount", () => {
     }),
   );
 
-  it.scoped("should enable reactivity via Component wrapper", () =>
+  scoped("should enable reactivity via Component wrapper", () =>
     Effect.gen(function* () {
       const count = Signal.makeSync(0);
 
@@ -81,7 +80,7 @@ describe("mount", () => {
 // Scope: Rendering plain text nodes
 
 describe("Text element rendering", () => {
-  it.scoped("should create DOM text node with content", () =>
+  scoped("should create DOM text node with content", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="text-parent">Hello World</div>);
 
@@ -89,7 +88,7 @@ describe("Text element rendering", () => {
     }),
   );
 
-  it.scoped("should append text node to parent", () =>
+  scoped("should append text node to parent", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<span data-testid="parent">Child text</span>);
 
@@ -99,7 +98,7 @@ describe("Text element rendering", () => {
     }),
   );
 
-  it.scoped("should remove text node on cleanup", () =>
+  scoped("should remove text node on cleanup", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
@@ -122,7 +121,7 @@ describe("Text element rendering", () => {
 // Scope: Reactive text nodes that update when signal changes
 
 describe("SignalText element rendering", () => {
-  it.scoped("should create text node with signal initial value", () =>
+  scoped("should create text node with signal initial value", () =>
     Effect.gen(function* () {
       const textSignal = yield* Signal.make("Initial text");
       const { getByTestId } = yield* render(<div data-testid="signal-text">{textSignal}</div>);
@@ -131,7 +130,7 @@ describe("SignalText element rendering", () => {
     }),
   );
 
-  it.scoped("should update textContent when signal changes", () =>
+  scoped("should update textContent when signal changes", () =>
     Effect.gen(function* () {
       const textSignal = yield* Signal.make("Before");
       const { getByTestId } = yield* render(<div data-testid="update-text">{textSignal}</div>);
@@ -143,7 +142,7 @@ describe("SignalText element rendering", () => {
     }),
   );
 
-  it.scoped("should subscribe to signal for updates", () =>
+  scoped("should subscribe to signal for updates", () =>
     Effect.gen(function* () {
       const textSignal = yield* Signal.make("text");
       const initialListeners = textSignal._listeners.size;
@@ -154,7 +153,7 @@ describe("SignalText element rendering", () => {
     }),
   );
 
-  it.scoped("should unsubscribe and remove node on cleanup", () =>
+  scoped("should unsubscribe and remove node on cleanup", () =>
     Effect.gen(function* () {
       const textSignal = yield* Signal.make("cleanup");
       const scope = yield* Scope.make();
@@ -180,7 +179,7 @@ describe("SignalText element rendering", () => {
 // Scope: Reactive elements that swap DOM when signal changes
 
 describe("SignalElement rendering", () => {
-  it.scoped("should render initial Element from signal", () =>
+  scoped("should render initial Element from signal", () =>
     Effect.gen(function* () {
       const elemSignal = yield* Signal.make(<span>Initial</span>);
       const { getByTestId } = yield* render(<div data-testid="signal-elem">{elemSignal}</div>);
@@ -189,7 +188,7 @@ describe("SignalElement rendering", () => {
     }),
   );
 
-  it.scoped("should swap DOM content when signal changes", () =>
+  scoped("should swap DOM content when signal changes", () =>
     Effect.gen(function* () {
       const elemSignal = yield* Signal.make(<span>Before</span>);
       const { getByTestId } = yield* render(<div data-testid="swap-elem">{elemSignal}</div>);
@@ -203,7 +202,7 @@ describe("SignalElement rendering", () => {
     }),
   );
 
-  it.scoped("should maintain position using anchor comment", () =>
+  scoped("should maintain position using anchor comment", () =>
     Effect.gen(function* () {
       const elemSignal = yield* Signal.make(<span>Middle</span>);
       const { getByTestId } = yield* render(
@@ -216,7 +215,7 @@ describe("SignalElement rendering", () => {
     }),
   );
 
-  it.scoped("should cleanup content and anchor on unmount", () =>
+  scoped("should cleanup content and anchor on unmount", () =>
     Effect.gen(function* () {
       const elemSignal = yield* Signal.make(<span id="elem-cleanup" />);
       const scope = yield* Scope.make();
@@ -233,7 +232,7 @@ describe("SignalElement rendering", () => {
     }),
   );
 
-  it.scoped("should render primitive values as text nodes", () =>
+  scoped("should render primitive values as text nodes", () =>
     Effect.gen(function* () {
       const numSignal = yield* Signal.make(42);
       const { getByTestId } = yield* render(<div data-testid="prim-signal">{numSignal}</div>);
@@ -242,7 +241,7 @@ describe("SignalElement rendering", () => {
     }),
   );
 
-  it.scoped("should preserve provided context when swapping", () =>
+  scoped("should preserve provided context when swapping", () =>
     Effect.gen(function* () {
       class Theme extends ServiceMap.Service<Theme, { value: string }>()("Theme") {}
       const themeLayer = Layer.succeed(Theme, { value: "themed" });
@@ -283,7 +282,7 @@ describe("SignalElement rendering", () => {
 // Scope: Rendering HTML elements like div, span, button
 
 describe("Intrinsic element rendering", () => {
-  it.scoped("should create DOM element with correct tag", () =>
+  scoped("should create DOM element with correct tag", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<article data-testid="tag-test" />);
 
@@ -291,7 +290,7 @@ describe("Intrinsic element rendering", () => {
     }),
   );
 
-  it.scoped("should apply static props as attributes", () =>
+  scoped("should apply static props as attributes", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <div data-testid="attr-test" className="my-class" id="my-id" />,
@@ -303,7 +302,7 @@ describe("Intrinsic element rendering", () => {
     }),
   );
 
-  it.scoped("should render children inside element", () =>
+  scoped("should render children inside element", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <ul data-testid="children-test">
@@ -318,7 +317,7 @@ describe("Intrinsic element rendering", () => {
     }),
   );
 
-  it.scoped("should remove element and children on cleanup", () =>
+  scoped("should remove element and children on cleanup", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
@@ -345,7 +344,7 @@ describe("Intrinsic element rendering", () => {
 // Scope: Rendering Effect-based components with reactivity
 
 describe("Component element rendering", () => {
-  it.scoped("should execute component Effect to produce Element", () =>
+  scoped("should execute component Effect to produce Element", () =>
     Effect.gen(function* () {
       let effectRan = false;
 
@@ -360,7 +359,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should render component output to DOM", () =>
+  scoped("should render component output to DOM", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         return <section data-testid="comp-output">Component content</section>;
@@ -372,7 +371,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should create render phase for signal tracking", () =>
+  scoped("should create render phase for signal tracking", () =>
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         const signal = yield* Signal.make(0);
@@ -386,7 +385,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should re-render when subscribed signal changes", () =>
+  scoped("should re-render when subscribed signal changes", () =>
     Effect.gen(function* () {
       const count = Signal.makeSync(0);
 
@@ -405,7 +404,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should preserve signal identity on re-render", () =>
+  scoped("should preserve signal identity on re-render", () =>
     Effect.gen(function* () {
       const trigger = Signal.makeSync(0);
       let signalInstance: Signal.Signal<number> | null = null;
@@ -430,7 +429,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should maintain position using anchor comment", () =>
+  scoped("should maintain position using anchor comment", () =>
     Effect.gen(function* () {
       const Inner = Component.gen(function* () {
         return <span>Component</span>;
@@ -449,7 +448,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should close scopes and remove content on cleanup", () =>
+  scoped("should close scopes and remove content on cleanup", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
@@ -467,7 +466,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped("should propagate errors from component effect", () =>
+  scoped("should propagate errors from component effect", () =>
     Effect.gen(function* () {
       const ErrorComponent = Component.gen(function* () {
         yield* new ComponentError({ message: "Component error" });
@@ -480,7 +479,7 @@ describe("Component element rendering", () => {
     }),
   );
 
-  it.scoped(
+  scoped(
     "should execute effect when Component element is stored in Signal and passed as children",
     () =>
       Effect.gen(function* () {
@@ -518,7 +517,7 @@ describe("Component element rendering", () => {
       }),
   );
 
-  it.scoped("should re-render inner component when it subscribes to an outer signal", () =>
+  scoped("should re-render inner component when it subscribes to an outer signal", () =>
     Effect.gen(function* () {
       // This tests the router pattern: Outlet subscribes to router.current
       // When router.current changes, Outlet should re-render
@@ -570,7 +569,7 @@ describe("Component element rendering", () => {
 // Scope: Rendering multiple children without wrapper
 
 describe("Fragment element rendering", () => {
-  it.scoped("should render all children to DOM", () =>
+  scoped("should render all children to DOM", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <div data-testid="frag-parent">
@@ -584,7 +583,7 @@ describe("Fragment element rendering", () => {
     }),
   );
 
-  it.scoped("should not create wrapper element", () =>
+  scoped("should not create wrapper element", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <div data-testid="no-wrapper">
@@ -601,7 +600,7 @@ describe("Fragment element rendering", () => {
     }),
   );
 
-  it.scoped("should use comment anchor for empty fragment", () =>
+  scoped("should use comment anchor for empty fragment", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <div data-testid="empty-frag">
@@ -614,7 +613,7 @@ describe("Fragment element rendering", () => {
     }),
   );
 
-  it.scoped("should remove all children on cleanup", () =>
+  scoped("should remove all children on cleanup", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
@@ -644,7 +643,7 @@ describe("Fragment element rendering", () => {
 // Scope: Applying props to DOM elements
 
 describe("Props application", () => {
-  it.scoped("should apply className prop", () =>
+  scoped("should apply className prop", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="classname" className="my-class" />);
 
@@ -652,7 +651,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply style object to element", () =>
+  scoped("should apply style object to element", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <div data-testid="style" style={{ color: "red", fontSize: "16px" }} />,
@@ -664,7 +663,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply htmlFor as for attribute", () =>
+  scoped("should apply htmlFor as for attribute", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<label data-testid="htmlfor" htmlFor="input-id" />);
 
@@ -672,7 +671,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply checked prop to input", () =>
+  scoped("should apply checked prop to input", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <input data-testid="checked" type="checkbox" checked={true} />,
@@ -682,7 +681,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply value prop to input", () =>
+  scoped("should apply value prop to input", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <input data-testid="value" type="text" value="hello" />,
@@ -692,7 +691,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply disabled prop as attribute", () =>
+  scoped("should apply disabled prop as attribute", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<button data-testid="disabled" disabled={true} />);
 
@@ -700,7 +699,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply hidden prop as attribute", () =>
+  scoped("should apply hidden prop as attribute", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="hidden" hidden={true} />);
 
@@ -708,7 +707,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply data-* attributes", () =>
+  scoped("should apply data-* attributes", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<div data-testid="data-attr" data-custom="value" />);
 
@@ -716,7 +715,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should apply aria-* attributes", () =>
+  scoped("should apply aria-* attributes", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<button data-testid="aria" aria-label="Close" />);
 
@@ -724,7 +723,7 @@ describe("Props application", () => {
     }),
   );
 
-  it.scoped("should handle boolean attributes correctly", () =>
+  scoped("should handle boolean attributes correctly", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(
         <input data-testid="bool" type="text" readonly={true} required={true} />,
@@ -743,7 +742,7 @@ describe("Props application", () => {
 // Scope: Props that accept Signals for direct DOM updates
 
 describe("Signal props", () => {
-  it.scoped("should update className directly when signal changes", () =>
+  scoped("should update className directly when signal changes", () =>
     Effect.gen(function* () {
       const classSignal = yield* Signal.make("initial");
       const { getByTestId } = yield* render(
@@ -759,7 +758,7 @@ describe("Signal props", () => {
     }),
   );
 
-  it.scoped("should update input value directly when signal changes", () =>
+  scoped("should update input value directly when signal changes", () =>
     Effect.gen(function* () {
       const valueSignal = yield* Signal.make("initial");
       const { getByTestId } = yield* render(
@@ -775,7 +774,7 @@ describe("Signal props", () => {
     }),
   );
 
-  it.scoped("should update input checked directly when signal changes", () =>
+  scoped("should update input checked directly when signal changes", () =>
     Effect.gen(function* () {
       const checkedSignal = yield* Signal.make(false);
       const { getByTestId } = yield* render(
@@ -791,7 +790,7 @@ describe("Signal props", () => {
     }),
   );
 
-  it.scoped("should update disabled directly when signal changes", () =>
+  scoped("should update disabled directly when signal changes", () =>
     Effect.gen(function* () {
       const disabledSignal = yield* Signal.make(false);
       const { getByTestId } = yield* render(
@@ -809,7 +808,7 @@ describe("Signal props", () => {
     }),
   );
 
-  it.scoped("should update data-* attribute when signal changes", () =>
+  scoped("should update data-* attribute when signal changes", () =>
     Effect.gen(function* () {
       const dataSignal = yield* Signal.make("initial");
       const { getByTestId } = yield* render(<div data-testid="sig-data" data-value={dataSignal} />);
@@ -823,7 +822,7 @@ describe("Signal props", () => {
     }),
   );
 
-  it.scoped("should unsubscribe from signal props on cleanup", () =>
+  scoped("should unsubscribe from signal props on cleanup", () =>
     Effect.gen(function* () {
       const classSignal = yield* Signal.make("class");
       const scope = yield* Scope.make();
@@ -846,7 +845,7 @@ describe("Signal props", () => {
 // Scope: Event handler props
 
 describe("Event handlers", () => {
-  it.scoped("should call function handler with event", () =>
+  scoped("should call function handler with event", () =>
     Effect.gen(function* () {
       let eventReceived: Event | null = null;
 
@@ -871,7 +870,7 @@ describe("Event handlers", () => {
     }),
   );
 
-  it.scoped("should execute thunk handler without event usage", () =>
+  scoped("should execute thunk handler without event usage", () =>
     Effect.gen(function* () {
       let handlerExecuted = false;
 
@@ -895,7 +894,7 @@ describe("Event handlers", () => {
     }),
   );
 
-  it.scoped("should support multiple different event handlers", () =>
+  scoped("should support multiple different event handlers", () =>
     Effect.gen(function* () {
       let clicked = false;
       let focused = false;
@@ -927,7 +926,7 @@ describe("Event handlers", () => {
     }),
   );
 
-  it.scoped("should reject direct Effect event handlers", () =>
+  scoped("should reject direct Effect event handlers", () =>
     Effect.gen(function* () {
       const exit = yield* Effect.exit(
         render(
@@ -947,7 +946,7 @@ describe("Event handlers", () => {
 // Scope: Proper resource management
 
 describe("Scope and cleanup", () => {
-  it.scoped("should close scope on unmount", () =>
+  scoped("should close scope on unmount", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       let finalizerRan = false;
@@ -973,7 +972,7 @@ describe("Scope and cleanup", () => {
     }),
   );
 
-  it.scoped("should cleanup nested scopes correctly", () =>
+  scoped("should cleanup nested scopes correctly", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const cleanupOrder: string[] = [];
@@ -1008,7 +1007,7 @@ describe("Scope and cleanup", () => {
     }),
   );
 
-  it.scoped("should remove all signal subscriptions on cleanup", () =>
+  scoped("should remove all signal subscriptions on cleanup", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const scope = yield* Scope.make();
@@ -1029,7 +1028,7 @@ describe("Scope and cleanup", () => {
     }),
   );
 
-  it.scoped("should remove all DOM nodes on cleanup", () =>
+  scoped("should remove all DOM nodes on cleanup", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
 
@@ -1059,7 +1058,7 @@ describe("Scope and cleanup", () => {
 // Scope: Component re-rendering on signal changes
 
 describe("Re-render behavior", () => {
-  it.scoped("should only re-render components subscribed to changed signal", () =>
+  scoped("should only re-render components subscribed to changed signal", () =>
     Effect.gen(function* () {
       const signal1 = Signal.makeSync(0);
       const signal2 = Signal.makeSync(0);
@@ -1096,7 +1095,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should recreate child component on parent re-render (full subtree teardown)", () =>
+  scoped("should recreate child component on parent re-render (full subtree teardown)", () =>
     Effect.gen(function* () {
       const parentTrigger = Signal.makeSync(0);
       let childRenderCount = 0;
@@ -1130,7 +1129,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should clean up old content when SignalElement swaps (navigation pattern)", () =>
+  scoped("should clean up old content when SignalElement swaps (navigation pattern)", () =>
     Effect.gen(function* () {
       // This simulates the router outlet pattern:
       // 1. A Signal<Element> holds the current route component
@@ -1191,7 +1190,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should not duplicate content on rapid signal changes", () =>
+  scoped("should not duplicate content on rapid signal changes", () =>
     Effect.gen(function* () {
       // Test that rapid navigation doesn't cause duplicate DOM nodes
       const routeSignal = Signal.makeSync<Element>(<span>Initial</span>);
@@ -1216,89 +1215,87 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped(
-    "should cleanup nested SignalElement on parent component re-render (outlet pattern)",
-    () =>
-      Effect.gen(function* () {
-        // This simulates the router outlet pattern:
-        // - Outlet is a Component that subscribes to router.current
-        // - Outlet returns a SignalElement (tracker.view) that is UPDATED via Signal.set
-        // - When router changes, the view signal is updated with new content
+  scoped("should cleanup nested SignalElement on parent component re-render (outlet pattern)", () =>
+    Effect.gen(function* () {
+      // This simulates the router outlet pattern:
+      // - Outlet is a Component that subscribes to router.current
+      // - Outlet returns a SignalElement (tracker.view) that is UPDATED via Signal.set
+      // - When router changes, the view signal is updated with new content
 
-        const routerSignal = Signal.makeSync("/page-a");
-        let outletRenderCount = 0;
+      const routerSignal = Signal.makeSync("/page-a");
+      let outletRenderCount = 0;
 
-        // Create a view signal OUTSIDE the component (like async tracker does)
-        const viewSignal = Signal.makeSync<Element>(<div data-testid="page-a">Page A Content</div>);
+      // Create a view signal OUTSIDE the component (like async tracker does)
+      const viewSignal = Signal.makeSync<Element>(<div data-testid="page-a">Page A Content</div>);
 
-        // Simulated outlet that re-renders on route change
-        const SimulatedOutlet = Component.gen(function* () {
-          // Subscribe to router signal (causes re-render when it changes)
-          const currentRoute = yield* Signal.get(routerSignal);
-          outletRenderCount++;
+      // Simulated outlet that re-renders on route change
+      const SimulatedOutlet = Component.gen(function* () {
+        // Subscribe to router signal (causes re-render when it changes)
+        const currentRoute = yield* Signal.get(routerSignal);
+        outletRenderCount++;
 
-          // Update the view signal (like tracker.run does)
-          yield* Signal.set(
-            viewSignal,
-            currentRoute === "/page-a" ? (
-              <div data-testid="page-a">Page A Content</div>
-            ) : (
-              <div data-testid="page-b">Page B Content</div>
-            ),
-          );
-
-          // Return SignalElement (like outlet does)
-          return <div data-testid="outlet-inner">{viewSignal}</div>;
-        });
-
-        const { container } = yield* render(
-          <div data-testid="app">
-            <SimulatedOutlet />
-          </div>,
+        // Update the view signal (like tracker.run does)
+        yield* Signal.set(
+          viewSignal,
+          currentRoute === "/page-a" ? (
+            <div data-testid="page-a">Page A Content</div>
+          ) : (
+            <div data-testid="page-b">Page B Content</div>
+          ),
         );
 
-        // Initial state
-        assert.strictEqual(outletRenderCount, 1, "Outlet should render once initially");
-        assert.isNotNull(
-          container.querySelector("[data-testid='page-a']"),
-          "Page A should be visible",
-        );
-        assert.isNull(
-          container.querySelector("[data-testid='page-b']"),
-          "Page B should not be visible",
-        );
+        // Return SignalElement (like outlet does)
+        return <div data-testid="outlet-inner">{viewSignal}</div>;
+      });
 
-        // Navigate to page B
-        yield* Signal.set(routerSignal, "/page-b");
-        yield* TestClock.adjust(20);
+      const { container } = yield* render(
+        <div data-testid="app">
+          <SimulatedOutlet />
+        </div>,
+      );
 
-        // After navigation
-        assert.strictEqual(outletRenderCount, 2, "Outlet should re-render on navigation");
+      // Initial state
+      assert.strictEqual(outletRenderCount, 1, "Outlet should render once initially");
+      assert.isNotNull(
+        container.querySelector("[data-testid='page-a']"),
+        "Page A should be visible",
+      );
+      assert.isNull(
+        container.querySelector("[data-testid='page-b']"),
+        "Page B should not be visible",
+      );
 
-        const pageAElements = container.querySelectorAll("[data-testid='page-a']");
-        const pageBElements = container.querySelectorAll("[data-testid='page-b']");
-        const outletInnerElements = container.querySelectorAll("[data-testid='outlet-inner']");
+      // Navigate to page B
+      yield* Signal.set(routerSignal, "/page-b");
+      yield* TestClock.adjust(20);
 
-        // Count elements
-        assert.strictEqual(
-          pageAElements.length,
-          0,
-          `Page A should be removed, found ${pageAElements.length}. DOM: ${container.innerHTML}`,
-        );
-        assert.strictEqual(
-          pageBElements.length,
-          1,
-          `Should have exactly 1 Page B, found ${pageBElements.length}`,
-        );
-        assert.strictEqual(
-          outletInnerElements.length,
-          1,
-          `Should have exactly 1 outlet-inner, found ${outletInnerElements.length}`,
-        );
-      }),
+      // After navigation
+      assert.strictEqual(outletRenderCount, 2, "Outlet should re-render on navigation");
+
+      const pageAElements = container.querySelectorAll("[data-testid='page-a']");
+      const pageBElements = container.querySelectorAll("[data-testid='page-b']");
+      const outletInnerElements = container.querySelectorAll("[data-testid='outlet-inner']");
+
+      // Count elements
+      assert.strictEqual(
+        pageAElements.length,
+        0,
+        `Page A should be removed, found ${pageAElements.length}. DOM: ${container.innerHTML}`,
+      );
+      assert.strictEqual(
+        pageBElements.length,
+        1,
+        `Should have exactly 1 Page B, found ${pageBElements.length}`,
+      );
+      assert.strictEqual(
+        outletInnerElements.length,
+        1,
+        `Should have exactly 1 outlet-inner, found ${outletInnerElements.length}`,
+      );
+    }),
   );
 
-  it.scoped("should render component only ONCE on initial mount (no double render)", () =>
+  scoped("should render component only ONCE on initial mount (no double render)", () =>
     Effect.gen(function* () {
       // This test verifies that components don't double-render on initial mount
       // which was a reported issue with the outlet pattern
@@ -1336,7 +1333,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should render nested component only ONCE when parent subscribes to signal", () =>
+  scoped("should render nested component only ONCE when parent subscribes to signal", () =>
     Effect.gen(function* () {
       // More complex case: outer component subscribes to a signal
       // but inner component should still only render once initially
@@ -1383,7 +1380,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should render outlet pattern (Signal<Component>) only ONCE on initial mount", () =>
+  scoped("should render outlet pattern (Signal<Component>) only ONCE on initial mount", () =>
     Effect.gen(function* () {
       // This matches the exact app structure:
       // App creates Signal containing Outlet Component
@@ -1456,7 +1453,7 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  it.scoped("should render real Router.Outlet only ONCE on initial mount", () =>
+  scoped("should render real Router.Outlet only ONCE on initial mount", () =>
     Effect.gen(function* () {
       // Test with actual Router.Outlet and router service
       let homeRenderCount = 0;
@@ -1524,7 +1521,7 @@ describe("Re-render behavior", () => {
 // Scope: Error propagation and recovery
 
 describe("Renderer error handling", () => {
-  it.scoped("should propagate component effect errors", () =>
+  scoped("should propagate component effect errors", () =>
     Effect.gen(function* () {
       const ErrorComponent = Component.gen(function* () {
         yield* new ComponentError({ message: "Render error" });
@@ -1537,7 +1534,7 @@ describe("Renderer error handling", () => {
     }),
   );
 
-  it.scoped("should preserve old content when component re-render fails", () =>
+  scoped("should preserve old content when component re-render fails", () =>
     Effect.gen(function* () {
       const shouldError = Signal.makeSync(false);
 
@@ -1563,7 +1560,7 @@ describe("Renderer error handling", () => {
     }),
   );
 
-  it.scoped("should preserve old content when SignalElement swap fails", () =>
+  scoped("should preserve old content when SignalElement swap fails", () =>
     Effect.gen(function* () {
       const viewSignal = yield* Signal.make<"working" | "error">("working");
 
@@ -1593,7 +1590,7 @@ describe("Renderer error handling", () => {
     }),
   );
 
-  it.scoped("should maintain signal subscriptions after re-render error for retry", () =>
+  scoped("should maintain signal subscriptions after re-render error for retry", () =>
     Effect.gen(function* () {
       const errorCount = Signal.makeSync(0);
       let renderCount = 0;
@@ -1628,7 +1625,7 @@ describe("Renderer error handling", () => {
     }),
   );
 
-  it.scoped("should cleanup properly after re-render error when component unmounts", () =>
+  scoped("should cleanup properly after re-render error when component unmounts", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
       const shouldError = Signal.makeSync(false);
@@ -1668,7 +1665,7 @@ describe("Renderer error handling", () => {
 // Scope: Context propagation via Provide element
 
 describe("Provide element", () => {
-  it.scoped("should provide context to child components", () =>
+  scoped("should provide context to child components", () =>
     Effect.gen(function* () {
       class TestCtx extends ServiceMap.Service<TestCtx, { value: string }>()("TestCtx") {}
 
@@ -1687,7 +1684,7 @@ describe("Provide element", () => {
     }),
   );
 
-  it.scoped("should propagate context to deeply nested components", () =>
+  scoped("should propagate context to deeply nested components", () =>
     Effect.gen(function* () {
       class DeepCtx extends ServiceMap.Service<DeepCtx, { nested: string }>()("DeepCtx") {}
 
@@ -1720,7 +1717,7 @@ describe("Provide element", () => {
 // =============================================================================
 
 describe("KeyedList rendering", () => {
-  it.scoped("should preserve DOM order when a keyed item re-renders", () =>
+  scoped("should preserve DOM order when a keyed item re-renders", () =>
     Effect.gen(function* () {
       // Items with internal toggle state — simulates expand/collapse
       const ToggleItem = Component.gen(function* (Props: ComponentProps<{ label: string }>) {
@@ -1794,7 +1791,7 @@ describe("KeyedList rendering", () => {
     }),
   );
 
-  it.scoped("should preserve DOM order when middle item re-renders", () =>
+  scoped("should preserve DOM order when middle item re-renders", () =>
     Effect.gen(function* () {
       const Counter = Component.gen(function* (Props: ComponentProps<{ id: number }>) {
         const { id } = yield* Props;

@@ -60,12 +60,16 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
   PlatformEventTarget.of({
     on: (target, event, handler) =>
       Effect.gen(function* () {
+        const scope = yield* Effect.scope;
         const services = yield* Effect.services();
-        const runFork = Effect.runForkWith(services);
         const listener = (e: Event) => {
-          runFork(handler(e as never));
+          Effect.runForkWith(services)(
+            Effect.forkIn(handler(e as never), scope, { startImmediately: true }),
+          );
         };
-        target.addEventListener(event, listener);
+        yield* Effect.sync(() => {
+          target.addEventListener(event, listener);
+        });
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             target.removeEventListener(event, listener);

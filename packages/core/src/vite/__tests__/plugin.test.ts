@@ -2,7 +2,8 @@
  * Tests for Vite plugin
  * @module
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import { Cause, Effect, Exit, FileSystem, Schema, Scope } from "effect";
 import * as path from "path";
@@ -20,8 +21,6 @@ import {
   resolveRoutePaths,
   type ParsedRoute,
 } from "../plugin.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 /**
  * Create a scoped temporary directory with route files.
@@ -163,7 +162,7 @@ describe("Vite Plugin", () => {
   // Scope: API platform guard
   // ─────────────────────────────────────────────────────────────────────────────
   describe("validateApiPlatform", () => {
-    it.scoped("should reject platform-node imports when platform is bun", () =>
+    scoped("should reject platform-node imports when platform is bun", () =>
       Effect.gen(function* () {
         const dir = yield* makeTempDir({
           "app/api.ts":
@@ -186,7 +185,7 @@ describe("Vite Plugin", () => {
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
-    it.scoped("should allow platform-node imports when platform is node", () =>
+    scoped("should allow platform-node imports when platform is node", () =>
       Effect.gen(function* () {
         const dir = yield* makeTempDir({
           "app/api.ts":
@@ -198,7 +197,7 @@ describe("Vite Plugin", () => {
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
-    it.scoped("should allow bun platform when no node imports", () =>
+    scoped("should allow bun platform when no node imports", () =>
       Effect.gen(function* () {
         const dir = yield* makeTempDir({
           "app/api.ts": "export const Api = {}",

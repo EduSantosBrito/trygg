@@ -77,8 +77,8 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
   Observer.of({
     intersection: (options) =>
       Effect.gen(function* () {
+        const scope = yield* Effect.scope;
         const services = yield* Effect.services();
-        const runFork = Effect.runForkWith(services);
 
         const init: IntersectionObserverInit = {};
         if (options.threshold !== undefined) {
@@ -91,7 +91,9 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
         const observer = new IntersectionObserver((entries) => {
           for (const entry of entries) {
             if (entry.isIntersecting) {
-              runFork(options.onIntersect(entry));
+              Effect.runForkWith(services)(
+                Effect.forkIn(options.onIntersect(entry), scope, { startImmediately: true }),
+              );
             }
           }
         }, init);
@@ -118,11 +120,13 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
 
     mutation: (target, options, handler) =>
       Effect.gen(function* () {
+        const scope = yield* Effect.scope;
         const services = yield* Effect.services();
-        const runFork = Effect.runForkWith(services);
 
         const observer = new MutationObserver((mutations) => {
-          runFork(handler(mutations));
+          Effect.runForkWith(services)(
+            Effect.forkIn(handler(mutations), scope, { startImmediately: true }),
+          );
         });
 
         observer.observe(target, options);

@@ -4,8 +4,13 @@
  * Tests the in-memory test layer for Observer.
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Scope } from "effect";
-import { Observer, test as observerTest, type TestObserverService } from "../observer.js";
+import { Deferred, Effect, Exit, Ref, Scope } from "effect";
+import {
+  Observer,
+  browser as observerBrowser,
+  test as observerTest,
+  type TestObserverService,
+} from "../observer.js";
 
 describe("Observer.intersection", () => {
   it.effect("observe registers element for intersection", () =>
@@ -162,5 +167,76 @@ describe("Observer.mutation", () => {
 
       assert.deepStrictEqual(received, []);
     }).pipe(Effect.provide(observerTest)),
+  );
+});
+
+describe("Observer browser supervision", () => {
+  it.effect("intersection handler fiber is interrupted on scope close", () =>
+    Effect.gen(function* () {
+      const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+      const callbackRef: { current: IntersectionObserverCallback | null } = { current: null };
+
+      class FakeIntersectionObserver implements IntersectionObserver {
+        readonly root = null;
+        readonly rootMargin = "0px";
+        readonly thresholds = [0];
+
+        constructor(cb: IntersectionObserverCallback) {
+          callbackRef.current = cb;
+        }
+
+        disconnect(): void {}
+        observe(_target: Element): void {}
+        takeRecords(): Array<IntersectionObserverEntry> {
+          return [];
+        }
+        unobserve(_target: Element): void {}
+      }
+
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          globalThis.IntersectionObserver = OriginalIntersectionObserver;
+        }),
+      );
+
+      yield* Effect.sync(() => {
+        globalThis.IntersectionObserver = FakeIntersectionObserver;
+      });
+
+      const interrupted = yield* Ref.make(false);
+      const gate = yield* Deferred.make<void>();
+      const el = document.createElement("div");
+      const scope = yield* Scope.make();
+      const obs = yield* Observer;
+
+      const handle = yield* obs
+        .intersection({
+          onIntersect: () =>
+            Deferred.await(gate).pipe(Effect.onInterrupt(() => Ref.set(interrupted, true))),
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope));
+
+      yield* handle.observe(el);
+      if (callbackRef.current !== null) {
+        const intersectionCallback = callbackRef.current;
+        intersectionCallback(
+          [
+            {
+              target: el,
+              isIntersecting: true,
+              intersectionRatio: 1,
+              boundingClientRect: el.getBoundingClientRect(),
+              intersectionRect: el.getBoundingClientRect(),
+              rootBounds: null,
+              time: 0,
+            },
+          ],
+          new FakeIntersectionObserver(intersectionCallback),
+        );
+      }
+
+      yield* Scope.close(scope, Exit.void);
+      assert.isTrue(yield* Ref.get(interrupted));
+    }).pipe(Effect.provide(observerBrowser)),
   );
 });

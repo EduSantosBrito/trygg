@@ -17,6 +17,7 @@
  */
 
 import { Effect, Layer, ServiceMap } from "effect";
+import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 
 /** Base fields for all events */
 interface BaseEvent {
@@ -411,6 +412,11 @@ type ResourceFetchSetFailureEvent = BaseEvent & {
   readonly error: string;
 };
 
+type ResourceFetchInterruptedEvent = BaseEvent & {
+  readonly event: "resource.fetch.interrupted";
+  readonly key: string;
+};
+
 type ResourceFetchCompleteEvent = BaseEvent & {
   readonly event: "resource.fetch.complete";
   readonly key: string;
@@ -653,6 +659,13 @@ type RouterPrefetchTriggerEvent = BaseEvent & {
   readonly trigger: "render" | "intent_hover" | "intent_focus" | "viewport";
 };
 
+type RouterPrefetchErrorEvent = BaseEvent & {
+  readonly event: "router.prefetch.error";
+  readonly path: string;
+  readonly phase: "resolver" | "viewport";
+  readonly error_message: string;
+};
+
 /** F-001: Viewport prefetch trigger event */
 type RouterPrefetchViewportEvent = BaseEvent & {
   readonly event: "router.prefetch.viewport";
@@ -744,6 +757,8 @@ type RouterScrollSaveEvent = BaseEvent & {
 type RouterOutletErrorEvent = BaseEvent & {
   readonly event: "router.outlet.error";
   readonly error: string;
+  readonly phase?: string;
+  readonly path?: string;
 };
 
 /** Unsafe quarantine events — observability for type-boundary crossings */
@@ -827,6 +842,7 @@ export type DebugEvent =
   | ResourceFetchSuccessEvent
   | ResourceFetchErrorEvent
   | ResourceFetchSetSuccessEvent
+  | ResourceFetchInterruptedEvent
   | ResourceFetchSetFailureEvent
   | ResourceFetchCompleteEvent
   | ResourceFetchDefectEvent
@@ -870,6 +886,7 @@ export type DebugEvent =
   | RouterPrefetchCompleteEvent
   | RouterPrefetchNoMatchEvent
   | RouterPrefetchTriggerEvent
+  | RouterPrefetchErrorEvent
   | RouterPrefetchViewportEvent
   | RouterViewportObserverAddedEvent
   | RouterViewportObserverRemovedEvent
@@ -983,14 +1000,10 @@ export const nextSpanId = (): string => `span_${++spanCounter}`;
 // --- Trace Context References ---
 
 const getReference = <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
-  Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference)));
+  getFiberRef(reference);
 
 const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
-  Effect.withFiber((fiber) =>
-    Effect.sync(() => {
-      fiber.setServices(ServiceMap.add(fiber.services, reference, value));
-    }),
-  );
+  setFiberRef(reference, value);
 
 /**
  * Reference for current trace ID.

@@ -13,10 +13,11 @@ export const ActionButton = Component.gen(function* (
   const theme = yield* DashboardTheme;
   const analytics = yield* Analytics;
 
-  const handleClick = Effect.gen(function* () {
-    yield* analytics.track("button_clicked", { label, variant });
-    yield* onClick();
-  });
+  const handleClick = () =>
+    Effect.gen(function* () {
+      yield* analytics.track("button_clicked", { label, variant });
+      yield* onClick();
+    });
 
   return (
     <button

@@ -19,7 +19,8 @@
  * - Every test manages its own fibers/scope to prevent memory leaks
  * - Tests are unbiased (no assumptions about internal implementation)
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { TestClock } from "effect/testing";
@@ -29,8 +30,6 @@ import { Element, text } from "../element.js";
 import * as Component from "../component.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 const withRenderPhase = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -51,7 +50,7 @@ const withRenderScope = <A, E, R>(
 // - Position-based identity across re-renders
 
 describe("Signal.make", () => {
-  it.scoped("should create signal with initial primitive value", () =>
+  scoped("should create signal with initial primitive value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(42);
       const value = yield* Signal.get(signal);
@@ -60,7 +59,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should create signal with object value", () =>
+  scoped("should create signal with object value", () =>
     Effect.gen(function* () {
       const obj = { name: "test", count: 5 };
       const signal = yield* Signal.make(obj);
@@ -70,7 +69,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should create signal with array value", () =>
+  scoped("should create signal with array value", () =>
     Effect.gen(function* () {
       const arr = [1, 2, 3];
       const signal = yield* Signal.make(arr);
@@ -80,7 +79,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should create standalone signal outside render phase", () =>
+  scoped("should create standalone signal outside render phase", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.CurrentRenderPhase;
       assert.isNull(phase);
@@ -92,7 +91,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should track signal in render phase when created during render", () =>
+  scoped("should track signal in render phase when created during render", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
@@ -104,7 +103,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should return same signal instance for same position on re-render", () =>
+  scoped("should return same signal instance for same position on re-render", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
@@ -120,7 +119,7 @@ describe("Signal.make", () => {
     }),
   );
 
-  it.scoped("should create new signal for additional calls on first render", () =>
+  scoped("should create new signal for additional calls on first render", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
@@ -163,7 +162,7 @@ describe("Signal.makeSync", () => {
 // Scope: Reading signal value and subscribing component
 
 describe("Signal.get", () => {
-  it.scoped("should return current signal value", () =>
+  scoped("should return current signal value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make("hello");
       const value = yield* Signal.get(signal);
@@ -172,7 +171,7 @@ describe("Signal.get", () => {
     }),
   );
 
-  it.scoped("should add signal to accessed set when in render phase", () =>
+  scoped("should add signal to accessed set when in render phase", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
       const signal = yield* Signal.make(10);
@@ -183,7 +182,7 @@ describe("Signal.get", () => {
     }),
   );
 
-  it.scoped("should not add to accessed set when outside render phase", () =>
+  scoped("should not add to accessed set when outside render phase", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
       const signal = yield* Signal.make(10);
@@ -207,7 +206,7 @@ describe("Signal.peekSync", () => {
     assert.strictEqual(Signal.peekSync(signal), 99);
   });
 
-  it.scoped("should not trigger any subscription", () =>
+  scoped("should not trigger any subscription", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
       const signal = yield* Signal.make(50);
@@ -226,7 +225,7 @@ describe("Signal.peekSync", () => {
 // Scope: Setting signal value and notifying listeners
 
 describe("Signal.set", () => {
-  it.scoped("should update signal to new value", () =>
+  scoped("should update signal to new value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
 
@@ -237,7 +236,7 @@ describe("Signal.set", () => {
     }),
   );
 
-  it.scoped("should notify all listeners when value changes", () =>
+  scoped("should notify all listeners when value changes", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let notified = 0;
@@ -255,7 +254,7 @@ describe("Signal.set", () => {
     }),
   );
 
-  it.scoped("should skip notification when value is unchanged", () =>
+  scoped("should skip notification when value is unchanged", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(42);
       let notified = 0;
@@ -273,7 +272,7 @@ describe("Signal.set", () => {
     }),
   );
 
-  it.scoped("should notify listeners in parallel with unbounded concurrency", () =>
+  scoped("should notify listeners in parallel with unbounded concurrency", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const startTimes: number[] = [];
@@ -310,7 +309,7 @@ describe("Signal.set", () => {
     }),
   );
 
-  it.scoped("should isolate errors between listeners", () =>
+  scoped("should isolate errors between listeners", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let secondCalled = false;
@@ -339,7 +338,7 @@ describe("Signal.set", () => {
 // Scope: Updating signal value using a function
 
 describe("Signal.update", () => {
-  it.scoped("should apply update function to current value", () =>
+  scoped("should apply update function to current value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(5);
 
@@ -350,7 +349,7 @@ describe("Signal.update", () => {
     }),
   );
 
-  it.scoped("should notify listeners after update", () =>
+  scoped("should notify listeners after update", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let notified = false;
@@ -368,7 +367,7 @@ describe("Signal.update", () => {
     }),
   );
 
-  it.scoped("should skip notification when update function returns equal value", () =>
+  scoped("should skip notification when update function returns equal value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(10);
       let notified = false;
@@ -393,7 +392,7 @@ describe("Signal.update", () => {
 // Scope: Atomically modify value and return a result
 
 describe("Signal.modify", () => {
-  it.scoped("should return first tuple element and store second", () =>
+  scoped("should return first tuple element and store second", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(10);
 
@@ -405,7 +404,7 @@ describe("Signal.modify", () => {
     }),
   );
 
-  it.scoped("should notify listeners after modify", () =>
+  scoped("should notify listeners after modify", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let newValue: number | null = null;
@@ -423,7 +422,7 @@ describe("Signal.modify", () => {
     }),
   );
 
-  it.scoped("should perform read and write atomically", () =>
+  scoped("should perform read and write atomically", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const results: number[] = [];
@@ -457,7 +456,7 @@ describe("Signal.modify", () => {
 // Scope: Subscribing to signal changes
 
 describe("Signal.subscribe", () => {
-  it.scoped("should add listener that receives change notifications", () =>
+  scoped("should add listener that receives change notifications", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const values: number[] = [];
@@ -477,7 +476,7 @@ describe("Signal.subscribe", () => {
     }),
   );
 
-  it.scoped("should return unsubscribe effect that removes listener", () =>
+  scoped("should return unsubscribe effect that removes listener", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let callCount = 0;
@@ -500,7 +499,7 @@ describe("Signal.subscribe", () => {
     }),
   );
 
-  it.scoped("should support multiple concurrent listeners", () =>
+  scoped("should support multiple concurrent listeners", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let listener1Called = false;
@@ -532,7 +531,7 @@ describe("Signal.subscribe", () => {
     }),
   );
 
-  it.scoped("should handle listener unsubscribing during notification", () =>
+  scoped("should handle listener unsubscribing during notification", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let secondListenerCalled = false;
@@ -569,7 +568,7 @@ describe("Signal.subscribe", () => {
 // Scope: Creating derived/computed signals
 
 describe("Signal.derive", () => {
-  it.scoped("should create derived signal with transformed initial value", () =>
+  scoped("should create derived signal with transformed initial value", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(5);
       const derived = yield* Signal.derive(source, (n) => n * 2);
@@ -579,7 +578,7 @@ describe("Signal.derive", () => {
     }),
   );
 
-  it.scoped("should update derived value when source changes", () =>
+  scoped("should update derived value when source changes", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(10);
       const derived = yield* Signal.derive(source, (n) => n + 100);
@@ -592,7 +591,7 @@ describe("Signal.derive", () => {
     }),
   );
 
-  it.scoped("should cleanup subscription when scope closes", () =>
+  scoped("should cleanup subscription when scope closes", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(0);
       const initialListenerCount = source._listeners.size;
@@ -611,7 +610,7 @@ describe("Signal.derive", () => {
     }),
   );
 
-  it.scoped("should use explicit scope when provided", () =>
+  scoped("should use explicit scope when provided", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(1);
       const customScope = yield* Scope.make();
@@ -625,7 +624,7 @@ describe("Signal.derive", () => {
     }),
   );
 
-  it.scoped("should use render scope when in render phase", () =>
+  scoped("should use render scope when in render phase", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(2);
       const renderScope = yield* Scope.make();
@@ -642,7 +641,7 @@ describe("Signal.derive", () => {
     }),
   );
 
-  it.scoped("should support chaining multiple derive calls", () =>
+  scoped("should support chaining multiple derive calls", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(2);
       const doubled = yield* Signal.derive(source, (n) => n * 2);
@@ -666,7 +665,7 @@ describe("Signal.derive", () => {
 // Scope: Creating derived signals from multiple sources
 
 describe("Signal.deriveAll", () => {
-  it.scoped("should compute initial value from multiple sources", () =>
+  scoped("should compute initial value from multiple sources", () =>
     Effect.gen(function* () {
       const count = yield* Signal.make(5);
       const name = yield* Signal.make("hello");
@@ -678,7 +677,7 @@ describe("Signal.deriveAll", () => {
     }),
   );
 
-  it.scoped("should update when any source changes", () =>
+  scoped("should update when any source changes", () =>
     Effect.gen(function* () {
       const a = yield* Signal.make(1);
       const b = yield* Signal.make(2);
@@ -696,7 +695,7 @@ describe("Signal.deriveAll", () => {
     }),
   );
 
-  it.scoped("should cleanup all subscriptions when scope closes", () =>
+  scoped("should cleanup all subscriptions when scope closes", () =>
     Effect.gen(function* () {
       const a = yield* Signal.make(0);
       const b = yield* Signal.make(0);
@@ -714,7 +713,7 @@ describe("Signal.deriveAll", () => {
     }),
   );
 
-  it.scoped("should not update when computed value is unchanged", () =>
+  scoped("should not update when computed value is unchanged", () =>
     Effect.gen(function* () {
       const a = yield* Signal.make(2);
       const b = yield* Signal.make(3);
@@ -739,7 +738,7 @@ describe("Signal.deriveAll", () => {
     }),
   );
 
-  it.scoped("should work with single source (like derive)", () =>
+  scoped("should work with single source (like derive)", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(7);
       const doubled = yield* Signal.deriveAll([source], (n) => n * 2);
@@ -755,7 +754,7 @@ describe("Signal.deriveAll", () => {
 // Scope: Check if value is a Signal
 
 describe("Signal.isSignal", () => {
-  it.scoped("should return true for Signal objects", () =>
+  scoped("should return true for Signal objects", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
 
@@ -781,7 +780,7 @@ describe("Signal.isSignal", () => {
 // Scope: Managing signal identity during component render
 
 describe("RenderPhase", () => {
-  it.scoped("should create render phase with signalIndex, signals, and accessed", () =>
+  scoped("should create render phase with signalIndex, signals, and accessed", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
@@ -794,7 +793,7 @@ describe("RenderPhase", () => {
     }),
   );
 
-  it.scoped("should reset signalIndex and clear accessed on reset", () =>
+  scoped("should reset signalIndex and clear accessed on reset", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
@@ -820,7 +819,7 @@ describe("RenderPhase", () => {
 // Scope: Verify listeners run in parallel with error isolation
 
 describe("Signal parallel notification", () => {
-  it.scoped("should run all listeners concurrently not sequentially", () =>
+  scoped("should run all listeners concurrently not sequentially", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const executionOrder: string[] = [];
@@ -853,7 +852,7 @@ describe("Signal parallel notification", () => {
     }),
   );
 
-  it.scoped("should not block other listeners when one throws", () =>
+  scoped("should not block other listeners when one throws", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let listener2Completed = false;
@@ -875,7 +874,7 @@ describe("Signal parallel notification", () => {
     }),
   );
 
-  it.scoped("should emit signal.listener.error event for failed listeners", () =>
+  scoped("should emit signal.listener.error event for failed listeners", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
 
@@ -898,7 +897,7 @@ describe("Signal parallel notification", () => {
 // Scope: Test at limits and edge cases
 
 describe("Signal boundary values", () => {
-  it.scoped("should handle empty string value", () =>
+  scoped("should handle empty string value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make("");
       const value = yield* Signal.get(signal);
@@ -907,7 +906,7 @@ describe("Signal boundary values", () => {
     }),
   );
 
-  it.scoped("should handle zero value", () =>
+  scoped("should handle zero value", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const value = yield* Signal.get(signal);
@@ -916,7 +915,7 @@ describe("Signal boundary values", () => {
     }),
   );
 
-  it.scoped("should handle negative number values", () =>
+  scoped("should handle negative number values", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(-100);
       const value = yield* Signal.get(signal);
@@ -925,7 +924,7 @@ describe("Signal boundary values", () => {
     }),
   );
 
-  it.scoped("should handle large array values", () =>
+  scoped("should handle large array values", () =>
     Effect.gen(function* () {
       const largeArray = Array.from({ length: 10000 }, (_, i) => i);
       const signal = yield* Signal.make(largeArray);
@@ -936,7 +935,7 @@ describe("Signal boundary values", () => {
     }),
   );
 
-  it.scoped("should handle many concurrent listeners efficiently", () =>
+  scoped("should handle many concurrent listeners efficiently", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       let totalCalls = 0;
@@ -957,7 +956,7 @@ describe("Signal boundary values", () => {
     }),
   );
 
-  it.scoped("should handle rapid sequential updates", () =>
+  scoped("should handle rapid sequential updates", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const updateCount = 100;
@@ -978,7 +977,7 @@ describe("Signal boundary values", () => {
 // Scope: Ensure no memory leaks
 
 describe("Signal memory management", () => {
-  it.scoped("should not retain references after unsubscribe", () =>
+  scoped("should not retain references after unsubscribe", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
 
@@ -994,7 +993,7 @@ describe("Signal memory management", () => {
     }),
   );
 
-  it.scoped("should remove source subscription on derive cleanup", () =>
+  scoped("should remove source subscription on derive cleanup", () =>
     Effect.gen(function* () {
       const source = yield* Signal.make(0);
       const scope = yield* Scope.make();
@@ -1013,7 +1012,7 @@ describe("Signal memory management", () => {
     }),
   );
 
-  it.scoped("should stop all fibers when resource scope closes", () =>
+  scoped("should stop all fibers when resource scope closes", () =>
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
       const scope = yield* Scope.make();
@@ -1064,7 +1063,7 @@ describe("Signal.suspend", () => {
       return yield* effect;
     });
 
-  it.scoped("should produce SuspendedComponent that renders a SignalElement", () =>
+  scoped("should produce SuspendedComponent that renders a SignalElement", () =>
     Effect.gen(function* () {
       const comp = mockComponent(Effect.succeed(text("hello")));
 
@@ -1084,7 +1083,7 @@ describe("Signal.suspend", () => {
     }),
   );
 
-  it.scoped("should initialize view signal with Pending element", () =>
+  scoped("should initialize view signal with Pending element", () =>
     Effect.gen(function* () {
       const comp = mockComponent(Effect.succeed(text("done")));
 
@@ -1099,7 +1098,7 @@ describe("Signal.suspend", () => {
     }),
   );
 
-  it.scoped("should update view signal to Failure on render error", () =>
+  scoped("should update view signal to Failure on render error", () =>
     Effect.gen(function* () {
       class RenderError extends Data.TaggedError("RenderError")<{}> {}
       const comp = mockComponent(Effect.fail(new RenderError()));
@@ -1126,7 +1125,7 @@ describe("Signal.suspend", () => {
     }),
   );
 
-  it.scoped("should accumulate handler requirements in inferred component R", () =>
+  scoped("should accumulate handler requirements in inferred component R", () =>
     Effect.gen(function* () {
       class PendingTheme extends ServiceMap.Service<PendingTheme, { readonly label: string }>()(
         "PendingTheme",

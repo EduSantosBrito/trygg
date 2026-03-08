@@ -2,7 +2,8 @@
  * Tests for testing utilities
  * @module
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../effect-vitest.js";
 import { Cause, Effect, Exit, Fiber, Option, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -18,14 +19,12 @@ import {
 import * as Signal from "../../primitives/signal.js";
 import { Renderer } from "../../primitives/renderer.js";
 
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
-
 describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: TestRenderResult interface
   // ─────────────────────────────────────────────────────────────────────────────
   describe("TestRenderResult", () => {
-    it.scoped("should expose the container element", () =>
+    scoped("should expose the container element", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<div>Hello</div>).pipe(Effect.provide(testLayer));
 
@@ -33,7 +32,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should set data-testid on container", () =>
+    scoped("should set data-testid on container", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<div>Hello</div>).pipe(Effect.provide(testLayer));
 
@@ -46,7 +45,7 @@ describe("Testing Utilities", () => {
   // Scope: renderElement function
   // ─────────────────────────────────────────────────────────────────────────────
   describe("renderElement", () => {
-    it.scoped("should render a simple element to the DOM", () =>
+    scoped("should render a simple element to the DOM", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<div>Hello</div>).pipe(Effect.provide(testLayer));
 
@@ -54,7 +53,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should render element with children", () =>
+    scoped("should render element with children", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(
           <div>
@@ -70,7 +69,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should render element with attributes", () =>
+    scoped("should render element with attributes", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<div className="test-class" id="test-id" />).pipe(
           Effect.provide(testLayer),
@@ -82,7 +81,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should remove container when scope closes", () =>
+    scoped("should remove container when scope closes", () =>
       Effect.gen(function* () {
         const scope = yield* Scope.make();
 
@@ -101,7 +100,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should require Renderer service", () =>
+    scoped("should require Renderer service", () =>
       Effect.gen(function* () {
         // This test verifies that renderElement requires Renderer service
         // We can verify this by checking the effect runs successfully WITH testLayer
@@ -111,7 +110,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should create separate containers for multiple renders", () =>
+    scoped("should create separate containers for multiple renders", () =>
       Effect.gen(function* () {
         const result1 = yield* renderElement(<div id="el-1">First</div>).pipe(
           Effect.provide(testLayer),
@@ -131,7 +130,7 @@ describe("Testing Utilities", () => {
   // Scope: render convenience function
   // ─────────────────────────────────────────────────────────────────────────────
   describe("render", () => {
-    it.scoped("should render a static Element", () =>
+    scoped("should render a static Element", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Static content</div>);
 
@@ -139,7 +138,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should render an Effect that produces Element", () =>
+    scoped("should render an Effect that produces Element", () =>
       Effect.gen(function* () {
         const componentEffect = Effect.succeed(<div>From Effect</div>);
         const result = yield* render(componentEffect);
@@ -148,7 +147,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should wrap Effect in Component element", () =>
+    scoped("should wrap Effect in Component element", () =>
       Effect.gen(function* () {
         const componentEffect = Effect.gen(function* () {
           return <div className="component">Component content</div>;
@@ -162,7 +161,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should provide testLayer automatically", () =>
+    scoped("should provide testLayer automatically", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Auto provided</div>);
 
@@ -170,7 +169,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should use scope from test context", () =>
+    scoped("should use scope from test context", () =>
       Effect.gen(function* () {
         yield* render(<div id="scope-test">Scoped</div>);
 
@@ -179,7 +178,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should support reactive updates in components", () =>
+    scoped("should support reactive updates in components", () =>
       Effect.gen(function* () {
         const count = Signal.makeSync(0);
 
@@ -204,7 +203,7 @@ describe("Testing Utilities", () => {
   // Scope: getByText query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("getByText", () => {
-    it.scoped("should find element by exact text content", () =>
+    scoped("should find element by exact text content", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -217,7 +216,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find leaf element with text", () =>
+    scoped("should find leaf element with text", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -232,7 +231,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find element with direct text node among children", () =>
+    scoped("should find element with direct text node among children", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -247,7 +246,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should fail with ElementNotFoundError when text not found", () =>
+    scoped("should fail with ElementNotFoundError when text not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Existing</div>);
 
@@ -256,7 +255,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should not match partial text", () =>
+    scoped("should not match partial text", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -269,7 +268,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should trim whitespace when matching text", () =>
+    scoped("should trim whitespace when matching text", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -287,7 +286,7 @@ describe("Testing Utilities", () => {
   // Scope: queryByText query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("queryByText", () => {
-    it.scoped("should return element when text found", () =>
+    scoped("should return element when text found", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -303,7 +302,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return Option.none when text not found", () =>
+    scoped("should return Option.none when text not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Existing</div>);
 
@@ -317,7 +316,7 @@ describe("Testing Utilities", () => {
   // Scope: getByTestId query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("getByTestId", () => {
-    it.scoped("should find element by data-testid attribute", () =>
+    scoped("should find element by data-testid attribute", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -331,7 +330,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should fail with ElementNotFoundError when testid not found", () =>
+    scoped("should fail with ElementNotFoundError when testid not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No testid</div>);
 
@@ -340,7 +339,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find nested elements by testid", () =>
+    scoped("should find nested elements by testid", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -363,7 +362,7 @@ describe("Testing Utilities", () => {
   // Scope: queryByTestId query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("queryByTestId", () => {
-    it.scoped("should return element when testid found", () =>
+    scoped("should return element when testid found", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -379,7 +378,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return Option.none when testid not found", () =>
+    scoped("should return Option.none when testid not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No testid</div>);
 
@@ -393,7 +392,7 @@ describe("Testing Utilities", () => {
   // Scope: getByRole query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("getByRole", () => {
-    it.scoped("should find element by explicit role attribute", () =>
+    scoped("should find element by explicit role attribute", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -406,7 +405,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find button by implicit role", () =>
+    scoped("should find button by implicit role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -419,7 +418,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find anchor by implicit link role", () =>
+    scoped("should find anchor by implicit link role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -432,7 +431,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find input by implicit textbox role", () =>
+    scoped("should find input by implicit textbox role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -445,7 +444,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find headings by implicit heading role", () =>
+    scoped("should find headings by implicit heading role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -458,7 +457,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find nav by implicit navigation role", () =>
+    scoped("should find nav by implicit navigation role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -471,7 +470,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find main by implicit main role", () =>
+    scoped("should find main by implicit main role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -484,7 +483,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find list by implicit list role", () =>
+    scoped("should find list by implicit list role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -497,7 +496,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find list item by implicit listitem role", () =>
+    scoped("should find list item by implicit listitem role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -510,7 +509,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find table by implicit table role", () =>
+    scoped("should find table by implicit table role", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -523,7 +522,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should fail with ElementNotFoundError when role not found", () =>
+    scoped("should fail with ElementNotFoundError when role not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No role</div>);
 
@@ -537,7 +536,7 @@ describe("Testing Utilities", () => {
   // Scope: queryByRole query
   // ─────────────────────────────────────────────────────────────────────────────
   describe("queryByRole", () => {
-    it.scoped("should return element when role found", () =>
+    scoped("should return element when role found", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -553,7 +552,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return Option.none when role not found", () =>
+    scoped("should return Option.none when role not found", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>No role</div>);
 
@@ -567,7 +566,7 @@ describe("Testing Utilities", () => {
   // Scope: querySelector
   // ─────────────────────────────────────────────────────────────────────────────
   describe("querySelector", () => {
-    it.scoped("should find element by CSS selector", () =>
+    scoped("should find element by CSS selector", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -580,7 +579,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find element by class selector", () =>
+    scoped("should find element by class selector", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -593,7 +592,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find element by id selector", () =>
+    scoped("should find element by id selector", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -606,7 +605,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find element by attribute selector", () =>
+    scoped("should find element by attribute selector", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -619,7 +618,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should find element by descendant selector", () =>
+    scoped("should find element by descendant selector", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div className="parent">
@@ -634,7 +633,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should fail with ElementNotFoundError when selector matches nothing", () =>
+    scoped("should fail with ElementNotFoundError when selector matches nothing", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Content</div>);
 
@@ -648,7 +647,7 @@ describe("Testing Utilities", () => {
   // Scope: querySelectorAll
   // ─────────────────────────────────────────────────────────────────────────────
   describe("querySelectorAll", () => {
-    it.scoped("should return all matching elements", () =>
+    scoped("should return all matching elements", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -666,7 +665,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return empty array when no matches", () =>
+    scoped("should return empty array when no matches", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Content</div>);
 
@@ -675,7 +674,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return ReadonlyArray", () =>
+    scoped("should return ReadonlyArray", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -717,7 +716,7 @@ describe("Testing Utilities", () => {
   // Scope: click utility
   // ─────────────────────────────────────────────────────────────────────────────
   describe("click", () => {
-    it.scoped("should trigger click event on element", () =>
+    scoped("should trigger click event on element", () =>
       Effect.gen(function* () {
         let clicked = false;
         const result = yield* render(
@@ -737,7 +736,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should trigger onclick handler on button", () =>
+    scoped("should trigger onclick handler on button", () =>
       Effect.gen(function* () {
         let handlerCalled = false;
 
@@ -758,7 +757,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should trigger click on anchor element", () =>
+    scoped("should trigger click on anchor element", () =>
       Effect.gen(function* () {
         let clicked = false;
 
@@ -782,7 +781,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return Effect<void>", () =>
+    scoped("should return Effect<void>", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -802,7 +801,7 @@ describe("Testing Utilities", () => {
   // Scope: type utility
   // ─────────────────────────────────────────────────────────────────────────────
   describe("type", () => {
-    it.scoped("should set input value", () =>
+    scoped("should set input value", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -818,7 +817,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should dispatch input event", () =>
+    scoped("should dispatch input event", () =>
       Effect.gen(function* () {
         let inputEventFired = false;
 
@@ -839,7 +838,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should dispatch change event", () =>
+    scoped("should dispatch change event", () =>
       Effect.gen(function* () {
         let changeEventFired = false;
 
@@ -860,7 +859,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should work with HTMLInputElement", () =>
+    scoped("should work with HTMLInputElement", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -876,7 +875,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should work with HTMLTextAreaElement", () =>
+    scoped("should work with HTMLTextAreaElement", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -892,7 +891,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return Effect<void>", () =>
+    scoped("should return Effect<void>", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -912,7 +911,7 @@ describe("Testing Utilities", () => {
   // Scope: waitFor utility
   // ─────────────────────────────────────────────────────────────────────────────
   describe("waitFor", () => {
-    it.scoped("should return immediately if condition true", () =>
+    scoped("should return immediately if condition true", () =>
       Effect.gen(function* () {
         const result = yield* waitFor(() => 42);
 
@@ -920,7 +919,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should wait for condition to become true", () =>
+    scoped("should wait for condition to become true", () =>
       Effect.gen(function* () {
         let attempts = 0;
 
@@ -944,7 +943,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should fail with WaitForTimeoutError on timeout", () =>
+    scoped("should fail with WaitForTimeoutError on timeout", () =>
       Effect.gen(function* () {
         // Fork waitFor so we can advance time
         const fiber = yield* Effect.forkChild(
@@ -964,7 +963,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should respect custom timeout by retrying appropriate number of times", () =>
+    scoped("should respect custom timeout by retrying appropriate number of times", () =>
       Effect.gen(function* () {
         let checkCount = 0;
 
@@ -990,7 +989,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should check at custom interval", () =>
+    scoped("should check at custom interval", () =>
       Effect.gen(function* () {
         let checkCount = 0;
 
@@ -1014,7 +1013,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should retry when function throws", () =>
+    scoped("should retry when function throws", () =>
       Effect.gen(function* () {
         let attempts = 0;
 
@@ -1036,7 +1035,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should return value from successful function call", () =>
+    scoped("should return value from successful function call", () =>
       Effect.gen(function* () {
         const result = yield* waitFor(() => ({ data: "test" }));
 
@@ -1044,7 +1043,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should include last error in timeout error", () =>
+    scoped("should include last error in timeout error", () =>
       Effect.gen(function* () {
         // Fork waitFor so we can advance time
         const fiber = yield* Effect.forkChild(
@@ -1105,7 +1104,7 @@ describe("Testing Utilities", () => {
   // Scope: testLayer
   // ─────────────────────────────────────────────────────────────────────────────
   describe("testLayer", () => {
-    it.scoped("should provide Renderer service", () =>
+    scoped("should provide Renderer service", () =>
       Effect.gen(function* () {
         const renderer = yield* Renderer;
 
@@ -1114,7 +1113,7 @@ describe("Testing Utilities", () => {
       }).pipe(Effect.provide(testLayer)),
     );
 
-    it.scoped("should be the browserLayer", () =>
+    scoped("should be the browserLayer", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<div>Browser layer</div>).pipe(
           Effect.provide(testLayer),
@@ -1129,7 +1128,7 @@ describe("Testing Utilities", () => {
   // Scope: RenderInput type
   // ─────────────────────────────────────────────────────────────────────────────
   describe("RenderInput type", () => {
-    it.scoped("should accept Element type", () =>
+    scoped("should accept Element type", () =>
       Effect.gen(function* () {
         const result = yield* render(<div>Element</div>);
 
@@ -1137,7 +1136,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should accept Effect<Element>", () =>
+    scoped("should accept Effect<Element>", () =>
       Effect.gen(function* () {
         const effect = Effect.succeed(<div>Effect</div>);
         const result = yield* render(effect);
@@ -1151,7 +1150,7 @@ describe("Testing Utilities", () => {
   // Scope: Integration scenarios
   // ─────────────────────────────────────────────────────────────────────────────
   describe("Integration", () => {
-    it.scoped("should support render -> query -> interact workflow", () =>
+    scoped("should support render -> query -> interact workflow", () =>
       Effect.gen(function* () {
         let value = 0;
 
@@ -1178,7 +1177,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should support async state updates with waitFor", () =>
+    scoped("should support async state updates with waitFor", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -1210,7 +1209,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should support multiple query types on same render", () =>
+    scoped("should support multiple query types on same render", () =>
       Effect.gen(function* () {
         const result = yield* render(
           <div>
@@ -1231,7 +1230,7 @@ describe("Testing Utilities", () => {
       }),
     );
 
-    it.scoped("should isolate renders between tests", () =>
+    scoped("should isolate renders between tests", () =>
       Effect.gen(function* () {
         const result1 = yield* render(<div id="isolated-1">First</div>);
         const result2 = yield* render(<div id="isolated-2">Second</div>);

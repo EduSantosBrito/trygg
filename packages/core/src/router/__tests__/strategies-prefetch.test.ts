@@ -2,14 +2,13 @@
 //
 // Tests for parallel prefetch execution, RenderStrategy.Lazy/Eager,
 // and ScrollStrategy.Auto/None.
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Effect, Layer, Ref } from "effect";
 import { runPrefetch } from "../prefetch.js";
 import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // =============================================================================
 // Phase 6: Prefetch
@@ -99,14 +98,14 @@ describe("runPrefetch", () => {
 // =============================================================================
 
 describe("RenderStrategy", () => {
-  it.scoped("Lazy strategy has _tag 'Lazy'", () =>
+  scoped("Lazy strategy has _tag 'Lazy'", () =>
     Effect.gen(function* () {
       const strategy = yield* RenderStrategy;
       assert.strictEqual(strategy._tag, "Lazy");
     }).pipe(Effect.provide(RenderStrategy.Lazy)),
   );
 
-  it.scoped("Eager strategy has _tag 'Eager'", () =>
+  scoped("Eager strategy has _tag 'Eager'", () =>
     Effect.gen(function* () {
       const strategy = yield* RenderStrategy;
       assert.strictEqual(strategy._tag, "Eager");
@@ -127,7 +126,7 @@ describe("RenderStrategy", () => {
 // =============================================================================
 
 describe("ScrollStrategy", () => {
-  it.scoped("Auto has _tag 'Auto' (pure data, no functions)", () =>
+  scoped("Auto has _tag 'Auto' (pure data, no functions)", () =>
     Effect.gen(function* () {
       const strategy = yield* ScrollStrategy;
       assert.strictEqual(strategy._tag, "Auto");
@@ -136,7 +135,7 @@ describe("ScrollStrategy", () => {
     }).pipe(Effect.provide(ScrollStrategy.Auto)),
   );
 
-  it.scoped("None has _tag 'None' (pure data)", () =>
+  scoped("None has _tag 'None' (pure data)", () =>
     Effect.gen(function* () {
       const strategy = yield* ScrollStrategy;
       assert.strictEqual(strategy._tag, "None");

@@ -9,7 +9,8 @@
  * - Index route matching
  * - Re-match on path change (via router signal)
  */
-import { assert, describe, it as baseIt } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { scoped } from "../../testing/effect-vitest.js";
 import { Effect, Option } from "effect";
 import * as Route from "../route.js";
 import { IndexMarker } from "../route.js";
@@ -21,8 +22,6 @@ import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
 import type { Any as AnyLayer } from "effect/Layer";
-
-const it = Object.assign(baseIt, { scoped: baseIt.effect });
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
@@ -442,7 +441,7 @@ describe("createMatcher", () => {
 // =============================================================================
 
 describe("re-match on path change", () => {
-  it.scoped("should match different routes on navigation", () =>
+  scoped("should match different routes on navigation", () =>
     Effect.gen(function* () {
       const manifest = Routes.make()
         .add(Route.make("/").component(CompA))
@@ -480,7 +479,7 @@ describe("re-match on path change", () => {
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
-  it.scoped("should return no match for unknown path after navigation", () =>
+  scoped("should return no match for unknown path after navigation", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 

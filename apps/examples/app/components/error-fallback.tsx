@@ -17,7 +17,7 @@ export const ErrorFallback = Component.gen(function* () {
       </pre>
       <button
         className="bg-blue-600 border-blue-600 text-white py-3 px-6 text-base mr-4 rounded cursor-pointer hover:bg-blue-700"
-        onClick={reset}
+        onClick={() => reset}
       >
         Try Again
       </button>
