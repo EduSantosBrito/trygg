@@ -35,7 +35,9 @@ const Pure: Component.Type<never, never, never>
 Components expose `.provide()` to satisfy service requirements:
 
 ```tsx
-class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
+import * as ServiceMap from "effect/ServiceMap"
+
+class Theme extends ServiceMap.Service<Theme, { primary: string }>()("Theme") {}
 
 const Card = Component.gen(function* () {
   const theme = yield* Theme
@@ -130,12 +132,22 @@ const userResource = Resource.make(
 ```tsx
 const state = yield* Resource.fetch(usersResource)
 
-return yield* Resource.match(state, {
-  Pending: () => <Spinner />,
-  Success: (users, stale) => <UserList users={users} opacity={stale ? 0.5 : 1} />,
-  Failure: (error, staleValue) => <ErrorView error={error} />
-})
+return yield* Resource.match(state).pipe(
+  Resource.on("Pending", () => <Spinner />),
+  Resource.on("Success", ({ value: users, stale }) => (
+    <UserList users={users} opacity={stale ? 0.5 : 1} />
+  )),
+  Resource.on("Failure", ({ error, stale }) => (
+    <ErrorView error={error} stale={stale} />
+  )),
+  Resource.exhaustive,
+)
 ```
+
+Handlers receive payload objects:
+- `Pending` -> `{ stale: Option.Option<A> }`
+- `Success` -> `{ value: A, stale: boolean }`
+- `Failure` -> `{ error: E, stale: Option.Option<A> }`
 
 ### Cache Control
 
@@ -147,7 +159,7 @@ Resource.clear(resource)       // Remove from cache
 
 ## ErrorBoundary
 
-Chainable builder pattern for typed error handling:
+Pipeable matcher pattern for typed error handling:
 
 ```tsx
 // Define fallback as a component (can use services, signals, etc.)
@@ -158,22 +170,24 @@ const GenericError = Component.gen(function* (
   return <div>Unexpected: {String(Cause.squash(cause))}</div>
 })
 
-// With catchAll -- returns Element (plain JSX or <Component />)
-const Safe = yield* ErrorBoundary.catch(RiskyComponent)
-  .on("NetworkError", NetworkErrorView)
-  .on("ValidationError", ValidationErrorView)
-  .catchAll((cause) => <GenericError cause={cause} />)
+// With catchAll
+const Safe = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+  ErrorBoundary.on("NetworkError", NetworkErrorView),
+  ErrorBoundary.on("ValidationError", ValidationErrorView),
+  ErrorBoundary.catchAll(GenericError),
+)
 
 // Exhaustive (all error tags handled, no catchAll needed)
-const Safe = yield* ErrorBoundary.catch(RiskyComponent)
-  .on("NetworkError", NetworkErrorView)
-  .on("ValidationError", ValidationErrorView)
-  .exhaustive()
+const SafeExact = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+  ErrorBoundary.on("NetworkError", NetworkErrorView),
+  ErrorBoundary.on("ValidationError", ValidationErrorView),
+  ErrorBoundary.exhaustive,
+)
 
 return <Safe userId={userId} />
 ```
 
-`.on()` takes a `Component.Type` (called internally with `{ error }` props). `.catchAll()` takes a function returning `Element` -- can be plain JSX or component JSX.
+`.on()` takes a `Component.Type` receiving `{ error }`. `.catchAll()` takes a fallback component receiving `{ cause }`. `ErrorBoundary.catch(...)` is synchronous; `yield*` only the final `catchAll` / `exhaustive` step.
 
 ## Portal
 

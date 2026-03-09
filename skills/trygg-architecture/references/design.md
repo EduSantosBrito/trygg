@@ -124,7 +124,7 @@ Development mode (`jsx-dev-runtime.ts`) adds source location info for debugging.
 ### 3.1 Renderer Service
 
 ```typescript
-export class Renderer extends Context.Tag("@trygg/Renderer")<Renderer, RendererService>() {}
+export class Renderer extends ServiceMap.Service<Renderer, RendererService>()("@trygg/Renderer") {}
 
 export interface RendererService {
   readonly mount: (container: HTMLElement, element: Element) => Effect<void, unknown, Scope.Scope>
@@ -466,29 +466,29 @@ const Modal = Component.gen(function* () {
 
 ## 8. Error Boundary
 
-Chainable builder pattern for typed error handling:
+Pipeable matcher pattern for typed error handling:
 
 ```tsx
 import { ErrorBoundary } from "trygg"
 
 // With catchAll
-const SafeComponent = yield* ErrorBoundary
-  .catch(RiskyComponent)
-  .on("NetworkError", NetworkErrorView)
-  .on("ValidationError", ValidationErrorView)
-  .catchAll((cause) => <GenericError cause={cause} />)
+const SafeComponent = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+  ErrorBoundary.on("NetworkError", NetworkErrorView),
+  ErrorBoundary.on("ValidationError", ValidationErrorView),
+  ErrorBoundary.catchAll(GenericError),
+)
 
 // Exhaustive (compile-time check — all error tags must be handled)
-const SafeComponent = yield* ErrorBoundary
-  .catch(RiskyComponent)
-  .on("NetworkError", NetworkErrorView)
-  .on("ValidationError", ValidationErrorView)
-  .exhaustive()
+const SafeExact = yield* ErrorBoundary.catch(RiskyComponent).pipe(
+  ErrorBoundary.on("NetworkError", NetworkErrorView),
+  ErrorBoundary.on("ValidationError", ValidationErrorView),
+  ErrorBoundary.exhaustive,
+)
 
 return <SafeComponent userId={userId} />
 ```
 
-`.on(tag, component)` takes a `Component.Type<{ error: E }>`. `.catchAll(handler)` takes `(cause: Cause<unknown>) => Element`. Props passed to the wrapped component can be `SignalOrValue<T>` (reactive).
+`.on(tag, component)` takes a `Component.Type<{ error: E }>` and `.catchAll(component)` takes a fallback component receiving `{ cause }`. `ErrorBoundary.catch(...)` is sync; `catchAll` / `exhaustive` return the final effect.
 
 ---
 
@@ -564,12 +564,17 @@ Resource.hash("users.getUser", { id: "123" })
 ```typescript
 const state = yield* Resource.fetch(userResource)
 
-return yield* Resource.match(state, {
-  Pending: () => <Spinner />,
-  Success: (user, stale) => <UserCard user={user} opacity={stale ? 0.5 : 1} />,
-  Failure: (error, staleValue) => <ErrorView error={error} />
-})
+return yield* Resource.match(state).pipe(
+  Resource.on("Pending", () => <Spinner />),
+  Resource.on("Success", ({ value: user, stale }) => (
+    <UserCard user={user} opacity={stale ? 0.5 : 1} />
+  )),
+  Resource.on("Failure", ({ error, stale }) => <ErrorView error={error} stale={stale} />),
+  Resource.exhaustive,
+)
 ```
+
+Payloads are object-shaped: `Pending -> { stale }`, `Success -> { value, stale }`, `Failure -> { error, stale }`.
 
 ### 10.4 Cache Control
 
@@ -593,7 +598,7 @@ API routes are defined in a single `app/api.ts` file exporting an `HttpApi` defi
 
 ```typescript
 // app/api.ts
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema, Layer } from "effect"
 
 const users = HttpApiGroup.make("users")
@@ -624,7 +629,7 @@ type Handlers = Api.GroupHandlers<typeof group>
 ### 11.3 Vite Plugin Integration
 
 The plugin:
-1. Requires `app/api.ts` to have a `default` export — a pre-composed `Layer<HttpApi.Api>`
+1. Requires `app/api.ts` to have a `default` export — a pre-composed HttpApi layer
 2. Creates dev server middleware via SSR-loaded handler factory
 3. Uses `Layer.isLayer` runtime check at module boundary (type params are phantom)
 
@@ -633,14 +638,17 @@ The plugin:
 Users define `ApiClient` and `ApiClientLive` in `app/api.ts`:
 
 ```typescript
-import { HttpApiClient, FetchHttpClient } from "@effect/platform"
-import { Context, Effect, Layer } from "effect"
+import { HttpApiClient, HttpApiSchema } from "effect/unstable/httpapi"
+import { Effect, Layer } from "effect"
+import * as ServiceMap from "effect/ServiceMap"
 
-const _client = HttpApiClient.make(Api, { baseUrl: "" })
+const _client = HttpApiClient.make(Api).pipe(
+  Effect.provide(HttpApiSchema.client.json),
+)
 type ApiClientService = Effect.Effect.Success<typeof _client>
 
-export class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClientService>() {}
-export const ApiClientLive = Layer.effect(ApiClient, _client.pipe(Effect.provide(FetchHttpClient.layer)))
+export class ApiClient extends ServiceMap.Service<ApiClient, ApiClientService>()("ApiClient") {}
+export const ApiClientLive = Layer.effect(ApiClient, _client)
 
 // In components:
 const client = yield* ApiClient
@@ -678,7 +686,7 @@ export default defineConfig({
 ```typescript
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { render, click, waitFor } from "trygg"
+import { render, click, waitFor } from "trygg/testing"
 
 describe("Counter", () => {
   it.scoped("increments on click", () =>
@@ -700,14 +708,14 @@ describe("Counter", () => {
 - `render(element)` - Renders component/element, returns query helpers. Auto-provides `testLayer`.
 - `renderElement(element)` - Renders raw Element
 - `click(element)` - Simulates click event
-- `typeInput(element, value)` - Simulates input
+- `type(element, value)` - Simulates input/change
 - `waitFor(fn)` - Polls until assertion passes
 - `getByTestId(id)` - Returns `Effect<HTMLElement>` (effectful)
-- `queryByText(text)` - Sync, returns `HTMLElement | null`
-- `queryByTestId(id)` - Sync, returns `HTMLElement | null`
-- `queryByRole(role)` - Sync, returns `HTMLElement | null`
-- `querySelectorAll(selector)` - Sync, returns `NodeListOf<HTMLElement>`
-- `testLayer` - Provides Renderer + test Router
+- `queryByText(text)` - Returns `Effect<Option.Option<HTMLElement>>`
+- `queryByTestId(id)` - Returns `Effect<Option.Option<HTMLElement>>`
+- `queryByRole(role)` - Returns `Effect<Option.Option<HTMLElement>>`
+- `querySelectorAll(selector)` - Returns `Effect<ReadonlyArray<HTMLElement>>`
+- `testLayer` - Provides the browser renderer
 
 ---
 

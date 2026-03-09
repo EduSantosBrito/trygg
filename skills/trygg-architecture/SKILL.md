@@ -50,7 +50,7 @@ What are you investigating?
 |   See: references/design.md §10
 |
 +-- API routes?
-|   +-- HttpApi + HttpApiGroup + HttpApiEndpoint from @effect/platform
+|   +-- HttpApi + HttpApiGroup + HttpApiEndpoint from effect/unstable/httpapi
 |   +-- Single app/api.ts file, handler layer export
 |   +-- Vite plugin creates dev middleware
 |   See: references/design.md §11
