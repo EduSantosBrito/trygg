@@ -2,17 +2,18 @@
 
 ## Services and Layers
 
-Define services with `Context.Tag`, provide via `Layer`:
+Define services with `ServiceMap.Service`, provide via `Layer`:
 
 ```tsx
-import { Context, Layer } from "effect"
+import { Layer } from "effect"
+import * as ServiceMap from "effect/ServiceMap"
 import { Component } from "trygg"
 
 // Define service
-class Theme extends Context.Tag("Theme")<Theme, {
+class Theme extends ServiceMap.Service<Theme, {
   readonly primary: string
   readonly background: string
-}>() {}
+}>()("Theme") {}
 
 // Create layer
 const themeLayer = Layer.succeed(Theme, { primary: "blue", background: "#fff" })
@@ -93,7 +94,7 @@ const fetchUser = (id: string) => Effect.gen(function* () {
 ```tsx
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, type, waitFor } from "trygg"
+import { render, click, type, waitFor } from "trygg/testing"
 ```
 
 ### Render and Query
@@ -101,7 +102,7 @@ import { testRender, click, type, waitFor } from "trygg"
 ```tsx
 it.scoped("renders content", () =>
   Effect.gen(function* () {
-    const { getByText, getByTestId, getByRole, querySelector } = yield* testRender(<MyComp />)
+    const { getByText, getByTestId, getByRole, querySelector, queryByText } = yield* render(<MyComp />)
 
     // Query methods (return Effect — yield* to unwrap):
     const el = yield* getByText("Hello")          // exact text match
@@ -109,9 +110,8 @@ it.scoped("renders content", () =>
     const heading = yield* getByRole("heading")    // ARIA role (implicit for h1-h6)
     const input = yield* querySelector<HTMLInputElement>("input[type=email]")
 
-    // Non-Effect queries (return HTMLElement | null):
-    // queryByText, queryByTestId, queryByRole — no Effect, no yield*
-    // querySelectorAll — returns ReadonlyArray<HTMLElement>
+    // Optional queries also return Effect
+    const maybeGreeting = yield* queryByText("Welcome")
   })
 )
 ```
@@ -121,7 +121,7 @@ it.scoped("renders content", () =>
 ```tsx
 it.scoped("handles user interaction", () =>
   Effect.gen(function* () {
-    const { getByTestId, getByText } = yield* testRender(<Counter />)
+    const { getByTestId, getByText } = yield* render(<Counter />)
 
     yield* click(yield* getByTestId("increment"))
     yield* waitFor(() => {
@@ -139,7 +139,7 @@ it.scoped("renders with mock service", () =>
   Effect.gen(function* () {
     const mockTheme = Layer.succeed(Theme, { primary: "red", background: "#000" })
     const Comp = MyComponent.provide(mockTheme)
-    const { getByText } = yield* testRender(<Comp />)
+    const { getByText } = yield* render(<Comp />)
     yield* getByText("red")
   })
 )
@@ -149,18 +149,18 @@ it.scoped("renders with mock service", () =>
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `testRender` | `(element) => Effect<TestRenderResult, _, Scope>` | Render and get query helpers; auto-provides `testLayer` |
+| `render` | `(element) => Effect<TestRenderResult, _, Scope>` | Render and get query helpers; auto-provides `testLayer` |
 | `renderElement` | `(element: Element) => Effect<TestRenderResult, _, Renderer \| Scope>` | Render raw Element (requires Renderer + Scope) |
 | `click` | `(el: HTMLElement) => Effect<void>` | Simulate click |
 | `type` | `(el, value: string) => Effect<void>` | Simulate typing (fires input+change) |
 | `waitFor` | `(fn, opts?) => Effect<T, WaitForTimeoutError>` | Poll until assertion passes |
-| `queryByText` | `(text: string) => HTMLElement \| null` | Query by text content (no Effect) |
-| `queryByTestId` | `(testId: string) => HTMLElement \| null` | Query by data-testid (no Effect) |
-| `queryByRole` | `(role: string) => HTMLElement \| null` | Query by ARIA role (no Effect) |
-| `querySelectorAll` | `(selector: string) => ReadonlyArray<HTMLElement>` | Query all matching elements |
-| `testLayer` | `Layer<Renderer>` | Provides Renderer + test Router |
+| `queryByText` | `(text: string) => Effect<Option.Option<HTMLElement>>` | Optional text lookup |
+| `queryByTestId` | `(testId: string) => Effect<Option.Option<HTMLElement>>` | Optional test id lookup |
+| `queryByRole` | `(role: string) => Effect<Option.Option<HTMLElement>>` | Optional role lookup |
+| `querySelectorAll` | `(selector: string) => Effect<ReadonlyArray<HTMLElement>>` | Query all matching elements |
+| `testLayer` | `Layer<Renderer>` | Provides browser renderer only |
 
-> Note: `testRender` (exported as `render` internally, re-exported as `testRender`) auto-provides `testLayer`. No need to `.pipe(Effect.provide(testLayer))`.
+> Note: import these helpers from `trygg/testing`. `render` auto-provides `testLayer`. No need to `.pipe(Effect.provide(testLayer))`.
 > The `queryBy*` and `querySelectorAll` functions are methods on `TestRenderResult`, not standalone exports.
 
 ## Routing
@@ -168,30 +168,33 @@ it.scoped("renders with mock service", () =>
 ### Route Definition (app/routes.ts)
 
 ```tsx
-import { Router } from "trygg/router"
+import { Route, Routes } from "trygg/router"
 
-export default Router.routes([
-  Router.route("/", () => import("./pages/home")),
-  Router.route("/users", () => import("./pages/users/list")),
-  Router.route("/users/:id", () => import("./pages/users/detail")),
-  Router.layout("/settings", () => import("./pages/settings/layout"), [
-    Router.route("/settings", () => import("./pages/settings/overview")),
-    Router.route("/settings/profile", () => import("./pages/settings/profile")),
-  ]),
-])
+export const routes = Routes.make()
+  .add(Route.make("/").component(() => import("./pages/home")))
+  .add(Route.make("/users").component(() => import("./pages/users/list")))
+  .add(Route.make("/users/:id").component(() => import("./pages/users/detail")))
+  .add(
+    Route.make("/settings")
+      .layout(() => import("./pages/settings/layout"))
+      .children(
+        Route.index(() => import("./pages/settings/overview")),
+        Route.make("/profile").component(() => import("./pages/settings/profile")),
+      ),
+  )
 ```
 
 ### Navigation
 
 ```tsx
-import { Router } from "trygg/router"
+import * as Router from "trygg/router"
 
-const nav = yield* Router.Navigation
-yield* nav.push("/users/123")
-yield* nav.replace("/login")
+const router = yield* Router.get
+yield* router.navigate("/users/:id", { params: { id: "123" } })
+yield* router.navigate("/login", { replace: true })
 
 // Link component
-<Router.Link href="/users">Users</Router.Link>
+<Router.Link to="/users">Users</Router.Link>
 ```
 
 ### Outlet

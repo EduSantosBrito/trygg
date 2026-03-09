@@ -71,14 +71,14 @@ import { Signal } from "trygg"
 **Cause:** `getByText`, `getByTestId`, or `getByRole` couldn't find a matching element
 **Solution:** Verify the element is rendered; use `waitFor` if it appears asynchronously
 
-> Note: `ElementNotFoundError` is a plain Error subclass with a manual `_tag` field, not a `Data.TaggedError`. It works with try/catch but cannot be yielded directly.
+> Note: `ElementNotFoundError` is a `Data.TaggedError`. It is yieldable and works with `catchTag`.
 
 ### `WaitForTimeoutError`
 
 **Cause:** Assertion inside `waitFor` didn't pass within the timeout period
 **Solution:** Check that state updates are firing; increase timeout if async operation is slow
 
-> Note: `WaitForTimeoutError` is a plain Error subclass with a manual `_tag` field, not a `Data.TaggedError`. It works with try/catch but cannot be yielded directly.
+> Note: `WaitForTimeoutError` is a `Data.TaggedError`. It is yieldable and works with `catchTag`.
 
 ### `UnsafeUrlError`
 
@@ -198,10 +198,10 @@ export default defineConfig({ plugins: [trygg()] })
 
 ### ErrorBoundary not catching errors
 
-- `ErrorBoundary.catch(Component)` returns an Effect — must `yield*` it
-- `.on("Tag", Handler)` matches `Data.TaggedError` `_tag` field
-- Use `.catchAll(fn)` or `.exhaustive()` to finalize the builder
-- Builder is immutable — each `.on()`, `.catchAll()`, `.exhaustive()` creates independent state
+- `ErrorBoundary.catch(Component)` returns a matcher immediately
+- `.on("Tag", Handler)` matches `Data.TaggedError` `_tag`
+- Finalize with `.pipe(ErrorBoundary.catchAll(Fallback))` or `.pipe(..., ErrorBoundary.exhaustive)`
+- `yield*` the final `catchAll` / `exhaustive` effect, not the initial `catch`
 
 ---
 

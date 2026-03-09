@@ -52,7 +52,7 @@ Route.make("/users/:id")
 | `.query(schema)` | Schema for query params |
 | `.component(Component)` | Component to render |
 | `.middleware(effect)` | Add middleware (chained, left-to-right) |
-| `.prefetch(fn)` | Prefetch Resource on navigation (parallel execution) |
+| `.prefetch(fn)` | Register explicit prefetch work for `Router.prefetch` / `Link` prefetch |
 | `.loading(Component)` | Loading fallback while route loads |
 | `.error(Component)` | Error boundary (nearest wins) |
 | `.notFound(Component)` | 404 fallback for unmatched children |
@@ -117,8 +117,7 @@ Route.make("/files/:filepath+")
 ```tsx
 const UserProfile = Component.gen(function* () {
   const { id } = yield* Router.params("/users/:id")
-  // id: string — Router.params returns raw string values
-  // Schema decoding happens internally at match time but params are strings
+  // id is the decoded route param value for the active match
   return <div>User {id}</div>
 })
 ```
@@ -150,14 +149,14 @@ Middleware runs before component rendering. Left-to-right ordering.
 
 ```tsx
 const requireAuth = Effect.gen(function* () {
-  const session = yield* FiberRef.get(CurrentSession)
+  const session = yield* CurrentSession
   if (Option.isNone(session)) {
     return yield* Route.redirect("/login")
   }
 })
 
 const requireAdmin = Effect.gen(function* () {
-  const user = yield* FiberRef.get(CurrentUser)
+  const user = yield* CurrentUser
   if (!user.isAdmin) {
     return yield* Route.forbidden()
   }
@@ -182,7 +181,7 @@ Route.make("/admin")
   .pipe(Route.provide(AuthLive))  // Runtime layer — R not narrowed at type level
 ```
 
-> **Note:** `Route.provide` applies layers at runtime but does not narrow the R type parameter. Use middleware that resolves its own services (e.g., via FiberRef) to keep R = never.
+> **Note:** `Route.provide` applies layers at runtime but does not narrow the R type parameter. Prefer middleware that resolves its own services inside the effect so the route collection still closes to `R = never`.
 
 ---
 
@@ -257,8 +256,8 @@ type Eager = { readonly _tag: "Eager" }
 type Lazy = { readonly _tag: "Lazy" }
 type RenderStrategyType = Eager | Lazy
 
-// Context.Tag with Layer factories
-class RenderStrategy extends Context.Tag("trygg/RenderStrategy")<...>() {
+// ServiceMap.Service with Layer factories
+class RenderStrategy extends ServiceMap.Service<RenderStrategy, RenderStrategyType>()("trygg/RenderStrategy") {
   static readonly Eager: Layer.Layer<RenderStrategy>
   static readonly Lazy: Layer.Layer<RenderStrategy>
 }
@@ -386,7 +385,7 @@ const isExact = yield* Router.isActive("/settings", { exact: true })
 <Router.Link to="/admin" prefetch={false}>Admin</Router.Link>
 ```
 
-Browser `import()` cache handles dedup natively. Navigation to prefetched routes skips loading state.
+`intent` fires from `pointermove` (50ms debounce) or focus. `viewport` uses the shared observer. `render` waits until the outlet's prefetch resolver is ready. Browser `import()` cache handles module dedup.
 
 ### Programmatic Prefetch
 
@@ -398,7 +397,7 @@ yield* Router.prefetch("/users/123")
 
 ## Data Prefetching
 
-Prefetch Resources when navigating to a route:
+Prefetch runs only when explicitly triggered by `Router.prefetch(...)` or `Link` prefetch strategies:
 
 ```tsx
 Route.make("/users/:id")
@@ -408,7 +407,7 @@ Route.make("/users/:id")
   .component(UserProfile)
 ```
 
-Multiple `.prefetch()` calls run in parallel. Errors are logged but don't block navigation.
+Multiple `.prefetch()` calls run in parallel. Prefetch receives decoded `params` / `query`. Errors are logged and surfaced as debug events but don't block later navigation.
 
 ---
 
@@ -420,7 +419,7 @@ The `Outlet` renders the matched route:
 // With explicit manifest
 <Router.Outlet routes={routes.manifest} />
 
-// Implicit (reads from CurrentRoutesManifest FiberRef)
+// Implicit (reads from CurrentRoutesManifest reference)
 <Router.Outlet />
 ```
 
@@ -428,8 +427,8 @@ Outlet behavior:
 1. Matches current path via trie matcher
 2. Runs middleware chain
 3. Decodes params/query via Schema
-4. Runs prefetch effects
-5. Resolves component (handles lazy loading)
+4. Resolves component (handles lazy loading)
+5. Uses explicit prefetch resolver for `Router.prefetch` / `Link` prefetch
 6. Stacks layouts (root-to-leaf)
 7. Wraps with error boundary
 8. Shows loading state during async loads

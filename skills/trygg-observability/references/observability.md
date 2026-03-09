@@ -125,6 +125,7 @@ mount(container, <>
 | `resource.fetch.error` | Fetch failed | `key`, `error`, `error_message` |
 | `resource.fetch.set_success` | State set to Success | `key` |
 | `resource.fetch.set_failure` | State set to Failure | `key`, `error` |
+| `resource.fetch.interrupted` | Fetch interrupted before failure state commit | `key` |
 | `resource.fetch.complete` | Fetch cleanup done | `key` |
 | `resource.fetch.defect` | Unexpected defect | `key`, `defect` |
 | `resource.fetch.unhandled` | Unhandled cause | `key`, `error`, `error_message` |
@@ -174,8 +175,10 @@ mount(container, <>
 | `router.module.load.timeout` | Module load timed out *(reserved)* | `path`, `kind`, `timeout_ms`, `is_prefetch`, `attempt` |
 | `router.module.load.cache_hit` | Module from cache *(reserved)* | `path`, `kind`, `is_prefetch` |
 | `router.prefetch.start` | Prefetch started | `path` |
-| `router.prefetch.complete` | Prefetch completed *(reserved)* | `path` |
-| `router.prefetch.no_match` | Prefetch path unmatched *(reserved)* | `path` |
+| `router.prefetch.complete` | Prefetch completed | `path` |
+| `router.prefetch.no_match` | Prefetch path unmatched | `path` |
+| `router.prefetch.trigger` | Link prefetch trigger fired | `path`, `trigger` |
+| `router.prefetch.error` | Prefetch resolver failed | `path`, `phase`, `error_message` |
 | `router.prefetch.viewport` | Viewport prefetch triggered | `path` |
 | `router.viewport.observer.added` | Viewport observer setup | - |
 | `router.viewport.observer.removed` | Viewport observer removed *(reserved)* | - |

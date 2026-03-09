@@ -42,7 +42,7 @@ What are you building?
 +-- Data fetching?
 |   +-- Static key? -> Resource.make(fetchFn, { key: "name" })
 |   +-- Parameterized? -> Resource.make(fn, { key: p => Resource.hash("name", p) })
-|   +-- Render states? -> Resource.match(state, { Pending, Success, Failure })
+|   +-- Render states? -> Resource.match(state).pipe(Resource.on(...), Resource.exhaustive)
 |   See: references/component-api.md
 |
 +-- List rendering?
@@ -51,12 +51,12 @@ What are you building?
 |   See: references/signals-api.md
 |
 +-- Error handling?
-|   +-- Typed errors? -> ErrorBoundary.catch(Comp).on("Tag", Handler).catchAll(fn)
-|   +-- Exhaustive? -> .on("A", A).on("B", B).exhaustive()
+|   +-- Typed errors? -> ErrorBoundary.catch(Comp).pipe(ErrorBoundary.on("Tag", Handler), ErrorBoundary.catchAll(Fallback))
+|   +-- Exhaustive? -> ErrorBoundary.catch(Comp).pipe(ErrorBoundary.on("A", A), ErrorBoundary.on("B", B), ErrorBoundary.exhaustive)
 |   See: references/common-errors.md
 |
 +-- Testing?
-|   +-- Render component? -> yield* testRender(<Comp />)  (auto-provides testLayer)
+|   +-- Render component? -> yield* render(<Comp />)  (from trygg/testing)
 |   +-- Simulate click? -> yield* click(element)
 |   +-- Assert async? -> yield* waitFor(() => expect(...))
 |   See: references/effect-patterns.md
@@ -107,7 +107,8 @@ The Vite plugin auto-generates the entry, handles `mountDocument`, routing, and 
 For global state, use service-wrapped signals with a stable layer:
 
 ```tsx
-import { Context, Effect, Layer, Option } from "effect"
+import { Effect, Layer, Option } from "effect"
+import * as ServiceMap from "effect/ServiceMap"
 import { Signal } from "trygg"
 
 type User = { id: string }
@@ -118,7 +119,7 @@ interface AuthService {
   readonly clearUser: Effect.Effect<void>
 }
 
-class Auth extends Context.Tag("Auth")<Auth, AuthService>() {}
+class Auth extends ServiceMap.Service<Auth, AuthService>()("Auth") {}
 
 const currentUser = Signal.makeSync<Option.Option<User>>(Option.none())
 
@@ -133,7 +134,7 @@ export const AuthLayer = Layer.succeed(Auth, AuthLive)
 
 Why this pattern:
 - `Signal.makeSync` creates one module-lifetime signal
-- `Context.Tag` keeps components dependent on contract, not implementation
+- `ServiceMap.Service` keeps components dependent on contract, not implementation
 - `Layer.succeed` provides a stable service reference (no signal re-creation)
 
 Anti-pattern (causes state loss):
@@ -160,10 +161,11 @@ Use `Signal.makeSync` + `Layer.succeed` instead.
 ## Component with Props and DI
 
 ```tsx
-import { Context, Layer } from "effect"
+import { Layer } from "effect"
+import * as ServiceMap from "effect/ServiceMap"
 import { Component, Signal, type ComponentProps } from "trygg"
 
-class Theme extends Context.Tag("Theme")<Theme, { primary: string }>() {}
+class Theme extends ServiceMap.Service<Theme, { primary: string }>()("Theme") {}
 
 const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
   const { title } = yield* Props
@@ -237,13 +239,14 @@ const onInput = (e: Event) =>
 ```tsx
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { testRender, click, waitFor } from "trygg"
+import { render, click, waitFor } from "trygg/testing"
 
 describe("Counter", () => {
   it.scoped("increments", () =>
     Effect.gen(function* () {
-      const { getByText } = yield* testRender(<Counter />)
+      const { getByText, queryByText } = yield* render(<Counter />)
       yield* click(yield* getByText("0"))
+      const maybeOne = yield* queryByText("1")
       yield* waitFor(() => {
         const el = document.querySelector("button")
         expect(el?.textContent).toContain("1")
