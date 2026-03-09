@@ -9,8 +9,10 @@ import {
   TRYGG_VERSION,
   EFFECT_VERSION,
   EFFECT_PLATFORM_BROWSER_VERSION,
+  EFFECT_LANGUAGE_SERVICE_VERSION,
   TYPESCRIPT_VERSION,
   VITE_VERSION,
+  OXLINT_VERSION,
   TAILWIND_VERSION,
   TAILWIND_VITE_VERSION,
 } from "../versions.js";
@@ -31,6 +33,11 @@ export const generatePackageJson = (
       dev: platform.devScript,
       build: "vite build",
       typecheck: "tsc --noEmit",
+      lint: "oxlint .",
+      "lint:fix": "oxlint . --fix",
+      "effect:check": "effect-language-service diagnostics --project tsconfig.json",
+      check: "bun run lint && bun run typecheck && bun run effect:check",
+      prepare: "effect-language-service patch",
     };
 
     // Add platform-specific scripts for server output
@@ -49,8 +56,10 @@ export const generatePackageJson = (
     };
 
     const devDependencies: Record<string, string> = {
+      "@effect/language-service": EFFECT_LANGUAGE_SERVICE_VERSION,
       typescript: TYPESCRIPT_VERSION,
       vite: VITE_VERSION,
+      oxlint: OXLINT_VERSION,
       "@tailwindcss/vite": TAILWIND_VITE_VERSION,
       tailwindcss: TAILWIND_VERSION,
     };

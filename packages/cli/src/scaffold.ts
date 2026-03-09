@@ -11,6 +11,7 @@ import { generatePackageJson } from "./generators/package-json";
 import { generateViteConfig } from "./generators/vite-config";
 import { generateTsConfig } from "./generators/tsconfig";
 import { generateGitignore } from "./generators/gitignore";
+import { generateOxlintConfig } from "./generators/oxlint-config";
 import { PlatformConfig } from "./platform-config";
 import { BunPlatformConfig, NodePlatformConfig } from "./platforms";
 
@@ -105,4 +106,8 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     // 9. Generate .gitignore
     const gitignore = yield* generateGitignore();
     yield* fs.writeFileString(path.join(targetDir, ".gitignore"), gitignore);
+
+    // 10. Generate .oxlintrc.json
+    const oxlintConfig = yield* generateOxlintConfig();
+    yield* fs.writeFileString(path.join(targetDir, ".oxlintrc.json"), oxlintConfig);
   });

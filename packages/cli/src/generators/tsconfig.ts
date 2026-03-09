@@ -19,7 +19,14 @@ export const generateTsConfig = (): Effect.Effect<string> =>
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "transform": "@effect/language-service/transform",
+        "namespaceImportPackages": ["effect", "@effect/*"]
+      }
+    ]
   },
   "include": ["app/**/*.ts", "app/**/*.tsx"]
 }
