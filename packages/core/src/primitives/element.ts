@@ -1,6 +1,14 @@
 /**
+ * Element values and child-shape types for trygg rendering.
+ *
+ * @remarks
+ * Owner module for the `Element` topic. This module defines the virtual element
+ * model that JSX produces, along with the core child and prop types used by the
+ * renderer and component surfaces.
+ *
+ * @see ./element.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Virtual DOM Element representation for trygg
+ * @module trygg/primitives/element
  */
 import { Cause, Data, Effect, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -17,6 +25,18 @@ export const isEffect = (value: unknown): value is Effect.Effect<Element, unknow
 /**
  * Key type for list reconciliation.
  * Uses Effect's Equal and Hash traits for efficient comparison.
+ *
+ * @remarks
+ * Keys let renderer-managed collections preserve DOM identity across inserts,
+ * removals, and reordering.
+ *
+ * @example
+ * ```tsx
+ * const key: ElementKey = "todo-1"
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export type ElementKey = string | number;
@@ -34,6 +54,17 @@ export type ElementKey = string | number;
  * <button onClick={() => reset}>Retry</button>
  * ```
  *
+ * @remarks
+ * trygg event props always return an Effect thunk. The renderer runs that
+ * effect inside the active render scope and service context.
+ *
+ * @example
+ * ```tsx
+ * <button onClick={() => Effect.void}>Save</button>
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export type EventHandler<A = void, E = never, R = never> = (event: Event) => Effect.Effect<A, E, R>;
@@ -72,6 +103,18 @@ export type AttributeInput = AttributePrimitive | AttributeSignal;
 
 /**
  * Valid child types for JSX elements
+ *
+ * @remarks
+ * `ElementChild` models every value JSX accepts in trygg, including nested
+ * arrays, primitives, and Signals that drive fine-grained updates.
+ *
+ * @example
+ * ```tsx
+ * const child: ElementChild = "hello"
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export type ElementChild =
@@ -86,12 +129,36 @@ export type ElementChild =
 
 /**
  * Children prop type - can be a single child or array of children
+ *
+ * @remarks
+ * Use `ElementChildren` when authoring low-level helpers that need the same
+ * permissive child input shape as JSX intrinsic elements.
+ *
+ * @example
+ * ```ts
+ * const children: ElementChildren = ["title", 1]
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export type ElementChildren = ElementChild | ReadonlyArray<ElementChild>;
 
 /**
- * Base props shared by all intrinsic elements
+ * Base props shared by all intrinsic elements.
+ *
+ * @remarks
+ * `BaseProps` carries the common attributes every intrinsic element accepts
+ * before element-specific props extend the shape.
+ *
+ * @example
+ * ```ts
+ * const props: BaseProps = { id: "app", children: "hello" }
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export interface BaseProps {
@@ -117,6 +184,18 @@ type AnyEventHandler = EventHandler<void, never, unknown>;
  * Event props that can be attached to intrinsic elements.
  * Event handlers can have any service requirements (R) since
  * services are provided by the ManagedRuntime at mount time.
+ *
+ * @remarks
+ * `EventProps` is the shared event-handler surface mixed into `ElementProps`
+ * for intrinsic elements.
+ *
+ * @example
+ * ```tsx
+ * const props: EventProps = { onClick: () => Effect.void }
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export interface EventProps {
@@ -147,6 +226,17 @@ export interface EventProps {
  * for fine-grained reactivity. When you pass a Signal, the DOM attribute
  * updates directly without re-rendering the component.
  *
+ * @remarks
+ * `ElementProps` is the shared prop shape used by the JSX runtime when the tag
+ * is an intrinsic string like `div` or `button`.
+ *
+ * @example
+ * ```ts
+ * const props: ElementProps = { id: "root", hidden: false }
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export interface ElementProps extends BaseProps, EventProps {
@@ -215,6 +305,18 @@ export interface ElementProps extends BaseProps, EventProps {
 /**
  * Virtual DOM Element - the core type of trygg
  * Modeled as a tagged enum for pattern matching
+ *
+ * @remarks
+ * `Element` is the runtime shape produced by the JSX runtime and consumed by the
+ * renderer. Components return this type directly or inside Effects.
+ *
+ * @example
+ * ```tsx
+ * const view: Element = <div>Hello</div>
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export type Element = Data.TaggedEnum<{
@@ -327,12 +429,36 @@ export type ComponentElementWithRequirements<R> = ComponentElement & {
 
 /**
  * Element constructors and utilities
+ *
+ * @remarks
+ * Use `Element` when you need explicit tagged constructors or pattern matching
+ * instead of JSX syntax.
+ *
+ * @example
+ * ```ts
+ * const node = Element.Text({ content: "Hello" })
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const Element = Data.taggedEnum<Element>();
 
 /**
- * Create an intrinsic element
+ * Create an intrinsic element.
+ *
+ * @remarks
+ * `intrinsic` is the low-level constructor behind JSX lowering for string tag
+ * names.
+ *
+ * @example
+ * ```ts
+ * const div = intrinsic("div", {}, [text("hello")])
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const intrinsic = (
@@ -343,7 +469,18 @@ export const intrinsic = (
 ) => Element.Intrinsic({ tag, props, children, key });
 
 /**
- * Create a text element
+ * Create a text element.
+ *
+ * @remarks
+ * `text` creates the tagged text-node form used by the renderer.
+ *
+ * @example
+ * ```ts
+ * const node = text("hello")
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const text = (content: string) => Element.Text({ content });
@@ -356,6 +493,10 @@ export const text = (content: string) => Element.Text({ content });
  *
  * If the effect has unsatisfied requirements, it will fail
  * at runtime with "service not found".
+ *
+ * @remarks
+ * `componentElement` is the escape hatch used by JSX and renderer internals to
+ * wrap an Effect-producing thunk as an `Element.Component`.
  *
  * @since 1.0.0
  * @internal
@@ -375,7 +516,18 @@ export const provideElement = (context: ServiceMap.ServiceMap<unknown>, child: E
   Element.Provide({ context, child });
 
 /**
- * Create a fragment element
+ * Create a fragment element.
+ *
+ * @remarks
+ * `fragment` groups children without producing an intrinsic wrapper node.
+ *
+ * @example
+ * ```ts
+ * const node = fragment([text("a"), text("b")])
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const fragment = (children: ReadonlyArray<Element>) => Element.Fragment({ children });
@@ -383,6 +535,18 @@ export const fragment = (children: ReadonlyArray<Element>) => Element.Fragment({
 /**
  * Create a portal element.
  * Children are automatically normalized (strings, numbers, arrays, etc. all work).
+ *
+ * @remarks
+ * `portal` moves normalized children into another DOM target while keeping the
+ * element in the same component tree.
+ *
+ * @example
+ * ```tsx
+ * const node = portal("#modal-root", <div>Dialog</div>)
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const portal = (target: HTMLElement | string, children: unknown) =>
@@ -391,6 +555,18 @@ export const portal = (target: HTMLElement | string, children: unknown) =>
 /**
  * Create a keyed list element for efficient list rendering.
  * Maintains stable scopes per key so nested signals are preserved across updates.
+ *
+ * @remarks
+ * `keyedList` is the low-level list primitive behind stable keyed collection
+ * rendering.
+ *
+ * @example
+ * ```ts
+ * const list = keyedList(items, (item) => Effect.succeed(text(String(item))), (item) => item)
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const keyedList = <T>(
@@ -408,7 +584,19 @@ export const keyedList = <T>(
   });
 
 /**
- * Empty element singleton (empty fragment)
+ * Empty element singleton (empty fragment).
+ *
+ * @remarks
+ * `empty` is the canonical no-op element value used when child normalization
+ * drops nullish or boolean content.
+ *
+ * @example
+ * ```ts
+ * const node = empty
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const empty: Element = Element.Fragment({ children: [] });
@@ -424,7 +612,22 @@ const isSignal = (value: unknown): value is Signal<unknown> =>
   (value as { _tag: unknown })._tag === "Signal";
 
 /**
- * Check if a value is an Element
+ * Check if a value is an `Element`.
+ *
+ * @remarks
+ * `isElement` narrows unknown values to the tagged element union consumed by
+ * the renderer.
+ *
+ * @example
+ * ```ts
+ * const value: unknown = text("hello")
+ * if (isElement(value)) {
+ *   value._tag
+ * }
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const isElement = (value: unknown): value is Element =>
@@ -462,7 +665,19 @@ export const signalElement = <A>(
 ): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
 
 /**
- * Normalize a child value to an Element
+ * Normalize a child value to an `Element`.
+ *
+ * @remarks
+ * `normalizeChild` is the single-value normalization step used by JSX child
+ * handling before arrays are flattened.
+ *
+ * @example
+ * ```ts
+ * const child = normalizeChild("hello")
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const normalizeChild = (child: unknown): Element => {
@@ -506,14 +721,38 @@ export const normalizeChild = (child: unknown): Element => {
  * @since 1.0.0
  */
 /**
- * Check if an element is empty (empty fragment)
+ * Check if an element is empty (empty fragment).
+ *
+ * @remarks
+ * `isEmpty` identifies the canonical empty fragment used by child
+ * normalization.
+ *
+ * @example
+ * ```ts
+ * const emptyChild = isEmpty(empty)
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const isEmpty = (element: Element): boolean =>
   element._tag === "Fragment" && element.children.length === 0;
 
 /**
- * Normalize an array of children to Elements
+ * Normalize arbitrary children to `Element` values.
+ *
+ * @remarks
+ * `normalizeChildren` flattens nested arrays, removes empty children, and
+ * delegates single-value coercion to `normalizeChild`.
+ *
+ * @example
+ * ```ts
+ * const children = normalizeChildren(["a", ["b", null]])
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const normalizeChildren = (children: unknown): ReadonlyArray<Element> => {
@@ -534,7 +773,18 @@ export const normalizeChildren = (children: unknown): ReadonlyArray<Element> => 
 };
 
 /**
- * Get the key from an Element if it has one
+ * Get the key from an `Element` if it has one.
+ *
+ * @remarks
+ * `getKey` reads reconciliation keys from intrinsic and component elements.
+ *
+ * @example
+ * ```ts
+ * const key = getKey(keyed("row-1", text("hello")))
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const getKey = (element: Element): ElementKey | null => {
@@ -551,6 +801,17 @@ export const getKey = (element: Element): ElementKey | null => {
 /**
  * Create a keyed element - used for list reconciliation
  * Elements with keys use Effect's Equal and Hash for efficient diffing
+ *
+ * @remarks
+ * `keyed` attaches a reconciliation key to intrinsic or component elements.
+ *
+ * @example
+ * ```ts
+ * const node = keyed("row-1", text("hello"))
+ * ```
+ *
+ * @category Elements
+ * @public
  * @since 1.0.0
  */
 export const keyed = (key: ElementKey, element: Element): Element => {

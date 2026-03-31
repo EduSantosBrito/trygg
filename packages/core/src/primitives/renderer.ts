@@ -1,8 +1,14 @@
 /**
- * @since 1.0.0
- * Renderer service for trygg
+ * DOM rendering and mount entrypoints for trygg.
  *
- * Handles mounting Element trees to the DOM.
+ * @remarks
+ * Owner module for the `Renderer` topic. This module owns the renderer service,
+ * browser layer, and the root mount helpers that turn `Element` trees into live
+ * DOM.
+ *
+ * @see ./renderer.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/primitives/renderer
  */
 import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -92,7 +98,19 @@ export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHand
 }
 
 /**
- * Render context passed through the rendering tree
+ * Render context passed through the rendering tree.
+ *
+ * @remarks
+ * `RenderContext` carries the active service map and scope that renderer-owned
+ * work must preserve across event handlers and nested renders.
+ *
+ * @example
+ * ```ts
+ * const context: RenderContext = { services, scope }
+ * ```
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export interface RenderContext {
@@ -117,7 +135,13 @@ const runForkInRenderContext = <A, E>(
 };
 
 /**
- * FiberRef to track the current render context
+ * FiberRef to track the current render context.
+ *
+ * @remarks
+ * Renderer internals use `CurrentRenderContext` to read the ambient render
+ * scope when wiring event handlers and reactive updates.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
@@ -128,7 +152,19 @@ export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
 );
 
 /**
- * Result of rendering an element - contains the DOM node and cleanup effect
+ * Result of rendering an element - contains the DOM node and cleanup effect.
+ *
+ * @remarks
+ * `RenderResult` is the low-level renderer return shape used by mounting and
+ * document-render helpers.
+ *
+ * @example
+ * ```ts
+ * const result: RenderResult = { node, cleanup: Effect.void }
+ * ```
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export interface RenderResult {
@@ -184,6 +220,18 @@ const defaultRenderOptions: RenderOptions = { errorHandler: null };
 
 /**
  * Renderer service interface
+ *
+ * @remarks
+ * `RendererService` is the low-level contract implemented by `browserLayer` and
+ * consumed by helpers like `render`, `mount`, and `mountDocument`.
+ *
+ * @example
+ * ```ts
+ * const service: RendererService = yield* Renderer
+ * ```
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export interface RendererService {
@@ -206,6 +254,18 @@ export interface RendererService {
 
 /**
  * Renderer service tag
+ *
+ * @remarks
+ * Yield `Renderer` inside Effects when you need direct access to the active
+ * renderer implementation instead of the convenience mount helpers.
+ *
+ * @example
+ * ```ts
+ * const renderer = yield* Renderer
+ * ```
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export class Renderer extends ServiceMap.Service<Renderer, RendererService>()("@trygg/Renderer") {}
@@ -2134,6 +2194,12 @@ const renderElement = (
  * )
  * ```
  *
+ * @remarks
+ * `browserLayer` wires the DOM-specific renderer implementation used by the
+ * higher-level mount helpers.
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
@@ -2275,6 +2341,13 @@ const isEffectValue = (value: unknown): value is Effect.Effect<Element, unknown,
  * )
  * ```
  *
+ * @remarks
+ * `mount` is the default browser entrypoint. It accepts either a ready
+ * `Element` or an `Effect` that produces one, then installs the browser runtime,
+ * router layer, and resource registry needed by a full app.
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export const mount = <E>(
@@ -2323,6 +2396,12 @@ export const mount = <E>(
  * mountDocument(<RootLayout />)
  * ```
  *
+ * @remarks
+ * `renderDocument` is the composable Effect form for document ownership. Use it
+ * when you need to provide custom layers or manage the runtime yourself.
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export const renderDocument = <E>(
@@ -2381,6 +2460,12 @@ export const renderDocument = <E>(
  * mountDocument(<RootLayout />)
  * ```
  *
+ * @remarks
+ * `mountDocument` mirrors `mount` for root layouts that render `<html>`,
+ * `<head>`, and `<body>` into the existing browser document.
+ *
+ * @category Rendering
+ * @public
  * @since 1.0.0
  */
 export const mountDocument = <E>(

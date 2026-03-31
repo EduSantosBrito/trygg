@@ -1,9 +1,13 @@
 /**
- * @since 1.0.0
- * JSX Development Runtime for trygg
+ * Development JSX runtime for trygg.
  *
- * This module is used in development mode and provides additional debugging
- * information for better error messages and stack traces.
+ * @remarks
+ * Owner module for the `jsx-dev-runtime` topic. Tooling targets this entrypoint
+ * in development builds so the compiler can pass source-location metadata.
+ *
+ * @see ./jsx-dev-runtime.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/jsx-dev-runtime
  */
 import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
 
@@ -27,6 +31,17 @@ interface JSXSource {
  * - source: file/line/column info
  * - self: the `this` context (usually undefined)
  *
+ * @remarks
+ * `jsxDEV` mirrors `jsx` but accepts the extra development-only arguments that
+ * modern JSX compilers provide for debugging.
+ *
+ * @example
+ * ```ts
+ * const element = jsxDEV("div", { id: "root" }, undefined, false)
+ * ```
+ *
+ * @category JSX Development
+ * @public
  * @since 1.0.0
  */
 export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
@@ -42,5 +57,20 @@ export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXEl
   return jsx(type, props, key);
 };
 
-// Also export jsxs for dev mode (same as jsxDEV)
+/**
+ * Development JSX helper for static child arrays.
+ *
+ * @remarks
+ * `jsxsDEV` is the development-mode companion used when the compiler lowers JSX
+ * with multiple static children.
+ *
+ * @example
+ * ```ts
+ * const element = jsxsDEV("div", { children: ["a", "b"] }, undefined, true)
+ * ```
+ *
+ * @category JSX Development
+ * @public
+ * @since 1.0.0
+ */
 export const jsxsDEV: typeof jsxDEV = jsxDEV;

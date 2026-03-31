@@ -1,12 +1,18 @@
 /**
- * @since 1.0.0
- * Signal - Effect-native reactive state primitive
+ * Reactive state primitives for trygg.
  *
- * Fine-grained reactivity built on SubscriptionRef.
- * Signals are first-class reactive values that can be:
- * - Passed to JSX for automatic DOM subscriptions
- * - Passed to JSX for fine-grained DOM updates
- * - Composed with derive for computed values
+ * @remarks
+ * Owner module for the `Signal` topic. Use this module when you need local or
+ * module-level reactive state, derived state, suspended views, or keyed list
+ * rendering. The root `trygg` entrypoint publishes this topic as `Signal.*`.
+ *
+ * `Signal` has two read modes:
+ * - pass signals directly to JSX for fine-grained DOM updates
+ * - call `Signal.get` when a component must re-run on changes
+ *
+ * @see ./signal.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/primitives/signal
  */
 import { Cause, Data, Effect, Equal, Exit, Pipeable, Ref, Scope, SubscriptionRef } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -22,7 +28,12 @@ import {
 
 /**
  * Error raised when Signal module is not properly initialized.
+ *
+ * @remarks
+ * Internal guard for impossible `Signal.suspend` states and duplicated module
+ * initialization paths.
  * @since 1.0.0
+ * @internal
  */
 export class SignalInitError extends Data.TaggedError("SignalInitError")<{
   readonly message: string;
@@ -30,7 +41,12 @@ export class SignalInitError extends Data.TaggedError("SignalInitError")<{
 
 /**
  * Callback type for signal change notifications.
- * Effect-based for trace context propagation.
+ *
+ * @remarks
+ * Internal listener contract. Listeners stay Effect-based so trace context and
+ * scoped cleanup propagate through signal updates.
+ *
+ * @since 1.0.0
  * @internal
  */
 export type SignalListener = () => Effect.Effect<void>;
@@ -38,12 +54,24 @@ export type SignalListener = () => Effect.Effect<void>;
 /**
  * A Signal holds reactive state.
  *
+ * @remarks
  * Signals are first-class values that can be:
  * - Read with `Signal.get(signal)`
  * - Written with `Signal.set(signal, value)`
  * - Updated with `Signal.update(signal, fn)`
  * - Passed to JSX for fine-grained DOM updates
  *
+ * `Signal.make` creates component-local or scoped state. `Signal.makeSync`
+ * creates module-lifetime state that can back stable services.
+ *
+ * @example
+ * ```tsx
+ * const count = yield* Signal.make(0)
+ * yield* Signal.update(count, (n) => n + 1)
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export interface Signal<A> {
@@ -57,6 +85,9 @@ export interface Signal<A> {
 
 /**
  * Internal signal storage type - uses any to work around invariance.
+ *
+ * @remarks
+ * Only used to store heterogeneously typed signals during render-phase tracking.
  * @internal
  */
 type AnySignal = Signal<any>;
@@ -73,6 +104,12 @@ declare global {
 /**
  * Render phase context - managed by Renderer during component execution.
  * Tracks signals created during render for identity across re-renders.
+ *
+ * @remarks
+ * Internal renderer bookkeeping for hook-like position tracking and dependency
+ * collection.
+ *
+ * @since 1.0.0
  * @internal
  */
 export interface RenderPhase {
@@ -88,6 +125,11 @@ export interface RenderPhase {
  * Reference to track current render phase.
  * Set by Renderer before executing component effects.
  * Stored on globalThis to survive module duplication.
+ *
+ * @remarks
+ * Internal service reference used to make signal reads and allocations render-phase aware.
+ *
+ * @since 1.0.0
  * @internal
  */
 export const CurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> =
@@ -98,7 +140,15 @@ export const CurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> =
     },
   ));
 
-// Debug: unique ID to detect module duplication
+/**
+ * Debug identifier for the shared render-phase reference.
+ *
+ * @remarks
+ * Internal duplication detector used by debugging tools and diagnostics.
+ *
+ * @since 1.0.0
+ * @internal
+ */
 export const _currentRenderPhaseId =
   (globalThis.__tryggSignalCurrentRenderPhaseId ??= `reference_${Math.random().toString(36).slice(2, 8)}`);
 
@@ -106,6 +156,11 @@ export const _currentRenderPhaseId =
  * Reference to track current component lifetime scope.
  * Set by Renderer before executing component effects.
  * Stored on globalThis to survive module duplication.
+ *
+ * @remarks
+ * Internal scope reference for subscriptions that should live for the whole component instance.
+ *
+ * @since 1.0.0
  * @internal
  */
 export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> =
@@ -120,6 +175,11 @@ export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null>
  * Reference to track current render scope (cleared on re-render).
  * Set by Renderer before executing component effects.
  * Stored on globalThis to survive module duplication.
+ *
+ * @remarks
+ * Internal scope reference for subscriptions tied to the current render pass only.
+ *
+ * @since 1.0.0
  * @internal
  */
 export const CurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> =
@@ -132,6 +192,11 @@ export const CurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> =
 
 /**
  * Create a new RenderPhase for a component.
+ *
+ * @remarks
+ * Internal helper used by the renderer and `Signal.suspend` to start a fresh dependency pass.
+ *
+ * @since 1.0.0
  * @internal
  */
 export const makeRenderPhase = Effect.gen(function* () {
@@ -143,6 +208,11 @@ export const makeRenderPhase = Effect.gen(function* () {
 
 /**
  * Reset render phase for re-render (keeps signals, resets index).
+ *
+ * @remarks
+ * Internal helper that preserves signal identity while clearing per-render access tracking.
+ *
+ * @since 1.0.0
  * @internal
  */
 export const resetRenderPhase = Effect.fn("Signal.resetRenderPhase")(function* (
@@ -158,6 +228,10 @@ export const resetRenderPhase = Effect.fn("Signal.resetRenderPhase")(function* (
  * When called inside a component (during render phase), signals are
  * tracked by position for identity across re-renders (like React hooks).
  *
+ * @remarks
+ * Use `Signal.make` for component-local state. Outside a render phase it creates
+ * a standalone signal in the current Effect scope.
+ *
  * @example
  * ```tsx
  * const Counter = Effect.gen(function* () {
@@ -171,6 +245,8 @@ export const resetRenderPhase = Effect.fn("Signal.resetRenderPhase")(function* (
  * })
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Signal.make")(
@@ -258,8 +334,12 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
  *
  * Rule: stateful services should use `Signal.makeSync` + `Layer.succeed`.
  *
- * Use `Signal.make` inside `Component.gen` for component-local state
- * that is scoped to the component's lifecycle and cleaned up automatically.
+  * Use `Signal.make` inside `Component.gen` for component-local state
+  * that is scoped to the component's lifecycle and cleaned up automatically.
+ *
+ * @remarks
+ * Use this for stable module-lifetime state, not per-render state. It avoids the
+ * layer recreation hazards that come with `Signal.make` inside rebuilding layers.
  *
  * @example
  * ```tsx
@@ -271,6 +351,8 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
  * yield* Signal.set(authSignal, Option.some(newUser))
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const makeSync = <A>(initial: A): Signal<A> => {
@@ -290,6 +372,9 @@ export const makeSync = <A>(initial: A): Signal<A> => {
  * For fine-grained reactivity (no re-render), pass signals directly to JSX
  * children or props instead of reading them.
  *
+ * @remarks
+ * `Signal.get` is the opt-in bridge from fine-grained updates to component re-renders.
+ *
  * @example
  * ```tsx
  * // This subscribes the component - it will re-render when count changes:
@@ -299,6 +384,8 @@ export const makeSync = <A>(initial: A): Signal<A> => {
  * return <span>Count: {count}</span>  // No re-render, just text update!
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal.get")(function* <
@@ -329,6 +416,9 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
  * Signal<Element> vs Signal<primitive>). Do not use in components - use
  * Signal.get instead which properly tracks dependencies.
  *
+ * @remarks
+ * Internal escape hatch for sync code paths that cannot yield Effects.
+ *
  * @internal
  * @since 1.0.0
  */
@@ -338,11 +428,17 @@ export const peekSync = <A>(signal: Signal<A>): A =>
 /**
  * Set the value of a signal and notify listeners.
  *
+ * @remarks
+ * Updates are equality-checked first. Setting the same value is a no-op and does
+ * not trigger listeners or re-renders.
+ *
  * @example
  * ```tsx
  * yield* Signal.set(count, 5)
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effect.fn("Signal.set")(
@@ -377,11 +473,16 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
 /**
  * Update the value of a signal using a function and notify listeners.
  *
+ * @remarks
+ * Prefer this when the next value depends on the current one.
+ *
  * @example
  * ```tsx
  * yield* Signal.update(count, n => n + 1)
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<void> = Effect.fn(
@@ -417,11 +518,16 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
 /**
  * Modify a signal's value and return a result.
  *
+ * @remarks
+ * Use this when one atomic read-modify-write step should also return a derived result.
+ *
  * @example
  * ```tsx
  * const oldValue = yield* Signal.modify(count, n => [n, n + 1])
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const modify = <A, B>(signal: Signal<A>, f: (a: A) => readonly [B, A]): Effect.Effect<B> =>
@@ -429,6 +535,18 @@ export const modify = <A, B>(signal: Signal<A>, f: (a: A) => readonly [B, A]): E
 
 /**
  * Options for Signal.derive
+ *
+ * @remarks
+ * Pass an explicit scope when the derived signal should outlive the current render scope.
+ *
+ * @example
+ * ```tsx
+ * const scope = yield* Scope.make()
+ * const doubled = yield* Signal.derive(count, (n) => n * 2, { scope })
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export interface DeriveOptions {
@@ -442,6 +560,9 @@ export interface DeriveOptions {
  * The derived signal updates eagerly when any source signal changes.
  * Subscriptions are automatically cleaned up when the scope closes.
  *
+ * @remarks
+ * Derived signals let you keep fine-grained updates while moving computation out of JSX.
+ *
  * @example
  * ```tsx
  * // Uses current Effect scope (component lifetime)
@@ -453,6 +574,8 @@ export interface DeriveOptions {
  * // Later: yield* Scope.close(scope, Exit.void)
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export function derive<A, B>(
@@ -524,6 +647,9 @@ export function derive<A, B>(
  * Subscriptions are automatically cleaned up when the scope closes.
  * Each source signal's value is passed as a corresponding argument to the function.
  *
+ * @remarks
+ * Use `deriveAll` when one reactive value depends on multiple upstream signals.
+ *
  * @example
  * ```tsx
  * const count = yield* Signal.make(0)
@@ -536,6 +662,8 @@ export function derive<A, B>(
  * )
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export function deriveAll<A, B>(
@@ -638,6 +766,20 @@ export function deriveAll(
 
 /**
  * Check if a value is a Signal.
+ *
+ * @remarks
+ * Useful at API boundaries that accept either plain values or signals.
+ *
+ * @example
+ * ```ts
+ * const value: unknown = maybeSignal
+ * if (Signal.isSignal(value)) {
+ *   return Signal.peekSync(value)
+ * }
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const isSignal = (value: unknown): value is Signal<unknown> =>
@@ -692,6 +834,19 @@ const notifyListeners: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fn
 /**
  * Subscribe to a signal's changes with an Effect-based callback.
  * Returns an Effect that yields an unsubscribe Effect.
+ *
+ * @remarks
+ * Most component code should prefer direct JSX usage or `Signal.get`. Reach for
+ * `subscribe` when bridging signals into lower-level reactive machinery.
+ *
+ * @example
+ * ```tsx
+ * const unsubscribe = yield* Signal.subscribe(count, () => Effect.log("changed"))
+ * yield* unsubscribe
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const subscribe: <A>(
@@ -732,6 +887,9 @@ export const subscribe: <A>(
 /**
  * Import Element type from element.ts
  * Using import type to avoid circular dependency issues at runtime
+ *
+ * @remarks
+ * Internal alias for the suspend implementation.
  * @internal
  */
 type SuspendElement = import("./element.js").Element;
@@ -783,6 +941,19 @@ type ValidHandler<State extends SuspendState, Handler> = State extends "Pending"
  * Suspended component preserving `Props`, `E`, `R` and exposing the internal
  * signal for tests/debugging.
  *
+ * @remarks
+ * Produced by `Signal.suspend(...).pipe(..., Signal.exhaustive)`. It behaves like
+ * the wrapped component while exposing the rendered signal for advanced tooling.
+ *
+ * @example
+ * ```tsx
+ * const SuspendedProfile = yield* Signal
+ *   .suspend(UserProfile)
+ *   .pipe(Signal.on("Pending", Spinner), Signal.on("Failure", ErrorView), Signal.exhaustive)
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export interface SuspendedComponent<Props = never, E = never, R = never> extends Component.Type<
@@ -800,6 +971,16 @@ export interface SuspendedComponent<Props = never, E = never, R = never> extends
  * component type and documents failures from the wrapped component itself.
  * The `Failure` branch is for the suspend lifecycle fallback UI.
  *
+ * @remarks
+ * Build this matcher with `Signal.suspend`, then register handlers with `Signal.on`.
+ *
+ * @example
+ * ```tsx
+ * const matcher = Signal.suspend(UserProfile)
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export interface SuspendMatcher<Props, E, R, HasPending extends boolean, HasFailure extends boolean>
@@ -892,6 +1073,10 @@ const renderFailure = (
 /**
  * Start building a suspended component.
  *
+ * @remarks
+ * Use this when a component can re-run with async dependencies and should show
+ * pending or failure fallbacks without leaving the signal-based rendering model.
+ *
  * @example
  * ```tsx
  * const SuspendedProfile = yield* Signal
@@ -903,6 +1088,8 @@ const renderFailure = (
  *   )
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const suspend = <Props, E, R>(
@@ -915,6 +1102,16 @@ export const suspend = <Props, E, R>(
  * `Pending` receives `{ stale }`.
  * `Failure` receives `{ cause, stale }`.
  *
+ * @remarks
+ * `Signal.on` keeps suspend fallback wiring pipeable and typed until `Signal.exhaustive`.
+ *
+ * @example
+ * ```tsx
+ * const matcher = Signal.suspend(UserProfile).pipe(Signal.on("Pending", Spinner))
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const on =
@@ -943,6 +1140,18 @@ export const on =
  * The returned component preserves the wrapped component `Props`, `E`, and the
  * accumulated requirements from both the wrapped component and state handlers.
  *
+ * @remarks
+ * This is the step that turns a suspend matcher back into a component.
+ *
+ * @example
+ * ```tsx
+ * const SuspendedProfile = yield* Signal
+ *   .suspend(UserProfile)
+ *   .pipe(Signal.on("Pending", Spinner), Signal.on("Failure", ErrorView), Signal.exhaustive)
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const exhaustive = <Props, E, R>(
@@ -1101,12 +1310,34 @@ export const exhaustive = <Props, E, R>(
 
 /**
  * Key type for list items
+ *
+ * @remarks
+ * Stable keys preserve per-item Effect scopes and nested signal identity across list updates.
+ *
+ * @example
+ * ```ts
+ * const key: Signal.ItemKey = "todo-1"
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export type ItemKey = string | number;
 
 /**
  * Options for Signal.each
+ *
+ * @remarks
+ * The `key` function should return a stable identifier for the logical item, not the current index.
+ *
+ * @example
+ * ```tsx
+ * const options: Signal.EachOptions<Todo> = { key: (todo) => todo.id }
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export interface EachOptions<T> {
@@ -1120,6 +1351,17 @@ export interface EachOptions<T> {
 /**
  * Render function return type for Signal.each.
  * Accepts either a plain Element or an Effect that produces an Element.
+ *
+ * @remarks
+ * This keeps keyed list rendering ergonomic while still allowing scoped Effect work per item.
+ *
+ * @example
+ * ```tsx
+ * const renderTodo = (todo: Todo): Signal.EachRenderResult<never> => <li>{todo.text}</li>
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export type EachRenderResult<E> = Element | Effect.Effect<Element, E, unknown>;
@@ -1151,6 +1393,10 @@ const makeKeyedListElement = <T, E>(
  * Items are identified by a key function - items with the same key maintain
  * their Effect scope across list updates, preserving nested signals.
  *
+ * @remarks
+ * Prefer `Signal.each` over `array.map(...)` when list items own signals, scopes,
+ * or async work that must survive reordering.
+ *
  * @example
  * ```tsx
  * const TodoList = Effect.gen(function* () {
@@ -1174,6 +1420,8 @@ const makeKeyedListElement = <T, E>(
  * })
  * ```
  *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
 export const each: EachFn = (source, renderFn, options) => {

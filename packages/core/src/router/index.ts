@@ -1,9 +1,10 @@
 /**
- * @since 1.0.0
- * Router module for trygg
+ * Public router entrypoint for trygg.
  *
- * Routing with Schema-validated params, middleware composition,
- * and Layer-based rendering strategies.
+ * @remarks
+ * Owner module for the router entry surface. This module owns the `Route` and
+ * `Routes` namespace objects and re-exports the supported navigation, matching,
+ * outlet, link, params, and strategy APIs from the router owner modules.
  *
  * ## Quick Start
  *
@@ -36,9 +37,14 @@
  *   )
  * })
  *
- * mount(document.getElementById("root")!, App)
+ * const root = document.getElementById("root")
+ * if (root !== null) {
+ *   mount(root, App)
+ * }
  * ```
  *
+ * @see ./router.docs.md - Source-owned topic guide
+ * @since 1.0.0
  * @module trygg/router
  */
 
@@ -103,7 +109,7 @@ export type {
 
 // Link
 export { Link } from "./link.js";
-export type { LinkProps } from "./link.js";
+export type { LinkProps, PrefetchStrategy } from "./link.js";
 
 // Matching (RouteMatcher is now a Context.Tag)
 export {
@@ -180,6 +186,11 @@ import { currentRoute as _currentRoute } from "./service.js";
  * `Route.provide(...layers)`, `Route.current`, `Route.redirect(path)`,
  * and `Route.forbidden()`.
  *
+ * @remarks
+ * Use `Route` for the fluent route-definition API. The namespace groups the
+ * builder entrypoints and middleware escape hatches under the import users see
+ * most often in application code.
+ *
  * @example
  * ```tsx
  * import { Route, RenderStrategy } from "trygg/router"
@@ -189,6 +200,8 @@ import { currentRoute as _currentRoute } from "./service.js";
  *   .pipe(Route.provide(RenderStrategy.Eager))
  * ```
  *
+ * @category Routing
+ * @public
  * @since 1.0.0
  */
 export const Route = {
@@ -203,6 +216,10 @@ export const Route = {
 /**
  * Routes namespace - provides `Routes.make()` for route collection.
  *
+ * @remarks
+ * Use `Routes` to build the root manifest consumed by `Outlet`. The namespace
+ * keeps the collection builder distinct from individual `Route` definitions.
+ *
  * @example
  * ```tsx
  * import { Routes } from "trygg/router"
@@ -212,6 +229,8 @@ export const Route = {
  *   .add(Route.make("/users").component(UsersList))
  * ```
  *
+ * @category Routing
+ * @public
  * @since 1.0.0
  */
 export const Routes = {

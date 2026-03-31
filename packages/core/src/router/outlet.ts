@@ -1,11 +1,14 @@
 /**
- * @since 1.0.0
- * Router Outlet
+ * Outlet rendering primitives for `trygg/router`.
  *
- * Renders matched route components from a RoutesManifest.
- * Uses RouteMatcher, BoundaryResolver, OutletRenderer (service interfaces),
- * and AsyncLoader for loading state. Instance-scoped state uses Ref
- * (atomic, Effect-native state management).
+ * @remarks
+ * Owner module for route rendering. This module owns the `Outlet` component,
+ * its props, and the prefetch resolver that ties route matching to lazy module
+ * warming during navigation.
+ *
+ * @see ./outlet.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/router/outlet
  */
 import {
   Array as Arr,
@@ -254,6 +257,18 @@ const resolveComponent = (
 
 /**
  * Outlet props
+ *
+ * @remarks
+ * `OutletProps` lets callers pass an explicit manifest when mounting a root
+ * outlet. Nested outlets normally rely on the implicit manifest FiberRef.
+ *
+ * @example
+ * ```tsx
+ * <Router.Outlet routes={routes.manifest} />
+ * ```
+ *
+ * @category Router Outlet
+ * @public
  * @since 1.0.0
  */
 export interface OutletProps {
@@ -279,6 +294,19 @@ export interface OutletProps {
  * - AsyncLoader for loading state management (Ref-based, scoped fibers)
  * - Layout stacking (root-to-leaf via Array.reduceRight)
  *
+ * @remarks
+ * Use `Outlet` once at the app root with a manifest, then again inside layouts
+ * without props to render nested child matches.
+ *
+ * @example
+ * ```tsx
+ * const App = Component.gen(function* () {
+ *   return <Outlet routes={routes.manifest} />
+ * })
+ * ```
+ *
+ * @category Router Outlet
+ * @public
  * @since 1.0.0
  */
 export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps>) {

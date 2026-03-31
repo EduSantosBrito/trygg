@@ -1,19 +1,14 @@
 /**
+ * Structured debug events, plugins, and tracing helpers.
+ *
+ * @remarks
+ * Owner module for the `Debug` topic. Use this module when the app needs direct
+ * control over debug enablement, event plugins, or trace/span context beyond
+ * the higher-level `DevMode` component.
+ *
+ * @see ./debug.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Debug logging for trygg
- *
- * Uses wide event pattern - one structured log per operation with full context.
- * Enable by adding <DevMode /> component to your app.
- *
- * @example
- * ```tsx
- * import { mount, DevMode } from "trygg"
- *
- * mount(container, <>
- *   {App}
- *   <DevMode />
- * </>)
- * ```
+ * @module trygg/debug/debug
  */
 
 import { Effect, Layer, ServiceMap } from "effect";
@@ -772,7 +767,20 @@ type UnsafeBuildContextEvent = BaseEvent & {
   readonly layer_count: number;
 };
 
-/** All debug events as discriminated union */
+/**
+ * All structured debug events emitted by the framework.
+ *
+ * @remarks
+ * Use this union when consuming debug output in custom plugins or test helpers.
+ *
+ * @example
+ * ```ts
+ * const events: Array<Debug.DebugEvent> = []
+ * ```
+ *
+ * @category Debugging
+ * @public
+ */
 export type DebugEvent =
   // Signal events
   | SignalCreateEvent
@@ -911,13 +919,39 @@ export type DebugEvent =
   | UnsafeMergeLayersEvent
   | UnsafeBuildContextEvent;
 
-/** Extract event type from DebugEvent */
+/**
+ * String union of all debug event names.
+ *
+ * @remarks
+ * Useful for filters, plugin signatures, and helpers that only need the event
+ * discriminator instead of the full payload union.
+ *
+ * @example
+ * ```ts
+ * const eventType: Debug.EventType = "signal.set"
+ * ```
+ *
+ * @category Debugging
+ * @public
+ */
 export type EventType = DebugEvent["event"];
 
 /**
  * Loose input type for log function.
  * Accepts any event with optional fields - the discriminated union above
  * documents the expected shape for each event type.
+ *
+ * @remarks
+ * `log` accepts this looser input and enriches it with timestamp and trace
+ * context before dispatching it to plugins.
+ *
+ * @example
+ * ```ts
+ * const input: Debug.LogInput = { event: "signal.set", signal_id: "sig_1" }
+ * ```
+ *
+ * @category Debugging
+ * @public
  */
 export type LogInput = {
   readonly event: EventType;
@@ -926,7 +960,21 @@ export type LogInput = {
   readonly [key: string]: unknown;
 };
 
-/** Trace context structure */
+/**
+ * Trace metadata attached to debug work.
+ *
+ * @remarks
+ * `traceId`, `spanId`, and `parentSpanId` are threaded through Effect context
+ * so plugins can correlate related events.
+ *
+ * @example
+ * ```ts
+ * const context: Debug.TraceContext = { traceId: "trace_1" }
+ * ```
+ *
+ * @category Debugging
+ * @public
+ */
 export interface TraceContext {
   readonly traceId?: string;
   readonly spanId?: string;
@@ -938,6 +986,18 @@ export interface TraceContext {
 /**
  * Debug plugin interface.
  * Plugins receive structured events and can output them to any destination.
+ *
+ * @remarks
+ * Register plugins through `registerPlugin` or pass them to `DevMode` to fan
+ * out framework events to consoles, collectors, or external telemetry sinks.
+ *
+ * @example
+ * ```ts
+ * const plugin: Debug.DebugPlugin = Debug.createPlugin("capture", () => {})
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export interface DebugPlugin {
@@ -956,6 +1016,18 @@ export interface DebugPlugin {
 /**
  * Create a debug plugin.
  * Helper function for constructing type-safe plugins.
+ *
+ * @remarks
+ * Prefer this over hand-writing objects so plugin construction stays concise and
+ * aligned with the public `DebugPlugin` shape.
+ *
+ * @example
+ * ```ts
+ * const plugin = Debug.createPlugin("capture", (event) => console.log(event.event))
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const createPlugin = (name: string, handle: (event: DebugEvent) => void): DebugPlugin => ({
@@ -971,13 +1043,37 @@ const _plugins: Map<string, DebugPlugin> = new Map();
 
 // --- Signal ID Generation ---
 
-/** Generate unique signal ID for tracking */
+/**
+ * Allocate a fresh internal signal identifier.
+ *
+ * @remarks
+ * Renderer and signal internals use this to attach stable IDs to debug events.
+ *
+ * @internal
+ */
 let signalCounter = 0;
+
+/**
+ * Allocate a fresh internal signal identifier.
+ *
+ * @remarks
+ * Renderer and signal internals use this to attach stable IDs to debug events.
+ *
+ * @internal
+ */
 export const nextSignalId = (): string => `sig_${++signalCounter}`;
 
 /** Store signal IDs on signal objects */
 const signalIds = new WeakMap<object, string>();
 
+/**
+ * Get or assign the internal debug ID for a signal object.
+ *
+ * @remarks
+ * Exported for framework internals that need stable signal identifiers in logs.
+ *
+ * @internal
+ */
 export const getSignalId = (signal: object): string => {
   let id = signalIds.get(signal);
   if (id === undefined) {
@@ -989,12 +1085,44 @@ export const getSignalId = (signal: object): string => {
 
 // --- Trace ID Generation ---
 
-/** Generate unique trace ID for correlating events across a navigation flow */
+/**
+ * Allocate a fresh internal trace identifier.
+ *
+ * @remarks
+ * Router and tracing internals use this when starting a new navigation trace.
+ *
+ * @internal
+ */
 let traceCounter = 0;
+
+/**
+ * Allocate a fresh internal trace identifier.
+ *
+ * @remarks
+ * Router and tracing internals use this when starting a new navigation trace.
+ *
+ * @internal
+ */
 export const nextTraceId = (): string => `trace_${++traceCounter}`;
 
-/** Generate unique span ID for tracking nested operations */
+/**
+ * Allocate a fresh internal span identifier.
+ *
+ * @remarks
+ * Span helpers use this to correlate nested operations inside a trace.
+ *
+ * @internal
+ */
 let spanCounter = 0;
+
+/**
+ * Allocate a fresh internal span identifier.
+ *
+ * @remarks
+ * Span helpers use this to correlate nested operations inside a trace.
+ *
+ * @internal
+ */
 export const nextSpanId = (): string => `span_${++spanCounter}`;
 
 // --- Trace Context References ---
@@ -1008,6 +1136,12 @@ const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.E
 /**
  * Reference for current trace ID.
  * Set by router on navigate, propagated through Effect context.
+ *
+ * @remarks
+ * Exported for low-level integrations that need direct access to the current
+ * trace fiber ref.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentTraceId = ServiceMap.Reference<string | undefined>(
@@ -1020,6 +1154,12 @@ export const CurrentTraceId = ServiceMap.Reference<string | undefined>(
 /**
  * Reference for current span ID.
  * Set by startSpan, propagated through Effect context.
+ *
+ * @remarks
+ * Exported for low-level integrations that need direct access to the current
+ * span fiber ref.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentSpanId = ServiceMap.Reference<string | undefined>("trygg/Debug/CurrentSpanId", {
@@ -1029,6 +1169,12 @@ export const CurrentSpanId = ServiceMap.Reference<string | undefined>("trygg/Deb
 /**
  * Reference for parent span ID.
  * Used for building span hierarchies.
+ *
+ * @remarks
+ * Exported for low-level integrations that need direct access to parent span
+ * context.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentParentSpanId = ServiceMap.Reference<string | undefined>(
@@ -1041,6 +1187,18 @@ export const CurrentParentSpanId = ServiceMap.Reference<string | undefined>(
 /**
  * Get current trace context from references.
  * Effect-based - reads from fiber-local state.
+ *
+ * @remarks
+ * Use this when custom debug helpers or plugins need the same trace metadata the
+ * framework attaches to logged events.
+ *
+ * @example
+ * ```ts
+ * const context = yield* Debug.getTraceContext
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function* () {
@@ -1058,6 +1216,18 @@ export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function*
 /**
  * Set the current trace ID.
  * Called by router on navigate to start a new trace.
+ *
+ * @remarks
+ * Advanced integrations can call this when work should join an existing trace
+ * or begin a new one outside the router.
+ *
+ * @example
+ * ```ts
+ * yield* Debug.setTraceId("trace_1")
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const setTraceId = (traceId: string): Effect.Effect<void> =>
@@ -1065,6 +1235,18 @@ export const setTraceId = (traceId: string): Effect.Effect<void> =>
 
 /**
  * Clear the current trace context.
+ *
+ * @remarks
+ * Use this when a unit of work should stop inheriting previously established
+ * trace or span metadata.
+ *
+ * @example
+ * ```ts
+ * yield* Debug.clearTraceContext
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const clearTraceContext: Effect.Effect<void> = Effect.gen(function* () {
@@ -1079,10 +1261,22 @@ export const clearTraceContext: Effect.Effect<void> = Effect.gen(function* () {
  * Enable debug logging.
  * Called internally by DevMode component.
  *
+ * @remarks
+ * Call this directly when debugging should be enabled without mounting
+ * `DevMode`, for example in tests or non-JSX tooling.
+ *
  * @param filter - Optional filter for event types
  *   - undefined: log all events
  *   - string: log events matching prefix (e.g., "signal" matches "signal.set")
  *   - string[]: log events matching any prefix
+ *
+ * @example
+ * ```ts
+ * Debug.enable(["signal", "trace"])
+ * ```
+ *
+ * @category Debugging
+ * @public
  */
 export const enable = (filter?: string | ReadonlyArray<string>): void => {
   _enabled = true;
@@ -1098,6 +1292,17 @@ export const enable = (filter?: string | ReadonlyArray<string>): void => {
 /**
  * Disable debug logging.
  * Called internally by DevMode component cleanup.
+ *
+ * @remarks
+ * This resets both the enabled flag and the current prefix filter.
+ *
+ * @example
+ * ```ts
+ * Debug.disable()
+ * ```
+ *
+ * @category Debugging
+ * @public
  */
 export const disable = (): void => {
   _enabled = false;
@@ -1106,11 +1311,34 @@ export const disable = (): void => {
 
 /**
  * Check if debug logging is enabled.
+ *
+ * @remarks
+ * Useful for tests and custom tooling that need to assert or branch on current
+ * debug state.
+ *
+ * @example
+ * ```ts
+ * const enabled = Debug.isEnabled()
+ * ```
+ *
+ * @category Debugging
+ * @public
  */
 export const isEnabled = (): boolean => _enabled;
 
 /**
  * Get current filter configuration.
+ *
+ * @remarks
+ * Returns `null` when debug is enabled for all events.
+ *
+ * @example
+ * ```ts
+ * const filter = Debug.getFilter()
+ * ```
+ *
+ * @category Debugging
+ * @public
  */
 export const getFilter = (): ReadonlyArray<string> | null => {
   return _filter !== null ? Array.from(_filter) : null;
@@ -1122,6 +1350,18 @@ export const getFilter = (): ReadonlyArray<string> | null => {
  * Register a debug plugin.
  * Plugins receive all events that pass the current filter.
  * Multiple plugins can be registered; each receives events independently.
+ *
+ * @remarks
+ * Register plugins imperatively when debug output should be wired outside
+ * `DevMode`.
+ *
+ * @example
+ * ```ts
+ * Debug.registerPlugin(Debug.consolePlugin)
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const registerPlugin = (plugin: DebugPlugin): void => {
@@ -1130,6 +1370,17 @@ export const registerPlugin = (plugin: DebugPlugin): void => {
 
 /**
  * Unregister a debug plugin by name.
+ *
+ * @remarks
+ * Use the plugin's `name` field to remove it from the global registry.
+ *
+ * @example
+ * ```ts
+ * Debug.unregisterPlugin("console")
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const unregisterPlugin = (name: string): void => {
@@ -1138,6 +1389,18 @@ export const unregisterPlugin = (name: string): void => {
 
 /**
  * Get all registered plugin names.
+ *
+ * @remarks
+ * Useful in tests and setup code that need to inspect or reset the plugin
+ * registry.
+ *
+ * @example
+ * ```ts
+ * const names = Debug.getPlugins()
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const getPlugins = (): ReadonlyArray<string> => {
@@ -1146,6 +1409,17 @@ export const getPlugins = (): ReadonlyArray<string> => {
 
 /**
  * Check if a plugin is registered.
+ *
+ * @remarks
+ * This is a convenience query over the global plugin registry.
+ *
+ * @example
+ * ```ts
+ * const hasConsole = Debug.hasPlugin("console")
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const hasPlugin = (name: string): boolean => {
@@ -1267,6 +1541,18 @@ const formatEvent = (event: DebugEvent): void => {
  * Console plugin - outputs events with color-coded category badges.
  * Uses %c CSS styling for compact, readable output.
  * This is the default plugin used when no custom plugins are registered.
+ *
+ * @remarks
+ * Include this plugin explicitly when custom plugin lists should still preserve
+ * human-readable console output.
+ *
+ * @example
+ * ```ts
+ * Debug.registerPlugin(Debug.consolePlugin)
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const consolePlugin: DebugPlugin = createPlugin("console", formatEvent);
@@ -1274,6 +1560,17 @@ export const consolePlugin: DebugPlugin = createPlugin("console", formatEvent);
 /**
  * Create a custom plugin that collects events into an array.
  * Useful for testing or building custom event processors.
+ *
+ * @remarks
+ * This is the simplest way to capture debug events for assertions.
+ *
+ * @example
+ * ```ts
+ * const plugin = Debug.createCollectorPlugin("capture", [])
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const createCollectorPlugin = (name: string, events: DebugEvent[]): DebugPlugin =>
@@ -1304,6 +1601,18 @@ const dispatchToPlugins = (fullEvent: DebugEvent): void => {
  * Log a wide event (Effect-based).
  * Reads trace context from references and dispatches to plugins.
  * No-op if debug is disabled or event is filtered out.
+ *
+ * @remarks
+ * Use this for custom instrumentation that should flow through the same plugin
+ * and filtering pipeline as framework-generated events.
+ *
+ * @example
+ * ```ts
+ * yield* Debug.log({ event: "trace.span.start", name: "custom" })
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const log: (event: LogInput) => Effect.Effect<void> = Effect.fnUntraced(function* (
@@ -1326,6 +1635,18 @@ export const log: (event: LogInput) => Effect.Effect<void> = Effect.fnUntraced(f
 /**
  * Start a new span within the current trace.
  * Returns an Effect that yields a function to end the span.
+ *
+ * @remarks
+ * Prefer `withSpan` for most callers. Use `startSpan` directly when span start
+ * and end need to be separated across a larger control flow.
+ *
+ * @example
+ * ```ts
+ * const endSpan = yield* Debug.startSpan("load-user")
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const startSpan: (
@@ -1365,6 +1686,18 @@ export const startSpan: (
 /**
  * Run an effect within a span.
  * Automatically ends the span when the effect completes or fails.
+ *
+ * @remarks
+ * This is the main public helper for attaching span boundaries to existing
+ * Effects.
+ *
+ * @example
+ * ```ts
+ * const result = yield* Debug.withSpan("load-user", userEffect)
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const withSpan = <A, E, R>(
@@ -1418,6 +1751,18 @@ export const withSpan = <A, E, R>(
 /**
  * Measure duration of an effect and log it.
  * No-op if debug is disabled or event is filtered out.
+ *
+ * @remarks
+ * Use this when custom instrumentation should emit the same `duration_ms`
+ * field shape as framework timing events.
+ *
+ * @example
+ * ```ts
+ * const result = yield* Debug.measure({ event: "trace.span.end", name: "custom" }, work)
+ * ```
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const measure = <A, E, R>(
@@ -1446,10 +1791,18 @@ export const measure = <A, E, R>(
  * browser console with color coding by event category.
  *
  * Use this layer explicitly when you want console output:
+ *
+ * @example
  * ```typescript
  * Effect.provide(myEffect, Debug.defaultLayer)
  * ```
  *
+ * @remarks
+ * Provide this layer when console logging should be enabled through Effect layer
+ * wiring instead of imperative plugin registration.
+ *
+ * @category Debugging
+ * @public
  * @since 1.0.0
  */
 export const defaultLayer: Layer.Layer<never> = Layer.effectDiscard(

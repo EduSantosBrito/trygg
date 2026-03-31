@@ -95,67 +95,7 @@ export * as Api from "./api/types.js";
 export * as Resource from "./primitives/resource.js";
 
 // Component API for typed props
-import {
-  Component as ComponentFn,
-  gen as componentGen,
-  isEffectComponent,
-  type ComponentProps,
-  type PropsMarker,
-} from "./primitives/component.js";
-
-/**
- * Component API for creating JSX components with typed props.
- *
- * ## Usage
- *
- * Use `Component.gen` for the recommended syntax:
- *
- * @example
- * ```tsx
- * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
- *   const { title } = yield* Props
- *   const theme = yield* Theme
- *   return <div style={{ color: theme.primary }}>{title}</div>
- * })
- *
- * const App = Component.gen(function* () {
- *   return Effect.gen(function* () {
- *     return <Card title="Hello" />
- *   }).pipe(Component.provide(themeLayer))
- * })
- * ```
- *
- * Service requirements are satisfied by parent effects, not props.
- *
- * @see DESIGN.md Section 5 for detailed documentation
- */
-type ComponentApi = typeof ComponentFn & {
-  readonly gen: typeof componentGen;
-};
-
-export const Component: ComponentApi = Object.assign(ComponentFn, {
-  gen: componentGen,
-});
-
-export declare namespace Component {
-  /**
-   * Component type - tracks Props, Error, and Requirements.
-   *
-   * @example
-   * ```typescript
-   * const Card: Component.Type<{ title: string }, never, Theme>
-   * const Pure: Component.Type<never, never, never>
-   * ```
-   *
-   * @since 1.0.0
-   */
-  export interface Type<Props = never, _E = never, _R = never> {
-    readonly _tag: "EffectComponent";
-    (props: [Props] extends [never] ? {} : Props): import("./primitives/element.js").Element;
-  }
-}
-
-export { isEffectComponent, type ComponentProps, type PropsMarker };
+export { Component, isEffectComponent, type ComponentProps, type PropsMarker } from "./primitives/component.js";
 
 // Components
 export { DevMode, type DevModeProps } from "./components/dev-mode.js";

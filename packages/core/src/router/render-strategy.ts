@@ -1,6 +1,10 @@
 /**
- * @since 1.0.0
- * Render Strategy
+ * Render strategy primitives for `trygg/router`.
+ *
+ * @remarks
+ * Owner module for route render strategies. This module owns the strategy union,
+ * the load error type, and the service tag whose layers configure eager versus
+ * lazy route loading.
  *
  * Controls how route components are loaded. Provided as a Layer via
  * `Route.provide(RenderStrategy.Eager)`. The Vite plugin reads the
@@ -19,6 +23,8 @@
  * // Eager - stays as direct import, bundled in main chunk
  * Route.make("/").component(HomePage).pipe(Route.provide(RenderStrategy.Eager))
  * ```
+ * @since 1.0.0
+ * @module trygg/router/render-strategy
  */
 import { Data, Layer } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -30,6 +36,18 @@ import * as ServiceMap from "effect/ServiceMap";
 /**
  * Eager — component stays in main bundle. No code splitting.
  * Vite plugin skips the dynamic import transform for Eager routes.
+ *
+ * @remarks
+ * Use `Eager` when a route should stay in the current bundle rather than load
+ * through a lazy module boundary.
+ *
+ * @example
+ * ```ts
+ * type Strategy = Eager
+ * ```
+ *
+ * @category Render Strategies
+ * @public
  * @since 1.0.0
  */
 export interface Eager {
@@ -39,6 +57,18 @@ export interface Eager {
 /**
  * Lazy — component is code-split via dynamic import. Default strategy.
  * Vite plugin transforms `.component(X)` → `.component(() => import("./X"))`.
+ *
+ * @remarks
+ * `Lazy` is the default route-loading mode and lets the Vite transform turn
+ * direct component references into loader functions.
+ *
+ * @example
+ * ```ts
+ * type Strategy = Lazy
+ * ```
+ *
+ * @category Render Strategies
+ * @public
  * @since 1.0.0
  */
 export interface Lazy {
@@ -53,6 +83,18 @@ export interface Lazy {
 /**
  * Union of all render strategies.
  * Extend this union when adding new strategies.
+ *
+ * @remarks
+ * `RenderStrategyType` is the pure-data union read by the router when a route's
+ * render strategy layer has been resolved.
+ *
+ * @example
+ * ```ts
+ * const strategy: RenderStrategyType = { _tag: "Lazy" }
+ * ```
+ *
+ * @category Render Strategies
+ * @public
  * @since 1.0.0
  */
 export type RenderStrategyType = Eager | Lazy;
@@ -63,6 +105,18 @@ export type RenderStrategyType = Eager | Lazy;
 
 /**
  * Error when a render strategy load fails.
+ *
+ * @remarks
+ * `RenderLoadError` wraps failures that happen while resolving a lazy route
+ * component.
+ *
+ * @example
+ * ```ts
+ * const error = new RenderLoadError({ cause: "network" })
+ * ```
+ *
+ * @category Render Strategies
+ * @public
  * @since 1.0.0
  */
 export class RenderLoadError extends Data.TaggedError("RenderLoadError")<{
@@ -91,6 +145,17 @@ const lazy: Lazy = { _tag: "Lazy" };
  *   - Eager/Lazy → loader function vs direct reference (no Context read needed)
  *   - Future: Server/Island → outlet reads strategy from services for dispatch
  *
+ * @remarks
+ * Apply `RenderStrategy` with `Route.provide(...)` when a specific route should
+ * opt into eager loading or preserve the default lazy behavior explicitly.
+ *
+ * @example
+ * ```tsx
+ * Route.make("/").component(HomePage).pipe(Route.provide(RenderStrategy.Eager))
+ * ```
+ *
+ * @category Render Strategies
+ * @public
  * @since 1.0.0
  */
 export class RenderStrategy extends ServiceMap.Service<RenderStrategy, RenderStrategyType>()(

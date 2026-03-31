@@ -1,9 +1,11 @@
 /**
- * @since 1.0.0
- * Route Builder
+ * Route builder primitives for `trygg/router`.
  *
- * Pipeable data structure for defining routes with type-safe path params,
- * middleware composition, and boundary components.
+ * @remarks
+ * Owner module for route-definition mechanics. This module owns the immutable
+ * route builders behind `Route.make`, route-scoped layer application, schema
+ * decode helpers used at match time, and the typed redirect/forbidden failures
+ * used by router middleware.
  *
  * @example
  * ```tsx
@@ -13,6 +15,9 @@
  *   .component(UserProfile)
  *   .loading(UserSkeleton)
  * ```
+ * @see ./route.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/router/route
  */
 import { Cause, Data, Effect, Option, Pipeable, Schema } from "effect";
 import type * as LayerTypes from "effect/Layer";
@@ -34,6 +39,10 @@ import {
 /**
  * Extract param names from a path pattern as a union type.
  *
+ * @remarks
+ * `ExtractParams` keeps route builder schemas aligned with the path pattern
+ * supplied to `Route.make(...)`.
+ *
  * Handles `:param`, `:param*` (zero-or-more), `:param+` (one-or-more).
  *
  * @example
@@ -44,6 +53,8 @@ import {
  * type P4 = ExtractParams<"/about"> // never
  * ```
  *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export type ExtractParams<Path extends string> =
@@ -73,6 +84,12 @@ export type IndexMarker = typeof IndexMarker;
 
 /**
  * Internal route definition produced by the builder.
+ *
+ * @remarks
+ * `RouteDefinition` is the normalized route data consumed by matching and
+ * outlet rendering after fluent builder calls finish.
+ *
+ * @internal
  * @since 1.0.0
  */
 export interface RouteDefinition {
@@ -108,6 +125,11 @@ export type False = { readonly _: unique symbol };
 /**
  * Route builder - accumulates configuration for a route.
  *
+ * @remarks
+ * `RouteBuilder` is the fluent type returned from `Route.make` and
+ * `Route.index`. Its type parameters encode builder-state invariants such as
+ * params coverage, middleware requirements, and component-versus-children.
+ *
  * Type parameters:
  * - `Path` - the path pattern string
  * - `R` - accumulated service requirements from middleware
@@ -115,6 +137,15 @@ export type False = { readonly _: unique symbol };
  * - `HasChildren` - whether `.children()` has been called
  * - `NeedsCoverage` - whether this route tree needs an error boundary
  *
+ * @example
+ * ```tsx
+ * const route = Route.make("/users/:id")
+ *   .params(Schema.Struct({ id: Schema.NumberFromString }))
+ *   .component(UserProfile)
+ * ```
+ *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export interface RouteBuilder<
@@ -284,6 +315,12 @@ export interface RouteBuilder<
 
 /**
  * Any RouteBuilder, used for children parameter to avoid variance issues.
+ *
+ * @remarks
+ * `AnyRouteBuilder` is the widened builder shape used internally by tuple-based
+ * child-route typing helpers.
+ *
+ * @internal
  * @since 1.0.0
  */
 export interface AnyRouteBuilder {
@@ -489,6 +526,10 @@ const emptyDefinition = (path: string | IndexMarker): RouteDefinition => ({
 /**
  * Create a route with a path pattern.
  *
+ * @remarks
+ * Start with `make` when the route should match a concrete path pattern and
+ * then add params, middleware, boundaries, strategies, or children.
+ *
  * Path patterns support:
  * - Static segments: `/about`
  * - Dynamic params: `/users/:id`
@@ -501,6 +542,8 @@ const emptyDefinition = (path: string | IndexMarker): RouteDefinition => ({
  *   .component(UserProfile)
  * ```
  *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export const make = <Path extends string>(path: Path): RouteBuilder<Path, never, false, false> =>
@@ -508,6 +551,10 @@ export const make = <Path extends string>(path: Path): RouteBuilder<Path, never,
 
 /**
  * Create an index route (matches parent path exactly).
+ *
+ * @remarks
+ * Use `index` inside `.children(...)` when a parent layout needs a default leaf
+ * route at the parent's exact path.
  *
  * @example
  * ```tsx
@@ -519,6 +566,8 @@ export const make = <Path extends string>(path: Path): RouteBuilder<Path, never,
  *   )
  * ```
  *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export const index = (component: ComponentInput): RouteBuilder<"__index__", never, true, false> =>
@@ -529,6 +578,12 @@ export const index = (component: ComponentInput): RouteBuilder<"__index__", neve
 
 /**
  * Check if a value is a RouteBuilder.
+ *
+ * @remarks
+ * Advanced helper for tests or tooling that need to detect builder values
+ * structurally before reading `.definition`.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const isRouteBuilder = (
@@ -580,6 +635,20 @@ type LayerContext<L> = L extends LayerTypes.Layer<infer _A, infer _E, infer R> ?
  *   .pipe(Route.provide(AuthLive, ScrollStrategy.None))
  * ```
  *
+ * @remarks
+ * `provide` attaches route-local layers without breaking the fluent builder
+ * flow. Strategy layers go to dedicated fields while other layers stay on the
+ * definition for middleware requirements.
+ *
+ * @example
+ * ```tsx
+ * Route.make("/settings")
+ *   .component(SettingsPage)
+ *   .pipe(Route.provide(AuthLive, ScrollStrategy.None))
+ * ```
+ *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export function provide<ROut, E2 = never, RIn = never>(
@@ -597,6 +666,13 @@ export function provide<ROut, E2 = never, RIn = never>(
 
 /**
  * Apply multiple Layers to a route.
+ *
+ * @remarks
+ * Use this overload when a route needs more than one layer and you want the
+ * builder to carry the combined requirements.
+ *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export function provide<
@@ -718,6 +794,12 @@ export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
 /**
  * FiberRef holding the decoded query params for the current route.
  * Set by the Outlet at match time after decoding via the route's query schema.
+ *
+ * @remarks
+ * Router internals write decoded query objects here so `Router.query(...)` can
+ * read them without threading values through component props.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentRouteQuery = ServiceMap.Reference<Record<string, unknown>>(
@@ -774,6 +856,10 @@ export class RouterForbiddenError extends Data.TaggedError("RouterForbidden")<{}
  * Redirect to another path. Used in middleware to abort and navigate.
  * Fails the middleware Effect with a typed `RouterRedirect` error.
  *
+ * @remarks
+ * Use this inside route middleware when a guard should stop rendering and hand
+ * control back to the router for a redirect.
+ *
  * @example
  * ```tsx
  * const requireAuth = Effect.gen(function* () {
@@ -784,6 +870,8 @@ export class RouterForbiddenError extends Data.TaggedError("RouterForbidden")<{}
  * })
  * ```
  *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export const routeRedirect = (
@@ -796,6 +884,10 @@ export const routeRedirect = (
  * Forbid access. Used in middleware to render the forbidden boundary.
  * Fails the middleware Effect with a typed `RouterForbidden` error.
  *
+ * @remarks
+ * Use this inside route middleware when a guard should stop rendering and ask
+ * the outlet to resolve the nearest forbidden boundary.
+ *
  * @example
  * ```tsx
  * const requireAdmin = Effect.gen(function* () {
@@ -806,6 +898,8 @@ export const routeRedirect = (
  * })
  * ```
  *
+ * @category Route Builders
+ * @public
  * @since 1.0.0
  */
 export const routeForbidden = (): Effect.Effect<never, RouterForbiddenError> =>
@@ -817,6 +911,12 @@ export const routeForbidden = (): Effect.Effect<never, RouterForbiddenError> =>
 
 /**
  * Result of running a middleware chain.
+ *
+ * @remarks
+ * Internal router shape used to carry middleware outcomes into matching and
+ * outlet rendering.
+ *
+ * @internal
  * @since 1.0.0
  */
 export type MiddlewareResult =

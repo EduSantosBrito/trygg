@@ -1,9 +1,14 @@
 /**
- * @since 1.0.0
- * JSX Runtime for trygg
+ * Automatic JSX runtime for trygg.
  *
- * This module provides the JSX transformation functions used by TypeScript/Babel
- * when compiling JSX syntax. It implements the "automatic" JSX runtime.
+ * @remarks
+ * Owner module for the `jsx-runtime` topic. TypeScript and Babel target this
+ * entrypoint when `jsxImportSource` points at `trygg` and the automatic runtime
+ * is enabled.
+ *
+ * @see ./jsx-runtime.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/jsx-runtime
  */
 import { Effect } from "effect";
 import {
@@ -22,6 +27,18 @@ import { unsafeAsElementFor, unsafeAsElementProps } from "./internal/unsafe.js";
 
 /**
  * Props passed to JSX elements
+ *
+ * @remarks
+ * `JSXProps` extends intrinsic element props with the optional `key` field that
+ * the runtime consumes during JSX lowering.
+ *
+ * @example
+ * ```ts
+ * const props: JSXProps = { key: "row-1", id: "row" }
+ * ```
+ *
+ * @category JSX Runtime
+ * @public
  * @since 1.0.0
  */
 export interface JSXProps extends ElementProps {
@@ -30,6 +47,18 @@ export interface JSXProps extends ElementProps {
 
 /**
  * Valid JSX element type - either an intrinsic string or a Component.Type
+ *
+ * @remarks
+ * This type describes the `type` argument TypeScript passes into `jsx` and
+ * `jsxs` after lowering JSX syntax.
+ *
+ * @example
+ * ```ts
+ * const type: JSXElementType = "div"
+ * ```
+ *
+ * @category JSX Runtime
+ * @public
  * @since 1.0.0
  */
 export type JSXElementType<Props = Record<string, unknown>, E = never, R = unknown> =
@@ -66,6 +95,17 @@ const isElementKey = (value: unknown): value is ElementKey =>
  * Invalid component types (plain functions or direct Effects) fail with
  * InvalidComponentError via Effect.fail when rendered.
  *
+ * @remarks
+ * `jsx` is the single-child lowering target for the automatic JSX runtime. Most
+ * users do not call it directly; the compiler emits calls during transpilation.
+ *
+ * @example
+ * ```ts
+ * const element = jsx("div", { id: "root" })
+ * ```
+ *
+ * @category JSX Runtime
+ * @public
  * @since 1.0.0
  */
 export const jsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
@@ -139,6 +179,17 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
  * This is called by the TypeScript compiler for JSX expressions with
  * multiple static children.
  *
+ * @remarks
+ * `jsxs` is the multiple-children companion to `jsx`. The compiler chooses it
+ * when a JSX expression has a static array of children.
+ *
+ * @example
+ * ```ts
+ * const element = jsxs("div", { children: ["a", "b"] })
+ * ```
+ *
+ * @category JSX Runtime
+ * @public
  * @since 1.0.0
  */
 export const jsxs: typeof jsx = jsx;
@@ -148,6 +199,16 @@ export const jsxs: typeof jsx = jsx;
  *
  * Used for grouping elements without adding extra DOM nodes.
  *
+ * @remarks
+ * `Fragment` groups children without introducing an extra DOM node.
+ *
+ * @example
+ * ```tsx
+ * const view = <Fragment><span>A</span><span>B</span></Fragment>
+ * ```
+ *
+ * @category JSX Runtime
+ * @public
  * @since 1.0.0
  */
 export const Fragment = Component.gen(function* (Props: ComponentProps<{ children?: unknown }>) {

@@ -1,9 +1,14 @@
 /**
- * @since 1.0.0
- * Testing utilities for trygg
+ * Testing utilities for the `trygg/testing` entrypoint.
  *
- * Provides helpers for rendering and querying components in tests.
- * Works with @effect/vitest for Effect-based testing.
+ * @remarks
+ * Owner module for the browser-facing test helpers used in `@effect/vitest`
+ * suites. These exports keep tests at the public DOM/query layer instead of
+ * reaching into renderer internals.
+ *
+ * @see ./testing.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/testing
  */
 import { Data, Duration, Effect, Layer, Option, Schedule, Scope } from "effect";
 import { unsafeEraseR } from "../internal/unsafe.js";
@@ -11,7 +16,20 @@ import { Element, isElement } from "../primitives/element.js";
 import { browserLayer, Renderer } from "../primitives/renderer.js";
 
 /**
- * Result of rendering an element for testing
+ * Query helpers returned by `render` and `renderElement`.
+ *
+ * @remarks
+ * `TestRenderResult` keeps assertions focused on rendered DOM behavior while
+ * still exposing the root container when lower-level inspection is needed.
+ *
+ * @example
+ * ```tsx
+ * const result = yield* render(<button>Save</button>)
+ * const button = yield* result.getByText("Save")
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export interface TestRenderResult {
@@ -73,7 +91,20 @@ export interface TestRenderResult {
 }
 
 /**
- * Error thrown when a query fails to find an element
+ * Error raised when a required query finds no matching element.
+ *
+ * @remarks
+ * `ElementNotFoundError` is the failure channel for the `getBy*` helpers so
+ * tests can pattern-match on a missing DOM node instead of parsing strings.
+ *
+ * @example
+ * ```tsx
+ * const result = yield* render(<div>Hello</div>)
+ * const exit = yield* Effect.exit(result.getByText("Missing"))
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export class ElementNotFoundError extends Data.TaggedError("ElementNotFoundError")<{
@@ -231,10 +262,11 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
 };
 
 /**
- * Render an Element for testing
+ * Render a raw `Element` into a disposable test container.
  *
- * Creates a container, renders the element into it, and returns query helpers.
- * The container is automatically cleaned up when the scope closes.
+ * @remarks
+ * Use `renderElement` when a test already has an `Element` and wants explicit
+ * control over when the renderer layer is provided.
  *
  * @example
  * ```tsx
@@ -253,6 +285,8 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
  * })
  * ```
  *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 const renderElementImpl = Effect.fn("renderElement")(function* (element: Element) {
@@ -279,13 +313,34 @@ const renderElementImpl = Effect.fn("renderElement")(function* (element: Element
   } satisfies TestRenderResult;
 });
 
+/**
+ * Render a raw `Element` into a disposable test container.
+ *
+ * @remarks
+ * Use `renderElement` when a test already has an `Element` and wants explicit
+ * control over when the renderer layer is provided.
+ *
+ * @example
+ * ```tsx
+ * const result = yield* renderElement(<div>Hello</div>).pipe(Effect.provide(testLayer))
+ * const element = yield* result.getByText("Hello")
+ * ```
+ *
+ * @category Testing
+ * @public
+ * @since 1.0.0
+ */
 export const renderElement: (
   element: Element,
 ) => Effect.Effect<TestRenderResult, unknown, Scope.Scope> = (element) =>
   unsafeEraseR(renderElementImpl(element));
 
 /**
- * Test layer that provides the browser renderer
+ * Test layer that provides the browser renderer.
+ *
+ * @remarks
+ * `testLayer` is the minimal layer needed by `renderElement`. The higher-level
+ * `render` helper provides it for you automatically.
  *
  * @example
  * ```tsx
@@ -298,12 +353,27 @@ export const renderElement: (
  * )
  * ```
  *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export const testLayer: Layer.Layer<Renderer> = browserLayer;
 
 /**
- * Simulate a click event on an element
+ * Simulate a click event on an element.
+ *
+ * @remarks
+ * `click` dispatches through the browser DOM so component event handlers run in
+ * the same shape they would under a real user interaction.
+ *
+ * @example
+ * ```tsx
+ * const result = yield* render(<button>Save</button>)
+ * yield* click(yield* result.getByText("Save"))
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export const click = (element: HTMLElement): Effect.Effect<void> =>
@@ -312,7 +382,21 @@ export const click = (element: HTMLElement): Effect.Effect<void> =>
   });
 
 /**
- * Simulate typing into an input element
+ * Simulate typing into an input or textarea.
+ *
+ * @remarks
+ * `type` updates the element value and dispatches the matching `input` and
+ * `change` events so controlled components observe the same sequence as in the
+ * browser.
+ *
+ * @example
+ * ```tsx
+ * const result = yield* render(<input data-testid="name" />)
+ * yield* type(yield* result.getByTestId("name"), "Ada")
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export const type = (
@@ -326,7 +410,21 @@ export const type = (
   });
 
 /**
- * Error thrown when waitFor times out
+ * Error raised when `waitFor` exhausts its retry budget.
+ *
+ * @remarks
+ * The error keeps the original timeout and last thrown failure so test output
+ * still explains what never became true.
+ *
+ * @example
+ * ```ts
+ * const exit = yield* Effect.exit(waitFor(() => {
+ *   throw new Error("still loading")
+ * }, { timeout: 50, interval: 10 }))
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")<{
@@ -343,8 +441,9 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
 /**
  * Wait for a condition to become true.
  *
- * Uses Effect primitives (Schedule) so it works with TestClock.
- * Must fork the waitFor call, then advance time, then join.
+ * @remarks
+ * `waitFor` uses Effect schedules instead of real timers, so it works with
+ * `TestClock` and other deterministic test runtimes.
  *
  * @example
  * ```ts
@@ -354,6 +453,8 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
  * const result = yield* Fiber.join(fiber)
  * ```
  *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export const waitFor = <T>(
@@ -406,17 +507,30 @@ export const waitFor = <T>(
 };
 
 /**
- * Input type for render - can be an Element or an Effect that produces an Element
+ * Input accepted by `render`.
+ *
+ * @remarks
+ * `RenderInput` keeps the convenience helper flexible: callers can pass a ready
+ * `Element` or a component Effect that resolves to one.
+ *
+ * @example
+ * ```ts
+ * const input: RenderInput = Effect.succeed(<div>Hello</div>)
+ * ```
+ *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export type RenderInput = Element | Effect.Effect<Element, unknown, never>;
 
 /**
- * Convenience function to render and provide the test layer
+ * Convenience renderer for tests.
  *
- * Accepts either a static Element or an Effect that produces an Element (component).
- * Effects are wrapped in a Component element to enable reactive re-rendering.
- * The Scope is provided by `it.scoped` from @effect/vitest.
+ * @remarks
+ * `render` is the default testing entrypoint. It accepts either a static
+ * element or a component Effect, provides `testLayer`, and reuses the scope
+ * already managed by `it.scoped`.
  *
  * @example
  * ```tsx
@@ -439,6 +553,8 @@ export type RenderInput = Element | Effect.Effect<Element, unknown, never>;
  * )
  * ```
  *
+ * @category Testing
+ * @public
  * @since 1.0.0
  */
 export const render = (
