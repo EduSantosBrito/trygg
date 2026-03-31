@@ -80,6 +80,12 @@ const features = [
     description: "Link prefetch strategies — intent, viewport, render, disabled",
     concepts: ["Router.Link", "prefetch", "data-trygg-prefetch", "IntersectionObserver"],
   },
+  {
+    title: "Identity",
+    path: "/identity",
+    description: "Manual probe for link DOM retention and routed child state preservation",
+    concepts: ["Router.Link", "Router.Outlet", "Stable identity", "Context updates"],
+  },
 ];
 
 const HomePage = Component.gen(function* () {

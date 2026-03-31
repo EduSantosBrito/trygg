@@ -1,7 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import * as ts from "typescript";
 
 type DocsViolationCode =
@@ -72,6 +72,7 @@ interface ExportDeclarationDoc {
 }
 
 interface OwnerCheck {
+  readonly owner: DocsOwner;
   readonly reachableExports: ReadonlyArray<string>;
   readonly violations: ReadonlyArray<DocsViolation>;
 }
@@ -110,8 +111,10 @@ type DocsContractError = DocsContractConfigError | DocsContractFileError;
 
 export const checkDocsContract = ({
   packageRoot,
+  touchedFiles = [],
 }: {
   readonly packageRoot: string;
+  readonly touchedFiles?: ReadonlyArray<string>;
 }): Effect.Effect<DocsReport, DocsContractError> =>
   Effect.gen(function* () {
     const config = yield* loadDocsConfig(packageRoot);
@@ -121,11 +124,33 @@ export const checkDocsContract = ({
       (owner) => checkOwner({ config, owner, packageExports, packageRoot }),
       { concurrency: 1 },
     );
+    const normalizedTouchedFiles = normalizeTouchedFiles(packageRoot, touchedFiles);
+    const checkAllOwners =
+      normalizedTouchedFiles.size === 0 ||
+      normalizedTouchedFiles.has("docs.contract.json") ||
+      normalizedTouchedFiles.has("package.json");
+    const touchedOwners = checkAllOwners
+      ? new Set(config.migratedOwners.map((owner) => owner.module))
+      : new Set(
+          (yield* Effect.forEach(
+            config.migratedOwners,
+            (owner) =>
+              isOwnerTouched({
+                normalizedTouchedFiles,
+                owner,
+                packageExports,
+                packageRoot,
+              }).pipe(Effect.map((touched) => (touched ? owner.module : null))),
+            { concurrency: 1 },
+          )).filter((ownerModule): ownerModule is string => ownerModule !== null),
+        );
 
     const reachableExports = [
       ...unique(ownerChecks.flatMap((check) => [...check.reachableExports])),
     ].sort();
-    const violations = ownerChecks.flatMap((check) => [...check.violations]);
+    const violations = ownerChecks.flatMap((check) =>
+      touchedOwners.has(check.owner.module) ? [...check.violations] : [],
+    );
     const ok = violations.length === 0;
     const payload = {
       ok,
@@ -387,9 +412,33 @@ const checkOwner = ({
     }
 
     return {
+      owner,
       reachableExports,
       violations,
     };
+  });
+
+const isOwnerTouched = ({
+  normalizedTouchedFiles,
+  owner,
+  packageExports,
+  packageRoot,
+}: {
+  readonly normalizedTouchedFiles: ReadonlySet<string>;
+  readonly owner: DocsOwner;
+  readonly packageExports: PackageExports;
+  readonly packageRoot: string;
+}): Effect.Effect<boolean, DocsContractError> =>
+  Effect.gen(function* () {
+    const entrypointFile = yield* resolveEntrypointSourceFile(
+      packageRoot,
+      packageExports,
+      owner.entrypoint,
+    );
+
+    return [owner.module, owner.sidecar, normalizeTouchedFile(packageRoot, entrypointFile)].some(
+      (filePath) => normalizedTouchedFiles.has(filePath),
+    );
   });
 
 const loadDocsConfig = (packageRoot: string): Effect.Effect<DocsConfig, DocsContractError> =>
@@ -918,6 +967,26 @@ const resolveModuleFile = (fromFile: string, moduleSpecifier: string): string | 
 const stripJsExtension = (moduleSpecifier: string): string => moduleSpecifier.replace(/\.js$/, "");
 
 const stripLeadingDotSlash = (path: string): string => path.replace(/^\.\//, "");
+
+const normalizeTouchedFiles = (
+  packageRoot: string,
+  touchedFiles: ReadonlyArray<string>,
+): ReadonlySet<string> =>
+  new Set(touchedFiles.map((filePath) => normalizeTouchedFile(packageRoot, filePath)));
+
+const normalizeTouchedFile = (packageRoot: string, filePath: string): string => {
+  if (filePath.startsWith(packageRoot)) {
+    return normalizeRelativePath(relative(packageRoot, filePath));
+  }
+
+  const normalized = normalizeRelativePath(filePath);
+  return normalized.startsWith("packages/core/")
+    ? normalized.slice("packages/core/".length)
+    : normalized;
+};
+
+const normalizeRelativePath = (filePath: string): string =>
+  stripLeadingDotSlash(filePath).replaceAll("\\", "/");
 
 const formatHuman = ({
   ok,

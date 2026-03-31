@@ -181,6 +181,14 @@ const normalizeContext = (
   context: ServiceMap.ServiceMap<unknown> | null,
 ): ServiceMap.ServiceMap<unknown> => context ?? emptyContext;
 
+const equalOrChanged = (left: unknown, right: unknown): boolean => {
+  try {
+    return Equal.equals(left, right);
+  } catch {
+    return false;
+  }
+};
+
 const resolveReconcileTarget = (
   element: Element,
   context: ServiceMap.ServiceMap<unknown> | null,
@@ -559,9 +567,24 @@ const renderElement = (
       Effect.sync(() => {
         const node = document.createTextNode(content);
         parent.appendChild(node);
+        let currentContent = content;
         return {
           node,
           cleanup: Effect.sync(() => node.remove()),
+          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+            Effect.sync(() => {
+              const resolved = resolveReconcileTarget(nextElement, nextContext);
+              if (resolved.element._tag !== "Text") {
+                return false;
+              }
+
+              if (resolved.element.content !== currentContent) {
+                currentContent = resolved.element.content;
+                node.textContent = currentContent;
+              }
+
+              return true;
+            }),
         };
       }),
     ),
@@ -572,6 +595,7 @@ const renderElement = (
         const initialValue = yield* Signal.get(signal);
         const node = document.createTextNode(String(initialValue));
         parent.appendChild(node);
+        let currentSignal = signal;
 
         yield* Debug.log({
           event: "render.signaltext.initial",
@@ -599,6 +623,15 @@ const renderElement = (
             yield* unsubscribe;
             node.remove();
           }),
+          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+            Effect.sync(() => {
+              const resolved = resolveReconcileTarget(nextElement, nextContext);
+              if (resolved.element._tag !== "SignalText") {
+                return false;
+              }
+
+              return resolved.element.signal === currentSignal;
+            }),
         };
       }),
     ),
@@ -752,13 +785,31 @@ const renderElement = (
     ),
 
     Match.tag("Provide", ({ context: providedContext, child }) =>
-      renderElement(
-        child,
-        parent,
-        runtime,
-        context !== null ? ServiceMap.merge(context, providedContext) : providedContext,
-        options,
-      ),
+      Effect.gen(function* () {
+        const mergedContext =
+          context !== null ? ServiceMap.merge(context, providedContext) : providedContext;
+        const childResult = yield* renderElement(child, parent, runtime, mergedContext, options);
+
+        return {
+          get node() {
+            return childResult.node;
+          },
+          cleanup: childResult.cleanup,
+          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+            Effect.gen(function* () {
+              if (nextElement._tag !== "Provide" || childResult.reconcile === undefined) {
+                return false;
+              }
+
+              const nextMergedContext =
+                nextContext !== null
+                  ? ServiceMap.merge(nextContext, nextElement.context)
+                  : nextElement.context;
+
+              return yield* childResult.reconcile(nextElement.child, nextMergedContext);
+            }),
+        } satisfies RenderResult;
+      }),
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children, key }) =>
@@ -946,7 +997,7 @@ const renderElement = (
                   ? omitKey(resolvedNextElement.props, "mode")
                   : resolvedNextElement.props;
 
-              if (!Equal.equals(currentProps, nextProps)) {
+              if (!equalOrChanged(currentProps, nextProps)) {
                 for (const cleanup of propCleanups) {
                   yield* cleanup;
                 }
@@ -1097,13 +1148,15 @@ const renderElement = (
           yield* closeCurrentRenderScope;
         });
 
-        const closeCurrentRenderScope: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
-          if (currentRenderScope !== null) {
-            const scope = currentRenderScope;
-            currentRenderScope = null;
-            yield* Scope.close(scope, Exit.void);
-          }
-        });
+        const closeCurrentRenderScope: Effect.Effect<void, unknown, unknown> = Effect.gen(
+          function* () {
+            if (currentRenderScope !== null) {
+              const scope = currentRenderScope;
+              currentRenderScope = null;
+              yield* Scope.close(scope, Exit.void);
+            }
+          },
+        );
 
         const runComponentEffect: () => Effect.Effect<
           { element: Element; scope: Scope.Closeable },
@@ -1145,7 +1198,7 @@ const renderElement = (
             runtime,
             currentContext,
             options,
-          );
+          ).pipe(Effect.provideService(Signal.CurrentRenderPhase, null));
 
           // Move rendered content before the anchor.
           // Anchor parent can change while render is in-flight (e.g. fragment reparent).
@@ -1388,14 +1441,14 @@ const renderElement = (
                 identity !== undefined
                   ? resolvedNextElement.identity === identity
                   : resolvedNextElement.identity === identity &&
-                      resolvedNextElement.run === currentRun;
+                    resolvedNextElement.run === currentRun;
 
               if (!sameIdentity) {
                 return false;
               }
 
-              const inputsChanged = !Equal.equals(currentInputs, resolvedNextElement.inputs);
-              const contextChanged = !Equal.equals(
+              const inputsChanged = !equalOrChanged(currentInputs, resolvedNextElement.inputs);
+              const contextChanged = !equalOrChanged(
                 normalizeContext(currentContext),
                 normalizeContext(resolvedNextContext),
               );

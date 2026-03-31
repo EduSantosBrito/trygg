@@ -95,7 +95,12 @@ export * as Api from "./api/types.js";
 export * as Resource from "./primitives/resource.js";
 
 // Component API for typed props
-export { Component, isEffectComponent, type ComponentProps, type PropsMarker } from "./primitives/component.js";
+export {
+  Component,
+  isEffectComponent,
+  type ComponentProps,
+  type PropsMarker,
+} from "./primitives/component.js";
 
 // Components
 export { DevMode, type DevModeProps } from "./components/dev-mode.js";

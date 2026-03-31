@@ -902,7 +902,7 @@ export const browserLayer: Layer.Layer<
  * Uses in-memory state instead of window.location/history.
  * Useful for unit tests that don't have a DOM or need isolated routing.
  *
-  * @param initialPath - The initial path (defaults to "/")
+ * @param initialPath - The initial path (defaults to "/")
  *
  * @remarks
  * `testLayer` keeps navigation purely in memory so router-aware Effects and

@@ -74,7 +74,7 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  * - RenderStrategy.SSR → HeadStrategy.Server
  * - RenderStrategy.Lazy/Eager → HeadStrategy.Client
  *
-  * Can be explicitly overridden per-route.
+ * Can be explicitly overridden per-route.
  *
  * @example
  * ```ts
@@ -83,8 +83,8 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  *
  * @category Head Management
  * @public
-  * @since 1.0.0
-  */
+ * @since 1.0.0
+ */
 export class HeadStrategy extends ServiceMap.Service<HeadStrategy, HeadStrategyService>()(
   "trygg/HeadStrategy",
 ) {

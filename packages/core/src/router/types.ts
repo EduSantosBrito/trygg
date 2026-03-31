@@ -198,7 +198,7 @@ export type RoutePath = keyof RouteMap | (string & Record<never, never>);
  * `ExtractRouteParams` is the path-to-param utility used as the fallback when a
  * generated `RouteMap` entry is not available.
  *
-  * @example
+ * @example
  * ```ts
  * type P1 = ExtractRouteParams<"/users/:id">
  * // { readonly id: string }
@@ -244,7 +244,7 @@ export type HasKeys<T> = keyof T extends never ? false : true;
  * `RouteParamsFor` is the main path-to-param helper used by `Link`,
  * `Router.params`, and typed navigation helpers.
  *
-  * @example
+ * @example
  * ```ts
  * // With RouteMap (vite plugin):
  * type P1 = RouteParamsFor<"/users/:id">  // RouteMap["/users/:id"]
@@ -268,8 +268,8 @@ export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
  * `TypeSafeLinkProps` expresses the core conditional typing used by `LinkProps`
  * without the extra forwarded-attribute fields.
  *
-  * When the path contains dynamic segments (`:param`), the `params` prop is required.
-  * When the path is static, `params` is optional/unnecessary.
+ * When the path contains dynamic segments (`:param`), the `params` prop is required.
+ * When the path is static, `params` is optional/unnecessary.
  *
  * @example
  * ```tsx
@@ -313,7 +313,7 @@ export type TypeSafeLinkProps<Path extends string> =
  * `buildPathWithParams` is the typed path interpolator used when a route path
  * and its params should stay aligned at compile time.
  *
-  * @example
+ * @example
  * ```ts
  * buildPathWithParams("/users/:id", { id: "123" })
  * // "/users/123"

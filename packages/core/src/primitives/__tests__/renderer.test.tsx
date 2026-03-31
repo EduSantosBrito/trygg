@@ -1151,6 +1151,64 @@ describe("Re-render behavior", () => {
     }),
   );
 
+  scoped("should preserve intrinsic nodes with static text children on parent re-render", () =>
+    Effect.gen(function* () {
+      const parentTrigger = Signal.makeSync(0);
+
+      const Parent = Component.gen(function* () {
+        const value = yield* Signal.get(parentTrigger);
+        return (
+          <div>
+            <button data-testid="static-button">Static label</button>
+            <span data-testid="dynamic-value">{String(value)}</span>
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+      const buttonBefore = yield* getByTestId("static-button");
+
+      yield* Signal.set(parentTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      const buttonAfter = yield* getByTestId("static-button");
+      const valueAfter = yield* getByTestId("dynamic-value");
+
+      assert.strictEqual(buttonAfter, buttonBefore);
+      assert.strictEqual(valueAfter.textContent, "1");
+    }),
+  );
+
+  scoped("should not defect when parent rerender compares inline event handlers", () =>
+    Effect.gen(function* () {
+      const parentTrigger = Signal.makeSync(0);
+
+      const Parent = Component.gen(function* () {
+        const value = yield* Signal.get(parentTrigger);
+        return (
+          <div>
+            <button data-testid="inline-handler" onClick={() => Effect.void}>
+              Static label
+            </button>
+            <span data-testid="inline-value">{String(value)}</span>
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+      const buttonBefore = yield* getByTestId("inline-handler");
+
+      yield* Signal.set(parentTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      const buttonAfter = yield* getByTestId("inline-handler");
+      const valueAfter = yield* getByTestId("inline-value");
+
+      assert.strictEqual(buttonAfter, buttonBefore);
+      assert.strictEqual(valueAfter.textContent, "1");
+    }),
+  );
+
   scoped("should skip stable child rerender when parent passes semantically equal props", () =>
     Effect.gen(function* () {
       const parentTrigger = Signal.makeSync(0);
@@ -1200,9 +1258,7 @@ describe("Re-render behavior", () => {
       let childRenderCount = 0;
       let childCleanupCount = 0;
 
-      const Child = Component.gen(function* (
-        Props: Component.ComponentProps<{ value: string }>,
-      ) {
+      const Child = Component.gen(function* (Props: Component.ComponentProps<{ value: string }>) {
         childRenderCount++;
         const { value } = yield* Props;
         yield* Effect.addFinalizer(() =>
@@ -1290,9 +1346,7 @@ describe("Re-render behavior", () => {
           readonly reason: "update-failed";
         }> {}
 
-        const Child = Component.gen(function* (
-          Props: Component.ComponentProps<{ value: string }>,
-        ) {
+        const Child = Component.gen(function* (Props: Component.ComponentProps<{ value: string }>) {
           const { value } = yield* Props;
           if (value === "after") {
             return yield* new StableChildError({ reason: "update-failed" });
@@ -1476,7 +1530,9 @@ describe("Re-render behavior", () => {
 
       const parent = yield* getByTestId("keyed-parent");
       const nodeBAfter = yield* getByTestId("child-b");
-      const orderedIds = Array.from(parent.querySelectorAll("button")).map((node) => node.textContent);
+      const orderedIds = Array.from(parent.querySelectorAll("button")).map(
+        (node) => node.textContent,
+      );
 
       assert.deepStrictEqual(orderedIds, ["c:0", "a:0", "b:11"]);
       assert.strictEqual(nodeBAfter, nodeBAfterLocalUpdate);
@@ -1549,7 +1605,9 @@ describe("Re-render behavior", () => {
 
       const childNodeAfter = yield* getByTestId("shifted-child");
       const parent = yield* getByTestId("unkeyed-parent");
-      const order = Array.from(parent.children).map((element) => element.getAttribute("data-testid"));
+      const order = Array.from(parent.children).map((element) =>
+        element.getAttribute("data-testid"),
+      );
 
       assert.deepStrictEqual(order, ["prefix", "shifted-child", "tail"]);
       assert.notStrictEqual(childNodeAfter, childNodeBefore);
