@@ -44,9 +44,18 @@ my-app/
 
 The Vite plugin generates the entry point — no manual mounting needed.
 
+### Integration Entry Points
+
+Canonical setup docs now live with the entrypoint owners:
+
+- `trygg/config`: [`src/config.ts`](./src/config.ts), [`src/config.docs.md`](./src/config.docs.md)
+- `trygg/vite-plugin`: [`src/vite/plugin.ts`](./src/vite/plugin.ts), [`src/vite/plugin.docs.md`](./src/vite/plugin.docs.md)
+- `trygg/api`: [`src/api/types.ts`](./src/api/types.ts), [`src/api/api.docs.md`](./src/api/api.docs.md)
+- `trygg/testing`: [`src/testing/index.ts`](./src/testing/index.ts), [`src/testing/testing.docs.md`](./src/testing/testing.docs.md)
+
 ### API Routes
 
-Define type-safe API endpoints in `app/api.ts` using `@effect/platform`:
+Use `trygg/api` type utilities inside `app/api.ts`. The owner docs in [`src/api/types.ts`](./src/api/types.ts) and [`src/api/api.docs.md`](./src/api/api.docs.md) describe the contracts; this README just shows the wiring shape:
 
 ```ts
 // app/api.ts
@@ -72,7 +81,7 @@ The plugin serves API routes in dev and bundles them for production.
 
 ### Components use Component.gen
 
-Components are created with `Component.gen` and return JSX:
+`Component` is the canonical component surface. Start with the owner docs in [`src/primitives/component.ts`](./src/primitives/component.ts) and the longer guide in [`src/primitives/component.docs.md`](./src/primitives/component.docs.md).
 
 ```tsx
 const Greeting = Component.gen(function* () {
@@ -82,32 +91,27 @@ const Greeting = Component.gen(function* () {
 
 ### Signal for Reactive State
 
-`Signal` provides fine-grained reactivity without re-rendering entire components:
-
-```tsx
-const Counter = Component.gen(function* () {
-  const count = yield* Signal.make(0);
-
-  return <button onClick={() => Signal.update(count, (n) => n + 1)}>Count: {count}</button>;
-});
-// Component runs ONCE. Only the text node updates when count changes.
-```
+Canonical reactivity docs now live with the owner module: [`src/primitives/signal.ts`](./src/primitives/signal.ts) and [`src/primitives/signal.docs.md`](./src/primitives/signal.docs.md).
 
 ### Fine-Grained vs Re-render
 
-**Fine-grained (no re-render)** - Pass signal directly to JSX:
+Reactivity and rendering guidance is source-owned now:
 
-```tsx
-const email = yield * Signal.make("");
-return <input value={email} />; // Updates input.value directly
-```
+- `Signal`: [`src/primitives/signal.ts`](./src/primitives/signal.ts), [`src/primitives/signal.docs.md`](./src/primitives/signal.docs.md)
+- `Resource`: [`src/primitives/resource.ts`](./src/primitives/resource.ts), [`src/primitives/resource.docs.md`](./src/primitives/resource.docs.md)
+- `cx`: [`src/primitives/cx.ts`](./src/primitives/cx.ts)
+- `Element` / rendering: [`src/primitives/element.ts`](./src/primitives/element.ts), [`src/primitives/element.docs.md`](./src/primitives/element.docs.md), [`src/primitives/renderer.ts`](./src/primitives/renderer.ts), [`src/primitives/renderer.docs.md`](./src/primitives/renderer.docs.md)
 
-**Re-render** - Read signal with `Signal.get()`:
+### Supporting Surfaces
 
-```tsx
-const items = yield * Signal.get(itemsSignal); // Subscribes component
-return items.map((item) => <li>{item}</li>); // Re-renders when items change
-```
+Supporting public docs are source-owned too:
+
+- `DevMode`: [`src/components/dev-mode.ts`](./src/components/dev-mode.ts), [`src/components/dev-mode.docs.md`](./src/components/dev-mode.docs.md)
+- `ErrorBoundary`: [`src/primitives/error-boundary.ts`](./src/primitives/error-boundary.ts), [`src/primitives/error-boundary.docs.md`](./src/primitives/error-boundary.docs.md)
+- `Portal`: [`src/primitives/portal.ts`](./src/primitives/portal.ts), [`src/primitives/portal.docs.md`](./src/primitives/portal.docs.md)
+- `Head`: [`src/primitives/head.ts`](./src/primitives/head.ts), [`src/primitives/head.docs.md`](./src/primitives/head.docs.md)
+- `Debug`: [`src/debug/debug.ts`](./src/debug/debug.ts), [`src/debug/debug.docs.md`](./src/debug/debug.docs.md)
+- `Metrics`: [`src/debug/metrics.ts`](./src/debug/metrics.ts), [`src/debug/metrics.docs.md`](./src/debug/metrics.docs.md)
 
 ### Event Handlers Return Effects
 
@@ -144,6 +148,10 @@ const App = Component.gen(function* () {
 }).provide(themeLayer);
 ```
 
+### JSX Runtime Entry Points
+
+JSX lowering details now live with the entrypoints themselves: [`src/jsx-runtime.ts`](./src/jsx-runtime.ts), [`src/jsx-runtime.docs.md`](./src/jsx-runtime.docs.md), [`src/jsx-dev-runtime.ts`](./src/jsx-dev-runtime.ts), and [`src/jsx-dev-runtime.docs.md`](./src/jsx-dev-runtime.docs.md).
+
 ## API Reference
 
 ### Core Exports
@@ -165,9 +173,12 @@ const App = Component.gen(function* () {
 | `Resource.match(state, handlers)`     | Pattern-match on `Pending` / `Success` / `Failure` |
 | `Resource.invalidate(key)`            | Stale-while-revalidate a cached resource           |
 | `Resource.refresh(key)`               | Force re-fetch a cached resource                   |
-| `DevMode`                             | Debug event viewer                                 |
-| `ErrorBoundary`                       | Error handling component                           |
-| `Portal`                              | Render to different container                      |
+| `DevMode`                             | Enable debug output from JSX                       |
+| `ErrorBoundary`                       | Match tagged render failures                       |
+| `Portal`                              | Render into another DOM target                     |
+| `Head`                                | Head hoisting and dedup helpers                    |
+| `Debug`                               | Low-level debug events, plugins, spans             |
+| `Metrics`                             | Low-level framework metrics and sinks              |
 
 ### Router Exports
 
@@ -178,6 +189,10 @@ const App = Component.gen(function* () {
 | `Router.Outlet`                 | Renders matched route                      |
 | `Router.browserLayer`           | Browser router layer (included by default) |
 | `Router.testLayer(path)`        | In-memory router for testing               |
+
+### Testing
+
+Testing helpers now live with the entrypoint itself: [`src/testing/index.ts`](./src/testing/index.ts) and [`src/testing/testing.docs.md`](./src/testing/testing.docs.md).
 
 ## License
 

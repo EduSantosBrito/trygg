@@ -1,6 +1,14 @@
 /**
+ * Error-boundary matchers for tagged render failures.
+ *
+ * @remarks
+ * Owner module for the `ErrorBoundary` topic. Use this module when component
+ * failures should stay typed and render a fallback through explicit matcher
+ * composition instead of ad-hoc `catch` logic.
+ *
+ * @see ./error-boundary.docs.md - Source-owned topic guide
  * @since 1.0.0
- * ErrorBoundary - Effect-native error handling with pipeable matchers.
+ * @module trygg/primitives/error-boundary
  */
 import { Cause, Data, Effect, Pipeable } from "effect";
 import { Component, tagComponent } from "./component.js";
@@ -22,6 +30,18 @@ interface ErrorHandler {
 
 /**
  * Error when unhandled errors remain at render time.
+ *
+ * @remarks
+ * `ErrorBoundary.exhaustive` fails with this error when a tagged failure still
+ * escapes the matcher chain at render time.
+ *
+ * @example
+ * ```ts
+ * const exit = yield* Effect.exit(SafeBoundary)
+ * ```
+ *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError")<{
@@ -31,9 +51,17 @@ export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError
 /**
  * Pipeable matcher for building an error boundary.
  *
+ * @remarks
  * `E` tracks the remaining unhandled errors.
  * `R` tracks the accumulated requirements from the wrapped component and all handlers.
  *
+ * @example
+ * ```ts
+ * const matcher = ErrorBoundary.catch_(RiskyComponent)
+ * ```
+ *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export interface ErrorBoundaryMatcher<Props, E, R, HandledTags extends string>
@@ -97,6 +125,9 @@ const resolveFallback = (
 /**
  * Create an error-boundary matcher for a component.
  *
+ * @remarks
+ * Start matcher composition here, then finish with `catchAll` or `exhaustive`.
+ *
  * @example
  * ```tsx
  * const SafeComponent = yield* ErrorBoundary
@@ -107,6 +138,8 @@ const resolveFallback = (
  *   )
  * ```
  *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export const catch_ = <Props, E, R>(
@@ -116,9 +149,17 @@ export const catch_ = <Props, E, R>(
 /**
  * Handle a specific tagged error with a component.
  *
+ * @remarks
  * The handler receives `{ error }` props and its requirements are added to the
  * resulting component requirements.
  *
+ * @example
+ * ```ts
+ * const matcher = ErrorBoundary.catch_(Risky).pipe(ErrorBoundary.on("NetworkError", Fallback))
+ * ```
+ *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export const on =
@@ -152,9 +193,17 @@ export const on =
 /**
  * Handle all remaining errors with a component.
  *
+ * @remarks
  * The handler receives `{ cause }` props and its requirements are added to the
  * resulting component requirements.
  *
+ * @example
+ * ```ts
+ * const Safe = yield* ErrorBoundary.catch_(Risky).pipe(ErrorBoundary.catchAll(GenericFallback))
+ * ```
+ *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export const catchAll =
@@ -189,8 +238,16 @@ export const catchAll =
 /**
  * Finalize the matcher exhaustively.
  *
+ * @remarks
  * Only compiles when all tagged errors have been handled via `ErrorBoundary.on`.
  *
+ * @example
+ * ```ts
+ * const Safe = yield* ErrorBoundary.exhaustive(matcher)
+ * ```
+ *
+ * @category Error Boundaries
+ * @public
  * @since 1.0.0
  */
 export const exhaustive = <Props, E, R, HandledTags extends string>(

@@ -1,6 +1,10 @@
 /**
- * @since 1.0.0
- * Scroll Strategy
+ * Scroll strategy primitives for `trygg/router`.
+ *
+ * @remarks
+ * Owner module for route scroll behavior. This module owns the strategy union
+ * and the service tag whose layers configure automatic scroll restoration or no
+ * scroll management.
  *
  * Controls scroll position management during navigation.
  * Uses SessionStorage service keyed by navigation entry.
@@ -14,6 +18,8 @@
  *   .children(...)
  *   .pipe(Route.provide(ScrollStrategy.None))
  * ```
+ * @since 1.0.0
+ * @module trygg/router/scroll-strategy
  */
 import { Layer } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -21,6 +27,18 @@ import * as ServiceMap from "effect/ServiceMap";
 /**
  * Auto — save/restore scroll per history entry via sessionStorage.
  * New navigation scrolls to top. Back/forward restores. Hash scrolls to element.
+ *
+ * @remarks
+ * `ScrollAuto` is the default browser-like behavior used by the outlet when no
+ * route overrides scroll handling.
+ *
+ * @example
+ * ```ts
+ * type Strategy = ScrollAuto
+ * ```
+ *
+ * @category Scroll Strategies
+ * @public
  * @since 1.0.0
  */
 export interface ScrollAuto {
@@ -29,6 +47,17 @@ export interface ScrollAuto {
 
 /**
  * None — no scroll management. For tabs, modals, or routes where scroll should not change.
+ *
+ * @remarks
+ * `ScrollNone` disables all outlet-managed scroll behavior for a route tree.
+ *
+ * @example
+ * ```ts
+ * type Strategy = ScrollNone
+ * ```
+ *
+ * @category Scroll Strategies
+ * @public
  * @since 1.0.0
  */
 export interface ScrollNone {
@@ -37,6 +66,18 @@ export interface ScrollNone {
 
 /**
  * Union of all scroll strategies. Extend when adding new variants.
+ *
+ * @remarks
+ * `ScrollStrategyType` is the pure-data union the router dispatches on after it
+ * resolves the nearest scroll strategy layer.
+ *
+ * @example
+ * ```ts
+ * const strategy: ScrollStrategyType = { _tag: "Auto" }
+ * ```
+ *
+ * @category Scroll Strategies
+ * @public
  * @since 1.0.0
  */
 export type ScrollStrategyType = ScrollAuto | ScrollNone;
@@ -59,6 +100,17 @@ const noneStrategy: ScrollNone = { _tag: "None" };
  *   - `Auto` → save/restore via sessionStorage
  *   - `None` → no-op
  *
+ * @remarks
+ * Apply `ScrollStrategy` with `Route.provide(...)` when a route tree should opt
+ * out of default scroll restoration or make that behavior explicit.
+ *
+ * @example
+ * ```tsx
+ * Route.make("/settings").layout(SettingsLayout).pipe(Route.provide(ScrollStrategy.None))
+ * ```
+ *
+ * @category Scroll Strategies
+ * @public
  * @since 1.0.0
  */
 export class ScrollStrategy extends ServiceMap.Service<ScrollStrategy, ScrollStrategyType>()(

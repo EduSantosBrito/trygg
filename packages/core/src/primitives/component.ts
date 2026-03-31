@@ -1,32 +1,14 @@
 /**
+ * Component creation primitives for the root `Component` API.
+ *
+ * @remarks
+ * Owner module for the `Component` topic. This module owns the callable
+ * `Component` export, `Component.gen`, and the typing helpers used to thread
+ * props and service requirements through JSX components.
+ *
+ * @see ./component.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Component API for trygg
- *
- * Enables JSX components with typed props and explicit dependency injection.
- * Services are provided by parent effects via Component.provide.
- *
- * @example
- * ```tsx
- * import { Effect, Layer } from "effect"
- * import * as ServiceMap from "effect/ServiceMap"
- * import { Component, mount } from "trygg"
- *
- * class Theme extends ServiceMap.Service<Theme, { primary: string }>()("Theme") {}
- *
- * const Card = Component.gen(function* (Props: ComponentProps<{ title: string }>) {
- *   const { title } = yield* Props
- *   const theme = yield* Theme
- *   return <div style={{ color: theme.primary }}>{title}</div>
- * })
- *
- * const themeLayer = Layer.succeed(Theme, { primary: "blue" })
- *
- * const App = Component.gen(function* () {
- *   return <Card title="Hello" />
- * }).provide(themeLayer)
- *
- * mount(container, <App />)
- * ```
+ * @module trygg/primitives/component
  */
 import { Data, Effect, Layer } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -62,6 +44,19 @@ export class ComponentGenError extends Data.TaggedError("ComponentGenError")<{
 /**
  * Marker interface for Props service - distinguishes props from other services.
  * Used as the identifier type for the Props service key.
+ *
+ * @remarks
+ * `PropsMarker<P>` exists so `ComponentProps<P>` can carry the props shape as a
+ * service identity without colliding with other services in the component
+ * context.
+ *
+ * @example
+ * ```ts
+ * type GreetingProps = ComponentProps<{ readonly name: string }>
+ * ```
+ *
+ * @category Components
+ * @public
  * @since 1.0.0
  */
 export interface PropsMarker<P> {
@@ -70,7 +65,22 @@ export interface PropsMarker<P> {
 }
 
 /**
- * Props tag type used in Component.gen for inference.
+ * Props service handle yielded inside `Component.gen`.
+ *
+ * @remarks
+ * `ComponentProps<P>` gives generator-based components a typed service they can
+ * `yield*` to read their props exactly once during component execution.
+ *
+ * @example
+ * ```tsx
+ * const Greeting = Component.gen(function* (Props: ComponentProps<{ name: string }>) {
+ *   const { name } = yield* Props
+ *   return <h1>{name}</h1>
+ * })
+ * ```
+ *
+ * @category Components
+ * @public
  * @since 1.0.0
  */
 export type ComponentProps<P> = ServiceMap.Service<PropsMarker<P>, P>;
@@ -172,7 +182,7 @@ const normalizeResult = <E, R>(
  * Service requirements are resolved from the parent context.
  * @since 1.0.0
  */
-export function Component<P extends object = {}>(): <E, R>(
+function makeComponent<P extends object = {}>(): <E, R>(
   effectFn: (Props: ServiceMap.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
 ) => Component.Type<P, E, Exclude<R, PropsMarker<P>>> {
   return <E, R>(
@@ -262,7 +272,23 @@ const hasTag = (value: unknown): value is { _tag: unknown } =>
   typeof value === "function" && value !== null && "_tag" in value;
 
 /**
- * Check if a value is an EffectComponent
+ * Check whether a value is a trygg component.
+ *
+ * @remarks
+ * Use this guard when a lower-level integration accepts unknown JSX values and
+ * needs to distinguish `Component.gen` outputs from plain functions.
+ *
+ * @example
+ * ```ts
+ * const value: unknown = Component.gen(function* () {
+ *   return <div />
+ * })
+ *
+ * const ok = isEffectComponent(value)
+ * ```
+ *
+ * @category Components
+ * @public
  * @since 1.0.0
  */
 export const isEffectComponent = (value: unknown): value is Component.Type<unknown> =>
@@ -436,3 +462,30 @@ export const gen: Gen = function <P extends object>(f?: unknown): any {
     });
   });
 };
+
+type ComponentApi = typeof makeComponent & {
+  readonly gen: typeof gen;
+};
+
+/**
+ * Create JSX-compatible components and access `Component.gen`.
+ *
+ * @remarks
+ * `Component` is the public entry surface for component definitions. Call it
+ * directly for explicit effect functions, or use `Component.gen` for the
+ * generator-based style shown throughout the framework docs.
+ *
+ * @example
+ * ```tsx
+ * const Counter = Component.gen(function* () {
+ *   return <button>Count</button>
+ * })
+ * ```
+ *
+ * @category Components
+ * @public
+ * @since 1.0.0
+ */
+export const Component: ComponentApi = Object.assign(makeComponent, {
+  gen,
+});

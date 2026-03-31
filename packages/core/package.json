@@ -65,6 +65,8 @@
     "prepublishOnly": "bun run build",
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
+    "docs:check": "bun ./src/internal/docs-check.ts",
+    "docs:check:json": "bun ./src/internal/docs-check.ts --json",
     "typecheck": "tsc --noEmit",
     "effect:check": "effect-language-service diagnostics --project tsconfig.json",
     "test": "npx vitest run",

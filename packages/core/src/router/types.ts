@@ -1,6 +1,10 @@
 /**
- * @since 1.0.0
- * Router types for trygg
+ * Router types for `trygg/router`.
+ *
+ * @remarks
+ * Owner module for the router's shared public types. This module owns the type
+ * vocabulary for route params, navigation state, link typing, and the router
+ * service interface.
  *
  * ## Type-Safe Routing
  *
@@ -13,6 +17,8 @@
  * // TypeScript error: missing required param
  * <Link to="/users/:id">User</Link>
  * ```
+ * @since 1.0.0
+ * @module trygg/router/types
  */
 import { Data, Effect, type Cause, type Ref, type Scope } from "effect";
 import { Component } from "../primitives/component.js";
@@ -28,6 +34,17 @@ import type { Element } from "../primitives/element.js";
  * Wraps underlying platform errors (HistoryError, LocationError, etc.)
  * so consumers can handle navigation failures explicitly.
  *
+ * @remarks
+ * `NavigationError` is the typed failure surfaced by router navigation helpers
+ * when platform history or location work fails.
+ *
+ * @example
+ * ```ts
+ * const error = new NavigationError({ operation: "pushState", cause: "boom" })
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export class NavigationError extends Data.TaggedError("NavigationError")<{
@@ -39,6 +56,17 @@ export class NavigationError extends Data.TaggedError("NavigationError")<{
  * RouteComponent value was neither a Component.Type nor Effect<Element>.
  * Indicates a bug in route definition or schema validation.
  *
+ * @remarks
+ * `InvalidRouteComponent` signals that a route component slot received a value
+ * outside the supported `RouteComponent | ComponentLoader` surface.
+ *
+ * @example
+ * ```ts
+ * const error = new InvalidRouteComponent({ actual: null })
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export class InvalidRouteComponent extends Data.TaggedError("InvalidRouteComponent")<{
@@ -51,6 +79,10 @@ export class InvalidRouteComponent extends Data.TaggedError("InvalidRouteCompone
 
 /**
  * Route map interface - augmented by vite plugin with actual routes.
+ *
+ * @remarks
+ * `RouteMap` is the declaration-merge target used by the Vite plugin to add
+ * concrete route paths and param types to `trygg/router`.
  *
  * When using file-based routing, the vite plugin generates a routes.d.ts
  * that augments this interface with your actual route paths and params.
@@ -67,6 +99,8 @@ export class InvalidRouteComponent extends Data.TaggedError("InvalidRouteCompone
  * }
  * ```
  *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface RouteMap {
@@ -76,6 +110,18 @@ export interface RouteMap {
 /**
  * Route component type - Component.gen result or Effect<Element>.
  * Can be created with Component.gen or a plain Effect that produces an Element.
+ *
+ * @remarks
+ * `RouteComponent` is the direct component shape the router knows how to render
+ * without going through a lazy loader.
+ *
+ * @example
+ * ```ts
+ * type Page = RouteComponent
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type RouteComponent =
@@ -86,6 +132,18 @@ export type RouteComponent =
  * Lazy loader function produced by the vite transform.
  * At build time, `.component(X)` becomes `.component(() => import("./X"))`.
  * The default export must be a RouteComponent.
+ *
+ * @remarks
+ * `ComponentLoader` is the lazy route-component shape used after the Vite
+ * transform rewrites eager component references.
+ *
+ * @example
+ * ```ts
+ * const loader: ComponentLoader = () => import("./page")
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type ComponentLoader = () => Promise<{ readonly default: unknown }>;
@@ -93,6 +151,18 @@ export type ComponentLoader = () => Promise<{ readonly default: unknown }>;
 /**
  * Value stored in RouteDefinition component fields.
  * Either a direct RouteComponent (dev/eager) or a ComponentLoader (vite transform/lazy).
+ *
+ * @remarks
+ * `ComponentInput` is the full route-component input surface accepted by route
+ * builders and consumed by the outlet.
+ *
+ * @example
+ * ```ts
+ * type Input = ComponentInput
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type ComponentInput = RouteComponent | ComponentLoader;
@@ -100,6 +170,18 @@ export type ComponentInput = RouteComponent | ComponentLoader;
 /**
  * Get all route paths from RouteMap.
  * Uses `(string & Record<never, never>)` pattern for autocomplete with string fallback.
+ *
+ * @remarks
+ * `RoutePath` keeps editor autocomplete for known routes while still accepting
+ * arbitrary strings before a route map has been generated.
+ *
+ * @example
+ * ```ts
+ * const path: RoutePath = "/users/:id"
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type RoutePath = keyof RouteMap | (string & Record<never, never>);
@@ -112,7 +194,11 @@ export type RoutePath = keyof RouteMap | (string & Record<never, never>);
  * Extract route params from a path pattern.
  * Uses template literal types to parse :param segments.
  *
- * @example
+ * @remarks
+ * `ExtractRouteParams` is the path-to-param utility used as the fallback when a
+ * generated `RouteMap` entry is not available.
+ *
+  * @example
  * ```ts
  * type P1 = ExtractRouteParams<"/users/:id">
  * // { readonly id: string }
@@ -124,6 +210,8 @@ export type RoutePath = keyof RouteMap | (string & Record<never, never>);
  * // {}
  * ```
  *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type ExtractRouteParams<T extends string> =
@@ -152,7 +240,11 @@ export type HasKeys<T> = keyof T extends never ? false : true;
  * Get route params type for a path.
  * Uses RouteMap if available (from vite plugin), otherwise extracts from path pattern.
  *
- * @example
+ * @remarks
+ * `RouteParamsFor` is the main path-to-param helper used by `Link`,
+ * `Router.params`, and typed navigation helpers.
+ *
+  * @example
  * ```ts
  * // With RouteMap (vite plugin):
  * type P1 = RouteParamsFor<"/users/:id">  // RouteMap["/users/:id"]
@@ -161,6 +253,8 @@ export type HasKeys<T> = keyof T extends never ? false : true;
  * type P2 = RouteParamsFor<"/posts/:postId">  // { readonly postId: string }
  * ```
  *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
@@ -170,8 +264,12 @@ export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
 /**
  * Props for type-safe Link component.
  *
- * When the path contains dynamic segments (`:param`), the `params` prop is required.
- * When the path is static, `params` is optional/unnecessary.
+ * @remarks
+ * `TypeSafeLinkProps` expresses the core conditional typing used by `LinkProps`
+ * without the extra forwarded-attribute fields.
+ *
+  * When the path contains dynamic segments (`:param`), the `params` prop is required.
+  * When the path is static, `params` is optional/unnecessary.
  *
  * @example
  * ```tsx
@@ -185,6 +283,8 @@ export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
  * <Link to="/users/:id" params={{ wrong: "x" }}>Error!</Link>
  * ```
  *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type TypeSafeLinkProps<Path extends string> =
@@ -209,7 +309,11 @@ export type TypeSafeLinkProps<Path extends string> =
 /**
  * Build a URL path by substituting params into a pattern.
  *
- * @example
+ * @remarks
+ * `buildPathWithParams` is the typed path interpolator used when a route path
+ * and its params should stay aligned at compile time.
+ *
+  * @example
  * ```ts
  * buildPathWithParams("/users/:id", { id: "123" })
  * // "/users/123"
@@ -218,6 +322,8 @@ export type TypeSafeLinkProps<Path extends string> =
  * // "/posts/1/comments/2"
  * ```
  *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export const buildPathWithParams = <Path extends string>(
@@ -268,12 +374,35 @@ export const interpolateParams = (
 
 /**
  * Route parameters extracted from path
+ *
+ * @remarks
+ * `RouteParams` is the raw string-valued param record stored on matched routes
+ * before schema decode refines the values.
+ *
+ * @example
+ * ```ts
+ * const params: RouteParams = { id: "123" }
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export type RouteParams = Record<string, string>;
 
 /**
  * Current route state
+ *
+ * @remarks
+ * `Route` is the snapshot stored in the router's current-route signal.
+ *
+ * @example
+ * ```ts
+ * const route: Route = { path: "/", params: {}, query: new URLSearchParams() }
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface Route {
@@ -287,6 +416,18 @@ export interface Route {
 
 /**
  * Navigation options
+ *
+ * @remarks
+ * `NavigateOptions` controls replace behavior plus optional path-param and
+ * query interpolation during navigation.
+ *
+ * @example
+ * ```ts
+ * const options: NavigateOptions = { replace: true, query: { page: "2" } }
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface NavigateOptions {
@@ -300,6 +441,18 @@ export interface NavigateOptions {
 
 /**
  * Options for Router.isActive check.
+ *
+ * @remarks
+ * `IsActiveOptions` lets callers request exact matching or interpolate path
+ * params before active-state comparison.
+ *
+ * @example
+ * ```ts
+ * const options: IsActiveOptions = { exact: true }
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface IsActiveOptions {
@@ -311,6 +464,18 @@ export interface IsActiveOptions {
 
 /**
  * Route error info - available to .error() boundary components via RouteError FiberRef
+ *
+ * @remarks
+ * `RouteErrorInfo` is the structured error payload surfaced through
+ * `Router.currentError` while an error boundary renders.
+ *
+ * @example
+ * ```ts
+ * const info: RouteErrorInfo = { cause, path: "/users", reset: Effect.void }
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface RouteErrorInfo {
@@ -336,6 +501,18 @@ export interface NavigationContext {
 
 /**
  * Router service interface
+ *
+ * @remarks
+ * `RouterService` is the runtime contract implemented by `browserLayer` and
+ * `testLayer`, then exposed through the `Router` service tag.
+ *
+ * @example
+ * ```ts
+ * const router: RouterService = yield* Router.get
+ * ```
+ *
+ * @category Route Types
+ * @public
  * @since 1.0.0
  */
 export interface RouterService {

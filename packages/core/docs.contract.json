@@ -1,0 +1,611 @@
+{
+  "allowedTags": [
+    "category",
+    "deprecated",
+    "example",
+    "internal",
+    "module",
+    "param",
+    "public",
+    "remarks",
+    "returns",
+    "see",
+    "since",
+    "typeParam"
+  ],
+  "sidecarHeadings": ["When to use", "Behavior", "Related exports"],
+  "categories": [
+    {
+      "name": "Security",
+      "ownerModule": "src/security/safe-url.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Components",
+      "ownerModule": "src/primitives/component.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Elements",
+      "ownerModule": "src/primitives/element.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Rendering",
+      "ownerModule": "src/primitives/renderer.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Error Boundaries",
+      "ownerModule": "src/primitives/error-boundary.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Portals",
+      "ownerModule": "src/primitives/portal.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Head Management",
+      "ownerModule": "src/primitives/head.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Reactivity",
+      "ownerModule": "src/primitives/signal.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Async State",
+      "ownerModule": "src/primitives/resource.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Class Composition",
+      "ownerModule": "src/primitives/cx.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "JSX Runtime",
+      "ownerModule": "src/jsx-runtime.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "JSX Development",
+      "ownerModule": "src/jsx-dev-runtime.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Routing",
+      "ownerModule": "src/router/index.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Route Builders",
+      "ownerModule": "src/router/route.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Route Collections",
+      "ownerModule": "src/router/routes.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "Router Navigation",
+      "ownerModule": "src/router/service.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Router Links",
+      "ownerModule": "src/router/link.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Router Outlet",
+      "ownerModule": "src/router/outlet.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Route Matching",
+      "ownerModule": "src/router/matching.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Render Strategies",
+      "ownerModule": "src/router/render-strategy.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "Scroll Strategies",
+      "ownerModule": "src/router/scroll-strategy.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "Route Types",
+      "ownerModule": "src/router/types.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "Route Prefetch",
+      "ownerModule": "src/router/prefetch.ts",
+      "requiresSidecar": false
+    },
+    {
+      "name": "API Types",
+      "ownerModule": "src/api/types.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Testing",
+      "ownerModule": "src/testing/index.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Configuration",
+      "ownerModule": "src/config.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Vite Plugin",
+      "ownerModule": "src/vite/plugin.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Development",
+      "ownerModule": "src/components/dev-mode.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Debugging",
+      "ownerModule": "src/debug/debug.ts",
+      "requiresSidecar": true
+    },
+    {
+      "name": "Metrics",
+      "ownerModule": "src/debug/metrics.ts",
+      "requiresSidecar": true
+    }
+  ],
+  "migratedOwners": [
+    {
+      "topic": "SafeUrl",
+      "category": "Security",
+      "entrypoint": ".",
+      "module": "src/security/safe-url.ts",
+      "primaryExport": "SafeUrl",
+      "primaryKind": "namespace",
+      "namedExports": ["UnsafeUrlError"],
+      "sidecar": "src/security/safe-url.docs.md"
+    },
+    {
+      "topic": "Component",
+      "category": "Components",
+      "entrypoint": ".",
+      "module": "src/primitives/component.ts",
+      "primaryExport": "Component",
+      "primaryKind": "named",
+      "namedExports": ["ComponentProps", "PropsMarker", "isEffectComponent"],
+      "sidecar": "src/primitives/component.docs.md"
+    },
+    {
+      "topic": "Element",
+      "category": "Elements",
+      "entrypoint": ".",
+      "module": "src/primitives/element.ts",
+      "primaryExport": "Element",
+      "primaryKind": "named",
+      "namedExports": [
+        "ElementKey",
+        "ElementChild",
+        "ElementChildren",
+        "BaseProps",
+        "EventProps",
+        "ElementProps",
+        "EventHandler",
+        "intrinsic",
+        "text",
+        "componentElement",
+        "fragment",
+        "portal",
+        "keyedList",
+        "empty",
+        "isElement",
+        "isEmpty",
+        "normalizeChild",
+        "normalizeChildren",
+        "getKey",
+        "keyed"
+      ],
+      "sidecar": "src/primitives/element.docs.md"
+    },
+    {
+      "topic": "Renderer",
+      "category": "Rendering",
+      "entrypoint": ".",
+      "module": "src/primitives/renderer.ts",
+      "primaryExport": "Renderer",
+      "primaryKind": "named",
+      "namedExports": [
+        "browserLayer",
+        "mount",
+        "mountDocument",
+        "renderDocument",
+        "RendererService",
+        "RenderContext",
+        "RenderResult",
+        "CurrentRenderContext"
+      ],
+      "sidecar": "src/primitives/renderer.docs.md"
+    },
+    {
+      "topic": "ErrorBoundary",
+      "category": "Error Boundaries",
+      "entrypoint": ".",
+      "module": "src/primitives/error-boundary.ts",
+      "primaryExport": "ErrorBoundary",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/primitives/error-boundary.docs.md"
+    },
+    {
+      "topic": "Portal",
+      "category": "Portals",
+      "entrypoint": ".",
+      "module": "src/primitives/portal.ts",
+      "primaryExport": "Portal",
+      "primaryKind": "namespace",
+      "namedExports": ["PortalProps", "PortalOptions", "PortalTargetNotFoundError"],
+      "sidecar": "src/primitives/portal.docs.md"
+    },
+    {
+      "topic": "Head",
+      "category": "Head Management",
+      "entrypoint": ".",
+      "module": "src/primitives/head.ts",
+      "primaryExport": "Head",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/primitives/head.docs.md"
+    },
+    {
+      "topic": "Signal",
+      "category": "Reactivity",
+      "entrypoint": ".",
+      "module": "src/primitives/signal.ts",
+      "primaryExport": "Signal",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/primitives/signal.docs.md"
+    },
+    {
+      "topic": "Resource",
+      "category": "Async State",
+      "entrypoint": ".",
+      "module": "src/primitives/resource.ts",
+      "primaryExport": "Resource",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/primitives/resource.docs.md"
+    },
+    {
+      "topic": "cx",
+      "category": "Class Composition",
+      "entrypoint": ".",
+      "module": "src/primitives/cx.ts",
+      "primaryExport": "cx",
+      "primaryKind": "named",
+      "namedExports": ["ClassInput", "ClassValue"],
+      "sidecar": "src/primitives/cx.docs.md"
+    },
+    {
+      "topic": "jsx-runtime",
+      "category": "JSX Runtime",
+      "entrypoint": "./jsx-runtime",
+      "module": "src/jsx-runtime.ts",
+      "primaryExport": "jsx",
+      "primaryKind": "named",
+      "namedExports": ["JSXProps", "JSXElementType", "jsxs", "Fragment"],
+      "sidecar": "src/jsx-runtime.docs.md"
+    },
+    {
+      "topic": "jsx-dev-runtime",
+      "category": "JSX Development",
+      "entrypoint": "./jsx-dev-runtime",
+      "module": "src/jsx-dev-runtime.ts",
+      "primaryExport": "jsxDEV",
+      "primaryKind": "named",
+      "namedExports": ["jsxsDEV"],
+      "sidecar": "src/jsx-dev-runtime.docs.md"
+    },
+    {
+      "topic": "Router",
+      "category": "Routing",
+      "entrypoint": "./router",
+      "module": "src/router/index.ts",
+      "primaryExport": "Route",
+      "primaryKind": "named",
+      "namedExports": ["Route", "Routes"],
+      "sidecar": "src/router/router.docs.md"
+    },
+    {
+      "topic": "Route Builder",
+      "category": "Route Builders",
+      "entrypoint": "./router",
+      "module": "src/router/route.ts",
+      "primaryExport": "make",
+      "primaryKind": "named",
+      "namedExports": [
+        "make",
+        "index",
+        "provide",
+        "isRouteBuilder",
+        "CurrentRouteQuery",
+        "routeRedirect",
+        "routeForbidden",
+        "RouteBuilder",
+        "AnyRouteBuilder",
+        "ExtractParams",
+        "RouteDefinition",
+        "MiddlewareResult"
+      ],
+      "sidecar": "src/router/route.docs.md"
+    },
+    {
+      "topic": "Routes",
+      "category": "Route Collections",
+      "entrypoint": "./router",
+      "module": "src/router/routes.ts",
+      "primaryExport": "make",
+      "primaryKind": "named",
+      "namedExports": ["make", "RoutesCollection", "RoutesManifest", "CurrentRoutesManifest"],
+      "sidecar": "src/router/routes.docs.md"
+    },
+    {
+      "topic": "Router Service",
+      "category": "Router Navigation",
+      "entrypoint": "./router",
+      "module": "src/router/service.ts",
+      "primaryExport": "Router",
+      "primaryKind": "named",
+      "namedExports": [
+        "Router",
+        "get",
+        "getRouter",
+        "current",
+        "currentRoute",
+        "query",
+        "querySignal",
+        "navigate",
+        "back",
+        "forward",
+        "params",
+        "isActive",
+        "link",
+        "prefetch",
+        "browserLayer",
+        "testLayer",
+        "currentError"
+      ],
+      "sidecar": "src/router/service.docs.md"
+    },
+    {
+      "topic": "Link",
+      "category": "Router Links",
+      "entrypoint": "./router",
+      "module": "src/router/link.ts",
+      "primaryExport": "Link",
+      "primaryKind": "named",
+      "namedExports": ["Link", "LinkProps", "PrefetchStrategy"],
+      "sidecar": "src/router/link.docs.md"
+    },
+    {
+      "topic": "Outlet",
+      "category": "Router Outlet",
+      "entrypoint": "./router",
+      "module": "src/router/outlet.ts",
+      "primaryExport": "Outlet",
+      "primaryKind": "named",
+      "namedExports": ["Outlet", "OutletProps"],
+      "sidecar": "src/router/outlet.docs.md"
+    },
+    {
+      "topic": "Route Matching",
+      "category": "Route Matching",
+      "entrypoint": "./router",
+      "module": "src/router/matching.ts",
+      "primaryExport": "RouteMatcher",
+      "primaryKind": "named",
+      "namedExports": [
+        "ResolvedRoute",
+        "RouteMatch",
+        "RouteMatcherShape",
+        "RouteMatcher",
+        "resolveRoutes",
+        "collectRouteMiddleware",
+        "runRouteMiddleware",
+        "resolveErrorBoundary",
+        "resolveNotFoundBoundary",
+        "resolveForbiddenBoundary",
+        "resolveLoadingBoundary",
+        "resolveRenderStrategy",
+        "resolveScrollStrategy",
+        "decodeRouteParams",
+        "decodeRouteQuery",
+        "SyncMatcher",
+        "createMatcher"
+      ],
+      "sidecar": "src/router/matching.docs.md"
+    },
+    {
+      "topic": "RenderStrategy",
+      "category": "Render Strategies",
+      "entrypoint": "./router",
+      "module": "src/router/render-strategy.ts",
+      "primaryExport": "RenderStrategy",
+      "primaryKind": "named",
+      "namedExports": ["Eager", "Lazy", "RenderStrategyType", "RenderLoadError", "RenderStrategy"],
+      "sidecar": "src/router/render-strategy.docs.md"
+    },
+    {
+      "topic": "ScrollStrategy",
+      "category": "Scroll Strategies",
+      "entrypoint": "./router",
+      "module": "src/router/scroll-strategy.ts",
+      "primaryExport": "ScrollStrategy",
+      "primaryKind": "named",
+      "namedExports": ["ScrollAuto", "ScrollNone", "ScrollStrategyType", "ScrollStrategy"],
+      "sidecar": "src/router/scroll-strategy.docs.md"
+    },
+    {
+      "topic": "Route Types",
+      "category": "Route Types",
+      "entrypoint": "./router",
+      "module": "src/router/types.ts",
+      "primaryExport": "RouteMap",
+      "primaryKind": "named",
+      "namedExports": [
+        "NavigationError",
+        "InvalidRouteComponent",
+        "RouteMap",
+        "RouteComponent",
+        "ComponentLoader",
+        "ComponentInput",
+        "RoutePath",
+        "ExtractRouteParams",
+        "RouteParamsFor",
+        "TypeSafeLinkProps",
+        "buildPathWithParams",
+        "RouteParams",
+        "Route",
+        "NavigateOptions",
+        "IsActiveOptions",
+        "RouteErrorInfo",
+        "RouterService"
+      ],
+      "sidecar": "src/router/types.docs.md"
+    },
+    {
+      "topic": "Route Prefetch",
+      "category": "Route Prefetch",
+      "entrypoint": "./router",
+      "module": "src/router/prefetch.ts",
+      "primaryExport": "runPrefetch",
+      "primaryKind": "named",
+      "namedExports": ["runPrefetch"],
+      "sidecar": "src/router/prefetch.docs.md"
+    },
+    {
+      "topic": "API",
+      "category": "API Types",
+      "entrypoint": "./api",
+      "module": "src/api/types.ts",
+      "primaryExport": "Handler",
+      "primaryKind": "named",
+      "namedExports": [
+        "Handler",
+        "GroupHandlers",
+        "Request",
+        "Success",
+        "Error",
+        "Path",
+        "UrlParams",
+        "Payload",
+        "Headers"
+      ],
+      "sidecar": "src/api/api.docs.md"
+    },
+    {
+      "topic": "Testing",
+      "category": "Testing",
+      "entrypoint": "./testing",
+      "module": "src/testing/index.ts",
+      "primaryExport": "render",
+      "primaryKind": "named",
+      "namedExports": [
+        "TestRenderResult",
+        "ElementNotFoundError",
+        "renderElement",
+        "testLayer",
+        "click",
+        "type",
+        "WaitForTimeoutError",
+        "waitFor",
+        "RenderInput",
+        "render"
+      ],
+      "sidecar": "src/testing/testing.docs.md"
+    },
+    {
+      "topic": "Configuration",
+      "category": "Configuration",
+      "entrypoint": "./config",
+      "module": "src/config.ts",
+      "primaryExport": "defineConfig",
+      "primaryKind": "named",
+      "namedExports": ["Platform", "Output", "TryggConfig", "defineConfig"],
+      "sidecar": "src/config.docs.md"
+    },
+    {
+      "topic": "Vite Plugin",
+      "category": "Vite Plugin",
+      "entrypoint": "./vite-plugin",
+      "module": "src/vite/plugin.ts",
+      "primaryExport": "trygg",
+      "primaryKind": "named",
+      "namedExports": [
+        "PluginValidationError",
+        "PluginValidationErrors",
+        "PluginFileSystemError",
+        "PluginParseError",
+        "extractParamNames",
+        "generateParamType",
+        "ParsedRoute",
+        "ParsedParam",
+        "schemaToType",
+        "parseSchemaStruct",
+        "parseRoutes",
+        "resolveRoutePaths",
+        "generateRouteTypes",
+        "transformRoutesForBuild",
+        "validateApiPlatform",
+        "generateEntryModule",
+        "generateHtmlTemplate",
+        "generateServerEntry",
+        "TryggOptions",
+        "TryggPlugin",
+        "trygg"
+      ],
+      "sidecar": "src/vite/plugin.docs.md"
+    },
+    {
+      "topic": "DevMode",
+      "category": "Development",
+      "entrypoint": ".",
+      "module": "src/components/dev-mode.ts",
+      "primaryExport": "DevMode",
+      "primaryKind": "named",
+      "namedExports": ["DevModeProps"],
+      "sidecar": "src/components/dev-mode.docs.md"
+    },
+    {
+      "topic": "Debug",
+      "category": "Debugging",
+      "entrypoint": ".",
+      "module": "src/debug/debug.ts",
+      "primaryExport": "Debug",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/debug/debug.docs.md"
+    },
+    {
+      "topic": "Metrics",
+      "category": "Metrics",
+      "entrypoint": ".",
+      "module": "src/debug/metrics.ts",
+      "primaryExport": "Metrics",
+      "primaryKind": "namespace",
+      "namedExports": [],
+      "sidecar": "src/debug/metrics.docs.md"
+    }
+  ]
+}

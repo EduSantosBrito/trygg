@@ -1,28 +1,14 @@
 /**
+ * Portal components for rendering into alternate DOM targets.
+ *
+ * @remarks
+ * Owner module for the `Portal` topic. Use this module when a component should
+ * keep its data flow in the current render tree but mount DOM nodes under a
+ * separate target like `document.body` or a modal root.
+ *
+ * @see ./portal.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Portal - Effect-native DOM teleportation
- *
- * Portal.make wraps content into a ComponentType that renders
- * into a different DOM location (the target).
- *
- * @example
- * ```tsx
- * const Modal = Component.gen(function* () {
- *   const isOpen = yield* Signal.make(false)
- *
- *   const PortalledDialog = yield* Portal.make(
- *     <Dialog onClose={() => Signal.set(isOpen, false)} />,
- *     { target: document.body }
- *   )
- *
- *   return (
- *     <div>
- *       <button onClick={() => Signal.set(isOpen, true)}>Open</button>
- *       <PortalledDialog visible={isOpen} />
- *     </div>
- *   )
- * })
- * ```
+ * @module trygg/primitives/portal
  */
 import { Data, Effect, Scope } from "effect";
 import { gen, Component, type ComponentProps } from "./component.js";
@@ -36,6 +22,18 @@ import * as Signal from "./signal.js";
 
 /**
  * Error raised when a CSS selector target cannot be resolved.
+ *
+ * @remarks
+ * `Portal.make` fails with this error when a selector target is missing or does
+ * not resolve to an `HTMLElement`.
+ *
+ * @example
+ * ```ts
+ * const exit = yield* Effect.exit(Portal.make(<div />, { target: "#missing" }))
+ * ```
+ *
+ * @category Portals
+ * @public
  * @since 1.0.0
  */
 export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNotFoundError")<{
@@ -52,6 +50,18 @@ export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNot
 
 /**
  * Props accepted by the ComponentType returned from Portal.make.
+ *
+ * @remarks
+ * `visible` can stay static or reactive, so the returned portal component can
+ * mount and unmount without changing the original content definition.
+ *
+ * @example
+ * ```ts
+ * const props: PortalProps = { visible: true }
+ * ```
+ *
+ * @category Portals
+ * @public
  * @since 1.0.0
  */
 export interface PortalProps {
@@ -60,6 +70,18 @@ export interface PortalProps {
 
 /**
  * Options for Portal.make.
+ *
+ * @remarks
+ * Omit `target` to allocate a container under `document.body`, or pass a DOM
+ * node or selector when the mount point already exists.
+ *
+ * @example
+ * ```ts
+ * const options: PortalOptions = { target: "#modal-root" }
+ * ```
+ *
+ * @category Portals
+ * @public
  * @since 1.0.0
  */
 export interface PortalOptions {
@@ -87,6 +109,7 @@ const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<bo
 /**
  * Create a portal component that renders content into a different DOM location.
  *
+ * @remarks
  * Returns a ComponentType that accepts an optional `visible` prop to control
  * mount/unmount. When `visible` is a Signal, the portal reacts to changes.
  *
@@ -105,6 +128,8 @@ const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<bo
  * return <MyPortal visible={isOpenSignal} />
  * ```
  *
+ * @category Portals
+ * @public
  * @since 1.0.0
  */
 export const make = (

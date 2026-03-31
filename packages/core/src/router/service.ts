@@ -1,6 +1,14 @@
 /**
+ * Router service and navigation helpers for `trygg/router`.
+ *
+ * @remarks
+ * Owner module for programmatic navigation. This module owns the router service
+ * tag, current-route accessors, navigation effects, active-link state helpers,
+ * and the browser and test layers that back the router runtime.
+ *
+ * @see ./service.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Router service for trygg
+ * @module trygg/router/service
  */
 import { Data, Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -161,6 +169,18 @@ const setupViewportPrefetch = (
 
 /**
  * Router service key
+ *
+ * @remarks
+ * Yield `Router` inside Effects when you need direct access to the active
+ * router implementation rather than the convenience helpers exported beside it.
+ *
+ * @example
+ * ```ts
+ * const router = yield* Router
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export interface Router extends ServiceMap.Service<Router, RouterService> {}
@@ -232,11 +252,28 @@ export class CurrentErrorOutsideBoundaryError extends Data.TaggedError(
  * Get the current router service.
  * Uses the Router service key which is provided to all components
  * via the render context in browserLayer.
+ *
+ * @remarks
+ * This is the preferred way to access the router in Effect code when you need
+ * to call navigation methods directly.
+ *
+ * @example
+ * ```ts
+ * const router = yield* Router.get
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const get: Effect.Effect<RouterService, never, Router> = Router.asEffect();
 
 /**
+ * Backward-compatible alias for `get`.
+ *
+ * @remarks
+ * Kept for older code. Prefer `Router.get` for new code.
+ *
  * @deprecated Use `Router.get` instead
  * @internal
  */
@@ -244,6 +281,18 @@ export const getRouter: Effect.Effect<RouterService, never, Router> = Router.asE
 
 /**
  * Get the current route signal
+ *
+ * @remarks
+ * Use `current` when you need the reactive `Signal<Route>` itself rather than
+ * the current snapshot value.
+ *
+ * @example
+ * ```ts
+ * const currentRoute = yield* Router.current
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const current: Effect.Effect<Signal.Signal<Route>, never, Router> = Effect.map(
@@ -261,6 +310,12 @@ export const current: Effect.Effect<Signal.Signal<Route>, never, Router> = Effec
  * // route: { path: "/users/123", params: {...}, query: URLSearchParams }
  * ```
  *
+ * @remarks
+ * `currentRoute` is the one-step helper for code that only needs the latest
+ * route snapshot and not the underlying signal.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const currentRoute: Effect.Effect<Route, never, Router> = Effect.gen(function* () {
@@ -271,6 +326,18 @@ export const currentRoute: Effect.Effect<Route, never, Router> = Effect.gen(func
 /**
  * Get the raw query params signal (URLSearchParams).
  * For decoded query access, use `queryParams(path)`.
+ *
+ * @remarks
+ * This exposes the raw `URLSearchParams` signal when code needs low-level query
+ * inspection instead of schema-decoded values.
+ *
+ * @example
+ * ```ts
+ * const query = yield* Router.querySignal
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const querySignal: Effect.Effect<Signal.Signal<URLSearchParams>, never, Router> = Effect.map(
@@ -288,6 +355,12 @@ export const querySignal: Effect.Effect<Signal.Signal<URLSearchParams>, never, R
  * const { q, page } = yield* Router.query("/search")
  * ```
  *
+ * @remarks
+ * `query` reads the decoded query object the outlet placed in router context
+ * for the currently matched route.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const query = <Path extends RoutePath>(
@@ -303,6 +376,12 @@ export const query = <Path extends RoutePath>(
  * // Navigates to /users/123
  * ```
  *
+ * @remarks
+ * `navigate` handles param interpolation, query serialization, history writes,
+ * and scroll-context bookkeeping before the outlet processes the new match.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const navigate = (
@@ -313,6 +392,17 @@ export const navigate = (
 
 /**
  * Go back in history
+ *
+ * @remarks
+ * Delegates to the active router's history implementation.
+ *
+ * @example
+ * ```ts
+ * yield* Router.back
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const back: Effect.Effect<void, never, Router> = Effect.flatMap(
@@ -322,6 +412,17 @@ export const back: Effect.Effect<void, never, Router> = Effect.flatMap(
 
 /**
  * Go forward in history
+ *
+ * @remarks
+ * Delegates to the active router's history implementation.
+ *
+ * @example
+ * ```ts
+ * yield* Router.forward
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(
@@ -338,6 +439,12 @@ export const forward: Effect.Effect<void, never, Router> = Effect.flatMap(
  * const { id } = yield* Router.params("/users/:id")
  * ```
  *
+ * @remarks
+ * `params` reads the decoded params object the outlet placed in router context
+ * for the currently matched route.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<RouteParamsFor<Path>> =>
@@ -368,6 +475,12 @@ export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<Route
  * const isActive = yield* Signal.get(usersActive)
  * ```
  *
+ * @remarks
+ * `isActive` derives a boolean signal from the current route signal so callers
+ * can keep active-state rendering fine-grained.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const isActive = (
@@ -380,6 +493,18 @@ export const isActive = (
  * Prefetch route modules for a path.
  * Loads all modules (component, layouts) for the matched route into cache.
  * Best-effort: failures are silently ignored.
+ *
+ * @remarks
+ * `prefetch` delegates to the outlet-registered resolver, so it only starts
+ * doing real work once an outlet has mounted for the current router.
+ *
+ * @example
+ * ```ts
+ * yield* Router.prefetch("/users/123")
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const prefetch = (path: string): Effect.Effect<void, never, Router> =>
@@ -407,6 +532,12 @@ export const prefetch = (path: string): Effect.Effect<void, never, Router> =>
  *   .error(ErrorBoundary)
  * ```
  *
+ * @remarks
+ * `currentError` only succeeds while an error boundary is rendering for the
+ * active route.
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const currentError: Effect.Effect<RouteErrorInfo> = Effect.flatMap(
@@ -422,6 +553,12 @@ export const currentError: Effect.Effect<RouteErrorInfo> = Effect.flatMap(
 /**
  * Create a link click handler that navigates to a path
  * Prevents default browser navigation and uses router instead
+ *
+ * @remarks
+ * Lower-level helper used by `Link`. Prefer the component unless you need to
+ * wire navigation into a custom element.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const link =
@@ -438,6 +575,18 @@ export const link =
 /**
  * Create the browser router layer
  * Uses History API for navigation via platform services.
+ *
+ * @remarks
+ * `browserLayer` wires the router to real browser services, including history,
+ * location, scroll management, and viewport-prefetch observation.
+ *
+ * @example
+ * ```ts
+ * const app = Router.currentRoute.pipe(Effect.provide(Router.browserLayer))
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const browserLayer: Layer.Layer<
@@ -753,7 +902,19 @@ export const browserLayer: Layer.Layer<
  * Uses in-memory state instead of window.location/history.
  * Useful for unit tests that don't have a DOM or need isolated routing.
  *
- * @param initialPath - The initial path (defaults to "/")
+  * @param initialPath - The initial path (defaults to "/")
+ *
+ * @remarks
+ * `testLayer` keeps navigation purely in memory so router-aware Effects and
+ * components can run in unit tests without browser platform services.
+ *
+ * @example
+ * ```ts
+ * const program = Router.navigate("/users").pipe(Effect.provide(Router.testLayer("/")))
+ * ```
+ *
+ * @category Router Navigation
+ * @public
  * @since 1.0.0
  */
 export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>

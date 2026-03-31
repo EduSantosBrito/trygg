@@ -1,21 +1,14 @@
 /**
+ * Development-time component for enabling debug observability.
+ *
+ * @remarks
+ * Owner module for the `DevMode` topic. Use this component when the app should
+ * enable the public `Debug` surface from JSX instead of calling imperative
+ * helpers directly.
+ *
+ * @see ./dev-mode.docs.md - Source-owned topic guide
  * @since 1.0.0
- * DevMode component for enabling debug observability
- *
- * Add this component to your app to enable wide event logging in the console.
- *
- * **Singleton:** Mount only ONE DevMode per app. Multiple instances share
- * global debug state — unmounting one disables debugging for all.
- *
- * @example
- * ```tsx
- * import { mount, DevMode } from "trygg"
- *
- * mount(container, <>
- *   <App />
- *   <DevMode />
- * </>)
- * ```
+ * @module trygg/components/dev-mode
  */
 import { Effect } from "effect";
 import * as Debug from "../debug/debug.js";
@@ -24,7 +17,19 @@ import * as Component from "../primitives/component.js";
 import type { ComponentProps } from "../primitives/component.js";
 
 /**
- * Props for the DevMode component
+ * Props for the `DevMode` component.
+ *
+ * @remarks
+ * These props control when debug mode is enabled and which plugins receive the
+ * emitted debug events.
+ *
+ * @example
+ * ```ts
+ * const props: DevModeProps = { filter: ["signal"], enabled: true }
+ * ```
+ *
+ * @category Development
+ * @public
  * @since 1.0.0
  */
 export interface DevModeProps {
@@ -78,6 +83,7 @@ export interface DevModeProps {
 /**
  * DevMode component - enables debug observability when added to your app.
  *
+ * @remarks
  * This component renders nothing (empty fragment) but enables wide event
  * logging when mounted.
  *
@@ -118,6 +124,8 @@ export interface DevModeProps {
  * </>)
  * ```
  *
+ * @category Development
+ * @public
  * @since 1.0.0
  */
 export const DevMode = Component.gen(function* (Props: ComponentProps<DevModeProps>) {

@@ -1,6 +1,10 @@
 /**
- * @since 1.0.0
- * Router Link component for trygg
+ * Link component primitives for `trygg/router`.
+ *
+ * @remarks
+ * Owner module for declarative router links. This module owns the `Link`
+ * component, its type-safe props, and the prefetch strategy type used to decide
+ * when route work should warm before navigation.
  *
  * ## Type-Safe Navigation
  *
@@ -34,6 +38,9 @@
  *   )
  * })
  * ```
+ * @see ./link.docs.md - Source-owned topic guide
+ * @since 1.0.0
+ * @module trygg/router/link
  */
 import { Duration, Effect, Fiber } from "effect";
 import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
@@ -62,11 +69,22 @@ const PREFETCH_HOVER_DELAY_MS = 50;
 /**
  * Prefetch strategy for Link component.
  *
+ * @remarks
+ * `PrefetchStrategy` controls when `Link` should ask the router to prefetch the
+ * target route's work.
+ *
  * - `"intent"` (default): prefetch on hover (50ms debounce) or focus
  * - `"viewport"`: prefetch when link enters viewport (IntersectionObserver + requestIdleCallback)
  * - `"render"`: prefetch immediately when Link renders
  * - `false`: no prefetch
  *
+ * @example
+ * ```tsx
+ * <Link to="/users" prefetch="viewport">Users</Link>
+ * ```
+ *
+ * @category Router Links
+ * @public
  * @since 1.0.0
  */
 export type PrefetchStrategy = "intent" | "viewport" | "render" | false;
@@ -103,9 +121,23 @@ interface BaseLinkProps<Path extends RoutePath> {
 /**
  * Link props with route autocomplete.
  *
+ * @remarks
+ * `LinkProps` makes the `params` prop required only for route patterns that
+ * actually contain dynamic segments.
+ *
  * When the path contains dynamic segments (`:param`), the `params` prop is required.
  * When the path is static, `params` is not allowed.
  *
+ * @example
+ * ```tsx
+ * const profileLink: LinkProps<"/users/:id"> = {
+ *   to: "/users/:id",
+ *   params: { id: "123" },
+ * }
+ * ```
+ *
+ * @category Router Links
+ * @public
  * @since 1.0.0
  */
 export type LinkProps<Path extends RoutePath = RoutePath> =
@@ -379,5 +411,23 @@ const linkComponent: LinkComponent = Object.assign(
   },
 );
 
-// Export the tagged Link component
-export { linkComponent as Link };
+/**
+ * Router Link - navigates without full page reload.
+ *
+ * @remarks
+ * `Link` renders a real anchor for accessibility and SEO, but intercepts normal
+ * clicks to drive the router, keeping params, query, and prefetch behavior in
+ * one place.
+ *
+ * @example
+ * ```tsx
+ * <Link to="/users/:id" params={{ id: "123" }} prefetch="intent">
+ *   View user
+ * </Link>
+ * ```
+ *
+ * @category Router Links
+ * @public
+ * @since 1.0.0
+ */
+export const Link: LinkComponent = linkComponent;

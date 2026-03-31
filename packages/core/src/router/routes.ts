@@ -1,8 +1,10 @@
 /**
- * @since 1.0.0
- * Routes Collection
+ * Routes collection primitives for `trygg/router`.
  *
- * Collects route definitions and enforces R = never (all requirements satisfied).
+ * @remarks
+ * Owner module for the root route-manifest builder. This module owns the
+ * collection surface behind `Routes.make()` and the manifest shape consumed by
+ * `Outlet`.
  *
  * @example
  * ```tsx
@@ -14,6 +16,8 @@
  *   .notFound(NotFoundPage)
  *   .error(ErrorPage)  // Root error boundary
  * ```
+ * @since 1.0.0
+ * @module trygg/router/routes
  */
 import { Option } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
@@ -27,6 +31,12 @@ import type { RouteBuilder, RouteDefinition } from "./route.js";
 /**
  * Internal manifest produced by the Routes collection.
  * Used by the Outlet to render matched routes.
+ *
+ * @remarks
+ * `RoutesManifest` is the normalized tree read by route matching and outlet
+ * rendering after the collection is finalized.
+ *
+ * @internal
  * @since 1.0.0
  */
 export interface RoutesManifest {
@@ -43,6 +53,20 @@ export interface RoutesManifest {
 /**
  * Routes collection that accumulates route definitions.
  * `.add()` enforces R = never at type level.
+ *
+ * @remarks
+ * `RoutesCollection` is the fluent root builder used to gather top-level routes
+ * and root-level boundaries before passing `.manifest` to `Outlet`.
+ *
+ * @example
+ * ```tsx
+ * const routes = Routes.make()
+ *   .add(Route.make("/").component(HomePage))
+ *   .error(AppError)
+ * ```
+ *
+ * @category Route Collections
+ * @public
  * @since 1.0.0
  */
 export interface RoutesCollection {
@@ -126,7 +150,11 @@ const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
 /**
  * Create an empty routes collection.
  *
- * @example
+ * @remarks
+ * Start with `make` once all route definitions already have their required
+ * services provided and are ready to join the root manifest.
+ *
+  * @example
  * ```tsx
  * const routes = Routes.make()
  *   .add(homeRoute)
@@ -134,6 +162,8 @@ const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
  *   .notFound(NotFoundPage)
  * ```
  *
+ * @category Route Collections
+ * @public
  * @since 1.0.0
  */
 export const make = (): RoutesCollection =>
@@ -155,6 +185,11 @@ export const make = (): RoutesCollection =>
  *
  * This enables `<Router.Outlet />` without props.
  *
+ * @remarks
+ * Router internals use this FiberRef to thread the generated app manifest to
+ * nested outlets without requiring every render site to pass props manually.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const CurrentRoutesManifest = ServiceMap.Reference<Option.Option<RoutesManifest>>(

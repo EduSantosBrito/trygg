@@ -1,22 +1,47 @@
 /**
- * @since 1.0.0
- * cx - Effect-native class name composition with fine-grained reactivity.
+ * Class name composition for trygg.
  *
- * Combines class names with support for Signals. When Signal inputs are present,
- * returns a Signal<string> that updates reactively. Otherwise returns a plain string.
- * Used directly in className props — the renderer resolves the Effect internally.
+ * @remarks
+ * Owner module for the `cx` topic. Use this helper to compose static and signal-backed
+ * class names without manually subscribing to signal inputs. The root `trygg`
+ * entrypoint publishes this topic as `cx`, `ClassInput`, and `ClassValue`.
+ *
+ * @since 1.0.0
+ * @module trygg/primitives/cx
  */
 import { Effect, Scope, SubscriptionRef } from "effect";
 import * as Signal from "./signal.js";
 
 /**
  * Class name input type - basic values
+ *
+ * @remarks
+ * Matches the static shapes accepted by `cx`: strings, falsy sentinels, and object maps.
+ *
+ * @example
+ * ```ts
+ * const value: ClassValue = { active: true, disabled: false }
+ * ```
+ *
+ * @category Class Composition
+ * @public
  * @since 1.0.0
  */
 export type ClassValue = string | boolean | null | undefined | Record<string, boolean | undefined>;
 
 /**
  * Class name input that can include Signals for reactive class names
+ *
+ * @remarks
+ * `cx` upgrades to a reactive `Signal<string>` when any input is a signal.
+ *
+ * @example
+ * ```ts
+ * const input: ClassInput = variantSignal
+ * ```
+ *
+ * @category Class Composition
+ * @public
  * @since 1.0.0
  */
 export type ClassInput =
@@ -89,7 +114,11 @@ const computeClassesEffect = (inputs: ReadonlyArray<ClassInput>): Effect.Effect<
  * Supports both static values and Signals for reactive class names.
  * When Signals are present, returns a reactive Signal<string> that updates
  * automatically when any input Signal changes. The renderer resolves this
- * internally — no yield* needed at the call site.
+ * internally - no yield* needed at the call site.
+ *
+ * @remarks
+ * Use `cx` in `className` props when you want the same helper to work for static
+ * and reactive styling.
  *
  * @example
  * ```tsx
@@ -105,6 +134,8 @@ const computeClassesEffect = (inputs: ReadonlyArray<ClassInput>): Effect.Effect<
  * // className updates reactively when variant changes
  * ```
  *
+ * @category Class Composition
+ * @public
  * @since 1.0.0
  */
 export const cx = (

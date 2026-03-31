@@ -1,40 +1,19 @@
 /**
+ * Async state primitives for trygg.
+ *
+ * @remarks
+ * Owner module for the `Resource` topic. Use this module for cached async state,
+ * stale-while-revalidate refresh flows, and reactive fetches keyed from signals.
+ * The root `trygg` entrypoint publishes this topic as `Resource.*`.
+ *
+ * `Resource` separates three concerns:
+ * - descriptors define how to fetch and key data
+ * - `Resource.fetch` produces reactive `ResourceState`
+ * - matcher helpers turn that state into view logic
+ *
+ * @see ./resource.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Resource - Effect-native data fetching with caching and fine-grained reactivity
- *
- * Provides cached, deduplicated data fetching with stale-while-revalidate support.
- * Resources are fetched once and shared across components via ResourceRegistry.
- *
- * @example
- * ```tsx
- * import { Resource } from "trygg"
- * import { ApiClient } from "./api"
- * import { Effect } from "effect"
- *
- * // Define a no-params resource
- * const usersResource = Resource.make(
- *   () => Effect.gen(function* () {
- *     const c = yield* ApiClient
- *     return yield* c.users.listUsers()
- *   }),
- *   { key: "users.list" }
- * )
- *
- * // Define a parameterized resource
- * const userResource = Resource.make(
- *   (params: { id: string }) => Effect.gen(function* () {
- *     const c = yield* ApiClient
- *     return yield* c.users.getUser({ path: params })
- *   }),
- *   { key: (params) => Resource.hash("users.getUser", params) }
- * )
- *
- * // In a component - static fetch:
- * const state = yield* Resource.fetch(usersResource)
- *
- * // Reactive fetch (re-fetches when userId signal changes):
- * const state = yield* Resource.fetch(userResource, { id: userId })
- * ```
+ * @module trygg/primitives/resource
  */
 import {
   Cause,
@@ -77,6 +56,16 @@ import {
  * - `Success`: Fetch completed successfully, value available
  * - `Failure`: Fetch failed, error available (may have stale value from previous success)
  *
+ * @remarks
+ * `ResourceState` is the reactive output shape returned by `Resource.fetch`.
+ *
+ * @example
+ * ```ts
+ * const state: Resource.ResourceState<User, ApiError> = Resource.Pending()
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export type ResourceState<A, E> =
@@ -90,12 +79,34 @@ export type ResourceState<A, E> =
 
 /**
  * Create a Pending state.
+ *
+ * @remarks
+ * Used before the first successful fetch, or during a hard refresh.
+ *
+ * @example
+ * ```ts
+ * const state = Resource.Pending<User, ApiError>()
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const Pending = <A, E>(): ResourceState<A, E> => ({ _tag: "Pending" });
 
 /**
  * Create a Success state.
+ *
+ * @remarks
+ * `stale` marks that cached data is still shown while a background refetch runs.
+ *
+ * @example
+ * ```ts
+ * const state = Resource.Success({ id: "1" }, true)
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const Success = <A, E>(value: A, stale: boolean = false): ResourceState<A, E> => ({
@@ -106,6 +117,17 @@ export const Success = <A, E>(value: A, stale: boolean = false): ResourceState<A
 
 /**
  * Create a Failure state.
+ *
+ * @remarks
+ * Failures can preserve the last successful value through `staleValue`.
+ *
+ * @example
+ * ```ts
+ * const state = Resource.Failure<ApiUser, ApiError>(error, Option.none())
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const Failure = <A, E>(
@@ -119,6 +141,19 @@ export const Failure = <A, E>(
 
 /**
  * Check if a ResourceState is Pending.
+ *
+ * @remarks
+ * Use as a type guard when branching outside `Resource.match`.
+ *
+ * @example
+ * ```ts
+ * if (Resource.isPending(state)) {
+ *   return "loading"
+ * }
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const isPending = <A, E>(state: ResourceState<A, E>): state is { _tag: "Pending" } =>
@@ -126,6 +161,19 @@ export const isPending = <A, E>(state: ResourceState<A, E>): state is { _tag: "P
 
 /**
  * Check if a ResourceState is Success.
+ *
+ * @remarks
+ * Narrows to the success shape so `value` and `stale` become available.
+ *
+ * @example
+ * ```ts
+ * if (Resource.isSuccess(state)) {
+ *   return state.value
+ * }
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const isSuccess = <A, E>(
@@ -134,6 +182,19 @@ export const isSuccess = <A, E>(
 
 /**
  * Check if a ResourceState is Failure.
+ *
+ * @remarks
+ * Narrows to the failure shape so `error` and `staleValue` become available.
+ *
+ * @example
+ * ```ts
+ * if (Resource.isFailure(state)) {
+ *   return state.error
+ * }
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const isFailure = <A, E>(
@@ -147,6 +208,16 @@ export const isFailure = <A, E>(
 /**
  * Resource descriptor - defines what to fetch and how to identify it.
  *
+ * @remarks
+ * Resource descriptors are inert values. Call `Resource.fetch` to execute them.
+ *
+ * @example
+ * ```ts
+ * const users = Resource.make(() => Effect.succeed([]), { key: "users.list" })
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export interface Resource<A, E, R> {
@@ -162,6 +233,17 @@ export interface Resource<A, E, R> {
 /**
  * Allowed value for a single reactive param field.
  * Each field in the params can be either a static value or a Signal.
+ *
+ * @remarks
+ * `Signal` inputs make the fetch key reactive without changing the resource factory.
+ *
+ * @example
+ * ```ts
+ * type UserId = Resource.SignalOrValue<string>
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export type SignalOrValue<T> = T | Signal.Signal<T>;
@@ -169,6 +251,17 @@ export type SignalOrValue<T> = T | Signal.Signal<T>;
 /**
  * Params where each field can be a static value or a reactive Signal.
  * When any Signal field changes, the resource is re-fetched.
+ *
+ * @remarks
+ * This is the accepted shape for reactive `Resource.fetch(factory, params)` calls.
+ *
+ * @example
+ * ```ts
+ * type UserParams = Resource.ReactiveParams<{ id: string }>
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export type ReactiveParams<P extends object> = { readonly [K in keyof P]: SignalOrValue<P[K]> };
@@ -178,6 +271,10 @@ export type ReactiveParams<P extends object> = { readonly [K in keyof P]: Signal
  *
  * When `key` is a string, creates a no-params resource directly.
  * When `key` is a function, creates a parameterized factory.
+ *
+ * @remarks
+ * Keep keys stable and deterministic. The registry uses them for caching, dedupe,
+ * invalidation, and refresh semantics.
  *
  * @example
  * ```tsx
@@ -200,6 +297,8 @@ export type ReactiveParams<P extends object> = { readonly [K in keyof P]: Signal
  * )
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export function make<A, E, R>(
@@ -244,12 +343,17 @@ export function make<P extends object, A, E, R>(
  * Uses Effect's structural hashing (Hash.structure) for deterministic,
  * collision-resistant keys. Works with flat objects containing primitive values.
  *
+ * @remarks
+ * Use this when a resource key depends on parameter values.
+ *
  * @example
  * ```tsx
  * Resource.hash("users.getUser", { id: "123" })
  * // => "users.getUser:1234567"
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const hash = (prefix: string, params: object): string => {
@@ -288,6 +392,16 @@ const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
  * - Deduplicates concurrent requests
  * - Provides stale-while-revalidate support
  *
+ * @remarks
+ * Override this service when tests or custom runtime layers need different cache behavior.
+ *
+ * @example
+ * ```ts
+ * const registry = yield* Resource.ResourceRegistryTag
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export interface ResourceRegistry {
@@ -299,6 +413,17 @@ export interface ResourceRegistry {
 
 /**
  * ResourceRegistry service tag.
+ *
+ * @remarks
+ * Yield this service to inspect or replace the active resource registry.
+ *
+ * @example
+ * ```ts
+ * const registry = yield* Resource.ResourceRegistryTag
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export class ResourceRegistryTag extends ServiceMap.Service<
@@ -309,6 +434,16 @@ export class ResourceRegistryTag extends ServiceMap.Service<
 /**
  * Create a ResourceRegistry layer with an in-memory cache.
  *
+ * @remarks
+ * This is the default registry implementation used by app and test code.
+ *
+ * @example
+ * ```ts
+ * const program = Resource.fetch(users).pipe(Effect.provide(Resource.ResourceRegistryLive))
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effect(
@@ -507,6 +642,10 @@ const fetchInternal = <A, E, R>(
  * 2. Reactive: Pass a factory + reactive params. Re-fetches when Signal params change.
  *    Previous in-flight fetches are cancelled on param change.
  *
+ * @remarks
+ * Static fetches reuse cached entries by key. Reactive fetches keep the output
+ * signal stable while switching the backing cache entry as params change.
+ *
  * @example
  * ```tsx
  * // Static fetch (no-params resource):
@@ -520,6 +659,8 @@ const fetchInternal = <A, E, R>(
  * const state = yield* Resource.fetch(userResource, { id: userId })
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const fetch: {
@@ -886,6 +1027,16 @@ const renderFailure = <A, E>(
 /**
  * Pipeable matcher for Resource state rendering.
  *
+ * @remarks
+ * Build these with `Resource.match(state)` and finish with `Resource.exhaustive`.
+ *
+ * @example
+ * ```tsx
+ * const matcher = Resource.match(state)
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export interface ResourceMatcher<
@@ -934,6 +1085,10 @@ const makeMatcher = <
 /**
  * Start Resource state matching.
  *
+ * @remarks
+ * Use the matcher helpers when UI should react to `Pending`, `Success`, and `Failure`
+ * without manual switches in component code.
+ *
  * @example
  * ```tsx
  * const view = yield* Resource.match(state).pipe(
@@ -944,6 +1099,8 @@ const makeMatcher = <
  * )
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const match = <A, E>(
@@ -957,6 +1114,16 @@ export const match = <A, E>(
  * - `Success` payload: `{ value: A, stale: boolean }`
  * - `Failure` payload: `{ error: E, stale: Option.Option<A> }`
  *
+ * @remarks
+ * `Resource.on` keeps state rendering pipeable and type-safe until `Resource.exhaustive`.
+ *
+ * @example
+ * ```tsx
+ * const matcher = Resource.match(state).pipe(Resource.on("Pending", () => <Spinner />))
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export function on<RHandler>(
@@ -1026,6 +1193,21 @@ export function on(
  *
  * Requires handlers for all states.
  *
+ * @remarks
+ * This turns a matcher back into renderable output while preserving reactive updates.
+ *
+ * @example
+ * ```tsx
+ * const view = yield* Resource.match(state).pipe(
+ *   Resource.on("Pending", () => <Spinner />),
+ *   Resource.on("Success", ({ value }) => <UserCard user={value} />),
+ *   Resource.on("Failure", ({ error }) => <ErrorView error={error} />),
+ *   Resource.exhaustive,
+ * )
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const exhaustive = <A, E, R>(
@@ -1066,6 +1248,9 @@ export const exhaustive = <A, E, R>(
  * Preserves current Success value with stale=true during refetch.
  * Dedupes: no-op if fetch already in progress.
  *
+ * @remarks
+ * Use this for stale-while-revalidate flows where old data can stay visible.
+ *
  * @example
  * ```tsx
  * <button onClick={() => Resource.invalidate(userResource({ id }))}>
@@ -1073,6 +1258,8 @@ export const exhaustive = <A, E, R>(
  * </button>
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const invalidate = <A, E, R>(
@@ -1110,6 +1297,9 @@ export const invalidate = <A, E, R>(
  * Does not preserve stale value.
  * Dedupes: waits for in-progress fetch if any.
  *
+ * @remarks
+ * Use this when a hard reload is better than showing stale data.
+ *
  * @example
  * ```tsx
  * <button onClick={() => Resource.refresh(userResource({ id }))}>
@@ -1117,6 +1307,8 @@ export const invalidate = <A, E, R>(
  * </button>
  * ```
  *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const refresh = <A, E, R>(
@@ -1148,6 +1340,16 @@ export const refresh = <A, E, R>(
  *
  * Use this to force a fresh fetch on the next `Resource.fetch` call.
  *
+ * @remarks
+ * Clearing removes the cached entry entirely instead of marking it stale.
+ *
+ * @example
+ * ```ts
+ * yield* Resource.clear(userResource({ id: "1" }))
+ * ```
+ *
+ * @category Async State
+ * @public
  * @since 1.0.0
  */
 export const clear = <A, E, R>(

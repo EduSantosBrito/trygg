@@ -1,25 +1,34 @@
 /**
- * @since 1.0.0
- * SafeUrl validation for secure href/src attributes
+ * SafeUrl validation for secure href/src attributes.
  *
- * Uses WHATWG URL parsing and a scheme allowlist to prevent
- * dangerous URLs like `javascript:` from being rendered.
+ * @remarks
+ * Owner module for the `SafeUrl` topic. Use this module when URLs can cross an
+ * untrusted boundary before they reach DOM attributes like `href` or `src`.
+ * The root `trygg` entrypoint publishes this topic as `SafeUrl.*` and
+ * `UnsafeUrlError`.
  *
- * Config functions (getConfig, resetConfig, allowSchemes) are sync
- * since they only read/write module-level state with no failure modes.
- *
- * Validation functions (validate, validateOption, isSafe) return Effects
- * for composability in Effect pipelines.
- *
- * validateSync is provided for the renderer's sync DOM attribute path.
- *
+ * @see ./safe-url.docs.md - Source-owned topic guide
  * @see https://url.spec.whatwg.org/ - WHATWG URL Standard
  * @see https://www.iana.org/assignments/uri-schemes/ - IANA URI Schemes
+ * @since 1.0.0
+ * @module trygg/security/safe-url
  */
 import { Data, Effect, Option } from "effect";
 
 /**
  * Error produced when a URL fails validation.
+ *
+ * @remarks
+ * `SafeUrl.validate` and related helpers fail with this error when input is
+ * empty or uses a blocked scheme.
+ *
+ * @example
+ * ```ts
+ * const exit = yield* Effect.exit(SafeUrl.validate("javascript:alert(1)"))
+ * ```
+ *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
@@ -54,6 +63,18 @@ export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
  * - blob: Blob URLs (for local file references)
  * - data: Data URLs (for embedded content)
  *
+ * @remarks
+ * This list seeds the global SafeUrl configuration. Custom schemes extend this
+ * baseline instead of replacing it.
+ *
+ * @example
+ * ```ts
+ * const defaults = SafeUrl.DEFAULT_ALLOWED_SCHEMES
+ * ```
+ *
+ * @category Security
+ * @public
+ *
  * @since 1.0.0
  */
 export const DEFAULT_ALLOWED_SCHEMES: ReadonlyArray<string> = [
@@ -67,7 +88,21 @@ export const DEFAULT_ALLOWED_SCHEMES: ReadonlyArray<string> = [
 ] as const;
 
 /**
- * Configuration for SafeUrl validation
+ * Configuration for SafeUrl validation.
+ *
+ * @remarks
+ * `SafeUrlConfig` captures the allowlist used by `validate`, `validateSync`,
+ * and the renderer's attribute sanitization path.
+ *
+ * @example
+ * ```ts
+ * const config: SafeUrl.SafeUrlConfig = {
+ *   allowedSchemes: ["https", "mailto"],
+ * }
+ * ```
+ *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export interface SafeUrlConfig {
@@ -88,6 +123,17 @@ let _config: SafeUrlConfig = {
 
 /**
  * Get the current SafeUrl configuration.
+ *
+ * @remarks
+ * Use this to inspect the active allowlist before validating or extending it.
+ *
+ * @example
+ * ```ts
+ * const config = SafeUrl.getConfig()
+ * ```
+ *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const getConfig = (): SafeUrlConfig => _config;
@@ -95,11 +141,17 @@ export const getConfig = (): SafeUrlConfig => _config;
 /**
  * Add custom schemes to the allowlist.
  *
+ * @remarks
+ * Added schemes are normalized to lowercase, deduplicated, and appended to the
+ * default allowlist.
+ *
  * @example
  * ```ts
  * SafeUrl.allowSchemes(["myapp", "web+myapp"])
  * ```
  *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const allowSchemes = (schemes: ReadonlyArray<string>): void => {
@@ -111,7 +163,18 @@ export const allowSchemes = (schemes: ReadonlyArray<string>): void => {
 
 /**
  * Reset configuration to defaults.
- * Useful for testing.
+ *
+ * @remarks
+ * Useful for test isolation and for restoring the default allowlist after local
+ * customization.
+ *
+ * @example
+ * ```ts
+ * SafeUrl.resetConfig()
+ * ```
+ *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const resetConfig = (): void => {
@@ -152,7 +215,16 @@ const extractScheme = (url: string): Option.Option<string> => {
  * Validate a URL synchronously, returning Option.some(url) for valid
  * or Option.none() for invalid.
  *
+ * @remarks
  * Used by the renderer in the sync DOM attribute-setting path.
+ *
+ * @example
+ * ```ts
+ * const safe = SafeUrl.validateSync("https://example.com")
+ * ```
+ *
+ * @category Security
+ * @public
  *
  * @since 1.0.0
  */
@@ -183,6 +255,7 @@ export const validateSync = (url: string): Option.Option<string> => {
 /**
  * Validate a URL string against the current configuration.
  *
+ * @remarks
  * - Empty URLs are rejected with UnsafeUrlError
  * - Relative URLs (no scheme) are allowed
  * - Absolute URLs must use an allowed scheme
@@ -199,6 +272,8 @@ export const validateSync = (url: string): Option.Option<string> => {
  * yield* SafeUrl.validate("")
  * ```
  *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = Effect.fn(
@@ -240,12 +315,18 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = 
  * Validate a URL, returning Option.some(url) for valid or Option.none() for invalid.
  * Does not fail — useful when you want to skip invalid URLs without error handling.
  *
+ * @remarks
+ * Use this when invalid URLs should be dropped instead of surfaced as
+ * `UnsafeUrlError` failures.
+ *
  * @example
  * ```ts
  * const result = yield* SafeUrl.validateOption("javascript:alert(1)")
  * // Option.none()
  * ```
  *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const validateOption = (url: string): Effect.Effect<Option.Option<string>> =>
@@ -254,12 +335,18 @@ export const validateOption = (url: string): Effect.Effect<Option.Option<string>
 /**
  * Check if a URL is safe.
  *
+ * @remarks
+ * `isSafe` gives the same scheme verdict as `validateSync`, but collapsed to a
+ * boolean for guard-style control flow.
+ *
  * @example
  * ```ts
  * const safe = yield* SafeUrl.isSafe("https://example.com")
  * // true
  * ```
  *
+ * @category Security
+ * @public
  * @since 1.0.0
  */
 export const isSafe = (url: string): Effect.Effect<boolean> =>

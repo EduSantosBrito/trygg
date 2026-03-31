@@ -1,25 +1,15 @@
 /**
+ * Vite integration entrypoint for trygg.
+ *
+ * @remarks
+ * Owner module for `trygg/vite-plugin`. The supported consumer surface is the
+ * `trygg` plugin factory plus the public option and plugin-shape types used by
+ * `vite.config.ts`; the lower-level helpers in this file stay implementation
+ * details even when they are exported for local tests.
+ *
+ * @see ./plugin.docs.md - Source-owned topic guide
  * @since 1.0.0
- * Vite plugin for trygg
- *
- * Fully Effect-native implementation using:
- * - Data.TaggedError for yieldable errors
- * - FileSystem service via DevPlatform abstraction
- * - Match for exhaustive pattern matching
- * - Schema for dynamic validation
- * - Effect.forEach with concurrency for parallel operations
- *
- * @example
- * ```ts
- * // vite.config.ts
- * import { defineConfig } from "vite"
- * import { trygg } from "trygg/vite-plugin"
- * import tryggConfig from "./trygg.config"
- *
- * export default defineConfig({
- *   plugins: [trygg(tryggConfig)]
- * })
- * ```
+ * @module trygg/vite-plugin
  */
 import type { ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
@@ -207,6 +197,12 @@ const BUN_HANDLER_FACTORY_CODE = SHARED_FACTORY_CODE;
 
 /**
  * Plugin validation error.
+ *
+ * @remarks
+ * Internal validation helpers raise this when app structure or generated input
+ * files do not match what the Vite integration expects.
+ *
+ * @internal
  * @since 1.0.0
  */
 export class PluginValidationError extends Data.TaggedError("PluginValidationError")<{
@@ -252,6 +248,12 @@ export class PluginValidationError extends Data.TaggedError("PluginValidationErr
 
 /**
  * Multiple plugin validation errors.
+ *
+ * @remarks
+ * Batches several `PluginValidationError` values so the plugin can report the
+ * full set of structural problems from one validation pass.
+ *
+ * @internal
  * @since 1.0.0
  */
 export class PluginValidationErrors extends Data.TaggedError("PluginValidationErrors")<{
@@ -270,6 +272,12 @@ export class PluginValidationErrors extends Data.TaggedError("PluginValidationEr
 
 /**
  * Plugin file system error.
+ *
+ * @remarks
+ * Wraps file-system failures from generated file reads, writes, and directory
+ * creation while keeping the original cause attached for logs and tests.
+ *
+ * @internal
  * @since 1.0.0
  */
 export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemError")<{
@@ -280,6 +288,12 @@ export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemErr
 
 /**
  * Plugin parse error.
+ *
+ * @remarks
+ * Used by route and schema parsing helpers when source text cannot be turned
+ * into the intermediate structures the plugin needs.
+ *
+ * @internal
  * @since 1.0.0
  */
 export class PluginParseError extends Data.TaggedError("PluginParseError")<{
@@ -409,6 +423,12 @@ const logApiValidationError = (
 
 /**
  * Extract param names from a route path.
+ *
+ * @remarks
+ * Internal helper for route typing codegen. It keeps only colon-prefixed path
+ * segments and strips the leading `:`.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArray<string>> =>
@@ -421,6 +441,12 @@ export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArra
 
 /**
  * Generate TypeScript type for route params.
+ *
+ * @remarks
+ * Builds the stringified object type written into generated route maps from a
+ * route path's extracted params.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const generateParamType = (routePath: string): Effect.Effect<string> =>
@@ -439,6 +465,12 @@ export const generateParamType = (routePath: string): Effect.Effect<string> =>
 
 /**
  * Parsed route info extracted from a routes.ts source file.
+ *
+ * @remarks
+ * Internal intermediate shape used between textual route parsing and final
+ * route-type generation.
+ *
+ * @internal
  * @since 1.0.0
  */
 export interface ParsedRoute {
@@ -451,6 +483,12 @@ export interface ParsedRoute {
 
 /**
  * Parsed parameter with name and TypeScript type.
+ *
+ * @remarks
+ * Internal description of one decoded param or query field recovered from a
+ * route schema expression.
+ *
+ * @internal
  * @since 1.0.0
  */
 export interface ParsedParam {
@@ -461,6 +499,12 @@ export interface ParsedParam {
 
 /**
  * Map a Schema type expression to its TypeScript output type.
+ *
+ * @remarks
+ * Internal mapper used by route codegen. It intentionally handles only the
+ * schema forms emitted in route param and query definitions.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const schemaToType = (schemaExpr: string): string => {
@@ -498,6 +542,12 @@ export const schemaToType = (schemaExpr: string): string => {
 
 /**
  * Parse a Schema.Struct({ ... }) expression to extract field names and types.
+ *
+ * @remarks
+ * Internal regex-based parser for simple route schema structs used during
+ * route-type generation.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const parseSchemaStruct = (structBody: string): ReadonlyArray<ParsedParam> => {
@@ -524,6 +574,12 @@ export const parseSchemaStruct = (structBody: string): ReadonlyArray<ParsedParam
 /**
  * Parse routes from a routes.ts source string.
  * Extracts Route.make() paths, .params() schemas, .query() schemas, and children.
+ *
+ * @remarks
+ * Internal parser that recovers enough route metadata from source text to feed
+ * generated type declarations and build transforms.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const parseRoutes = (source: string): Effect.Effect<ReadonlyArray<ParsedRoute>> =>
@@ -623,6 +679,11 @@ const extractChildrenFromChain = (chain: string): Effect.Effect<ReadonlyArray<Pa
 
 /**
  * Resolve child routes against parent path to produce absolute paths.
+ *
+ * @remarks
+ * Flattens nested parsed routes into absolute route records before codegen.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const resolveRoutePaths = (
@@ -653,6 +714,12 @@ export const resolveRoutePaths = (
 
 /**
  * Generate RouteMap type declarations from parsed routes.
+ *
+ * @remarks
+ * Produces the ambient `trygg/router` RouteMap augmentation written to the
+ * generated `.trygg/routes.d.ts` file.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const generateRouteTypes = (
@@ -696,6 +763,11 @@ interface ImportedComponent {
  * Transform routes.ts for production build.
  * Replaces direct component references in .component() with lazy imports.
  *
+ * @remarks
+ * Internal production-build transform. It rewrites route component and layout
+ * references to lazy imports unless the surrounding route tree opts into eager
+ * rendering.
+ *
  * @example
  * ```ts
  * // Input:
@@ -706,6 +778,7 @@ interface ImportedComponent {
  * Route.make("/users/:id").component(() => import("./pages/users/profile").then(m => m.UserProfile))
  * ```
  *
+ * @internal
  * @since 1.0.0
  */
 export const transformRoutesForBuild = (
@@ -1029,6 +1102,12 @@ const writeFileSafe = (
 
 /**
  * Validate that api.ts does not import @effect/platform-node when platform is bun.
+ *
+ * @remarks
+ * Internal guard that prevents Bun builds from depending on the Node platform
+ * package through `app/api.ts`.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const validateApiPlatform = (
@@ -1077,6 +1156,10 @@ export const validateApiPlatform = (
  * The layout renders `<html>`, `<head>`, `<body>` which map to existing DOM.
  * Routes manifest is passed so `<Router.Outlet />` works without props.
  *
+ * @remarks
+ * Internal codegen step that writes the browser entry module under `.trygg/`.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const generateEntryModule = (
@@ -1113,6 +1196,12 @@ mountDocument(<App />, { manifest: routes.manifest })
  * Generate HTML shell.
  * Pure function — no Effect, no file I/O.
  * No `<title>` or `<meta>` beyond charset/viewport — HeadManager owns all head content.
+ *
+ * @remarks
+ * Internal template used for generated app HTML before runtime head content is
+ * hoisted into place.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
@@ -1133,6 +1222,11 @@ export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
  *   2. API routes — delegates to HttpApi handler (when `hasApi`)
  *   3. SPA fallback — serves `.trygg/index.html` for navigation requests
  *
+ * @remarks
+ * Internal codegen step that emits the production server source used for the
+ * generated server bundle.
+ *
+ * @internal
  * @since 1.0.0
  */
 export const generateServerEntry = (
@@ -1326,15 +1420,37 @@ ${tpl.runtime}.runMain(
  */
 /**
  * Plugin options for trygg.
- * Uses TryggConfig for type-safe configuration.
+ *
+ * @remarks
+ * `TryggOptions` reuses the `trygg/config` contract so Vite setup and app
+ * configuration stay aligned.
+ *
+ * @example
+ * ```ts
+ * const options: TryggOptions = { platform: "node", output: "server" }
+ * ```
+ *
+ * @category Vite Plugin
+ * @public
  * @since 1.0.0
  */
 export interface TryggOptions extends TryggConfig {}
 
 /**
  * Public plugin type deliberately avoids direct `vite` type coupling.
- * This prevents cross-install type identity conflicts when trygg and
+ *
+ * @remarks
+ * This shape prevents cross-install type identity conflicts when trygg and the
  * app resolve `vite` from different paths.
+ *
+ * @example
+ * ```ts
+ * const plugin: TryggPlugin = trygg()
+ * ```
+ *
+ * @category Vite Plugin
+ * @public
+ * @since 1.0.0
  */
 export interface TryggPlugin {
   readonly name: string;
@@ -1355,16 +1471,22 @@ interface PreviewServerLike {
 /**
  * Create trygg Vite plugin with platform-aware dev API.
  *
+ * @remarks
+ * `trygg` wires JSX transforms, generated entry modules, route types, and the
+ * optional dev API bridge behind one Vite plugin instance.
+ *
  * @example
  * ```ts
- * import { trygg } from "trygg/vite-plugin"
- * import tryggConfig from "./trygg.config"
+  * import { trygg } from "trygg/vite-plugin"
+  * import tryggConfig from "./trygg.config"
  *
  * export default defineConfig({
  *   plugins: [trygg(tryggConfig)]
  * })
  * ```
  *
+ * @category Vite Plugin
+ * @public
  * @since 1.0.0
  */
 export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
