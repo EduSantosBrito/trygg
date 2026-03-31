@@ -65,6 +65,7 @@ import { buildPathWithParams } from "./types.js";
 // F-001: Prefetch constants from framework research
 /** Hover delay before prefetch triggers (TanStack Router default) */
 const PREFETCH_HOVER_DELAY_MS = 50;
+const linkRuntimeIdentity = Symbol("trygg/router/Link");
 
 /**
  * Prefetch strategy for Link component.
@@ -366,7 +367,7 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
     });
 
   // Return a component element that will execute the effect when rendered
-  return componentElement(run);
+  return componentElement(run, null, linkRuntimeIdentity, props);
 }
 
 // Define the Link component type with Component.Type properties
@@ -397,7 +398,7 @@ const linkComponent: LinkComponent = Object.assign(
               const element = LinkImpl(props);
               return provideElement(context, element);
             });
-          return componentElement(run);
+          return componentElement(run, null, wrappedLink, props);
         },
         {
           _tag: "EffectComponent" as const,

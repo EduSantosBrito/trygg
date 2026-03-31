@@ -334,8 +334,8 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
  *
  * Rule: stateful services should use `Signal.makeSync` + `Layer.succeed`.
  *
-  * Use `Signal.make` inside `Component.gen` for component-local state
-  * that is scoped to the component's lifecycle and cleaned up automatically.
+ * Use `Signal.make` inside `Component.gen` for component-local state
+ * that is scoped to the component's lifecycle and cleaned up automatically.
  *
  * @remarks
  * Use this for stable module-lifetime state, not per-render state. It avoids the

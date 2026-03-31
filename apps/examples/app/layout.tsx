@@ -103,6 +103,9 @@ export default Component.gen(function* () {
               <Router.Link to="/prefetch" className="nav-link">
                 Prefetch
               </Router.Link>
+              <Router.Link to="/identity" className="nav-link">
+                Identity
+              </Router.Link>
             </div>
           </nav>
         </aside>

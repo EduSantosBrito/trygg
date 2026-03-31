@@ -589,7 +589,7 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Component");
+      assert.strictEqual(result._tag, "ErrorBoundaryElement");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -930,8 +930,8 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
 
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
-      // Error boundary catches the RenderLoadError and renders error component
-      assert.strictEqual(result._tag, "Component");
+      // Error boundary catches the RenderLoadError and returns an explicit boundary wrapper.
+      assert.strictEqual(result._tag, "ErrorBoundaryElement");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });

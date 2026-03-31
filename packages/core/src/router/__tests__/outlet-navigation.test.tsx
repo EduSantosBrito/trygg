@@ -16,7 +16,7 @@
  * The route reading should happen inside the AsyncLoader's tracking, not
  * in the component body.
  */
-import { assert, describe } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
@@ -33,6 +33,7 @@ import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
+import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
 
 // =============================================================================
@@ -273,6 +274,78 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
           `(not torn down and recreated). This proves the component did not re-render.`,
       );
     }).pipe(Effect.provide(testLayerAt("/dashboard"))),
+  );
+});
+
+describe("Outlet - stable identity", () => {
+  it.effect("returns a stable runtime wrapper with identity metadata", () =>
+    unsafeEraseR(
+      Effect.gen(function* () {
+        const manifest = Routes.make().add(
+          Route.make("/").component(Effect.succeed(text("Home"))),
+        ).manifest;
+        const outlet = Outlet({ routes: manifest });
+
+        assert.strictEqual(outlet._tag, "Component");
+
+        const runtime = yield* outlet.run();
+
+        if (runtime._tag !== "Component") {
+          assert.fail("Expected Outlet runtime to return a component wrapper");
+        }
+
+        assert.isDefined(runtime.identity);
+        assert.deepStrictEqual(runtime.inputs, { routes: manifest });
+      }),
+    ),
+  );
+
+  scoped("preserves route child DOM and local state on child-local signal updates", () =>
+    Effect.gen(function* () {
+      let cleanupCount = 0;
+      let noteSignal: Signal.Signal<string> | null = null;
+
+      const IdentityLayout = Components.gen(function* () {
+        return <Outlet />;
+      });
+
+      const IdentityChild = Components.gen(function* () {
+        const note = yield* Signal.make("hello");
+        noteSignal = note;
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            cleanupCount++;
+          }),
+        );
+
+        const value = yield* Signal.get(note);
+        return <input data-testid="route-note" value={value} />;
+      });
+
+      const manifest = Routes.make().add(
+        Route.make("/").layout(IdentityLayout).children(Route.index(IdentityChild)),
+      ).manifest;
+
+      const { getByTestId } = yield* render(<Outlet routes={manifest} />).pipe(
+        Effect.provide(testLayerAt("/")),
+      );
+
+      const signalBefore = noteSignal;
+      assert.isNotNull(signalBefore);
+
+      const inputBefore = (yield* getByTestId("route-note")) as HTMLInputElement;
+      assert.strictEqual(inputBefore.value, "hello");
+
+      yield* Signal.set(signalBefore, "hello world");
+      yield* TestClock.adjust(20);
+
+      const inputAfter = (yield* getByTestId("route-note")) as HTMLInputElement;
+
+      assert.strictEqual(cleanupCount, 0);
+      assert.strictEqual(inputAfter, inputBefore);
+      assert.strictEqual(inputAfter.value, "hello world");
+    }).pipe(Effect.provide(testLayerAt("/"))),
   );
 });
 

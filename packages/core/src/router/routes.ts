@@ -154,7 +154,7 @@ const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
  * Start with `make` once all route definitions already have their required
  * services provided and are ready to join the root manifest.
  *
-  * @example
+ * @example
  * ```tsx
  * const routes = Routes.make()
  *   .add(homeRoute)

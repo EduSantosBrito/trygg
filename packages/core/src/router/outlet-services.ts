@@ -7,7 +7,12 @@
  */
 import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
-import { type Element, componentElement, provideElement } from "../primitives/element.js";
+import {
+  Element as ElementNode,
+  type Element,
+  componentElement,
+  provideElement,
+} from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
@@ -30,6 +35,10 @@ import {
 import { CurrentRouteParams, CurrentRouteError, CurrentOutletChild } from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
+
+const routeComponentWrapperIdentity = Symbol("trygg/router/OutletRenderer.component");
+const routeLayoutWrapperIdentity = Symbol("trygg/router/OutletRenderer.layout");
+const routeErrorWrapperIdentity = Symbol("trygg/router/OutletRenderer.error");
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
@@ -56,6 +65,69 @@ export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => 
  */
 const isEffectElement = (u: RouteComponent): u is Effect.Effect<Element, unknown, unknown> =>
   Effect.isEffect(u);
+
+const wrapElementWithFiberRefs = (
+  element: Element,
+  wrapRun: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+): Element => {
+  switch (element._tag) {
+    case "Component":
+      return componentElement(
+        () =>
+          wrapRun(element.run()).pipe(
+            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+            unsafeEraseR,
+          ),
+        element.key,
+        element.identity ?? element.run,
+        element.inputs,
+      );
+    case "Provide":
+      return provideElement(element.context, wrapElementWithFiberRefs(element.child, wrapRun));
+    case "Intrinsic":
+      return ElementNode.Intrinsic({
+        tag: element.tag,
+        props: element.props,
+        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+        key: element.key,
+      });
+    case "Fragment":
+      return ElementNode.Fragment({
+        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+      });
+    case "Portal":
+      return ElementNode.Portal({
+        target: element.target,
+        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+      });
+    case "KeyedList":
+      return ElementNode.KeyedList({
+        source: element.source,
+        keyFn: element.keyFn,
+        renderFn: (item, index) =>
+          element.renderFn(item, index).pipe(
+            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+          ),
+      });
+    case "ErrorBoundaryElement":
+      if (typeof element.fallback === "function") {
+        const fallback = element.fallback;
+        return ElementNode.ErrorBoundaryElement({
+          child: wrapElementWithFiberRefs(element.child, wrapRun),
+          fallback: (cause) => wrapElementWithFiberRefs(fallback(cause), wrapRun),
+          onError: element.onError,
+        });
+      }
+
+      return ElementNode.ErrorBoundaryElement({
+        child: wrapElementWithFiberRefs(element.child, wrapRun),
+        fallback: wrapElementWithFiberRefs(element.fallback, wrapRun),
+        onError: element.onError,
+      });
+    default:
+      return element;
+  }
+};
 
 // =============================================================================
 // OutletRenderer Service
@@ -281,42 +353,27 @@ export function renderComponent(
       locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
     );
 
-  // RouteComponent can be Component.Type or Effect<Element>
-  if (Component.isEffectComponent(component)) {
-    const element = component({});
-    if (element._tag === "Component") {
-      const originalRun = element.run;
-      return Effect.succeed(
-        componentElement(() =>
-          withRouteContext(
-            Effect.gen(function* () {
-              const routeElement = yield* originalRun();
-              const capturedContext = yield* Effect.services<unknown>();
-              return provideElement(capturedContext, routeElement);
-            }),
-          ).pipe(unsafeEraseR),
-        ),
-      );
-    }
-    return Effect.succeed(element);
-  }
-
-  // Component is an Effect<Element> - wrap it
-  if (isEffectElement(component)) {
-    return Effect.succeed(
-      componentElement(() =>
-        withRouteContext(
-          Effect.gen(function* () {
-            const routeElement = yield* component;
-            const capturedContext = yield* Effect.services<unknown>();
-            return provideElement(capturedContext, routeElement);
-          }),
-        ).pipe(unsafeEraseR),
-      ),
+  const wrapRouteElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
+    componentElement(
+      () =>
+        Effect.gen(function* () {
+          const capturedContext = yield* Effect.services<unknown>();
+          const element = yield* effect;
+          return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
+        }).pipe(unsafeEraseR),
+      null,
+      routeComponentWrapperIdentity,
+      { params, query: decodedQuery, wrappedIdentity: component },
     );
+
+  if (Component.isEffectComponent(component)) {
+    return Effect.succeed(wrapRouteElement(Effect.succeed(component({}))));
   }
 
-  // Should never reach here if RouteComponent type is correct
+  if (isEffectElement(component)) {
+    return Effect.succeed(wrapRouteElement(component));
+  }
+
   return Effect.fail(new InvalidRouteComponent({ actual: component }));
 }
 
@@ -342,42 +399,27 @@ export function renderLayout(
       ),
     );
 
-  // RouteComponent can be Component.Type or Effect<Element>
-  if (Component.isEffectComponent(layout)) {
-    const element = layout({});
-    if (element._tag === "Component") {
-      const originalRun = element.run;
-      return Effect.succeed(
-        componentElement(() =>
-          withLayoutContext(
-            Effect.gen(function* () {
-              const layoutElement = yield* originalRun();
-              const capturedContext = yield* Effect.services<unknown>();
-              return provideElement(capturedContext, layoutElement);
-            }),
-          ).pipe(unsafeEraseR),
-        ),
-      );
-    }
-    return Effect.succeed(element);
-  }
-
-  // Layout is an Effect<Element> - wrap it
-  if (isEffectElement(layout)) {
-    return Effect.succeed(
-      componentElement(() =>
-        withLayoutContext(
-          Effect.gen(function* () {
-            const layoutElement = yield* layout;
-            const capturedContext = yield* Effect.services<unknown>();
-            return provideElement(capturedContext, layoutElement);
-          }),
-        ).pipe(unsafeEraseR),
-      ),
+  const wrapLayoutElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
+    componentElement(
+      () =>
+        Effect.gen(function* () {
+          const capturedContext = yield* Effect.services<unknown>();
+          const element = yield* effect;
+          return provideElement(capturedContext, wrapElementWithFiberRefs(element, withLayoutContext));
+        }).pipe(unsafeEraseR),
+      null,
+      routeLayoutWrapperIdentity,
+      { child, params, query: decodedQuery, wrappedIdentity: layout },
     );
+
+  if (Component.isEffectComponent(layout)) {
+    return Effect.succeed(wrapLayoutElement(Effect.succeed(layout({}))));
   }
 
-  // Should never reach here if RouteComponent type is correct
+  if (isEffectElement(layout)) {
+    return Effect.succeed(wrapLayoutElement(layout));
+  }
+
   return Effect.fail(new InvalidRouteComponent({ actual: layout }));
 }
 
@@ -390,53 +432,44 @@ export function renderError(
   cause: Cause.Cause<unknown>,
   path: string,
 ): Effect.Effect<Element, InvalidRouteComponent, never> {
-  return Effect.gen(function* () {
-    yield* Metrics.recordRouteError;
+  return unsafeEraseR(
+    Effect.gen(function* () {
+      yield* Metrics.recordRouteError;
 
-    const resetSignal = yield* Signal.make(0);
+      const resetSignal = yield* Signal.make(0);
 
-    const errorInfo: RouteErrorInfo = {
-      cause,
-      path,
-      reset: Signal.update(resetSignal, (n) => n + 1),
-    };
+      const errorInfo: RouteErrorInfo = {
+        cause,
+        path,
+        reset: Signal.update(resetSignal, (n) => n + 1),
+      };
 
-    // RouteComponent can be Component.Type or Effect<Element>
-    if (Component.isEffectComponent(errorComp)) {
-      const element = errorComp({});
-      if (element._tag === "Component") {
-        const originalRun = element.run;
-        return componentElement(() =>
-          locallyFiberRef(
-            CurrentRouteError,
-            Option.some(errorInfo),
+      const withErrorContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+        locallyFiberRef(CurrentRouteError, Option.some(errorInfo), effect);
+
+      const wrapErrorElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
+        componentElement(
+          () =>
             Effect.gen(function* () {
-              const errorElement = yield* originalRun();
               const capturedContext = yield* Effect.services<unknown>();
-              return provideElement(capturedContext, errorElement);
-            }),
-          ).pipe(unsafeEraseR),
+              const element = yield* effect;
+              return provideElement(capturedContext, wrapElementWithFiberRefs(element, withErrorContext));
+            }).pipe(unsafeEraseR),
+          null,
+          routeErrorWrapperIdentity,
+          { cause, path, wrappedIdentity: errorComp },
         );
+
+      if (Component.isEffectComponent(errorComp)) {
+        return wrapErrorElement(Effect.succeed(errorComp({})));
       }
-      return element;
-    }
 
-    // Error component is an Effect<Element> - wrap it
-    if (isEffectElement(errorComp)) {
-      return componentElement(() =>
-        locallyFiberRef(
-          CurrentRouteError,
-          Option.some(errorInfo),
-          Effect.gen(function* () {
-            const errorElement = yield* errorComp;
-            const capturedContext = yield* Effect.services<unknown>();
-            return provideElement(capturedContext, errorElement);
-          }),
-        ).pipe(unsafeEraseR),
-      );
-    }
+      if (isEffectElement(errorComp)) {
+        return wrapErrorElement(errorComp);
+      }
 
-    // Should never reach here if RouteComponent type is correct
-    return yield* new InvalidRouteComponent({ actual: errorComp });
-  });
+      // Should never reach here if RouteComponent type is correct
+      return yield* new InvalidRouteComponent({ actual: errorComp });
+    }),
+  );
 }

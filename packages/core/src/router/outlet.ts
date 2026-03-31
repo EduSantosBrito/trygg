@@ -24,7 +24,13 @@ import {
   SubscriptionRef,
 } from "effect";
 import * as Debug from "../debug/debug.js";
-import { type Element, text, signalElement, componentElement } from "../primitives/element.js";
+import {
+  Element as ElementEnum,
+  type Element,
+  text,
+  signalElement,
+  componentElement,
+} from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import type { ComponentProps } from "../primitives/component.js";
@@ -56,6 +62,9 @@ import { ScrollStrategy } from "./scroll-strategy.js";
 import { type ComponentInput, type ComponentLoader, type RouteComponent } from "./types.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
+
+const outletRuntimeIdentity = Symbol("trygg/router/Outlet.runtime");
+const outletErrorBoundaryIdentity = Symbol("trygg/router/Outlet.error-boundary");
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -515,28 +524,17 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                 renderError(resolvedErrorComp, resolutionCause, routePath),
               ),
             );
-            return componentElement(() =>
-              Effect.gen(function* () {
-                if (routeElement._tag === "Component") {
-                  return yield* routeElement.run().pipe(
-                    Effect.catchCause((sandboxedCause) =>
-                      Effect.gen(function* () {
-                        const errorEl = yield* renderError(
-                          resolvedErrorComp,
-                          sandboxedCause,
-                          routePath,
-                        );
-                        if (errorEl._tag === "Component") {
-                          return yield* errorEl.run();
-                        }
-                        return errorEl;
-                      }),
-                    ),
-                  );
-                }
-                return routeElement;
-              }),
-            );
+            return ElementEnum.ErrorBoundaryElement({
+              child: routeElement,
+              fallback: (sandboxedCause) =>
+                componentElement(
+                  () => renderError(resolvedErrorComp, sandboxedCause, routePath),
+                  null,
+                  outletErrorBoundaryIdentity,
+                  { errorComponent: resolvedErrorComp, routePath },
+                ),
+              onError: null,
+            });
           }),
       });
 
@@ -735,5 +733,5 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     return signalElement(viewSignal, { onSwap: onSwapEffect });
   });
 
-  return componentElement(() => outletEffect);
+  return componentElement(() => outletEffect, null, outletRuntimeIdentity, props);
 });

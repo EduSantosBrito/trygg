@@ -27,6 +27,7 @@ import * as Signal from "../../primitives/signal.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../../primitives/component.js";
 import * as Route from "../route.js";
+import * as Routes from "../routes.js";
 
 // Tagged error for testing route errors
 class TestRouteError extends Data.TaggedError("TestRouteError")<{ message: string }> {}
@@ -106,6 +107,22 @@ describe("Router.params", () => {
 
       assert.isDefined(params);
     }).pipe(Effect.provide(Router.testLayer("/org/1/user/2"))),
+  );
+
+  scoped("should be accessible inside routed Component.gen pages", () =>
+    Effect.gen(function* () {
+      const Page = Component.gen(function* () {
+        const params = yield* Router.params("/users/:id");
+        return <div data-testid="route-params">{params.id ?? "missing"}</div>;
+      });
+
+      const manifest = Routes.make().add(Route.make("/users/:id").component(Page)).manifest;
+      const { getByTestId } = yield* render(<Outlet routes={manifest} />).pipe(
+        Effect.provide(Router.testLayer("/users/123")),
+      );
+
+      assert.strictEqual((yield* getByTestId("route-params")).textContent, "123");
+    }),
   );
 });
 

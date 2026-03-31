@@ -26,6 +26,8 @@ const NestedProvidePage = () => import("./pages/nested-provide");
 const DashboardPage = () => import("./pages/dashboard");
 const ResourcePage = () => import("./pages/resource");
 const PrefetchPage = () => import("./pages/prefetch");
+const IdentityLayout = () => import("./pages/identity/layout");
+const IdentityOverview = () => import("./pages/identity/overview");
 const LoginPage = () => import("./pages/login");
 const ProtectedPage = () => import("./pages/protected");
 const UsersListPage = () => import("./pages/users/list");
@@ -58,6 +60,12 @@ export const routes = Routes.make()
   .add(Route.make("/dashboard").component(DashboardPage).loading(LoadingFallback))
   .add(Route.make("/resource").component(ResourcePage).loading(LoadingFallback))
   .add(Route.make("/prefetch").component(PrefetchPage).loading(LoadingFallback))
+  .add(
+    Route.make("/identity")
+      .layout(IdentityLayout)
+      .children(Route.index(IdentityOverview))
+      .loading(LoadingFallback),
+  )
   .add(Route.make("/login").component(LoginPage).loading(LoadingFallback))
   .add(
     Route.make("/protected")

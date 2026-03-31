@@ -7,8 +7,7 @@ export const Modal = Component.gen(function* () {
   const open = () => Signal.set(isOpen, true);
   const close = () => Signal.set(isOpen, false);
 
-  const handleBackdropClick = (e: Event) =>
-    e.target === e.currentTarget ? close() : Effect.void;
+  const handleBackdropClick = (e: Event) => (e.target === e.currentTarget ? close() : Effect.void);
 
   const PortalledModal = yield* Portal.make(
     <div

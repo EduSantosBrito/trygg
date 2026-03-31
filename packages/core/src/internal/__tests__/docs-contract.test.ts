@@ -307,6 +307,46 @@ describe("docs contract", () => {
     ),
   );
 
+  it.effect("filters violations to touched owners when touched files are provided", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureRoot = yield* makeDocsFixture({
+          ownerSource: [
+            "/**",
+            " * Fixture owner module.",
+            " *",
+            " * @remarks",
+            " * Owns the migrated fixture surface.",
+            " *",
+            " * @see ./owner.docs.md - Source-owned topic guide",
+            " * @module trygg",
+            " */",
+            "",
+            "/**",
+            " * Fixture value.",
+            " *",
+            " * @remarks",
+            " * `thing` is the migrated surface under test.",
+            " *",
+            " * @category Fixtures",
+            " * @public",
+            " * @since 1.0.0",
+            " */",
+            'export const thing = "ok";',
+            "",
+          ].join("\n"),
+        });
+
+        const report = yield* checkDocsContract({
+          packageRoot: fixtureRoot,
+          touchedFiles: ["src/unrelated.ts"],
+        });
+
+        assert.deepStrictEqual(report.violations, []);
+      }),
+    ),
+  );
+
   it.effect("reports category and unknown-tag regressions", () =>
     Effect.scoped(
       Effect.gen(function* () {

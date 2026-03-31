@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
+import * as Component from "../../primitives/component.js";
 import { text } from "../../primitives/element.js";
+import * as Signal from "../../primitives/signal.js";
 import { render } from "../../testing/index.js";
 import { Link } from "../link.js";
 import { Outlet } from "../outlet.js";
@@ -128,6 +130,52 @@ describe("Link prefetch", () => {
       yield* TestClock.adjust(60);
 
       assert.strictEqual(yield* Ref.get(count), 1);
+    }),
+  );
+
+  it.effect("preserves Link DOM node on parent rerender", () =>
+    Effect.gen(function* () {
+      const parentTrigger = Signal.makeSync(0);
+
+      const App = Component.gen(function* () {
+        yield* Signal.get(parentTrigger);
+        return <Link to="/about">About</Link>;
+      });
+
+      const { getByRole } = yield* render(<App />).pipe(Effect.provide(Router.testLayer("/")));
+      const linkBefore = yield* getByRole("link");
+
+      yield* Signal.set(parentTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      const linkAfter = yield* getByRole("link");
+
+      assert.strictEqual(linkAfter, linkBefore);
+    }),
+  );
+
+  it.effect("preserves Link DOM node on local parent signal rerender", () =>
+    Effect.gen(function* () {
+      let localTrigger: Signal.Signal<number> | null = null;
+
+      const App = Component.gen(function* () {
+        const trigger = yield* Signal.make(0);
+        localTrigger = trigger;
+        yield* Signal.get(trigger);
+        return <Link to="/about">About</Link>;
+      });
+
+      const { getByRole } = yield* render(<App />).pipe(Effect.provide(Router.testLayer("/")));
+      const linkBefore = yield* getByRole("link");
+
+      assert.isNotNull(localTrigger);
+
+      yield* Signal.set(localTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      const linkAfter = yield* getByRole("link");
+
+      assert.strictEqual(linkAfter, linkBefore);
     }),
   );
 });
