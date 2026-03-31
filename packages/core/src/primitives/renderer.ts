@@ -1208,12 +1208,15 @@ const renderElement = (
             pendingRerender = false;
           });
 
-        const rerenderEffect = Effect.gen(function* () {
-          if (isUnmounted) {
-            isRerendering = false;
-            pendingRerender = false;
-            return;
-          }
+        type RerenderFailureMode = "preserve" | "defect";
+
+        const rerenderEffect = (failureMode: RerenderFailureMode) =>
+          Effect.gen(function* () {
+            if (isUnmounted) {
+              isRerendering = false;
+              pendingRerender = false;
+              return;
+            }
 
             // Track re-render duration
             const rerenderStart = performance.now();
@@ -1262,7 +1265,21 @@ const renderElement = (
             if (needsAnotherRender) {
               scheduleRerender();
             }
-          }).pipe(Effect.catchCause(onRerenderFailure), Scope.provide(rendererScope));
+          }).pipe(
+            Effect.catchCause((cause) =>
+              failureMode === "defect" && options.errorHandler === null
+                ? Effect.ensuring(
+                    Effect.die(Cause.squash(cause)),
+                    Effect.gen(function* () {
+                      isRerendering = false;
+                      pendingRerender = false;
+                      yield* cleanupCurrent.pipe(Effect.catchCause(() => Effect.void));
+                    }),
+                  )
+                : onRerenderFailure(cause),
+            ),
+            Scope.provide(rendererScope),
+          );
 
         // Forward declaration for recursive scheduling
         let scheduleRerender: () => void;
@@ -1273,7 +1290,7 @@ const renderElement = (
           // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
           // The Debug.log below is triggered from within the Effect.gen that follows
 
-          runForkInRenderContext(rerenderEffect, runtime, currentContext);
+          runForkInRenderContext(rerenderEffect("preserve"), runtime, currentContext);
         };
 
         // Schedule a re-render via microtask
@@ -1398,7 +1415,7 @@ const renderElement = (
 
               isRerendering = true;
               renderCount++;
-              yield* rerenderEffect;
+              yield* rerenderEffect("defect");
               return true;
             }),
         };
