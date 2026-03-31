@@ -18,7 +18,7 @@
  */
 import { assert, describe } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Data, Effect, Exit, Layer, Option, Scope } from "effect";
+import { Cause, Data, Effect, Exit, Layer, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { TestClock } from "effect/testing";
 
@@ -28,9 +28,11 @@ import { render } from "../../testing/index.js";
 import * as Signal from "../signal.js";
 import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
+import * as ErrorBoundary from "../error-boundary.js";
+import { Renderer, browserLayer } from "../renderer.js";
 import * as Router from "../../router/index.js";
 import { Element, Fragment } from "../../index.js";
-import { unsafeWidenContext } from "../../internal/unsafe.js";
+import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
 
 // =============================================================================
 // mount - App entry point
@@ -1279,6 +1281,143 @@ describe("Re-render behavior", () => {
       assert.strictEqual(inputAfter, inputBefore);
       assert.strictEqual(inputAfter.value, "red");
     }),
+  );
+
+  scoped("should treat stable child update failures without a boundary as defects", () =>
+    unsafeEraseR(
+      Effect.gen(function* () {
+        class StableChildError extends Data.TaggedError("StableChildError")<{
+          readonly reason: "update-failed";
+        }> {}
+
+        const Child = Component.gen(function* (
+          Props: Component.ComponentProps<{ value: string }>,
+        ) {
+          const { value } = yield* Props;
+          if (value === "after") {
+            return yield* new StableChildError({ reason: "update-failed" });
+          }
+          return <div data-testid="stable-child-failure">{value}</div>;
+        });
+
+        const Parent = Component.gen(function* (
+          Props: Component.ComponentProps<{ value: string }>,
+        ) {
+          const { value } = yield* Props;
+          return <Child value={value} />;
+        });
+
+        const renderer = yield* Renderer;
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+        const result = yield* unsafeEraseR(renderer.render(<Parent value="before" />, container));
+        yield* Effect.addFinalizer(() =>
+          unsafeEraseR(result.cleanup.pipe(Effect.catchCause(() => Effect.void))),
+        );
+
+        assert.strictEqual(
+          container.querySelector('[data-testid="stable-child-failure"]')?.textContent,
+          "before",
+        );
+
+        const reconcile = result.reconcile;
+        if (reconcile === undefined) {
+          assert.fail("Expected stable child render result to support reconcile");
+        }
+
+        const exit = yield* Effect.exit(unsafeEraseR(reconcile(<Parent value="after" />, null)));
+
+        Exit.match(exit, {
+          onFailure: (cause) => {
+            assert.isTrue(Cause.hasDies(cause));
+            assert.instanceOf(Cause.squash(cause), StableChildError);
+          },
+          onSuccess: () => {
+            assert.fail("Expected stable child update to defect");
+          },
+        });
+
+        assert.isNull(container.querySelector('[data-testid="stable-child-failure"]'));
+      }).pipe(Effect.provide(browserLayer)),
+    ),
+  );
+
+  scoped("should swap to ErrorBoundary fallback when a stable child update defects", () =>
+    unsafeEraseR(
+      Effect.gen(function* () {
+        class StableChildError extends Data.TaggedError("StableChildError")<{
+          readonly reason: "update-failed";
+        }> {}
+
+        const RiskyChild = Component.gen(function* (
+          Props: Component.ComponentProps<{ value: string }>,
+        ) {
+          const { value } = yield* Props;
+          if (value === "after") {
+            return yield* new StableChildError({ reason: "update-failed" });
+          }
+          return <div data-testid="stable-child-safe">{value}</div>;
+        });
+
+        const ErrorFallback = Component.gen(function* (
+          Props: Component.ComponentProps<{ error: StableChildError }>,
+        ) {
+          yield* Props;
+          return <div data-testid="stable-child-fallback">fallback</div>;
+        });
+
+        const GenericFallback = Component.gen(function* (
+          Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>,
+        ) {
+          yield* Props;
+          return <div data-testid="stable-child-generic-fallback">generic</div>;
+        });
+
+        const SafeChild = yield* ErrorBoundary.catch(RiskyChild).pipe(
+          ErrorBoundary.on("StableChildError", ErrorFallback),
+          ErrorBoundary.catchAll(GenericFallback),
+        );
+
+        const Parent = Component.gen(function* (
+          Props: Component.ComponentProps<{ value: string }>,
+        ) {
+          const { value } = yield* Props;
+          return <SafeChild value={value} />;
+        });
+
+        const renderer = yield* Renderer;
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+        const result = yield* unsafeEraseR(renderer.render(<Parent value="before" />, container));
+        yield* Effect.addFinalizer(() =>
+          unsafeEraseR(result.cleanup.pipe(Effect.catchCause(() => Effect.void))),
+        );
+
+        assert.strictEqual(
+          container.querySelector('[data-testid="stable-child-safe"]')?.textContent,
+          "before",
+        );
+
+        const reconcile = result.reconcile;
+        if (reconcile === undefined) {
+          assert.fail("Expected stable child render result to support reconcile");
+        }
+
+        const reused = yield* unsafeEraseR(reconcile(<Parent value="after" />, null));
+
+        assert.isTrue(reused);
+        assert.isNull(container.querySelector('[data-testid="stable-child-safe"]'));
+        assert.isNull(container.querySelector('[data-testid="stable-child-generic-fallback"]'));
+        assert.strictEqual(
+          container.querySelector('[data-testid="stable-child-fallback"]')?.textContent,
+          "fallback",
+        );
+      }).pipe(Effect.provide(browserLayer)),
+    ),
   );
 
   scoped("should preserve keyed child identity when siblings reorder under same parent", () =>
