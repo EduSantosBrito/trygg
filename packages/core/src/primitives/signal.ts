@@ -839,7 +839,7 @@ const makeSignalElement = (signal: Signal<Element>): SuspendElement =>
 const makeComponentElement = <E, R>(
   run: () => Effect.Effect<SuspendElement, E, R>,
 ): SuspendElement =>
-  ({ _tag: "Component", run, key: null }) satisfies Extract<
+  ({ _tag: "Component", run, key: null, identity: undefined, inputs: undefined }) satisfies Extract<
     SuspendElement,
     { readonly _tag: "Component" }
   >;

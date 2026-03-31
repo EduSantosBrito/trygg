@@ -78,6 +78,8 @@ type ComponentElement = {
   readonly _tag: "Component";
   readonly run: () => Effect.Effect<Element, unknown, Router.Router | Scope.Scope>;
   readonly key: ElementKey | null;
+  readonly identity: unknown;
+  readonly inputs: unknown;
 };
 
 const isComponentElement = (element: Element): element is ComponentElement =>

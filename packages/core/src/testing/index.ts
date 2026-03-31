@@ -459,6 +459,8 @@ export const render = (
     const componentElement = Element.Component({
       run: () => input,
       key: null,
+      identity: render,
+      inputs: undefined,
     });
 
     return yield* unsafeEraseR(

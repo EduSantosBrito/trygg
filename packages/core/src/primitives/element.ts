@@ -276,6 +276,8 @@ export type Element = Data.TaggedEnum<{
   readonly Component: {
     readonly run: () => Effect.Effect<Element, unknown, unknown>;
     readonly key: ElementKey | null;
+    readonly identity: unknown;
+    readonly inputs: unknown;
   };
   /**
    * Fragment containing multiple children without a wrapper element
@@ -361,7 +363,9 @@ export const text = (content: string) => Element.Text({ content });
 export const componentElement = <E, R>(
   run: () => Effect.Effect<Element, E, R>,
   key: ElementKey | null = null,
-): ComponentElementWithRequirements<R> => Element.Component({ run, key });
+  identity?: unknown,
+  inputs?: unknown,
+): ComponentElementWithRequirements<R> => Element.Component({ run, key, identity, inputs });
 
 /**
  * Create a context boundary element.
