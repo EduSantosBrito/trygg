@@ -14,6 +14,7 @@ import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "e
 import * as ServiceMap from "effect/ServiceMap";
 import {
   Element,
+  getKey,
   isElement,
   normalizeChild,
   type ElementProps,
@@ -798,11 +799,75 @@ const renderElement = (
         let currentProps = domProps;
         let propCleanups = yield* applyProps(node, currentProps, runtime, context);
 
-        // Render children into the node
+        type ChildSlot = {
+          readonly key: ReturnType<typeof getKey>;
+          readonly startMarker: Comment;
+          readonly endMarker: Comment;
+          readonly result: RenderResult;
+        };
+
+        const hasKeyedChildren = children.some((child) => getKey(child) !== null);
+        const childrenAnchor = hasKeyedChildren ? document.createComment("children-end") : null;
+        if (childrenAnchor !== null) {
+          node.appendChild(childrenAnchor);
+        }
+
+        const moveRangeBefore = (startNode: Node, endNode: Node, beforeRef: Node): void => {
+          let current: Node | null = startNode;
+          while (current !== null && beforeRef.parentNode === node) {
+            const next: Node | null = current.nextSibling;
+            node.insertBefore(current, beforeRef);
+            if (current === endNode) {
+              return;
+            }
+            current = next;
+          }
+        };
+
+        const cleanupChildSlot = (slot: ChildSlot) =>
+          Effect.gen(function* () {
+            yield* slot.result.cleanup;
+            slot.startMarker.remove();
+            slot.endMarker.remove();
+          });
+
+        const renderChildSlot = (
+          child: Element,
+          childContext: ServiceMap.ServiceMap<unknown> | null,
+        ) =>
+          Effect.gen(function* () {
+            const fragment = document.createDocumentFragment();
+            const startMarker = document.createComment("child-start");
+            fragment.appendChild(startMarker);
+            const result = yield* renderElement(child, fragment, runtime, childContext, options);
+            const endMarker = document.createComment("child-end");
+            fragment.appendChild(endMarker);
+            if (childrenAnchor === null) {
+              node.appendChild(fragment);
+            } else {
+              node.insertBefore(fragment, childrenAnchor);
+            }
+
+            return {
+              key: getKey(child),
+              startMarker,
+              endMarker,
+              result,
+            } satisfies ChildSlot;
+          });
+
         const childResults: Array<RenderResult> = [];
-        for (const child of children) {
-          const result = yield* renderElement(child, node, runtime, context, options);
-          childResults.push(result);
+        let childSlots: Array<ChildSlot> = [];
+        if (hasKeyedChildren) {
+          for (const child of children) {
+            const slot = yield* renderChildSlot(child, context);
+            childSlots.push(slot);
+          }
+        } else {
+          for (const child of children) {
+            const result = yield* renderElement(child, node, runtime, context, options);
+            childResults.push(result);
+          }
         }
 
         if (shouldHoist) {
@@ -820,8 +885,14 @@ const renderElement = (
           return {
             node: anchor,
             cleanup: Effect.gen(function* () {
-              for (const child of childResults) {
-                yield* child.cleanup;
+              if (hasKeyedChildren) {
+                for (const childSlot of childSlots) {
+                  yield* cleanupChildSlot(childSlot);
+                }
+              } else {
+                for (const child of childResults) {
+                  yield* child.cleanup;
+                }
               }
               for (const cleanup of propCleanups) {
                 yield* cleanup;
@@ -838,8 +909,14 @@ const renderElement = (
           node,
           cleanup: Effect.gen(function* () {
             // Clean up children first
-            for (const child of childResults) {
-              yield* child.cleanup;
+            if (hasKeyedChildren) {
+              for (const childSlot of childSlots) {
+                yield* cleanupChildSlot(childSlot);
+              }
+            } else {
+              for (const child of childResults) {
+                yield* child.cleanup;
+              }
             }
             // Clean up props (event listeners)
             for (const cleanup of propCleanups) {
@@ -877,27 +954,106 @@ const renderElement = (
                 currentProps = nextProps;
               }
 
-              if (resolvedNextElement.children.length !== childResults.length) {
+              if (!hasKeyedChildren) {
+                if (resolvedNextElement.children.length !== childResults.length) {
+                  return false;
+                }
+
+                for (let index = 0; index < childResults.length; index++) {
+                  const childResult = childResults[index];
+                  const nextChild = resolvedNextElement.children[index];
+
+                  if (
+                    childResult === undefined ||
+                    nextChild === undefined ||
+                    childResult.reconcile === undefined
+                  ) {
+                    return false;
+                  }
+
+                  const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);
+                  if (!reused) {
+                    return false;
+                  }
+                }
+
+                return true;
+              }
+
+              if (childrenAnchor === null) {
                 return false;
               }
 
-              for (let index = 0; index < childResults.length; index++) {
-                const childResult = childResults[index];
-                const nextChild = resolvedNextElement.children[index];
+              const keyedIndices = new Map<string | number, number>();
+              childSlots.forEach((slot, index) => {
+                if (slot.key !== null && !keyedIndices.has(slot.key)) {
+                  keyedIndices.set(slot.key, index);
+                }
+              });
 
-                if (
-                  childResult === undefined ||
-                  nextChild === undefined ||
-                  childResult.reconcile === undefined
-                ) {
-                  return false;
+              const usedIndices = new Set<number>();
+              const nextSlots: Array<ChildSlot> = [];
+
+              const tryReuse = (nextChild: Element, slotIndex: number | undefined) =>
+                Effect.gen(function* () {
+                  if (slotIndex === undefined || usedIndices.has(slotIndex)) {
+                    return false;
+                  }
+
+                  const slot = childSlots[slotIndex];
+                  if (slot === undefined || slot.result.reconcile === undefined) {
+                    return false;
+                  }
+
+                  const reused = yield* slot.result.reconcile(nextChild, resolvedNextContext);
+                  if (!reused) {
+                    return false;
+                  }
+
+                  usedIndices.add(slotIndex);
+                  nextSlots.push(slot);
+                  return true;
+                });
+
+              for (let index = 0; index < resolvedNextElement.children.length; index++) {
+                const nextChild = resolvedNextElement.children[index];
+                if (nextChild === undefined) {
+                  continue;
                 }
 
-                const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);
-                if (!reused) {
-                  return false;
+                const nextKey = getKey(nextChild);
+                const reused =
+                  nextKey !== null
+                    ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
+                    : yield* tryReuse(nextChild, index);
+
+                if (reused) {
+                  continue;
+                }
+
+                const slot = yield* renderChildSlot(nextChild, resolvedNextContext);
+                nextSlots.push(slot);
+              }
+
+              let beforeRef: Node = childrenAnchor;
+              for (let index = nextSlots.length - 1; index >= 0; index--) {
+                const slot = nextSlots[index];
+                if (slot === undefined) {
+                  continue;
+                }
+
+                moveRangeBefore(slot.startMarker, slot.endMarker, beforeRef);
+                beforeRef = slot.startMarker;
+              }
+
+              for (let index = 0; index < childSlots.length; index++) {
+                const slot = childSlots[index];
+                if (slot !== undefined && !usedIndices.has(index)) {
+                  yield* cleanupChildSlot(slot);
                 }
               }
+
+              childSlots = nextSlots;
 
               return true;
             }),

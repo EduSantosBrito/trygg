@@ -1281,6 +1281,199 @@ describe("Re-render behavior", () => {
     }),
   );
 
+  scoped("should preserve keyed child identity when siblings reorder under same parent", () =>
+    Effect.gen(function* () {
+      const order = Signal.makeSync<ReadonlyArray<string>>(["a", "b", "c"]);
+      const localSignals = new Map<string, Signal.Signal<number>>();
+      const renderCounts = new Map<string, number>();
+      const cleanupCounts = new Map<string, number>();
+
+      const Child = Component.gen(function* (Props: ComponentProps<{ id: string }>) {
+        const { id } = yield* Props;
+        renderCounts.set(id, (renderCounts.get(id) ?? 0) + 1);
+
+        const localSignal = yield* Signal.make(id === "b" ? 10 : 0);
+        localSignals.set(id, localSignal);
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            cleanupCounts.set(id, (cleanupCounts.get(id) ?? 0) + 1);
+          }),
+        );
+
+        const value = yield* Signal.get(localSignal);
+        return <button data-testid={`child-${id}`}>{`${id}:${String(value)}`}</button>;
+      });
+
+      const Parent = Component.gen(function* () {
+        const ids = yield* Signal.get(order);
+
+        return (
+          <div data-testid="keyed-parent">
+            {ids.map((id) => (
+              <Child key={id} id={id} />
+            ))}
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      const nodeBBefore = yield* getByTestId("child-b");
+      const signalBBefore = localSignals.get("b");
+
+      assert.isDefined(signalBBefore);
+      assert.strictEqual(nodeBBefore.textContent, "b:10");
+
+      yield* Signal.set(signalBBefore, 11);
+      yield* TestClock.adjust(20);
+
+      const nodeBAfterLocalUpdate = yield* getByTestId("child-b");
+
+      assert.strictEqual(nodeBAfterLocalUpdate.textContent, "b:11");
+
+      yield* Signal.set(order, ["c", "a", "b"]);
+      yield* TestClock.adjust(20);
+
+      const parent = yield* getByTestId("keyed-parent");
+      const nodeBAfter = yield* getByTestId("child-b");
+      const orderedIds = Array.from(parent.querySelectorAll("button")).map((node) => node.textContent);
+
+      assert.deepStrictEqual(orderedIds, ["c:0", "a:0", "b:11"]);
+      assert.strictEqual(nodeBAfter, nodeBAfterLocalUpdate);
+      assert.strictEqual(localSignals.get("b"), signalBBefore);
+      assert.strictEqual(cleanupCounts.get("a") ?? 0, 0);
+      assert.strictEqual(cleanupCounts.get("b") ?? 0, 0);
+      assert.strictEqual(cleanupCounts.get("c") ?? 0, 0);
+      assert.strictEqual(renderCounts.get("a"), 1);
+      assert.strictEqual(renderCounts.get("b"), 2);
+      assert.strictEqual(renderCounts.get("c"), 1);
+    }),
+  );
+
+  scoped("should remount unkeyed children when a positional shift changes their parent index", () =>
+    Effect.gen(function* () {
+      const showPrefix = Signal.makeSync(false);
+      let childNodeBefore: HTMLElement | null = null;
+      let childSignal: Signal.Signal<number> | null = null;
+      let childCleanupCount = 0;
+
+      const Prefix = Component.gen(function* () {
+        return <span data-testid="prefix">prefix</span>;
+      });
+
+      const ShiftedChild = Component.gen(function* () {
+        const localSignal = yield* Signal.make(5);
+        childSignal = localSignal;
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+
+        const value = yield* Signal.get(localSignal);
+        return <button data-testid="shifted-child">{String(value)}</button>;
+      });
+
+      const StableTail = Component.gen(function* () {
+        return <span data-testid="tail">tail</span>;
+      });
+
+      const Parent = Component.gen(function* () {
+        const prefixed = yield* Signal.get(showPrefix);
+
+        return (
+          <div data-testid="unkeyed-parent">
+            {prefixed && <Prefix />}
+            <ShiftedChild />
+            <StableTail />
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      childNodeBefore = yield* getByTestId("shifted-child");
+      const signalBefore = childSignal;
+
+      assert.isNotNull(signalBefore);
+      assert.strictEqual(childNodeBefore.textContent, "5");
+
+      yield* Signal.set(signalBefore, 6);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("shifted-child")).textContent, "6");
+
+      yield* Signal.set(showPrefix, true);
+      yield* TestClock.adjust(20);
+
+      const childNodeAfter = yield* getByTestId("shifted-child");
+      const parent = yield* getByTestId("unkeyed-parent");
+      const order = Array.from(parent.children).map((element) => element.getAttribute("data-testid"));
+
+      assert.deepStrictEqual(order, ["prefix", "shifted-child", "tail"]);
+      assert.notStrictEqual(childNodeAfter, childNodeBefore);
+      assert.strictEqual(childNodeAfter.textContent, "5");
+      assert.notStrictEqual(childSignal, signalBefore);
+      assert.isAbove(childCleanupCount, 0);
+    }),
+  );
+
+  scoped("should restart a child subtree when its key changes", () =>
+    Effect.gen(function* () {
+      const childKey = Signal.makeSync("first");
+      let childSignal: Signal.Signal<number> | null = null;
+      let childCleanupCount = 0;
+
+      const Child = Component.gen(function* () {
+        const localSignal = yield* Signal.make(1);
+        childSignal = localSignal;
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+
+        const value = yield* Signal.get(localSignal);
+        return <button data-testid="keyed-restart-child">{String(value)}</button>;
+      });
+
+      const Parent = Component.gen(function* () {
+        const key = yield* Signal.get(childKey);
+        return (
+          <div data-testid="keyed-restart-parent">
+            <Child key={key} />
+          </div>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      const nodeBefore = yield* getByTestId("keyed-restart-child");
+      const signalBefore = childSignal;
+
+      assert.isNotNull(signalBefore);
+      assert.strictEqual(nodeBefore.textContent, "1");
+
+      yield* Signal.set(signalBefore, 2);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("keyed-restart-child")).textContent, "2");
+
+      yield* Signal.set(childKey, "second");
+      yield* TestClock.adjust(20);
+
+      const nodeAfter = yield* getByTestId("keyed-restart-child");
+
+      assert.notStrictEqual(nodeAfter, nodeBefore);
+      assert.strictEqual(nodeAfter.textContent, "1");
+      assert.notStrictEqual(childSignal, signalBefore);
+      assert.isAbove(childCleanupCount, 0);
+    }),
+  );
+
   scoped("should clean up old content when SignalElement swaps (navigation pattern)", () =>
     Effect.gen(function* () {
       // This simulates the router outlet pattern:
