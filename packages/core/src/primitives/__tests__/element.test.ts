@@ -387,6 +387,8 @@ describe("isElement", () => {
     const element = Element.Component({
       run: () => Effect.succeed(text("component")),
       key: null,
+      identity: undefined,
+      inputs: undefined,
     });
 
     assert.isTrue(isElement(element));
@@ -449,6 +451,8 @@ describe("getKey", () => {
     const element = Element.Component({
       run: () => Effect.succeed(text("comp")),
       key: "component-key",
+      identity: undefined,
+      inputs: undefined,
     });
 
     assert.strictEqual(getKey(element), "component-key");
@@ -484,6 +488,8 @@ describe("keyed", () => {
     const original = Element.Component({
       run: () => Effect.succeed(text("comp")),
       key: null,
+      identity: undefined,
+      inputs: undefined,
     });
     const withKey = keyed("comp-key", original);
 

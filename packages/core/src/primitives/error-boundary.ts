@@ -177,7 +177,7 @@ export const catchAll =
         );
 
       const safeComponentFn = (props: PropsInput<Props>): Element =>
-        componentElement(() => safeComponentRunFn(props));
+        componentElement(() => safeComponentRunFn(props), null, safeComponentFn, props);
 
       return tagComponent<Props, PropsInput<Props>, never, R | RHandler>(
         safeComponentFn,
@@ -216,7 +216,7 @@ export const exhaustive = <Props, E, R, HandledTags extends string>(
       );
 
     const safeComponentFn = (props: PropsInput<Props>): Element =>
-      componentElement(() => safeComponentRunFn(props));
+      componentElement(() => safeComponentRunFn(props), null, safeComponentFn, props);
 
     return tagComponent<Props, PropsInput<Props>, never, R>(
       safeComponentFn,

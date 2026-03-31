@@ -30,6 +30,7 @@ import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
 import * as Router from "../../router/index.js";
 import { Element, Fragment } from "../../index.js";
+import { unsafeWidenContext } from "../../internal/unsafe.js";
 
 // =============================================================================
 // mount - App entry point
@@ -1095,16 +1096,23 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  scoped("should recreate child component on parent re-render (full subtree teardown)", () =>
+  scoped("should preserve stable child component identity on parent re-render", () =>
     Effect.gen(function* () {
       const parentTrigger = Signal.makeSync(0);
       let childRenderCount = 0;
+      let childCleanupCount = 0;
+      let childSignal: Signal.Signal<number> | null = null;
 
       const Child = Component.gen(function* () {
         childRenderCount++;
-        const childSignal = yield* Signal.make(100);
-        const value = yield* Signal.get(childSignal);
-        return <span data-testid="child">{String(value)}</span>;
+        const localSignal = yield* Signal.make(100);
+        childSignal = localSignal;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+        return <span data-testid="child">{localSignal}</span>;
       });
 
       const Parent = Component.gen(function* () {
@@ -1118,14 +1126,158 @@ describe("Re-render behavior", () => {
 
       const { getByTestId } = yield* render(<Parent />);
 
+      const signalBefore = childSignal;
+      assert.isNotNull(signalBefore);
+      const nodeBefore = yield* getByTestId("child");
+
       assert.strictEqual(childRenderCount, 1);
-      assert.strictEqual((yield* getByTestId("child")).textContent, "100");
+      assert.strictEqual(nodeBefore.textContent, "100");
 
       yield* Signal.set(parentTrigger, 1);
       yield* TestClock.adjust(20);
 
-      // Child is recreated on parent re-render (F-004: full subtree teardown)
+      const nodeAfterParentRerender = yield* getByTestId("child");
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(childCleanupCount, 0);
+      assert.strictEqual(nodeAfterParentRerender, nodeBefore);
+
+      yield* Signal.set(signalBefore, 101);
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("child")).textContent, "101");
+    }),
+  );
+
+  scoped("should skip stable child rerender when parent passes semantically equal props", () =>
+    Effect.gen(function* () {
+      const parentTrigger = Signal.makeSync(0);
+      let childRenderCount = 0;
+      let childCleanupCount = 0;
+
+      const Child = Component.gen(function* (
+        Props: Component.ComponentProps<{ value: { readonly label: string } }>,
+      ) {
+        childRenderCount++;
+        const { value } = yield* Props;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+        return <input data-testid="child-input" value={value.label} />;
+      });
+
+      const Parent = Component.gen(function* () {
+        yield* Signal.get(parentTrigger);
+        return <Child value={{ label: "stable" }} />;
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      const inputBefore = (yield* getByTestId("child-input")) as HTMLInputElement;
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(inputBefore.value, "stable");
+
+      yield* Signal.set(parentTrigger, 1);
+      yield* TestClock.adjust(20);
+
+      const inputAfter = (yield* getByTestId("child-input")) as HTMLInputElement;
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(childCleanupCount, 0);
+      assert.strictEqual(inputAfter, inputBefore);
+      assert.strictEqual(inputAfter.value, "stable");
+    }),
+  );
+
+  scoped("should rerender stable child when parent passes changed props without remounting", () =>
+    Effect.gen(function* () {
+      const label = Signal.makeSync("before");
+      let childRenderCount = 0;
+      let childCleanupCount = 0;
+
+      const Child = Component.gen(function* (
+        Props: Component.ComponentProps<{ value: string }>,
+      ) {
+        childRenderCount++;
+        const { value } = yield* Props;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+        return <input data-testid="child-input-update" value={value} />;
+      });
+
+      const Parent = Component.gen(function* () {
+        const value = yield* Signal.get(label);
+        return <Child value={value} />;
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      const inputBefore = (yield* getByTestId("child-input-update")) as HTMLInputElement;
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(inputBefore.value, "before");
+
+      yield* Signal.set(label, "after");
+      yield* TestClock.adjust(20);
+
+      const inputAfter = (yield* getByTestId("child-input-update")) as HTMLInputElement;
+
       assert.strictEqual(childRenderCount, 2);
+      assert.strictEqual(childCleanupCount, 0);
+      assert.strictEqual(inputAfter, inputBefore);
+      assert.strictEqual(inputAfter.value, "after");
+    }),
+  );
+
+  scoped("should rerender stable child when provided context changes without remounting", () =>
+    Effect.gen(function* () {
+      class Theme extends ServiceMap.Service<Theme, { readonly value: string }>()("Theme") {}
+
+      const theme = Signal.makeSync("blue");
+      let childRenderCount = 0;
+      let childCleanupCount = 0;
+
+      const Child = Component.gen(function* () {
+        childRenderCount++;
+        const currentTheme = yield* Theme;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            childCleanupCount++;
+          }),
+        );
+        return <input data-testid="child-context-input" value={currentTheme.value} />;
+      });
+
+      const Parent = Component.gen(function* () {
+        const value = yield* Signal.get(theme);
+        return Element.Provide({
+          context: unsafeWidenContext(ServiceMap.make(Theme, { value })),
+          child: <Child />,
+        });
+      });
+
+      const { getByTestId } = yield* render(<Parent />);
+
+      const inputBefore = (yield* getByTestId("child-context-input")) as HTMLInputElement;
+
+      assert.strictEqual(childRenderCount, 1);
+      assert.strictEqual(inputBefore.value, "blue");
+
+      yield* Signal.set(theme, "red");
+      yield* TestClock.adjust(20);
+
+      const inputAfter = (yield* getByTestId("child-context-input")) as HTMLInputElement;
+
+      assert.strictEqual(childRenderCount, 2);
+      assert.strictEqual(childCleanupCount, 0);
+      assert.strictEqual(inputAfter, inputBefore);
+      assert.strictEqual(inputAfter.value, "red");
     }),
   );
 

@@ -4,7 +4,7 @@
  *
  * Handles mounting Element trees to the DOM.
  */
-import { Cause, Data, Effect, Exit, Layer, Match, Option, Scope } from "effect";
+import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import {
   Element,
@@ -17,7 +17,7 @@ import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
-import { unsafeEraseR } from "../internal/unsafe.js";
+import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
 import { ResourceRegistryLive } from "./resource.js";
 import * as SafeUrl from "../security/safe-url.js";
 import * as Head from "./head.js";
@@ -39,7 +39,7 @@ const isEventHandler = (value: unknown): value is EventHandler => typeof value =
  */
 const isEffectProp = (value: unknown): value is Effect.Effect<unknown> => Effect.isEffect(value);
 
-const emptyContext = ServiceMap.empty();
+const emptyContext = unsafeWidenContext(ServiceMap.empty());
 
 const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -134,8 +134,36 @@ export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
 export interface RenderResult {
   readonly node: Node;
   readonly cleanup: Effect.Effect<void, unknown, unknown>;
+  readonly reconcile?: (
+    nextElement: Element,
+    nextContext: ServiceMap.ServiceMap<unknown> | null,
+  ) => Effect.Effect<boolean, unknown, unknown>;
 }
 
+const normalizeContext = (
+  context: ServiceMap.ServiceMap<unknown> | null,
+): ServiceMap.ServiceMap<unknown> => context ?? emptyContext;
+
+const resolveReconcileTarget = (
+  element: Element,
+  context: ServiceMap.ServiceMap<unknown> | null,
+): { readonly element: Element; readonly context: ServiceMap.ServiceMap<unknown> | null } => {
+  let currentElement: Element = element;
+  let currentContext = context;
+
+  while (currentElement._tag === "Provide") {
+    currentContext =
+      currentContext !== null
+        ? ServiceMap.merge(currentContext, currentElement.context)
+        : currentElement.context;
+    currentElement = currentElement.child;
+  }
+
+  return {
+    element: currentElement,
+    context: currentContext,
+  };
+};
 /**
  * Error boundary handler type.
  * Called when a component or signal element encounters an error during re-render.
@@ -672,7 +700,7 @@ const renderElement = (
       ),
     ),
 
-    Match.tag("Intrinsic", ({ tag, props, children }) =>
+    Match.tag("Intrinsic", ({ tag, props, children, key }) =>
       Effect.gen(function* () {
         // Document-level elements: map to existing DOM nodes (only in mountDocument mode)
         const isDocumentMount = yield* getFiberRef(Head.IsDocumentMount);
@@ -707,7 +735,8 @@ const renderElement = (
         const domProps = mode !== undefined ? omitKey(props, "mode") : props;
 
         // Apply props and get cleanup functions
-        const propCleanups = yield* applyProps(node, domProps, runtime, context);
+        let currentProps = domProps;
+        let propCleanups = yield* applyProps(node, currentProps, runtime, context);
 
         // Render children into the node
         const childResults: Array<RenderResult> = [];
@@ -759,16 +788,65 @@ const renderElement = (
             // Remove node
             node.remove();
           }),
+          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+            Effect.gen(function* () {
+              const resolved = resolveReconcileTarget(nextElement, nextContext);
+              const resolvedNextElement = resolved.element;
+              const resolvedNextContext = resolved.context;
+
+              if (resolvedNextElement._tag !== "Intrinsic") {
+                return false;
+              }
+
+              if (resolvedNextElement.tag !== tag || resolvedNextElement.key !== key) {
+                return false;
+              }
+
+              const rawNextProps = resolvedNextElement.props as Record<string, unknown>;
+              const nextMode = rawNextProps["mode"];
+              const nextProps =
+                nextMode !== undefined
+                  ? omitKey(resolvedNextElement.props, "mode")
+                  : resolvedNextElement.props;
+
+              if (!Equal.equals(currentProps, nextProps)) {
+                for (const cleanup of propCleanups) {
+                  yield* cleanup;
+                }
+                propCleanups = yield* applyProps(node, nextProps, runtime, resolvedNextContext);
+                currentProps = nextProps;
+              }
+
+              if (resolvedNextElement.children.length !== childResults.length) {
+                return false;
+              }
+
+              for (let index = 0; index < childResults.length; index++) {
+                const childResult = childResults[index];
+                const nextChild = resolvedNextElement.children[index];
+
+                if (
+                  childResult === undefined ||
+                  nextChild === undefined ||
+                  childResult.reconcile === undefined
+                ) {
+                  return false;
+                }
+
+                const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);
+                if (!reused) {
+                  return false;
+                }
+              }
+
+              return true;
+            }),
         };
       }),
     ),
 
-    Match.tag("Component", ({ run }) =>
+    Match.tag("Component", ({ run, key, identity, inputs }) =>
       Effect.gen(function* () {
-        // Create the effect from the thunk
-        const effect = run();
-        const effectWithContext = provideRenderContext(effect, runtime, context);
-
         // Create a placeholder comment as anchor for this component
         const anchor = document.createComment("component");
         parent.appendChild(anchor);
@@ -780,6 +858,9 @@ const renderElement = (
         let isUnmounted = false;
         let pendingRerender = false; // Track if signal changed during re-render
         let renderCount = 0;
+        let currentRun = run;
+        let currentInputs = inputs;
+        let currentContext = context;
 
         // Component lifetime scope (persists across re-renders)
         const componentScope = yield* Scope.fork(yield* Effect.scope);
@@ -797,6 +878,10 @@ const renderElement = (
             yield* currentResult.cleanup;
             currentResult = null;
           }
+          yield* closeCurrentRenderScope;
+        });
+
+        const closeCurrentRenderScope: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
           if (currentRenderScope !== null) {
             const scope = currentRenderScope;
             currentRenderScope = null;
@@ -809,6 +894,7 @@ const renderElement = (
           unknown,
           unknown
         > = Effect.fnUntraced(function* () {
+          const effectWithContext = provideRenderContext(currentRun(), runtime, currentContext);
           const renderScope = yield* Scope.fork(componentScope);
           const element = yield* Effect.provideService(
             Effect.provideService(
@@ -841,7 +927,7 @@ const renderElement = (
             childElement,
             actualParent,
             runtime,
-            context,
+            currentContext,
             options,
           );
 
@@ -885,23 +971,34 @@ const renderElement = (
           return result;
         });
 
-        // Forward declaration for recursive scheduling
-        let scheduleRerender: () => void;
+        const onRerenderFailure = (cause: Cause.Cause<unknown>) =>
+          Effect.gen(function* () {
+            yield* Debug.log({
+              event: "render.component.rerender",
+              trigger: "error",
+              reason: String(cause),
+            });
 
-        // Function to perform the actual re-render
-        const doRerender = (): void => {
+            // Check for parent error boundary handler
+            if (options.errorHandler !== null) {
+              // Propagate error to error boundary - it will render fallback
+              options.errorHandler(cause);
+            }
+            // No error boundary - keep old content. Subscriptions from the last
+            // successful render are still active (not cleared because cleanupCurrent
+            // wasn't called on failure), so they will trigger retry on signal changes.
+
+            isRerendering = false;
+            pendingRerender = false;
+          });
+
+        const rerenderEffect = Effect.gen(function* () {
           if (isUnmounted) {
             isRerendering = false;
             pendingRerender = false;
             return;
           }
 
-          renderCount++;
-          // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
-          // The Debug.log below is triggered from within the Effect.gen that follows
-
-          // Re-render
-          const rerenderEffect = Effect.gen(function* () {
             // Track re-render duration
             const rerenderStart = performance.now();
 
@@ -911,15 +1008,26 @@ const renderElement = (
             // Re-execute the component effect with render phase context
             // NOTE: Render BEFORE cleanup so we can keep old content on error
             const nextRender = yield* runComponentEffect();
-            const nextResult = yield* renderAndPosition(normalizeChild(nextRender.element)).pipe(
-              Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
-            );
+            const nextElement = normalizeChild(nextRender.element);
+            const reused =
+              currentResult !== null && currentResult.reconcile !== undefined
+                ? yield* currentResult.reconcile(nextElement, currentContext)
+                : false;
 
-            // Clean up old render + scope AFTER successful render
-            yield* cleanupCurrent;
+            if (reused) {
+              yield* closeCurrentRenderScope;
+              currentRenderScope = nextRender.scope;
+            } else {
+              const nextResult = yield* renderAndPosition(nextElement).pipe(
+                Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
+              );
 
-            currentRenderScope = nextRender.scope;
-            currentResult = nextResult;
+              // Clean up old render + scope AFTER successful render
+              yield* cleanupCurrent;
+
+              currentRenderScope = nextRender.scope;
+              currentResult = nextResult;
+            }
             const rerenderDuration = performance.now() - rerenderStart;
 
             // Record render metrics for re-render
@@ -938,32 +1046,18 @@ const renderElement = (
             if (needsAnotherRender) {
               scheduleRerender();
             }
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.gen(function* () {
-                yield* Debug.log({
-                  event: "render.component.rerender",
-                  trigger: "error",
-                  reason: String(cause),
-                });
+          }).pipe(Effect.catchCause(onRerenderFailure), Scope.provide(rendererScope));
 
-                // Check for parent error boundary handler
-                if (options.errorHandler !== null) {
-                  // Propagate error to error boundary - it will render fallback
-                  options.errorHandler(cause);
-                }
-                // No error boundary - keep old content. Subscriptions from the last
-                // successful render are still active (not cleared because cleanupCurrent
-                // wasn't called on failure), so they will trigger retry on signal changes.
+        // Forward declaration for recursive scheduling
+        let scheduleRerender: () => void;
 
-                isRerendering = false;
-                pendingRerender = false;
-              }),
-            ),
-            Scope.provide(rendererScope),
-          );
+        // Function to perform the actual re-render
+        const doRerender = (): void => {
+          renderCount++;
+          // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
+          // The Debug.log below is triggered from within the Effect.gen that follows
 
-          runForkInRenderContext(rerenderEffect, runtime, context);
+          runForkInRenderContext(rerenderEffect, runtime, currentContext);
         };
 
         // Schedule a re-render via microtask
@@ -1047,6 +1141,50 @@ const renderElement = (
             yield* Scope.close(componentScope, Exit.void);
             anchor.remove();
           }),
+          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+            Effect.gen(function* () {
+              const resolved = resolveReconcileTarget(nextElement, nextContext);
+              const resolvedNextElement = resolved.element;
+              const resolvedNextContext = resolved.context;
+
+              if (resolvedNextElement._tag !== "Component" || resolvedNextElement.key !== key) {
+                return false;
+              }
+
+              const sameIdentity =
+                identity !== undefined
+                  ? resolvedNextElement.identity === identity
+                  : resolvedNextElement.identity === identity &&
+                      resolvedNextElement.run === currentRun;
+
+              if (!sameIdentity) {
+                return false;
+              }
+
+              const inputsChanged = !Equal.equals(currentInputs, resolvedNextElement.inputs);
+              const contextChanged = !Equal.equals(
+                normalizeContext(currentContext),
+                normalizeContext(resolvedNextContext),
+              );
+
+              currentRun = resolvedNextElement.run;
+              currentInputs = resolvedNextElement.inputs;
+              currentContext = resolvedNextContext;
+
+              if (!inputsChanged && !contextChanged) {
+                return true;
+              }
+
+              if (isRerendering) {
+                pendingRerender = true;
+                return true;
+              }
+
+              isRerendering = true;
+              renderCount++;
+              yield* rerenderEffect;
+              return true;
+            }),
         };
       }),
     ),
@@ -2089,6 +2227,8 @@ export const render = Effect.fn("render")(function* <E>(
   const componentElement = Element.Component({
     run: () => app,
     key: null,
+    identity: render,
+    inputs: undefined,
   });
 
   yield* renderer.mount(container, componentElement);
@@ -2205,6 +2345,8 @@ export const renderDocument = <E>(
     const componentElement = Element.Component({
       run: () => app,
       key: null,
+      identity: renderDocument,
+      inputs: undefined,
     });
 
     // Render into document.body — the root layout's <html>/<body> will map to existing DOM

@@ -139,7 +139,7 @@ export const tagComponent = <Props, RuntimeProps, E, R>(
           return provideElement(context, element);
         });
 
-      return componentElement(run);
+      return componentElement(run, null, newComponent, props);
     };
 
     // Tag the new component with merged layers and preserve the runFn and displayName
@@ -187,7 +187,7 @@ export function Component<P extends object = {}>(): <E, R>(
         return normalizeResult(withProps);
       };
 
-      return componentElement(run);
+      return componentElement(run, null, componentFn, props);
     };
 
     return tagComponent<P, P, E, Exclude<R, PropsMarker<P>>>(componentFn);
@@ -310,7 +310,7 @@ function genNoProps<Eff extends ComponentYieldable, AEff extends ComponentResult
   const runFn = (): Effect.Effect<Element, E, unknown> =>
     normalizeResult(Effect.gen(() => f(undefined)));
 
-  const componentFn = (_props: {}): Element => componentElement(runFn);
+  const componentFn = (_props: {}): Element => componentElement(runFn, null, componentFn);
 
   return tagComponent<never, {}, E, ExtractContext<Eff>>(componentFn, [], runFn);
 }
@@ -341,7 +341,8 @@ function genWithProps<P extends object>(): <
       return normalizeResult(withProps);
     };
 
-    const componentFn = (props: P): Element => componentElement(() => runFn(props));
+    const componentFn = (props: P): Element =>
+      componentElement(() => runFn(props), null, componentFn, props);
 
     return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(
       componentFn,
