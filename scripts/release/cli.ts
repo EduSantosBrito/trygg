@@ -117,8 +117,12 @@ const runCommand = Effect.fn("runCommand")(function*(
       ]);
 
       if (exitCode !== 0 && options?.allowFailure !== true) {
+        const details = [stdout.trim(), stderr.trim()].filter((part) => part.length > 0).join("\n");
+
         return yield* new ReleaseCliError({
-          message: `${command} exited with code ${exitCode}`,
+          message: details.length > 0
+            ? `${command} exited with code ${exitCode}\n${details}`
+            : `${command} exited with code ${exitCode}`,
           stdout,
           stderr,
           exitCode,

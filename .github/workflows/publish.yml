@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -46,15 +46,15 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.8"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "24.x"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Parse tag
@@ -102,7 +102,7 @@ jobs:
         working-directory: packages/core
 
       - name: Create GitHub Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           TAG_VERSION: ${{ steps.tag.outputs.version }}
         with:
@@ -127,15 +127,15 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.8"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "24.x"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Parse tag
@@ -196,7 +196,7 @@ jobs:
         working-directory: packages/cli
 
       - name: Create GitHub Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           TAG_VERSION: ${{ steps.tag.outputs.version }}
         with:
