@@ -13,16 +13,14 @@
 import { Effect } from "effect";
 import {
   Element,
-  componentElement,
   type ElementProps,
   type ElementKey,
-  normalizeChildren,
   empty,
   type ComponentElementWithRequirements,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
-import { buildJsx, InvalidJsxComponentInput } from "./internal/jsx-builder.js";
+import { buildJsx } from "./internal/jsx-builder.js";
 import { unsafeAsElementFor } from "./internal/unsafe.js";
 
 /**
@@ -70,20 +68,6 @@ type ElementFor<Type> =
     ? ComponentElementWithRequirements<R>
     : Element;
 
-const recoverInvalidJsxComponentInput = (error: InvalidJsxComponentInput) =>
-  Effect.succeed(
-    componentElement(
-      () =>
-        Effect.fail(
-          new Component.InvalidComponentError({
-            reason: error.reason,
-            displayName: error.displayName,
-          }),
-        ),
-      error.key,
-    ),
-  );
-
 const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
   type: Type,
   props: Props | null,
@@ -92,7 +76,19 @@ const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementTy
   unsafeAsElementFor<Type>(
     Effect.runSync(
       buildJsx(type, props, key).pipe(
-        Effect.catchTag("InvalidJsxComponentInput", recoverInvalidJsxComponentInput),
+        // Preserve lazy invalid-component failures. Any other failure/defect at
+        // this sync bridge is unexpected and should still surface immediately.
+        Effect.catchTag("InvalidJsxComponentInput", (error) =>
+          Effect.succeed(
+            Element.fail(
+              new Component.InvalidComponentError({
+                reason: error.reason,
+                displayName: error.displayName,
+              }),
+              { ...(error.key === null ? {} : { key: error.key }) },
+            ),
+          ),
+        ),
       ),
     ),
   );
@@ -167,7 +163,7 @@ export const jsxs: typeof jsx = runJsx;
  */
 export const Fragment = Component.gen(function* (Props: ComponentProps<{ children?: unknown }>) {
   const { children } = yield* Props;
-  const normalized = normalizeChildren(children);
+  const normalized = yield* Element.fromChildren(children);
   if (normalized.length === 0) {
     return empty;
   }

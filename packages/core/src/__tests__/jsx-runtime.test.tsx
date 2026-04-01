@@ -65,6 +65,36 @@ describe("JSX component validation", () => {
     }),
   );
 
+  it.effect("should not throw while constructing invalid plain function components before render", () =>
+    Effect.gen(function* () {
+      // Test: should not throw while constructing invalid plain function components before render.
+      // Scope: preserves the lazy invalid-component recovery boundary at jsx construction time.
+      // Assertion: jsx construction returns an element shell immediately, and the InvalidComponentError still appears only during render.
+      const Plain = () => <span data-testid="plain">Hello</span>;
+
+      const construction = yield* Effect.exit(Effect.sync(() => <Plain />));
+
+      if (Exit.isFailure(construction)) {
+        return assert.fail(
+          `Expected lazy invalid-component construction but got ${String(Cause.squash(construction.cause))}`,
+        );
+      }
+
+      const exit = yield* Effect.exit(render(construction.value));
+
+      if (Exit.isSuccess(exit)) {
+        return assert.fail("Expected failure but got success");
+      }
+
+      const error = Cause.squash(exit.cause);
+      if (!(error instanceof Component.InvalidComponentError)) {
+        return assert.fail(`Expected InvalidComponentError but got ${String(error)}`);
+      }
+
+      assert.strictEqual(error.reason, "plain-function");
+    }),
+  );
+
   it.effect("should reject direct Effect children", () =>
     Effect.gen(function* () {
       // Test: should reject direct Effect children while rendering intrinsic JSX trees.

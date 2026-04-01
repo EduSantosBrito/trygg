@@ -15,7 +15,6 @@ import * as ServiceMap from "effect/ServiceMap";
 import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
 import {
   Element,
-  componentElement,
   provideElement,
   type ComponentElementWithRequirements,
 } from "./element.js";
@@ -149,7 +148,7 @@ export const tagComponent = <Props, RuntimeProps, E, R>(
           return provideElement(context, element);
         });
 
-      return componentElement(run, null, newComponent, props);
+      return Element.fromEffect(Effect.suspend(run), { identity: newComponent, inputs: props });
     };
 
     // Tag the new component with merged layers and preserve the runFn and displayName
@@ -169,7 +168,7 @@ const normalizeResult = <E, R>(
   effect: Effect.Effect<ComponentResult, E, R>,
 ): Effect.Effect<Element, E, R> =>
   Effect.map(effect, (result) =>
-    Effect.isEffect(result) ? componentElement(() => result) : result,
+    Effect.isEffect(result) ? Element.fromEffect(result) : result,
   );
 
 // =============================================================================
@@ -197,7 +196,7 @@ function makeComponent<P extends object = {}>(): <E, R>(
         return normalizeResult(withProps);
       };
 
-      return componentElement(run, null, componentFn, props);
+      return Element.fromEffect(Effect.suspend(run), { identity: componentFn, inputs: props });
     };
 
     return tagComponent<P, P, E, Exclude<R, PropsMarker<P>>>(componentFn);
@@ -336,7 +335,8 @@ function genNoProps<Eff extends ComponentYieldable, AEff extends ComponentResult
   const runFn = (): Effect.Effect<Element, E, unknown> =>
     normalizeResult(Effect.gen(() => f(undefined)));
 
-  const componentFn = (_props: {}): Element => componentElement(runFn, null, componentFn);
+  const componentFn = (_props: {}): Element =>
+    Element.fromEffect(Effect.suspend(runFn), { identity: componentFn });
 
   return tagComponent<never, {}, E, ExtractContext<Eff>>(componentFn, [], runFn);
 }
@@ -368,7 +368,7 @@ function genWithProps<P extends object>(): <
     };
 
     const componentFn = (props: P): Element =>
-      componentElement(() => runFn(props), null, componentFn, props);
+      Element.fromEffect(Effect.suspend(() => runFn(props)), { identity: componentFn, inputs: props });
 
     return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(
       componentFn,

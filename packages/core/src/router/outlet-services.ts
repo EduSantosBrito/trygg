@@ -8,9 +8,8 @@
 import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import {
-  Element as ElementNode,
-  type Element,
-  componentElement,
+  Element,
+  type Element as ElementType,
   provideElement,
 } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
@@ -63,45 +62,72 @@ export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => 
  * Used to narrow the union type after checking !Component.isEffectComponent().
  * @internal
  */
-const isEffectElement = (u: RouteComponent): u is Effect.Effect<Element, unknown, unknown> =>
+const isEffectElement = (u: RouteComponent): u is Effect.Effect<ElementType, unknown, unknown> =>
   Effect.isEffect(u);
 
+const mapChildInputElements = (
+  child: import("../primitives/element.js").ElementChildren,
+  f: (element: ElementType) => ElementType,
+): import("../primitives/element.js").ElementChildren => {
+  if (Array.isArray(child)) {
+    return child.map((value) => mapChildInputElements(value, f));
+  }
+
+  return Component.isEffectComponent(child) || typeof child !== "object" || child === null || !("_tag" in child)
+    ? child
+    : Element.$is("Intrinsic")(child) ||
+        Element.$is("Text")(child) ||
+        Element.$is("SignalText")(child) ||
+        Element.$is("SignalElement")(child) ||
+        Element.$is("Provide")(child) ||
+        Element.$is("Component")(child) ||
+        Element.$is("Fragment")(child) ||
+        Element.$is("Portal")(child) ||
+        Element.$is("KeyedList")(child) ||
+        Element.$is("ErrorBoundaryElement")(child)
+      ? f(child)
+      : child;
+};
+
 const wrapElementWithFiberRefs = (
-  element: Element,
+  element: ElementType,
   wrapRun: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
-): Element => {
+): ElementType => {
   switch (element._tag) {
     case "Component":
-      return componentElement(
-        () =>
+      return Element.fromEffect(
+        Effect.suspend(() =>
           wrapRun(element.run()).pipe(
             Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
             unsafeEraseR,
           ),
-        element.key,
-        element.identity ?? element.run,
-        element.inputs,
+        ),
+        {
+          key: element.key ?? undefined,
+          identity: element.identity ?? element.run,
+          inputs: element.inputs,
+        },
       );
     case "Provide":
       return provideElement(element.context, wrapElementWithFiberRefs(element.child, wrapRun));
     case "Intrinsic":
-      return ElementNode.Intrinsic({
+      return Element.Intrinsic({
         tag: element.tag,
         props: element.props,
         children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
         key: element.key,
       });
     case "Fragment":
-      return ElementNode.Fragment({
+      return Element.Fragment({
         children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
       });
     case "Portal":
-      return ElementNode.Portal({
+      return Element.Portal({
         target: element.target,
-        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+        children: mapChildInputElements(element.children, (child) => wrapElementWithFiberRefs(child, wrapRun)),
       });
     case "KeyedList":
-      return ElementNode.KeyedList({
+      return Element.KeyedList({
         source: element.source,
         keyFn: element.keyFn,
         renderFn: (item, index) =>
@@ -112,14 +138,14 @@ const wrapElementWithFiberRefs = (
     case "ErrorBoundaryElement":
       if (typeof element.fallback === "function") {
         const fallback = element.fallback;
-        return ElementNode.ErrorBoundaryElement({
+        return Element.ErrorBoundaryElement({
           child: wrapElementWithFiberRefs(element.child, wrapRun),
           fallback: (cause) => wrapElementWithFiberRefs(fallback(cause), wrapRun),
           onError: element.onError,
         });
       }
 
-      return ElementNode.ErrorBoundaryElement({
+      return Element.ErrorBoundaryElement({
         child: wrapElementWithFiberRefs(element.child, wrapRun),
         fallback: wrapElementWithFiberRefs(element.fallback, wrapRun),
         onError: element.onError,
@@ -139,18 +165,18 @@ export interface OutletRendererShape {
     component: RouteComponent,
     params: Record<string, unknown>,
     query?: Record<string, unknown>,
-  ) => Effect.Effect<Element, unknown, never>;
+  ) => Effect.Effect<ElementType, unknown, never>;
   readonly renderLayout: (
     layout: RouteComponent,
-    child: Element,
+    child: ElementType,
     params: Record<string, unknown>,
     query?: Record<string, unknown>,
-  ) => Effect.Effect<Element, unknown, never>;
+  ) => Effect.Effect<ElementType, unknown, never>;
   readonly renderError: (
     errorComp: RouteComponent,
     cause: Cause.Cause<unknown>,
     path: string,
-  ) => Effect.Effect<Element, InvalidRouteComponent, never>;
+  ) => Effect.Effect<ElementType, InvalidRouteComponent, never>;
 }
 
 /**
@@ -344,7 +370,7 @@ export function renderComponent(
   component: RouteComponent,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
-): Effect.Effect<Element, InvalidRouteComponent, never> {
+): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
   const withRouteContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     locallyFiberRef(
@@ -353,17 +379,17 @@ export function renderComponent(
       locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
     );
 
-  const wrapRouteElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
-    componentElement(
-      () =>
-        Effect.gen(function* () {
-          const capturedContext = yield* Effect.services<unknown>();
-          const element = yield* effect;
-          return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
-        }).pipe(unsafeEraseR),
-      null,
-      routeComponentWrapperIdentity,
-      { params, query: decodedQuery, wrappedIdentity: component },
+  const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+    Element.fromEffect(
+      Effect.gen(function* () {
+        const capturedContext = yield* Effect.services<unknown>();
+        const element = yield* effect;
+        return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
+      }).pipe(unsafeEraseR),
+      {
+        identity: routeComponentWrapperIdentity,
+        inputs: { params, query: decodedQuery, wrappedIdentity: component },
+      },
     );
 
   if (Component.isEffectComponent(component)) {
@@ -383,10 +409,10 @@ export function renderComponent(
  */
 export function renderLayout(
   layout: RouteComponent,
-  child: Element,
+  child: ElementType,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
-): Effect.Effect<Element, InvalidRouteComponent, never> {
+): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
   const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     locallyFiberRef(
@@ -399,17 +425,17 @@ export function renderLayout(
       ),
     );
 
-  const wrapLayoutElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
-    componentElement(
-      () =>
-        Effect.gen(function* () {
-          const capturedContext = yield* Effect.services<unknown>();
-          const element = yield* effect;
-          return provideElement(capturedContext, wrapElementWithFiberRefs(element, withLayoutContext));
-        }).pipe(unsafeEraseR),
-      null,
-      routeLayoutWrapperIdentity,
-      { child, params, query: decodedQuery, wrappedIdentity: layout },
+  const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+    Element.fromEffect(
+      Effect.gen(function* () {
+        const capturedContext = yield* Effect.services<unknown>();
+        const element = yield* effect;
+        return provideElement(capturedContext, wrapElementWithFiberRefs(element, withLayoutContext));
+      }).pipe(unsafeEraseR),
+      {
+        identity: routeLayoutWrapperIdentity,
+        inputs: { child, params, query: decodedQuery, wrappedIdentity: layout },
+      },
     );
 
   if (Component.isEffectComponent(layout)) {
@@ -431,7 +457,7 @@ export function renderError(
   errorComp: RouteComponent,
   cause: Cause.Cause<unknown>,
   path: string,
-): Effect.Effect<Element, InvalidRouteComponent, never> {
+): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   return unsafeEraseR(
     Effect.gen(function* () {
       yield* Metrics.recordRouteError;
@@ -447,17 +473,17 @@ export function renderError(
       const withErrorContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
         locallyFiberRef(CurrentRouteError, Option.some(errorInfo), effect);
 
-      const wrapErrorElement = (effect: Effect.Effect<Element, unknown, unknown>) =>
-        componentElement(
-          () =>
-            Effect.gen(function* () {
-              const capturedContext = yield* Effect.services<unknown>();
-              const element = yield* effect;
-              return provideElement(capturedContext, wrapElementWithFiberRefs(element, withErrorContext));
-            }).pipe(unsafeEraseR),
-          null,
-          routeErrorWrapperIdentity,
-          { cause, path, wrappedIdentity: errorComp },
+      const wrapErrorElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+        Element.fromEffect(
+          Effect.gen(function* () {
+            const capturedContext = yield* Effect.services<unknown>();
+            const element = yield* effect;
+            return provideElement(capturedContext, wrapElementWithFiberRefs(element, withErrorContext));
+          }).pipe(unsafeEraseR),
+          {
+            identity: routeErrorWrapperIdentity,
+            inputs: { cause, path, wrappedIdentity: errorComp },
+          },
         );
 
       if (Component.isEffectComponent(errorComp)) {

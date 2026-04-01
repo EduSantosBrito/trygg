@@ -27,7 +27,7 @@ import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
 import { render, renderElement } from "../../testing/index.js";
 import { browserLayer, Renderer } from "../../primitives/renderer.js";
-import { componentElement, text, signalElement } from "../../primitives/element.js";
+import { text, signalElement } from "../../primitives/element.js";
 import { Element } from "../../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
@@ -43,7 +43,7 @@ import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
 /** Create a RouteComponent that renders a div with data-testid */
 const identifiableComp = (testId: string, content: string): RouteComponent => {
   const fn = () =>
-    componentElement(() =>
+    Element.fromEffect(
       Effect.succeed(
         Element.Intrinsic({
           tag: "div",
@@ -65,7 +65,7 @@ const identifiableComp = (testId: string, content: string): RouteComponent => {
 /** Create a loading RouteComponent */
 const loadingComp = (): RouteComponent => {
   const fn = () =>
-    componentElement(() =>
+    Element.fromEffect(
       Effect.succeed(
         Element.Intrinsic({
           tag: "div",

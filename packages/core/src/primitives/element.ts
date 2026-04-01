@@ -10,10 +10,9 @@
  * @since 1.0.0
  * @module trygg/primitives/element
  */
-import { Cause, Data, Effect, Scope } from "effect";
+import { Cause, Data, Effect, Schema, Scope, SubscriptionRef } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import type { Signal } from "./signal.js";
-import { peekSync } from "./signal.js";
 
 /**
  * Check if a value is an Effect
@@ -392,7 +391,7 @@ export type Element = Data.TaggedEnum<{
    */
   readonly Portal: {
     readonly target: HTMLElement | string;
-    readonly children: ReadonlyArray<Element>;
+    readonly children: ElementChildren;
   };
   /**
    * KeyedList - efficient list rendering with stable scopes per key
@@ -428,6 +427,32 @@ export type ComponentElementWithRequirements<R> = ComponentElement & {
 };
 
 /**
+ * Options for Effect-backed component element construction.
+ *
+ * @remarks
+ * Use these options to attach reconciliation metadata when lifting an
+ * `Effect` into an `Element.Component`.
+ *
+ * @example
+ * ```ts
+ * const node = Element.fromEffect(Effect.succeed(text("ok")), {
+ *   key: "row-1",
+ *   identity: Row,
+ *   inputs: { id: 1 },
+ * })
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export interface ComponentElementOptions {
+  readonly key?: ElementKey | undefined;
+  readonly identity?: unknown;
+  readonly inputs?: unknown;
+}
+
+/**
  * Element constructors and utilities
  *
  * @remarks
@@ -443,7 +468,7 @@ export type ComponentElementWithRequirements<R> = ComponentElement & {
  * @public
  * @since 1.0.0
  */
-export const Element = Data.taggedEnum<Element>();
+const ElementBase = Data.taggedEnum<Element>();
 
 /**
  * Create an intrinsic element.
@@ -466,7 +491,7 @@ export const intrinsic = (
   props: ElementProps,
   children: ReadonlyArray<Element>,
   key: ElementKey | null = null,
-) => Element.Intrinsic({ tag, props, children, key });
+) => ElementBase.Intrinsic({ tag, props, children, key });
 
 /**
  * Create a text element.
@@ -483,37 +508,227 @@ export const intrinsic = (
  * @public
  * @since 1.0.0
  */
-export const text = (content: string) => Element.Text({ content });
+export const text = (content: string) => ElementBase.Text({ content });
+
+const ComponentElementOptionsSchema = Schema.Struct({
+  key: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+  identity: Schema.optional(Schema.Any),
+  inputs: Schema.optional(Schema.Any),
+});
+
+const decodeComponentElementOptions = Schema.decodeUnknownSync<typeof ComponentElementOptionsSchema>(
+  ComponentElementOptionsSchema,
+);
 
 /**
- * Create a component element from a thunk that produces an Effect.
+ * Create a component element from an Effect.
  *
- * This is the low-level function for creating Component elements.
+ * @remarks
+ * `Element.fromEffect` lifts an `Effect` that produces an `Element` into the
+ * component node used by the renderer. If callers need to defer effect
+ * construction until render-time, wrap it in `Effect.suspend` before calling
+ * this constructor.
+ *
+ * @example
+ * ```ts
+ * const node = Element.fromEffect(Effect.succeed(text("hello")))
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export const fromEffect = <E, R>(
+  effect: Effect.Effect<Element, E, R>,
+  options?: ComponentElementOptions,
+): ComponentElementWithRequirements<R> => {
+  const decoded = decodeComponentElementOptions(options ?? {});
+
+  return ElementBase.Component({
+    run: () => effect,
+    key: decoded.key ?? null,
+    identity: decoded.identity,
+    inputs: decoded.inputs,
+  });
+};
+
+/**
+ * Create a component element that fails when rendered.
+ *
+ * @remarks
+ * `Element.fail` is the convenience constructor for lazy render-time failure
+ * elements. It is equivalent to `Element.fromEffect(Effect.fail(error),
+ * options)`.
+ *
+ * @example
+ * ```ts
+ * const node = Element.fail(new Error("boom"))
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export const fail = <E>(error: E, options?: ComponentElementOptions): ComponentElementWithRequirements<never> =>
+  Element.fromEffect(Effect.fail(error), options);
+
+/**
+ * Lift an unknown child-like value into an `Element`.
+ *
+ * @remarks
+ * `Element.fromUnknown` is the Effect-native child boundary. Use it when
+ * lower-level code needs JSX child normalization without introducing a new sync
+ * runtime boundary.
+ *
+ * @example
+ * ```ts
+ * const child = yield* Element.fromUnknown("hello")
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export const fromUnknown: (child: unknown) => Effect.Effect<Element> = Effect.fn(
+  "Element.fromUnknown",
+)(function* (child: unknown) {
+  if (child == null || child === false) {
+    return empty;
+  }
+  if (typeof child === "string") {
+    return text(child);
+  }
+  if (typeof child === "number") {
+    return text(String(child));
+  }
+  if (child === true) {
+    return empty;
+  }
+  if (isSignal(child)) {
+    const currentValue = yield* SubscriptionRef.get(child._ref);
+    return isElement(currentValue) ? signalElement(child) : signalText(child);
+  }
+  if (isElement(child)) {
+    return child;
+  }
+  if (isEffect(child)) {
+    return Element.fail(new InvalidJsxChildError({ reason: "effect" }));
+  }
+
+  return empty;
+});
+
+/**
+ * Lift arbitrary JSX children into normalized `Element` values.
+ *
+ * @remarks
+ * `Element.fromChildren` is the Effect-native collection boundary for child
+ * normalization. It flattens nested arrays and drops empty children while
+ * staying inside the current Effect pipeline.
+ *
+ * @example
+ * ```ts
+ * const children = yield* Element.fromChildren(["a", ["b", null]])
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export const fromChildren: (children: unknown) => Effect.Effect<ReadonlyArray<Element>> = Effect.fn(
+  "Element.fromChildren",
+)(function* (children: unknown) {
+  if (children == null) {
+    return [];
+  }
+
+  if (Array.isArray(children)) {
+    const normalizedChildren = yield* Effect.forEach(children, (child) =>
+      Effect.suspend(() =>
+        Array.isArray(child)
+          ? Element.fromChildren(child)
+          : Element.fromUnknown(child).pipe(
+              Effect.map((normalized) => (isEmpty(normalized) ? [] : [normalized])),
+            ),
+      ),
+    );
+
+    return normalizedChildren.flat();
+  }
+
+  const normalized = yield* Element.fromUnknown(children);
+  return isEmpty(normalized) ? [] : [normalized];
+});
+
+/**
+ * Element constructors and utilities
+ *
+ * @remarks
+ * Use `Element` when you need explicit tagged constructors or pattern matching
+ * instead of JSX syntax. The namespace also includes `Element.fromEffect`,
+ * `Element.fail`, `Element.fromUnknown`, and `Element.fromChildren` for
+ * Effect-native component construction and child normalization.
+ *
+ * @example
+ * ```ts
+ * const node = Element.fromEffect(Effect.succeed(Element.Text({ content: "Hello" })))
+ * ```
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export const Element: typeof ElementBase & {
+  readonly fromEffect: typeof fromEffect;
+  readonly fail: typeof fail;
+  readonly fromUnknown: typeof fromUnknown;
+  readonly fromChildren: typeof fromChildren;
+} = {
+  Intrinsic: ElementBase.Intrinsic,
+  Text: ElementBase.Text,
+  SignalText: ElementBase.SignalText,
+  SignalElement: ElementBase.SignalElement,
+  Provide: ElementBase.Provide,
+  Component: ElementBase.Component,
+  Fragment: ElementBase.Fragment,
+  Portal: ElementBase.Portal,
+  KeyedList: ElementBase.KeyedList,
+  ErrorBoundaryElement: ElementBase.ErrorBoundaryElement,
+  $is: ElementBase.$is,
+  $match: ElementBase.$match,
+  fromEffect,
+  fail,
+  fromUnknown,
+  fromChildren,
+};
+
+/**
+ * Create a component element from an Effect.
+ *
+ * This is the low-level alias used by existing internals.
  * For defining JSX-compatible components, use `Component()` from trygg instead.
  *
  * If the effect has unsatisfied requirements, it will fail
  * at runtime with "service not found".
  *
  * @remarks
- * `componentElement` is the escape hatch used by JSX and renderer internals to
- * wrap an Effect-producing thunk as an `Element.Component`.
+ * `componentElement` is the compatibility escape hatch used by JSX and renderer
+ * internals. Prefer `Element.fromEffect` at new call sites.
  *
  * @since 1.0.0
  * @internal
  */
 export const componentElement = <E, R>(
-  run: () => Effect.Effect<Element, E, R>,
-  key: ElementKey | null = null,
-  identity?: unknown,
-  inputs?: unknown,
-): ComponentElementWithRequirements<R> => Element.Component({ run, key, identity, inputs });
+  effect: Effect.Effect<Element, E, R>,
+  options?: ComponentElementOptions,
+): ComponentElementWithRequirements<R> => Element.fromEffect(effect, options);
 
 /**
  * Create a context boundary element.
  * @internal
  */
 export const provideElement = (context: ServiceMap.ServiceMap<unknown>, child: Element): Element =>
-  Element.Provide({ context, child });
+  ElementBase.Provide({ context, child });
 
 /**
  * Create a fragment element.
@@ -530,15 +745,23 @@ export const provideElement = (context: ServiceMap.ServiceMap<unknown>, child: E
  * @public
  * @since 1.0.0
  */
-export const fragment = (children: ReadonlyArray<Element>) => Element.Fragment({ children });
+export const fragment = (children: ReadonlyArray<Element>) => ElementBase.Fragment({ children });
+
+const snapshotElementChild = (child: ElementChild): ElementChild =>
+  Array.isArray(child) ? child.map(snapshotElementChild) : child;
+
+const snapshotElementChildren = (children: ElementChildren): ElementChildren =>
+  Array.isArray(children) ? children.map(snapshotElementChild) : children;
 
 /**
  * Create a portal element.
- * Children are automatically normalized (strings, numbers, arrays, etc. all work).
  *
  * @remarks
- * `portal` moves normalized children into another DOM target while keeping the
- * element in the same component tree.
+ * `portal` moves children into another DOM target while keeping the element in
+ * the same component tree. Child inputs stay in their JSX-facing shape until
+ * render time, where the renderer normalizes them inside the active Effect
+ * pipeline, but the child array shape is snapshotted when the portal is
+ * created so later caller mutations do not leak into first render.
  *
  * @example
  * ```tsx
@@ -549,8 +772,8 @@ export const fragment = (children: ReadonlyArray<Element>) => Element.Fragment({
  * @public
  * @since 1.0.0
  */
-export const portal = (target: HTMLElement | string, children: unknown) =>
-  Element.Portal({ target, children: normalizeChildren(children) });
+export const portal = (target: HTMLElement | string, children: ElementChildren) =>
+  ElementBase.Portal({ target, children: snapshotElementChildren(children) });
 
 /**
  * Create a keyed list element for efficient list rendering.
@@ -665,62 +888,6 @@ export const signalElement = <A>(
 ): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
 
 /**
- * Normalize a child value to an `Element`.
- *
- * @remarks
- * `normalizeChild` is the single-value normalization step used by JSX child
- * handling before arrays are flattened.
- *
- * @example
- * ```ts
- * const child = normalizeChild("hello")
- * ```
- *
- * @category Elements
- * @public
- * @since 1.0.0
- */
-export const normalizeChild = (child: unknown): Element => {
-  if (child == null || child === false) {
-    return empty;
-  }
-  if (typeof child === "string") {
-    return text(child);
-  }
-  if (typeof child === "number") {
-    return text(String(child));
-  }
-  if (child === true) {
-    return empty;
-  }
-  if (isSignal(child)) {
-    // Signal child - check if it contains an Element or primitive
-    const currentValue = peekSync(child);
-    if (isElement(currentValue)) {
-      // Signal<Element> - use SignalElement for DOM swapping
-      return signalElement(child);
-    }
-    // Signal<primitive> - use SignalText for text node updates
-    return signalText(child);
-  }
-  if (isElement(child)) {
-    return child;
-  }
-  if (isEffect(child)) {
-    return componentElement(() => Effect.fail(new InvalidJsxChildError({ reason: "effect" })));
-  }
-
-  // Unknown child type - silently ignore
-  // TypeScript types should catch most invalid children at compile time.
-  // At runtime, we gracefully degrade to an empty element.
-  return empty;
-};
-
-/**
- * Normalize an array of children to Elements
- * @since 1.0.0
- */
-/**
  * Check if an element is empty (empty fragment).
  *
  * @remarks
@@ -738,39 +905,6 @@ export const normalizeChild = (child: unknown): Element => {
  */
 export const isEmpty = (element: Element): boolean =>
   element._tag === "Fragment" && element.children.length === 0;
-
-/**
- * Normalize arbitrary children to `Element` values.
- *
- * @remarks
- * `normalizeChildren` flattens nested arrays, removes empty children, and
- * delegates single-value coercion to `normalizeChild`.
- *
- * @example
- * ```ts
- * const children = normalizeChildren(["a", ["b", null]])
- * ```
- *
- * @category Elements
- * @public
- * @since 1.0.0
- */
-export const normalizeChildren = (children: unknown): ReadonlyArray<Element> => {
-  if (children == null) {
-    return [];
-  }
-  if (Array.isArray(children)) {
-    return children.flatMap((child) => {
-      if (Array.isArray(child)) {
-        return normalizeChildren(child);
-      }
-      const normalized = normalizeChild(child);
-      return isEmpty(normalized) ? [] : [normalized];
-    });
-  }
-  const normalized = normalizeChild(children);
-  return isEmpty(normalized) ? [] : [normalized];
-};
 
 /**
  * Get the key from an `Element` if it has one.

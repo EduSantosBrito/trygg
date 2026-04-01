@@ -48,10 +48,8 @@ import * as Signal from "../primitives/signal.js";
 import {
   Element,
   intrinsic,
-  normalizeChildren,
   type ElementProps,
   type AttributeInput,
-  componentElement,
   provideElement,
 } from "../primitives/element.js";
 
@@ -361,13 +359,13 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         ...forwarded,
       };
 
-      const childElements = normalizeChildren(children);
+      const childElements = yield* Element.fromChildren(children);
 
       return intrinsic("a", anchorProps, childElements);
     });
 
   // Return a component element that will execute the effect when rendered
-  return componentElement(run, null, linkRuntimeIdentity, props);
+  return Element.fromEffect(Effect.suspend(run), { identity: linkRuntimeIdentity, inputs: props });
 }
 
 // Define the Link component type with Component.Type properties
@@ -398,7 +396,7 @@ const linkComponent: LinkComponent = Object.assign(
               const element = LinkImpl(props);
               return provideElement(context, element);
             });
-          return componentElement(run, null, wrappedLink, props);
+          return Element.fromEffect(Effect.suspend(run), { identity: wrappedLink, inputs: props });
         },
         {
           _tag: "EffectComponent" as const,

@@ -55,13 +55,10 @@ export {
   text,
   componentElement,
   fragment,
-  portal,
   keyedList,
   empty,
   isElement,
   isEmpty,
-  normalizeChild,
-  normalizeChildren,
   getKey,
   keyed,
 } from "./primitives/element.js";

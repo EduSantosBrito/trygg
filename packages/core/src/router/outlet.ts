@@ -25,11 +25,10 @@ import {
 } from "effect";
 import * as Debug from "../debug/debug.js";
 import {
-  Element as ElementEnum,
-  type Element,
+  Element,
+  type Element as ElementType,
   text,
   signalElement,
-  componentElement,
 } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
@@ -524,15 +523,13 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                 renderError(resolvedErrorComp, resolutionCause, routePath),
               ),
             );
-            return ElementEnum.ErrorBoundaryElement({
+            return Element.ErrorBoundaryElement({
               child: routeElement,
               fallback: (sandboxedCause) =>
-                componentElement(
-                  () => renderError(resolvedErrorComp, sandboxedCause, routePath),
-                  null,
-                  outletErrorBoundaryIdentity,
-                  { errorComponent: resolvedErrorComp, routePath },
-                ),
+                Element.fromEffect(renderError(resolvedErrorComp, sandboxedCause, routePath), {
+                  identity: outletErrorBoundaryIdentity,
+                  inputs: { errorComponent: resolvedErrorComp, routePath },
+                }),
               onError: null,
             });
           }),
@@ -574,7 +571,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
     /** Commit rendered element: async loader path or direct set + scroll. */
     const commitView = (
-      renderEffect: Effect.Effect<Element, unknown, never>,
+      renderEffect: Effect.Effect<ElementType, unknown, never>,
       match: RouteMatch,
       queryString: string,
     ) =>
@@ -733,5 +730,5 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     return signalElement(viewSignal, { onSwap: onSwapEffect });
   });
 
-  return componentElement(() => outletEffect, null, outletRuntimeIdentity, props);
+  return Element.fromEffect(outletEffect, { identity: outletRuntimeIdentity, inputs: props });
 });

@@ -4,7 +4,6 @@ import * as Component from "../primitives/component.js";
 import {
   Element,
   keyed,
-  normalizeChildren,
   type ElementKey,
 } from "../primitives/element.js";
 import type { Element as RuntimeElement } from "../primitives/element.js";
@@ -30,17 +29,6 @@ const isElementKey = (value: unknown): value is ElementKey =>
 
 const isRecord = (value: unknown): value is RuntimeProps => typeof value === "object" && value !== null;
 
-const invalidComponentInput = (
-  reason: "plain-function" | "effect" | "unknown",
-  displayName: string | undefined,
-  key: ElementKey | null,
-): InvalidJsxComponentInput =>
-  new InvalidJsxComponentInput({
-    reason,
-    displayName,
-    key,
-  });
-
 const normalizeInput = Effect.fn("JsxBuilder.normalizeInput")(function* (
   props: unknown,
   key?: ElementKey,
@@ -61,7 +49,7 @@ const normalizeInput = Effect.fn("JsxBuilder.normalizeInput")(function* (
 
   return {
     props: resolvedProps,
-    childElements: normalizeChildren(children),
+    childElements: yield* Element.fromChildren(children),
     elementProps,
     resolvedKey,
   };
@@ -104,16 +92,22 @@ export const buildJsx: (
       (tag) => buildIntrinsic(tag, input),
     ),
     Match.when(Effect.isEffect, (effectValue) =>
-      Effect.fail(invalidComponentInput("effect", effectValue.constructor?.name, input.resolvedKey)),
+      Effect.fail(
+        new InvalidJsxComponentInput({
+          reason: "effect",
+          displayName: effectValue.constructor?.name,
+          key: input.resolvedKey,
+        }),
+      ),
     ),
     Match.when(Component.isEffectComponent, (component) => buildComponent(component, input)),
     Match.orElse((value: unknown) =>
       Effect.fail(
-        invalidComponentInput(
-          typeof value === "function" ? "plain-function" : "unknown",
-          typeof value === "function" ? value.name : undefined,
-          input.resolvedKey,
-        ),
+        new InvalidJsxComponentInput({
+          reason: typeof value === "function" ? "plain-function" : "unknown",
+          displayName: typeof value === "function" ? value.name : undefined,
+          key: input.resolvedKey,
+        }),
       ),
     ),
   );

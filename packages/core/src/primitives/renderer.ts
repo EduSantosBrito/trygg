@@ -16,7 +16,6 @@ import {
   Element,
   getKey,
   isElement,
-  normalizeChild,
   type ElementProps,
   type EventHandler,
 } from "./element.js";
@@ -1280,7 +1279,7 @@ const renderElement = (
             // Re-execute the component effect with render phase context
             // NOTE: Render BEFORE cleanup so we can keep old content on error
             const nextRender = yield* runComponentEffect();
-            const nextElement = normalizeChild(nextRender.element);
+            const nextElement = yield* Element.fromUnknown(nextRender.element);
             const reused =
               currentResult !== null && currentResult.reconcile !== undefined
                 ? yield* currentResult.reconcile(nextElement, currentContext)
@@ -1392,7 +1391,8 @@ const renderElement = (
         const initialRender = yield* runComponentEffect();
 
         // Render and position the content
-        const initialResult = yield* renderAndPosition(normalizeChild(initialRender.element)).pipe(
+        const initialElement = yield* Element.fromUnknown(initialRender.element);
+        const initialResult = yield* renderAndPosition(initialElement).pipe(
           Effect.onError(() => Scope.close(initialRender.scope, Exit.void)),
         );
         currentRenderScope = initialRender.scope;
@@ -1521,9 +1521,11 @@ const renderElement = (
           return yield* new PortalTargetNotFoundError({ target });
         }
 
+        const normalizedChildren = yield* Element.fromChildren(children);
+
         // Render children into target
         const childResults: Array<RenderResult> = [];
-        for (const child of children) {
+        for (const child of normalizedChildren) {
           const result = yield* renderElement(child, targetElement, runtime, context, options);
           childResults.push(result);
         }
@@ -1680,13 +1682,8 @@ const renderElement = (
           listParent.appendChild(startMarker);
 
           // Render into list parent (content appended after startMarker)
-          const result = yield* renderElement(
-            normalizeChild(element),
-            listParent,
-            runtime,
-            context,
-            options,
-          );
+          const normalizedElement = yield* Element.fromUnknown(element);
+          const result = yield* renderElement(normalizedElement, listParent, runtime, context, options);
 
           // Insert end marker after content - ensures moveRange captures full Fragment range
           const endMarker = document.createComment("item-end");

@@ -211,8 +211,6 @@
         "empty",
         "isElement",
         "isEmpty",
-        "normalizeChild",
-        "normalizeChildren",
         "getKey",
         "keyed"
       ],

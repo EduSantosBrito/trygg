@@ -26,6 +26,7 @@ import { assert, describe, effect } from "@effect/vitest";
 import { Effect, Exit, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Component from "../component.js";
+import { portal as portalElement, type ElementChild } from "../element.js";
 import * as Signal from "../signal.js";
 import { render } from "../../testing/index.js";
 import * as Portal from "../portal.js";
@@ -55,6 +56,61 @@ function getPortalContainers(): HTMLElement[] {
 // =============================================================================
 
 describe("Portal.make — targeted (HTMLElement)", () => {
+  effect("should not render children appended after construction while the source array mutates before mount", () =>
+    Effect.gen(function* () {
+      // Test: should not render children appended after construction while the source array mutates before mount.
+      // Scope: guards the portal child boundary so caller-owned arrays are snapshotted when the portal element is created.
+      // Assertion: the target renders only the child present at construction time, not later array mutations.
+      const target = document.createElement("div");
+      document.body.appendChild(target);
+
+      const sourceChildren: Array<ElementChild> = ["A"];
+      const node = portalElement(target, sourceChildren);
+
+      sourceChildren.push("B");
+
+      yield* render(node);
+      yield* TestClock.adjust(100);
+
+      assert.strictEqual(
+        target.textContent,
+        "A",
+        `Portal should snapshot child arrays at construction. Target text was: ${target.textContent ?? ""}`,
+      );
+
+      target.remove();
+    }),
+  );
+
+  effect("should not render nested children appended after construction while nested source arrays mutate before mount", () =>
+    Effect.gen(function* () {
+      // Test: should not render nested children appended after construction while nested source arrays mutate before mount.
+      // Scope: covers the nested-array boundary because JSX children commonly arrive as nested arrays, not only flat lists.
+      // Assertion: the target renders only the nested child present at construction time, not later nested-array mutations.
+      const target = document.createElement("div");
+      document.body.appendChild(target);
+
+      const nestedChildren: Array<ElementChild> = [["A"]];
+      const node = portalElement(target, nestedChildren);
+
+      const firstBranch = nestedChildren[0];
+      if (Array.isArray(firstBranch)) {
+        firstBranch.push("B");
+      }
+
+      yield* render(node);
+      yield* TestClock.adjust(100);
+
+      assert.strictEqual(
+        target.textContent,
+        "A",
+        `Portal should snapshot nested child arrays at construction. Target text was: ${target.textContent ?? ""}`,
+      );
+
+      target.remove();
+    }),
+  );
+
   effect("renders content into the target element", () =>
     Effect.gen(function* () {
       const target = document.createElement("div");

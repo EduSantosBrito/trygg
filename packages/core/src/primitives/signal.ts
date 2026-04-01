@@ -412,8 +412,9 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
 /**
  * Peek at the current value of a signal synchronously without subscribing.
  *
- * WARNING: This is for internal use only (e.g., normalizeChild detecting
- * Signal<Element> vs Signal<primitive>). Do not use in components - use
+ * WARNING: This is for internal use only (e.g., `Element.fromUnknown`
+ * detecting `Signal<Element>` vs `Signal<primitive>`). Do not use in
+ * components - use
  * Signal.get instead which properly tracks dependencies.
  *
  * @remarks

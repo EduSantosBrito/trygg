@@ -12,7 +12,7 @@
  */
 import { Cause, Data, Effect, Pipeable } from "effect";
 import { Component, tagComponent } from "./component.js";
-import { type Element, Element as ElementEnum, componentElement } from "./element.js";
+import { Element, type Element as ElementType } from "./element.js";
 
 type ErrorTags<E> = E extends { readonly _tag: infer Tag }
   ? Tag extends string
@@ -84,8 +84,8 @@ const isErrorTag = <E, Tag extends ErrorTags<E>>(
   error: unknown,
 ): error is ErrorForTag<E, Tag> => isTaggedError(error) && error._tag === tag;
 
-const unhandledErrorElement = (cause: Cause.Cause<unknown>): Element =>
-  componentElement(() =>
+const unhandledErrorElement = (cause: Cause.Cause<unknown>): ElementType =>
+  Element.fromEffect(
     Effect.gen(function* () {
       const error = Cause.squash(cause);
       const unhandledTag = isTaggedError(error) ? error._tag : String(error);
@@ -111,7 +111,7 @@ const resolveFallback = (
   handlers: ReadonlyMap<string, ErrorHandler>,
   catchAllComponent: Component.Type<{ cause: Cause.Cause<unknown> }, any, any>,
   cause: Cause.Cause<unknown>,
-): Element => {
+): ElementType => {
   const error = Cause.squash(cause);
   if (isTaggedError(error)) {
     const handler = handlers.get(error._tag);
@@ -216,17 +216,20 @@ export const catchAll =
     Effect.sync(() => {
       const safeComponentRunFn = (
         props: PropsInput<Props>,
-      ): Effect.Effect<Element, never, R | RHandler> =>
+      ): Effect.Effect<ElementType, never, R | RHandler> =>
         Effect.succeed(
-          ElementEnum.ErrorBoundaryElement({
+          Element.ErrorBoundaryElement({
             child: self.component(props),
             fallback: (cause) => resolveFallback(self.handlers, component, cause),
             onError: null,
           }),
         );
 
-      const safeComponentFn = (props: PropsInput<Props>): Element =>
-        componentElement(() => safeComponentRunFn(props), null, safeComponentFn, props);
+      const safeComponentFn = (props: PropsInput<Props>): ElementType =>
+        Element.fromEffect(Effect.suspend(() => safeComponentRunFn(props)), {
+          identity: safeComponentFn,
+          inputs: props,
+        });
 
       return tagComponent<Props, PropsInput<Props>, never, R | RHandler>(
         safeComponentFn,
@@ -254,9 +257,9 @@ export const exhaustive = <Props, E, R, HandledTags extends string>(
   self: [E] extends [never] ? ErrorBoundaryMatcher<Props, E, R, HandledTags> : never,
 ): Effect.Effect<Component.Type<Props, never, R>, UnhandledErrorsError> =>
   Effect.sync(() => {
-    const safeComponentRunFn = (props: PropsInput<Props>): Effect.Effect<Element, never, R> =>
+    const safeComponentRunFn = (props: PropsInput<Props>): Effect.Effect<ElementType, never, R> =>
       Effect.succeed(
-        ElementEnum.ErrorBoundaryElement({
+        Element.ErrorBoundaryElement({
           child: self.component(props),
           fallback: (cause) => {
             const error = Cause.squash(cause);
@@ -272,8 +275,11 @@ export const exhaustive = <Props, E, R, HandledTags extends string>(
         }),
       );
 
-    const safeComponentFn = (props: PropsInput<Props>): Element =>
-      componentElement(() => safeComponentRunFn(props), null, safeComponentFn, props);
+    const safeComponentFn = (props: PropsInput<Props>): ElementType =>
+      Element.fromEffect(Effect.suspend(() => safeComponentRunFn(props)), {
+        identity: safeComponentFn,
+        inputs: props,
+      });
 
     return tagComponent<Props, PropsInput<Props>, never, R>(
       safeComponentFn,

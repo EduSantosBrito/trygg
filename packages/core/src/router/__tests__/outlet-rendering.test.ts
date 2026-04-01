@@ -20,8 +20,8 @@ import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
 import { OutletRenderer } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
-import { componentElement, text } from "../../primitives/element.js";
-import type { Element, ElementKey } from "../../primitives/element.js";
+import { Element, text } from "../../primitives/element.js";
+import type { ElementKey } from "../../primitives/element.js";
 import { getFiberRef, setFiberRef } from "../../internal/fiber-ref.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 import type { Component } from "../../primitives/component.js";
@@ -32,7 +32,7 @@ import type { Component } from "../../primitives/component.js";
 
 /** Create a RouteComponent that renders a text element */
 const textComp = (content: string): RouteComponent => {
-  const fn = () => componentElement(() => Effect.succeed(text(content)));
+  const fn = () => Element.fromEffect(Effect.succeed(text(content)));
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<LayerTypes.Any>,
@@ -45,7 +45,7 @@ const textComp = (content: string): RouteComponent => {
 /** Create a layout RouteComponent that reads CurrentOutletChild */
 const layoutComp = (_name: string): RouteComponent => {
   const fn = () =>
-    componentElement(() =>
+    Element.fromEffect(
       Effect.gen(function* () {
         const childContent = yield* getFiberRef(Router.CurrentOutletChild);
         if (Option.isSome(childContent)) {
