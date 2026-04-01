@@ -10,8 +10,8 @@
  */
 import { Effect, Layer, ServiceMap } from "effect";
 import * as Debug from "../debug/debug.js";
-import type { Element, ComponentElementWithRequirements } from "../primitives/element.js";
 import type { Component } from "../primitives/component.js";
+import type { Element } from "../primitives/element.js";
 import type { Signal } from "../primitives/signal.js";
 import type { ResourceState } from "../primitives/resource.js";
 
@@ -102,27 +102,6 @@ export const unsafeMakeKeyedListElement = <T, E>(
     renderFn,
     keyFn,
   }) as Element;
-
-// =============================================================================
-// JSX Element Type Narrowing
-// =============================================================================
-
-/**
- * Narrow an Element to ElementFor<Type> (conditional return type).
- *
- * SAFETY: ElementFor<Type> resolves to either Element or
- * ComponentElementWithRequirements<R>, which are structurally identical
- * (the requirements symbol is optional/phantom). This cast is always
- * a structural identity — no runtime behavior change.
- *
- * TypeScript cannot resolve conditional types in generic function bodies
- * (TS#33912). This is the standard workaround.
- */
-type ElementFor<Type> =
-  Type extends Component.Type<any, any, infer R> ? ComponentElementWithRequirements<R> : Element;
-
-export const unsafeAsElementFor = <Type>(element: Element): ElementFor<Type> =>
-  element as ElementFor<Type>;
 
 /**
  * Narrow Record<string, unknown> to ElementProps.

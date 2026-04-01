@@ -9,7 +9,16 @@
  * @since 1.0.0
  * @module trygg/jsx-dev-runtime
  */
-import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
+import {
+  jsx,
+  Fragment,
+  Element,
+  type JSXElementType,
+  type ElementKey,
+} from "./jsx-runtime.js";
+import * as Component from "./primitives/component.js";
+import type { Component as ComponentType } from "./primitives/component.js";
+import type { ComponentElementWithRequirements } from "./primitives/element.js";
 
 export { jsx, Fragment, Element };
 export type { JSXProps, JSXElementType, ElementProps, ElementKey } from "./jsx-runtime.js";
@@ -44,18 +53,40 @@ interface JSXSource {
  * @public
  * @since 1.0.0
  */
-export const jsxDEV = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
-  type: Type,
+export function jsxDEV(
+  type: string,
+  props: Record<string, unknown> | null,
+  key?: ElementKey,
+  _isStaticChildren?: boolean,
+  _source?: JSXSource,
+  _self?: unknown,
+): Element;
+export function jsxDEV<Props extends Record<string, unknown>, E, R>(
+  type: ComponentType.Type<Props, E, R>,
   props: Props | null,
   key?: ElementKey,
   _isStaticChildren?: boolean,
   _source?: JSXSource,
   _self?: unknown,
-): ReturnType<typeof jsx<Props, Type>> => {
+): ComponentElementWithRequirements<R>;
+export function jsxDEV(
+  type: JSXElementType,
+  props: Record<string, unknown> | null,
+  key?: ElementKey,
+  _isStaticChildren?: boolean,
+  _source?: JSXSource,
+  _self?: unknown,
+): Element {
   // For now, just delegate to the production jsx
   // In the future, we could store source info for better error messages
+  if (typeof type === "string") {
+    return jsx(type, props, key);
+  }
+  if (Component.isEffectComponent(type)) {
+    return jsx(type, props, key);
+  }
   return jsx(type, props, key);
-};
+}
 
 /**
  * Development JSX helper for static child arrays.

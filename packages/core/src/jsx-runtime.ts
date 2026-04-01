@@ -13,15 +13,14 @@
 import { Effect } from "effect";
 import {
   Element,
+  type ComponentElementWithRequirements,
   type ElementProps,
   type ElementKey,
   empty,
-  type ComponentElementWithRequirements,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
 import { JsxBuilder } from "./internal/jsx-builder.js";
-import { unsafeAsElementFor } from "./internal/unsafe.js";
 
 /**
  * Props passed to JSX elements
@@ -63,30 +62,23 @@ export type JSXElementType<Props = Record<string, unknown>, E = never, R = unkno
   | string
   | ComponentType.Type<Props, E, R>;
 
-type ElementFor<Type> =
-  Type extends ComponentType.Type<any, any, infer R>
-    ? ComponentElementWithRequirements<R>
-    : Element;
-
-const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
-  type: Type,
-  props: Props | null,
+const runJsx = (
+  type: JSXElementType,
+  props: Record<string, unknown> | null,
   key?: ElementKey,
-): ElementFor<Type> =>
-  unsafeAsElementFor<Type>(
-    Effect.runSync(
-      JsxBuilder.build(type, props, key).pipe(
-        // Preserve lazy invalid-component failures. Any other failure/defect at
-        // this sync bridge is unexpected and should still surface immediately.
-        Effect.catchTag("InvalidJsxComponentInput", (error) =>
-          Effect.succeed(
-            Element.fail(
-              new Component.InvalidComponentError({
-                reason: error.reason,
-                displayName: error.displayName,
-              }),
-              error.key === null ? {} : { key: error.key },
-            ),
+): Element =>
+  Effect.runSync(
+    JsxBuilder.build(type, props, key).pipe(
+      // Preserve lazy invalid-component failures. Any other failure/defect at
+      // this sync bridge is unexpected and should still surface immediately.
+      Effect.catchTag("InvalidJsxComponentInput", (error) =>
+        Effect.succeed(
+          Element.fail(
+            new Component.InvalidComponentError({
+              reason: error.reason,
+              displayName: error.displayName,
+            }),
+            error.key === null ? {} : { key: error.key },
           ),
         ),
       ),
@@ -117,11 +109,23 @@ const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementTy
  * @public
  * @since 1.0.0
  */
-export const jsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
-  type: Type,
+export function jsx(
+  type: string,
+  props: Record<string, unknown> | null,
+  key?: ElementKey,
+): Element;
+export function jsx<Props extends Record<string, unknown>, E, R>(
+  type: ComponentType.Type<Props, E, R>,
   props: Props | null,
   key?: ElementKey,
-): ElementFor<Type> => runJsx(type, props, key);
+): ComponentElementWithRequirements<R>;
+export function jsx(
+  type: JSXElementType,
+  props: Record<string, unknown> | null,
+  key?: ElementKey,
+): Element {
+  return runJsx(type, props, key);
+}
 
 /**
  * Create a JSX element with static children
@@ -142,7 +146,7 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
  * @public
  * @since 1.0.0
  */
-export const jsxs: typeof jsx = runJsx;
+export const jsxs: typeof jsx = jsx;
 
 /**
  * Fragment component
