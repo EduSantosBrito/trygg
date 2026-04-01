@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
 import * as Component from "../../primitives/component.js";
 import { Element, getKey, text } from "../../primitives/element.js";
-import { buildJsx } from "../jsx-builder.js";
+import { buildJsx, InvalidJsxComponentInput } from "../jsx-builder.js";
 
 const BuilderComponent = Component.gen(function* (
   Props: Component.ComponentProps<{ readonly message: string }>,
@@ -66,6 +66,52 @@ describe("buildJsx", () => {
 
       assert.deepStrictEqual(element.inputs, { message: "hello" });
       assert.strictEqual(getKey(element), 3);
+    }),
+  );
+
+  it.effect("should fail with typed invalid-component error while building plain function inputs", () =>
+    Effect.gen(function* () {
+      // Test: should fail with typed invalid-component error while building plain function inputs.
+      // Scope: verifies the shared builder classifies unsupported JSX component values internally instead of recovering at this layer.
+      // Assertion: buildJsx fails with the internal invalid-component classification and preserves the plain-function reason.
+      const Plain = () => Element.Intrinsic({ tag: "span", props: {}, children: [], key: null });
+
+      const exit = yield* Effect.exit(buildJsx(Plain, {}, 5));
+
+      if (Exit.isSuccess(exit)) {
+        return assert.fail("Expected buildJsx to fail for plain functions");
+      }
+
+      const error = Cause.squash(exit.cause);
+      if (!(error instanceof InvalidJsxComponentInput)) {
+        return assert.fail(`Expected typed invalid-component error but got ${String(error)}`);
+      }
+
+      assert.strictEqual(error.reason, "plain-function");
+      assert.strictEqual(error.key, 5);
+    }),
+  );
+
+  it.effect("should fail with typed invalid-component error while building raw Effect inputs", () =>
+    Effect.gen(function* () {
+      // Test: should fail with typed invalid-component error while building raw Effect inputs.
+      // Scope: verifies the shared builder classifies raw Effect component values with the same internal contract used by the public runtime recovery.
+      // Assertion: buildJsx fails with the internal invalid-component classification, preserves the effect reason, and keeps the resolved key.
+      const directEffect = Effect.succeed(Element.Intrinsic({ tag: "span", props: {}, children: [], key: null }));
+
+      const exit = yield* Effect.exit(buildJsx(directEffect, {}, 8));
+
+      if (Exit.isSuccess(exit)) {
+        return assert.fail("Expected buildJsx to fail for raw Effect inputs");
+      }
+
+      const error = Cause.squash(exit.cause);
+      if (!(error instanceof InvalidJsxComponentInput)) {
+        return assert.fail(`Expected typed invalid-component error but got ${String(error)}`);
+      }
+
+      assert.strictEqual(error.reason, "effect");
+      assert.strictEqual(error.key, 8);
     }),
   );
 });

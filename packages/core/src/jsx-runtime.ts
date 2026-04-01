@@ -13,6 +13,7 @@
 import { Effect } from "effect";
 import {
   Element,
+  componentElement,
   type ElementProps,
   type ElementKey,
   normalizeChildren,
@@ -21,7 +22,7 @@ import {
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
-import { buildJsx } from "./internal/jsx-builder.js";
+import { buildJsx, InvalidJsxComponentInput } from "./internal/jsx-builder.js";
 import { unsafeAsElementFor } from "./internal/unsafe.js";
 
 /**
@@ -69,11 +70,32 @@ type ElementFor<Type> =
     ? ComponentElementWithRequirements<R>
     : Element;
 
+const recoverInvalidJsxComponentInput = (error: InvalidJsxComponentInput) =>
+  Effect.succeed(
+    componentElement(
+      () =>
+        Effect.fail(
+          new Component.InvalidComponentError({
+            reason: error.reason,
+            displayName: error.displayName,
+          }),
+        ),
+      error.key,
+    ),
+  );
+
 const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
   type: Type,
   props: Props | null,
   key?: ElementKey,
-): ElementFor<Type> => unsafeAsElementFor<Type>(Effect.runSync(buildJsx(type, props, key)));
+): ElementFor<Type> =>
+  unsafeAsElementFor<Type>(
+    Effect.runSync(
+      buildJsx(type, props, key).pipe(
+        Effect.catchTag("InvalidJsxComponentInput", recoverInvalidJsxComponentInput),
+      ),
+    ),
+  );
 
 /**
  * Create a JSX element

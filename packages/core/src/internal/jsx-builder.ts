@@ -1,9 +1,8 @@
-import { Effect, Match } from "effect";
+import { Data, Effect, Match } from "effect";
 
 import * as Component from "../primitives/component.js";
 import {
   Element,
-  componentElement,
   keyed,
   normalizeChildren,
   type ElementKey,
@@ -12,6 +11,12 @@ import type { Element as RuntimeElement } from "../primitives/element.js";
 import { unsafeAsElementProps } from "./unsafe.js";
 
 type RuntimeProps = Record<string, unknown>;
+
+export class InvalidJsxComponentInput extends Data.TaggedError("InvalidJsxComponentInput")<{
+  readonly reason: "plain-function" | "effect" | "unknown";
+  readonly displayName?: string | undefined;
+  readonly key: ElementKey | null;
+}> {}
 
 interface NormalizedJsxInput {
   readonly props: RuntimeProps;
@@ -25,21 +30,16 @@ const isElementKey = (value: unknown): value is ElementKey =>
 
 const isRecord = (value: unknown): value is RuntimeProps => typeof value === "object" && value !== null;
 
-const invalidComponentElement = (
+const invalidComponentInput = (
   reason: "plain-function" | "effect" | "unknown",
   displayName: string | undefined,
   key: ElementKey | null,
-): RuntimeElement =>
-  componentElement(
-    () =>
-      Effect.fail(
-        new Component.InvalidComponentError({
-          reason,
-          displayName,
-        }),
-      ),
+): InvalidJsxComponentInput =>
+  new InvalidJsxComponentInput({
+    reason,
+    displayName,
     key,
-  );
+  });
 
 const normalizeInput = Effect.fn("JsxBuilder.normalizeInput")(function* (
   props: unknown,
@@ -91,7 +91,7 @@ export const buildJsx: (
   type: unknown,
   props: unknown,
   key?: ElementKey,
-) => Effect.Effect<RuntimeElement> = Effect.fn("JsxBuilder.build")(function* (
+) => Effect.Effect<RuntimeElement, InvalidJsxComponentInput> = Effect.fn("JsxBuilder.build")(function* (
   type: unknown,
   props: unknown,
   key?: ElementKey,
@@ -104,12 +104,12 @@ export const buildJsx: (
       (tag) => buildIntrinsic(tag, input),
     ),
     Match.when(Effect.isEffect, (effectValue) =>
-      Effect.succeed(invalidComponentElement("effect", effectValue.constructor?.name, input.resolvedKey)),
+      Effect.fail(invalidComponentInput("effect", effectValue.constructor?.name, input.resolvedKey)),
     ),
     Match.when(Component.isEffectComponent, (component) => buildComponent(component, input)),
     Match.orElse((value: unknown) =>
-      Effect.succeed(
-        invalidComponentElement(
+      Effect.fail(
+        invalidComponentInput(
           typeof value === "function" ? "plain-function" : "unknown",
           typeof value === "function" ? value.name : undefined,
           input.resolvedKey,
