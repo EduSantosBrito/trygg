@@ -59,21 +59,6 @@ bun run check          # lint + format + typecheck + effect:check
 | `bun run examples` | Dev server at `localhost:5173` |
 | `bun run lint` | Lint with oxlint |
 
-## Agent Skills
-
-Install trygg skills for AI coding assistants:
-
-```bash
-npx skills add EduSantosBrito/trygg
-```
-
-| Skill | Use When |
-|-------|----------|
-| `use-trygg` | Writing components, signals, services, events, testing |
-| `trygg-router` | Routes, params, middleware, layouts, prefetching, navigation |
-| `trygg-architecture` | Debugging internals, renderer, element variants, design decisions |
-| `trygg-observability` | Debug events, metrics, traces, DevMode, LLM test server |
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, PR process, and code standards.

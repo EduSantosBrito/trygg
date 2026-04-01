@@ -21,6 +21,7 @@ Code exploration:
 Task guides:
 
 - [Code quality](docs/agents/code-quality.md)
+- [API Naming](docs/agents/api-naming.md)
 - [Effect TypeScript](docs/agents/effect-typescript.md)
 - [Trygg UI patterns](docs/agents/trygg-ui.md)
 - [Observability](docs/agents/observability.md)
