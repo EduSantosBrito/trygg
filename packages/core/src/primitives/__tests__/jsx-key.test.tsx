@@ -28,18 +28,27 @@ const SimpleComponent = Component.gen(function* () {
 
 describe("jsx key on Component elements", () => {
   it("should propagate string key to Component element", () => {
+    // Test: should propagate string key to Component element while constructing valid effect components.
+    // Scope: regression coverage for keyed component construction through the shared runtime boundary.
+    // Assertion: the resulting element keeps the provided string key.
     const element = <SimpleComponent key="my-key" />;
 
     assert.strictEqual(getKey(element), "my-key");
   });
 
   it("should propagate numeric key to Component element", () => {
+    // Test: should propagate numeric key to Component element while constructing valid effect components.
+    // Scope: keeps numeric key handling covered on the component path.
+    // Assertion: the resulting element keeps the provided numeric key.
     const element = <SimpleComponent key={42} />;
 
     assert.strictEqual(getKey(element), 42);
   });
 
   it("should leave key null when no key provided", () => {
+    // Test: should leave key null while no key is provided to a Component element.
+    // Scope: verifies the runtime does not synthesize keys on the component path.
+    // Assertion: the resulting element has a null key.
     const element = <SimpleComponent />;
 
     assert.isNull(getKey(element));
@@ -52,12 +61,18 @@ describe("jsx key on Component elements", () => {
 
 describe("jsx key on intrinsic elements", () => {
   it("should propagate string key to intrinsic element", () => {
+    // Test: should propagate string key to intrinsic element while constructing intrinsic JSX nodes.
+    // Scope: sanity check for the intrinsic key path after the shared builder rewrite.
+    // Assertion: the resulting intrinsic element keeps the provided string key.
     const element = <div key="div-key" />;
 
     assert.strictEqual(getKey(element), "div-key");
   });
 
   it("should propagate numeric key to intrinsic element", () => {
+    // Test: should propagate numeric key to intrinsic element while constructing intrinsic JSX nodes.
+    // Scope: sanity check for numeric intrinsic keys after the shared builder rewrite.
+    // Assertion: the resulting intrinsic element keeps the provided numeric key.
     const element = <span key={7} />;
 
     assert.strictEqual(getKey(element), 7);

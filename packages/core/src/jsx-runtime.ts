@@ -16,14 +16,13 @@ import {
   type ElementProps,
   type ElementKey,
   normalizeChildren,
-  componentElement,
   empty,
-  keyed,
   type ComponentElementWithRequirements,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
-import { unsafeAsElementFor, unsafeAsElementProps } from "./internal/unsafe.js";
+import { buildJsx } from "./internal/jsx-builder.js";
+import { unsafeAsElementFor } from "./internal/unsafe.js";
 
 /**
  * Props passed to JSX elements
@@ -70,19 +69,11 @@ type ElementFor<Type> =
     ? ComponentElementWithRequirements<R>
     : Element;
 
-/**
- * Check if a value is an Effect
- * @internal
- */
-const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
-  Effect.isEffect(value);
-
-/**
- * Check if a value is a valid ElementKey
- * @internal
- */
-const isElementKey = (value: unknown): value is ElementKey =>
-  typeof value === "string" || typeof value === "number";
+const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementType<Props>>(
+  type: Type,
+  props: Props | null,
+  key?: ElementKey,
+): ElementFor<Type> => unsafeAsElementFor<Type>(Effect.runSync(buildJsx(type, props, key)));
 
 /**
  * Create a JSX element
@@ -112,66 +103,7 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
   type: Type,
   props: Props | null,
   key?: ElementKey,
-): ElementFor<Type> => {
-  const resolvedProps = props ?? {};
-  const children = "children" in resolvedProps ? resolvedProps.children : undefined;
-  const propsKeyRaw = "key" in resolvedProps ? resolvedProps.key : undefined;
-  const propsKey = isElementKey(propsKeyRaw) ? propsKeyRaw : undefined;
-  const resolvedKey = key ?? propsKey ?? null;
-  const childElements = normalizeChildren(children);
-
-  // Build element props by excluding children and key
-  const elementPropsMutable: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(resolvedProps)) {
-    if (k !== "children" && k !== "key") {
-      elementPropsMutable[k] = v;
-    }
-  }
-  const elementProps = unsafeAsElementProps(elementPropsMutable);
-
-  if (typeof type === "string") {
-    // Intrinsic element: <div>, <span>, etc.
-    const intrinsic = Element.Intrinsic({
-      tag: type,
-      props: elementProps,
-      children: childElements,
-      key: resolvedKey,
-    });
-    return unsafeAsElementFor<Type>(intrinsic);
-  }
-
-  // Check if it's an Effect being passed directly (invalid - not allowed)
-  if (isEffect(type)) {
-    const errorElement = componentElement(
-      () =>
-        Effect.fail(
-          new Component.InvalidComponentError({
-            reason: "effect",
-            displayName: type.constructor?.name,
-          }),
-        ),
-      resolvedKey,
-    );
-    return unsafeAsElementFor<Type>(errorElement);
-  }
-
-  if (!Component.isEffectComponent(type)) {
-    const errorElement = componentElement(
-      () =>
-        Effect.fail(
-          new Component.InvalidComponentError({
-            reason: typeof type === "function" ? "plain-function" : "unknown",
-            displayName: typeof type === "function" ? type.name : undefined,
-          }),
-        ),
-      resolvedKey,
-    );
-    return unsafeAsElementFor<Type>(errorElement);
-  }
-
-  const element = type(resolvedProps);
-  return unsafeAsElementFor<Type>(resolvedKey !== null ? keyed(resolvedKey, element) : element);
-};
+): ElementFor<Type> => runJsx(type, props, key);
 
 /**
  * Create a JSX element with static children
@@ -192,7 +124,7 @@ export const jsx = <Props extends Record<string, unknown>, Type extends JSXEleme
  * @public
  * @since 1.0.0
  */
-export const jsxs: typeof jsx = jsx;
+export const jsxs: typeof jsx = runJsx;
 
 /**
  * Fragment component
