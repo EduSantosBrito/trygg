@@ -226,10 +226,13 @@ export const catchAll =
         );
 
       const safeComponentFn = (props: PropsInput<Props>): ElementType =>
-        Element.fromEffect(Effect.suspend(() => safeComponentRunFn(props)), {
-          identity: safeComponentFn,
-          inputs: props,
-        });
+        Element.fromEffect(
+          Effect.suspend(() => safeComponentRunFn(props)),
+          {
+            identity: safeComponentFn,
+            inputs: props,
+          },
+        );
 
       return tagComponent<Props, PropsInput<Props>, never, R | RHandler>(
         safeComponentFn,
@@ -276,10 +279,13 @@ export const exhaustive = <Props, E, R, HandledTags extends string>(
       );
 
     const safeComponentFn = (props: PropsInput<Props>): ElementType =>
-      Element.fromEffect(Effect.suspend(() => safeComponentRunFn(props)), {
-        identity: safeComponentFn,
-        inputs: props,
-      });
+      Element.fromEffect(
+        Effect.suspend(() => safeComponentRunFn(props)),
+        {
+          identity: safeComponentFn,
+          inputs: props,
+        },
+      );
 
     return tagComponent<Props, PropsInput<Props>, never, R>(
       safeComponentFn,

@@ -222,7 +222,7 @@ const checkOwner = ({
         names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
       }
 
-       if (owner.memberExports.includes(exportName) && primaryReachable) {
+      if (owner.memberExports.includes(exportName) && primaryReachable) {
         names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
       }
 
@@ -588,15 +588,15 @@ const parseOwner = (value: unknown): DocsOwner => {
   if (
     typeof topic !== "string" ||
     typeof category !== "string" ||
-      typeof entrypoint !== "string" ||
-      typeof module !== "string" ||
-      typeof primaryExport !== "string" ||
-      typeof sidecar !== "string" ||
-      (memberExportsValue !== undefined && !Array.isArray(memberExportsValue)) ||
-      !Array.isArray(namedExportsValue)
-    ) {
-      throw new Error("migrated owner fields invalid");
-    }
+    typeof entrypoint !== "string" ||
+    typeof module !== "string" ||
+    typeof primaryExport !== "string" ||
+    typeof sidecar !== "string" ||
+    (memberExportsValue !== undefined && !Array.isArray(memberExportsValue)) ||
+    !Array.isArray(namedExportsValue)
+  ) {
+    throw new Error("migrated owner fields invalid");
+  }
 
   const primaryKind =
     primaryKindValue === undefined

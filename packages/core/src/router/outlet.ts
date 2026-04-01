@@ -579,29 +579,29 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       Effect.gen(function* () {
         const nearestLoadingComp = boundaries.resolveLoading(match.route);
 
-          if (Option.isSome(nearestLoadingComp)) {
-            const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
-            const matchKey = buildMatchKey(match, queryString);
-            const strategyLayer = resolveScrollStrategy(match.route);
-            // Defer scroll across loading/refreshing states. `track` forks the
-            // render fiber, so fast loads can already be Ready by the time it
-            // returns; handle that window explicitly after track.
-            pendingScroll = { strategyLayer };
-            yield* loader.track(matchKey, renderEffect);
-            const currentState = yield* SubscriptionRef.get(loader.state._ref);
-            const currentView = yield* SubscriptionRef.get(loader.view._ref);
-            if (pendingScroll !== null && currentState._tag === "Ready") {
-              pendingScroll = null;
-              yield* setViewAndAwaitSwap(currentView);
-              yield* applyScroll(strategyLayer);
-            } else {
-              yield* Signal.set(viewSignal, currentView);
-            }
+        if (Option.isSome(nearestLoadingComp)) {
+          const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
+          const matchKey = buildMatchKey(match, queryString);
+          const strategyLayer = resolveScrollStrategy(match.route);
+          // Defer scroll across loading/refreshing states. `track` forks the
+          // render fiber, so fast loads can already be Ready by the time it
+          // returns; handle that window explicitly after track.
+          pendingScroll = { strategyLayer };
+          yield* loader.track(matchKey, renderEffect);
+          const currentState = yield* SubscriptionRef.get(loader.state._ref);
+          const currentView = yield* SubscriptionRef.get(loader.view._ref);
+          if (pendingScroll !== null && currentState._tag === "Ready") {
+            pendingScroll = null;
+            yield* setViewAndAwaitSwap(currentView);
+            yield* applyScroll(strategyLayer);
           } else {
-            yield* setViewAndAwaitSwap(yield* renderEffect);
-            yield* applyScroll(resolveScrollStrategy(match.route));
+            yield* Signal.set(viewSignal, currentView);
           }
-        });
+        } else {
+          yield* setViewAndAwaitSwap(yield* renderEffect);
+          yield* applyScroll(resolveScrollStrategy(match.route));
+        }
+      });
 
     // -------------------------------------------------------------------------
     // processRoute — match, middleware, render, commit

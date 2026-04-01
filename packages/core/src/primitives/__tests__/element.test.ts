@@ -365,28 +365,32 @@ describe("Element.fromUnknown", () => {
     }),
   );
 
-  it.effect("should convert Signal of Element to SignalElement while normalizing child inputs", () =>
-    Effect.gen(function* () {
-      // Test: should convert Signal of Element to SignalElement while normalizing child inputs.
-      // Scope: verifies reactive element children still lower to SignalElement inside the Effect-native boundary.
-      // Assertion: element signals normalize to SignalElement.
-      const signal = yield* Signal.make(intrinsic("span", {}, [text("content")]));
-      const element = yield* Element.fromUnknown(signal);
+  it.effect(
+    "should convert Signal of Element to SignalElement while normalizing child inputs",
+    () =>
+      Effect.gen(function* () {
+        // Test: should convert Signal of Element to SignalElement while normalizing child inputs.
+        // Scope: verifies reactive element children still lower to SignalElement inside the Effect-native boundary.
+        // Assertion: element signals normalize to SignalElement.
+        const signal = yield* Signal.make(intrinsic("span", {}, [text("content")]));
+        const element = yield* Element.fromUnknown(signal);
 
-      assert.strictEqual(element._tag, "SignalElement");
-    }),
+        assert.strictEqual(element._tag, "SignalElement");
+      }),
   );
 
-  it.effect("should convert raw Effect child inputs to lazy failure components while normalizing children", () =>
-    Effect.gen(function* () {
-      // Test: should convert raw Effect child inputs to lazy failure components while normalizing children.
-      // Scope: verifies the child boundary keeps rejecting raw Effects while staying in the Effect pipeline.
-      // Assertion: raw Effect child inputs normalize to Component failure shells.
-      const effectChild = Effect.succeed(intrinsic("div", {}, []));
-      const element = yield* Element.fromUnknown(effectChild);
+  it.effect(
+    "should convert raw Effect child inputs to lazy failure components while normalizing children",
+    () =>
+      Effect.gen(function* () {
+        // Test: should convert raw Effect child inputs to lazy failure components while normalizing children.
+        // Scope: verifies the child boundary keeps rejecting raw Effects while staying in the Effect pipeline.
+        // Assertion: raw Effect child inputs normalize to Component failure shells.
+        const effectChild = Effect.succeed(intrinsic("div", {}, []));
+        const element = yield* Element.fromUnknown(effectChild);
 
-      assert.strictEqual(element._tag, "Component");
-    }),
+        assert.strictEqual(element._tag, "Component");
+      }),
   );
 });
 

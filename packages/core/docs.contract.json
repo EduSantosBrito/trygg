@@ -194,12 +194,7 @@
       "module": "src/primitives/element.ts",
       "primaryExport": "Element",
       "primaryKind": "named",
-      "memberExports": [
-        "fromEffect",
-        "fail",
-        "fromUnknown",
-        "fromChildren"
-      ],
+      "memberExports": ["fromEffect", "fail", "fromUnknown", "fromChildren"],
       "namedExports": [
         "ElementKey",
         "ElementChild",

@@ -516,9 +516,9 @@ const ComponentElementOptionsSchema = Schema.Struct({
   inputs: Schema.optional(Schema.Any),
 });
 
-const decodeComponentElementOptions = Schema.decodeUnknownSync<typeof ComponentElementOptionsSchema>(
-  ComponentElementOptionsSchema,
-);
+const decodeComponentElementOptions = Schema.decodeUnknownSync<
+  typeof ComponentElementOptionsSchema
+>(ComponentElementOptionsSchema);
 
 /**
  * Create a component element from an Effect.
@@ -569,8 +569,10 @@ export const fromEffect = <E, R>(
  * @public
  * @since 1.0.0
  */
-export const fail = <E>(error: E, options?: ComponentElementOptions): ComponentElementWithRequirements<never> =>
-  Element.fromEffect(Effect.fail(error), options);
+export const fail = <E>(
+  error: E,
+  options?: ComponentElementOptions,
+): ComponentElementWithRequirements<never> => Element.fromEffect(Effect.fail(error), options);
 
 /**
  * Lift an unknown child-like value into an `Element`.

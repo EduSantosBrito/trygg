@@ -85,7 +85,7 @@ const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementTy
                 reason: error.reason,
                 displayName: error.displayName,
               }),
-              { ...(error.key === null ? {} : { key: error.key }) },
+              error.key === null ? {} : { key: error.key },
             ),
           ),
         ),

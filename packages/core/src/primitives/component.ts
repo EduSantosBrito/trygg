@@ -13,11 +13,7 @@
 import { Data, Effect, Layer } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
-import {
-  Element,
-  provideElement,
-  type ComponentElementWithRequirements,
-} from "./element.js";
+import { Element, provideElement, type ComponentElementWithRequirements } from "./element.js";
 
 /**
  * Error raised when an invalid component type is used in JSX.
@@ -167,9 +163,7 @@ export const tagComponent = <Props, RuntimeProps, E, R>(
 const normalizeResult = <E, R>(
   effect: Effect.Effect<ComponentResult, E, R>,
 ): Effect.Effect<Element, E, R> =>
-  Effect.map(effect, (result) =>
-    Effect.isEffect(result) ? Element.fromEffect(result) : result,
-  );
+  Effect.map(effect, (result) => (Effect.isEffect(result) ? Element.fromEffect(result) : result));
 
 // =============================================================================
 // Component Function
@@ -368,7 +362,10 @@ function genWithProps<P extends object>(): <
     };
 
     const componentFn = (props: P): Element =>
-      Element.fromEffect(Effect.suspend(() => runFn(props)), { identity: componentFn, inputs: props });
+      Element.fromEffect(
+        Effect.suspend(() => runFn(props)),
+        { identity: componentFn, inputs: props },
+      );
 
     return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(
       componentFn,

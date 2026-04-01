@@ -7,11 +7,7 @@
  */
 import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
-import {
-  Element,
-  type Element as ElementType,
-  provideElement,
-} from "../primitives/element.js";
+import { Element, type Element as ElementType, provideElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
@@ -73,7 +69,10 @@ const mapChildInputElements = (
     return child.map((value) => mapChildInputElements(value, f));
   }
 
-  return Component.isEffectComponent(child) || typeof child !== "object" || child === null || !("_tag" in child)
+  return Component.isEffectComponent(child) ||
+    typeof child !== "object" ||
+    child === null ||
+    !("_tag" in child)
     ? child
     : Element.$is("Intrinsic")(child) ||
         Element.$is("Text")(child) ||
@@ -124,16 +123,18 @@ const wrapElementWithFiberRefs = (
     case "Portal":
       return Element.Portal({
         target: element.target,
-        children: mapChildInputElements(element.children, (child) => wrapElementWithFiberRefs(child, wrapRun)),
+        children: mapChildInputElements(element.children, (child) =>
+          wrapElementWithFiberRefs(child, wrapRun),
+        ),
       });
     case "KeyedList":
       return Element.KeyedList({
         source: element.source,
         keyFn: element.keyFn,
         renderFn: (item, index) =>
-          element.renderFn(item, index).pipe(
-            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
-          ),
+          element
+            .renderFn(item, index)
+            .pipe(Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun))),
       });
     case "ErrorBoundaryElement":
       if (typeof element.fallback === "function") {
@@ -435,7 +436,10 @@ export function renderLayout(
       Effect.gen(function* () {
         const capturedContext = yield* Effect.services<unknown>();
         const element = yield* effect;
-        return provideElement(capturedContext, wrapElementWithFiberRefs(element, withLayoutContext));
+        return provideElement(
+          capturedContext,
+          wrapElementWithFiberRefs(element, withLayoutContext),
+        );
       }).pipe(unsafeEraseR),
       {
         identity: routeLayoutWrapperIdentity,
@@ -483,7 +487,10 @@ export function renderError(
           Effect.gen(function* () {
             const capturedContext = yield* Effect.services<unknown>();
             const element = yield* effect;
-            return provideElement(capturedContext, wrapElementWithFiberRefs(element, withErrorContext));
+            return provideElement(
+              capturedContext,
+              wrapElementWithFiberRefs(element, withErrorContext),
+            );
           }).pipe(unsafeEraseR),
           {
             identity: routeErrorWrapperIdentity,

@@ -12,13 +12,7 @@
  */
 import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
-import {
-  Element,
-  getKey,
-  isElement,
-  type ElementProps,
-  type EventHandler,
-} from "./element.js";
+import { Element, getKey, isElement, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -1683,7 +1677,13 @@ const renderElement = (
 
           // Render into list parent (content appended after startMarker)
           const normalizedElement = yield* Element.fromUnknown(element);
-          const result = yield* renderElement(normalizedElement, listParent, runtime, context, options);
+          const result = yield* renderElement(
+            normalizedElement,
+            listParent,
+            runtime,
+            context,
+            options,
+          );
 
           // Insert end marker after content - ensures moveRange captures full Fragment range
           const endMarker = document.createComment("item-end");

@@ -66,34 +66,36 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.effect("should not throw while constructing invalid plain function components before render", () =>
-    Effect.gen(function* () {
-      // Test: should not throw while constructing invalid plain function components before render.
-      // Scope: preserves the lazy invalid-component recovery boundary at jsx construction time.
-      // Assertion: jsx construction returns an element shell immediately, and the InvalidComponentError still appears only during render.
-      const Plain = () => <span data-testid="plain">Hello</span>;
+  it.effect(
+    "should not throw while constructing invalid plain function components before render",
+    () =>
+      Effect.gen(function* () {
+        // Test: should not throw while constructing invalid plain function components before render.
+        // Scope: preserves the lazy invalid-component recovery boundary at jsx construction time.
+        // Assertion: jsx construction returns an element shell immediately, and the InvalidComponentError still appears only during render.
+        const Plain = () => <span data-testid="plain">Hello</span>;
 
-      const construction = yield* Effect.exit(Effect.sync(() => <Plain />));
+        const construction = yield* Effect.exit(Effect.sync(() => <Plain />));
 
-      if (Exit.isFailure(construction)) {
-        return assert.fail(
-          `Expected lazy invalid-component construction but got ${String(Cause.squash(construction.cause))}`,
-        );
-      }
+        if (Exit.isFailure(construction)) {
+          return assert.fail(
+            `Expected lazy invalid-component construction but got ${String(Cause.squash(construction.cause))}`,
+          );
+        }
 
-      const exit = yield* Effect.exit(render(construction.value));
+        const exit = yield* Effect.exit(render(construction.value));
 
-      if (Exit.isSuccess(exit)) {
-        return assert.fail("Expected failure but got success");
-      }
+        if (Exit.isSuccess(exit)) {
+          return assert.fail("Expected failure but got success");
+        }
 
-      const error = Cause.squash(exit.cause);
-      if (!(error instanceof Component.InvalidComponentError)) {
-        return assert.fail(`Expected InvalidComponentError but got ${String(error)}`);
-      }
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof Component.InvalidComponentError)) {
+          return assert.fail(`Expected InvalidComponentError but got ${String(error)}`);
+        }
 
-      assert.strictEqual(error.reason, "plain-function");
-    }),
+        assert.strictEqual(error.reason, "plain-function");
+      }),
   );
 
   it.effect("should reject direct Effect children", () =>
@@ -168,11 +170,15 @@ describe("JSX component validation", () => {
     // Test: should normalize static children and preserve explicit keys while using jsxs.
     // Scope: verifies the multiple-children public entrypoint stays aligned with jsx through the shared builder.
     // Assertion: jsxs returns the same observable intrinsic shape, normalized children, and explicit key precedence.
-    const element = jsxs("div", {
-      id: "root",
-      key: "props-key",
-      children: ["hello", null, ["world"]],
-    }, 9);
+    const element = jsxs(
+      "div",
+      {
+        id: "root",
+        key: "props-key",
+        children: ["hello", null, ["world"]],
+      },
+      9,
+    );
 
     assert.strictEqual(element._tag, "Intrinsic");
     if (element._tag !== "Intrinsic") {
@@ -189,28 +195,31 @@ describe("JSX component validation", () => {
       // Test: should align jsxDEV with jsx while Fragment children props are hostile.
       // Scope: verifies the development JSX entrypoint cannot drift from production JSX for the same Fragment inputs.
       // Assertion: jsxDEV(Fragment, props) degrades the hostile children getter into the same empty fragment result as jsx(Fragment, props).
-      const malformedProps = new Proxy({}, {
-        ownKeys() {
-          return ["children"];
-        },
-        getOwnPropertyDescriptor(_target, property) {
-          if (property === "children") {
-            return {
-              configurable: true,
-              enumerable: true,
-            };
-          }
+      const malformedProps = new Proxy(
+        {},
+        {
+          ownKeys() {
+            return ["children"];
+          },
+          getOwnPropertyDescriptor(_target, property) {
+            if (property === "children") {
+              return {
+                configurable: true,
+                enumerable: true,
+              };
+            }
 
-          return undefined;
-        },
-        get(_target, property) {
-          if (property === "children") {
-            throw new Error("boom-children");
-          }
+            return undefined;
+          },
+          get(_target, property) {
+            if (property === "children") {
+              throw new Error("boom-children");
+            }
 
-          return undefined;
+            return undefined;
+          },
         },
-      });
+      );
 
       const source = {
         fileName: "jsx-runtime.test.tsx",
@@ -226,7 +235,9 @@ describe("JSX component validation", () => {
         );
       }
 
-      const jsxDevExit = yield* Effect.exit(render(jsxDEV(Fragment, malformedProps, undefined, false, source)));
+      const jsxDevExit = yield* Effect.exit(
+        render(jsxDEV(Fragment, malformedProps, undefined, false, source)),
+      );
 
       if (Exit.isFailure(jsxDevExit)) {
         return assert.fail(
@@ -234,39 +245,47 @@ describe("JSX component validation", () => {
         );
       }
 
-      assert.strictEqual(jsxDevExit.value.container.textContent, jsxExit.value.container.textContent);
+      assert.strictEqual(
+        jsxDevExit.value.container.textContent,
+        jsxExit.value.container.textContent,
+      );
     }),
   );
 
-  it.effect("should not throw while malformed props trigger proxy traps during jsx construction", () =>
-    Effect.gen(function* () {
-      // Test: should not throw while malformed props trigger proxy traps during jsx construction.
-      // Scope: regression coverage for hostile JavaScript callers at the public sync JSX boundary.
-      // Assertion: jsx construction succeeds, preserves the explicit key, and degrades malformed props into the intrinsic default shape.
-      const malformedProps = new Proxy({}, {
-        ownKeys() {
-          throw new Error("boom-own-keys");
-        },
-      });
-
-      const construction = yield* Effect.exit(Effect.sync(() => jsx("div", malformedProps, 13)));
-
-      if (Exit.isFailure(construction)) {
-        return assert.fail(
-          `Expected malformed props to degrade during jsx construction but got ${String(Cause.squash(construction.cause))}`,
+  it.effect(
+    "should not throw while malformed props trigger proxy traps during jsx construction",
+    () =>
+      Effect.gen(function* () {
+        // Test: should not throw while malformed props trigger proxy traps during jsx construction.
+        // Scope: regression coverage for hostile JavaScript callers at the public sync JSX boundary.
+        // Assertion: jsx construction succeeds, preserves the explicit key, and degrades malformed props into the intrinsic default shape.
+        const malformedProps = new Proxy(
+          {},
+          {
+            ownKeys() {
+              throw new Error("boom-own-keys");
+            },
+          },
         );
-      }
 
-      const element = construction.value;
-      assert.strictEqual(element._tag, "Intrinsic");
-      if (element._tag !== "Intrinsic") {
-        return assert.fail("Expected Intrinsic element");
-      }
+        const construction = yield* Effect.exit(Effect.sync(() => jsx("div", malformedProps, 13)));
 
-      assert.deepStrictEqual(element.props, {});
-      assert.strictEqual(element.key, 13);
-      assert.deepStrictEqual(element.children, []);
-    }),
+        if (Exit.isFailure(construction)) {
+          return assert.fail(
+            `Expected malformed props to degrade during jsx construction but got ${String(Cause.squash(construction.cause))}`,
+          );
+        }
+
+        const element = construction.value;
+        assert.strictEqual(element._tag, "Intrinsic");
+        if (element._tag !== "Intrinsic") {
+          return assert.fail("Expected Intrinsic element");
+        }
+
+        assert.deepStrictEqual(element.props, {});
+        assert.strictEqual(element.key, 13);
+        assert.deepStrictEqual(element.children, []);
+      }),
   );
 
   it("should not require services while constructing valid effect components with jsx", () => {
