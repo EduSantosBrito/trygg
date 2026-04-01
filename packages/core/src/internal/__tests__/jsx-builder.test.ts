@@ -69,6 +69,32 @@ describe("buildJsx", () => {
     }),
   );
 
+  it.effect("should preserve safe props and explicit key while malformed jsx-only props throw", () =>
+    Effect.gen(function* () {
+      // Test: should preserve safe props and explicit key while malformed jsx-only props throw.
+      // Scope: guards the shared builder against hostile JavaScript prop objects without relying on the public sync runtime wrapper.
+      // Assertion: keeps readable props, drops throwing children/key reads, and still returns a normal intrinsic element.
+      const element = yield* buildJsx("div", {
+        id: "root",
+        get children() {
+          throw new Error("boom-children");
+        },
+        get key() {
+          throw new Error("boom-key");
+        },
+      }, 7);
+
+      assert.strictEqual(element._tag, "Intrinsic");
+      if (element._tag !== "Intrinsic") {
+        return assert.fail("Expected Intrinsic element");
+      }
+
+      assert.deepStrictEqual(element.props, { id: "root" });
+      assert.strictEqual(element.key, 7);
+      assert.deepStrictEqual(element.children, []);
+    }),
+  );
+
   it.effect("should fail with typed invalid-component error while building plain function inputs", () =>
     Effect.gen(function* () {
       // Test: should fail with typed invalid-component error while building plain function inputs.

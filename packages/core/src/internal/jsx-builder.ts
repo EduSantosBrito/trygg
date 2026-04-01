@@ -1,4 +1,4 @@
-import { Data, Effect, Match } from "effect";
+import { Data, Effect, Exit, Match } from "effect";
 
 import * as Component from "../primitives/component.js";
 import {
@@ -29,21 +29,34 @@ const isElementKey = (value: unknown): value is ElementKey =>
 
 const isRecord = (value: unknown): value is RuntimeProps => typeof value === "object" && value !== null;
 
+const collectProps = Effect.fn("JsxBuilder.collectProps")(function* (props: RuntimeProps) {
+  const keysExit = yield* Effect.exit(Effect.sync(() => Object.keys(props)));
+  if (Exit.isFailure(keysExit)) {
+    return {} satisfies RuntimeProps;
+  }
+
+  const entries = yield* Effect.forEach(keysExit.value, (property) =>
+    Effect.gen(function* () {
+      const valueExit = yield* Effect.exit(Effect.sync(() => Reflect.get(props, property)));
+      return Exit.isSuccess(valueExit) ? ([[property, valueExit.value]] as const) : [];
+    }),
+  );
+
+  return Object.fromEntries(entries.flat());
+});
+
 const normalizeInput = Effect.fn("JsxBuilder.normalizeInput")(function* (
   props: unknown,
   key?: ElementKey,
 ) {
-  const resolvedProps = isRecord(props) ? props : {};
-  const children = "children" in resolvedProps ? resolvedProps.children : undefined;
-  const propsKeyRaw = "key" in resolvedProps ? resolvedProps.key : undefined;
+  const resolvedProps = isRecord(props) ? yield* collectProps(props) : {};
+  const children = resolvedProps.children;
+  const propsKeyRaw = resolvedProps.key;
   const propsKey = isElementKey(propsKeyRaw) ? propsKeyRaw : undefined;
   const resolvedKey = key ?? propsKey ?? null;
   const elementProps = unsafeAsElementProps(
-    Object.assign(
-      {},
-      ...(yield* Effect.forEach(Object.entries(resolvedProps), ([property, value]) =>
-        Effect.succeed(property === "children" || property === "key" ? {} : { [property]: value }),
-      )),
+    Object.fromEntries(
+      Object.entries(resolvedProps).filter(([property]) => property !== "children" && property !== "key"),
     ),
   );
 

@@ -183,6 +183,37 @@ describe("JSX component validation", () => {
     assert.strictEqual(element.children.length, 2);
   });
 
+  it.effect("should not throw while malformed props trigger proxy traps during jsx construction", () =>
+    Effect.gen(function* () {
+      // Test: should not throw while malformed props trigger proxy traps during jsx construction.
+      // Scope: regression coverage for hostile JavaScript callers at the public sync JSX boundary.
+      // Assertion: jsx construction succeeds, preserves the explicit key, and degrades malformed props into the intrinsic default shape.
+      const malformedProps = new Proxy({}, {
+        ownKeys() {
+          throw new Error("boom-own-keys");
+        },
+      });
+
+      const construction = yield* Effect.exit(Effect.sync(() => jsx("div", malformedProps, 13)));
+
+      if (Exit.isFailure(construction)) {
+        return assert.fail(
+          `Expected malformed props to degrade during jsx construction but got ${String(Cause.squash(construction.cause))}`,
+        );
+      }
+
+      const element = construction.value;
+      assert.strictEqual(element._tag, "Intrinsic");
+      if (element._tag !== "Intrinsic") {
+        return assert.fail("Expected Intrinsic element");
+      }
+
+      assert.deepStrictEqual(element.props, {});
+      assert.strictEqual(element.key, 13);
+      assert.deepStrictEqual(element.children, []);
+    }),
+  );
+
   it("should not require services while constructing valid effect components with jsx", () => {
     // Test: should not require services while constructing valid effect components with jsx.
     // Scope: verifies the public sync bridge builds the element shell without running component requirements eagerly.
