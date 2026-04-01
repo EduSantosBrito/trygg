@@ -3,7 +3,7 @@ import { Cause, Effect, Exit } from "effect";
 
 import * as Component from "../../primitives/component.js";
 import { Element, getKey, text } from "../../primitives/element.js";
-import { buildJsx, InvalidJsxComponentInput } from "../jsx-builder.js";
+import { InvalidJsxComponentInput, JsxBuilder } from "../jsx-builder.js";
 
 const BuilderComponent = Component.gen(function* (
   Props: Component.ComponentProps<{ readonly message: string }>,
@@ -17,13 +17,13 @@ const BuilderComponent = Component.gen(function* (
   });
 });
 
-describe("buildJsx", () => {
+describe("JsxBuilder.build", () => {
   it.effect("should shape intrinsic props and normalize children while explicit key wins", () =>
     Effect.gen(function* () {
       // Test: should shape intrinsic props and normalize children while explicit key wins.
       // Scope: verifies the shared JSX builder handles the intrinsic happy path used by jsx/jsxs.
       // Assertion: removes JSX-only props, preserves the explicit key, and normalizes nested children.
-      const element = yield* buildJsx("div", {
+      const element = yield* JsxBuilder.build("div", {
         id: "root",
         key: "props-key",
         children: ["hello", null, ["world"]],
@@ -57,7 +57,7 @@ describe("buildJsx", () => {
       // Test: should preserve component props and key while building a valid effect component.
       // Scope: verifies the shared builder covers the component happy path in addition to intrinsic elements.
       // Assertion: returns a component element shell, keeps the provided props, and preserves the explicit key.
-      const element = yield* buildJsx(BuilderComponent, { message: "hello" }, 3);
+      const element = yield* JsxBuilder.build(BuilderComponent, { message: "hello" }, 3);
 
       assert.strictEqual(element._tag, "Component");
       if (element._tag !== "Component") {
@@ -74,7 +74,7 @@ describe("buildJsx", () => {
       // Test: should preserve safe props and explicit key while malformed jsx-only props throw.
       // Scope: guards the shared builder against hostile JavaScript prop objects without relying on the public sync runtime wrapper.
       // Assertion: keeps readable props, drops throwing children/key reads, and still returns a normal intrinsic element.
-      const element = yield* buildJsx("div", {
+      const element = yield* JsxBuilder.build("div", {
         id: "root",
         get children() {
           throw new Error("boom-children");
@@ -99,13 +99,13 @@ describe("buildJsx", () => {
     Effect.gen(function* () {
       // Test: should fail with typed invalid-component error while building plain function inputs.
       // Scope: verifies the shared builder classifies unsupported JSX component values internally instead of recovering at this layer.
-      // Assertion: buildJsx fails with the internal invalid-component classification and preserves the plain-function reason.
+      // Assertion: JsxBuilder.build fails with the internal invalid-component classification and preserves the plain-function reason.
       const Plain = () => Element.Intrinsic({ tag: "span", props: {}, children: [], key: null });
 
-      const exit = yield* Effect.exit(buildJsx(Plain, {}, 5));
+      const exit = yield* Effect.exit(JsxBuilder.build(Plain, {}, 5));
 
       if (Exit.isSuccess(exit)) {
-        return assert.fail("Expected buildJsx to fail for plain functions");
+        return assert.fail("Expected JsxBuilder.build to fail for plain functions");
       }
 
       const error = Cause.squash(exit.cause);
@@ -122,13 +122,13 @@ describe("buildJsx", () => {
     Effect.gen(function* () {
       // Test: should fail with typed invalid-component error while building raw Effect inputs.
       // Scope: verifies the shared builder classifies raw Effect component values with the same internal contract used by the public runtime recovery.
-      // Assertion: buildJsx fails with the internal invalid-component classification, preserves the effect reason, and keeps the resolved key.
+      // Assertion: JsxBuilder.build fails with the internal invalid-component classification, preserves the effect reason, and keeps the resolved key.
       const directEffect = Effect.succeed(Element.Intrinsic({ tag: "span", props: {}, children: [], key: null }));
 
-      const exit = yield* Effect.exit(buildJsx(directEffect, {}, 8));
+      const exit = yield* Effect.exit(JsxBuilder.build(directEffect, {}, 8));
 
       if (Exit.isSuccess(exit)) {
-        return assert.fail("Expected buildJsx to fail for raw Effect inputs");
+        return assert.fail("Expected JsxBuilder.build to fail for raw Effect inputs");
       }
 
       const error = Cause.squash(exit.cause);

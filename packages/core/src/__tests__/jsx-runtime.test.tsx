@@ -11,7 +11,8 @@ import { Cause, Effect, Exit } from "effect";
 import * as ServiceMap from "effect/ServiceMap";
 import * as Component from "../primitives/component.js";
 import { getKey } from "../primitives/element.js";
-import { jsx, jsxs } from "../jsx-runtime.js";
+import { jsxDEV } from "../jsx-dev-runtime.js";
+import { Fragment, jsx, jsxs } from "../jsx-runtime.js";
 import { render } from "../testing/index.js";
 
 describe("JSX component validation", () => {
@@ -182,6 +183,60 @@ describe("JSX component validation", () => {
     assert.strictEqual(element.key, 9);
     assert.strictEqual(element.children.length, 2);
   });
+
+  it.effect("should align jsxDEV with jsx while Fragment children props are hostile", () =>
+    Effect.gen(function* () {
+      // Test: should align jsxDEV with jsx while Fragment children props are hostile.
+      // Scope: verifies the development JSX entrypoint cannot drift from production JSX for the same Fragment inputs.
+      // Assertion: jsxDEV(Fragment, props) degrades the hostile children getter into the same empty fragment result as jsx(Fragment, props).
+      const malformedProps = new Proxy({}, {
+        ownKeys() {
+          return ["children"];
+        },
+        getOwnPropertyDescriptor(_target, property) {
+          if (property === "children") {
+            return {
+              configurable: true,
+              enumerable: true,
+            };
+          }
+
+          return undefined;
+        },
+        get(_target, property) {
+          if (property === "children") {
+            throw new Error("boom-children");
+          }
+
+          return undefined;
+        },
+      });
+
+      const source = {
+        fileName: "jsx-runtime.test.tsx",
+        lineNumber: 1,
+        columnNumber: 1,
+      };
+
+      const jsxExit = yield* Effect.exit(render(jsx(Fragment, malformedProps)));
+
+      if (Exit.isFailure(jsxExit)) {
+        return assert.fail(
+          `Expected jsx(Fragment, props) to degrade hostile children but got ${String(Cause.squash(jsxExit.cause))}`,
+        );
+      }
+
+      const jsxDevExit = yield* Effect.exit(render(jsxDEV(Fragment, malformedProps, undefined, false, source)));
+
+      if (Exit.isFailure(jsxDevExit)) {
+        return assert.fail(
+          `Expected jsxDEV(Fragment, props) to match jsx(Fragment, props) but got ${String(Cause.squash(jsxDevExit.cause))}`,
+        );
+      }
+
+      assert.strictEqual(jsxDevExit.value.container.textContent, jsxExit.value.container.textContent);
+    }),
+  );
 
   it.effect("should not throw while malformed props trigger proxy traps during jsx construction", () =>
     Effect.gen(function* () {

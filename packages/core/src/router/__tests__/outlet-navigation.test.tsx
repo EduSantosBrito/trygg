@@ -18,7 +18,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import * as Components from "../../primitives/component.js";
 import * as Route from "../route.js";
@@ -170,6 +170,47 @@ describe("AsyncLoader - view signal during track", () => {
 // =============================================================================
 
 describe("Outlet - Component re-render on navigation (root cause)", () => {
+  scoped("should apply scroll once after fast ready navigation behind a loading boundary", () =>
+    Effect.gen(function* () {
+      // Test: should apply scroll once after fast ready navigation behind a loading boundary.
+      // Scope: regression for the deferred-scroll window where AsyncLoader can reach Ready before Outlet finishes post-track handling.
+      // Assertion: navigating to a loading-boundary route with synchronous content still increments router._applyScroll exactly once.
+      const DashComp = identifiableComp("dashboard", "Dashboard Page");
+      const UsersComp = identifiableComp("users", "Users Page");
+      const LoadingComp = loadingComp();
+
+      const manifest = Routes.make()
+        .add(Route.make("/dashboard").component(DashComp).loading(LoadingComp))
+        .add(Route.make("/users").component(UsersComp).loading(LoadingComp)).manifest;
+
+      const baseRouter = yield* Router.Router;
+      const scrollCalls = yield* Ref.make(0);
+      const wrappedRouter = Router.Router.of({
+        ...baseRouter,
+        _applyScroll: (options) =>
+          Ref.update(scrollCalls, (count) => count + 1).pipe(
+            Effect.flatMap(() => baseRouter._applyScroll(options)),
+          ),
+      });
+
+      const outlet = Outlet({ routes: manifest });
+      yield* renderElement(outlet).pipe(Effect.provideService(Router.Router, wrappedRouter));
+      yield* TestClock.adjust(100);
+
+      const beforeNavigate = yield* Ref.get(scrollCalls);
+
+      yield* wrappedRouter.navigate("/users");
+      yield* TestClock.adjust(100);
+
+      const afterNavigate = yield* Ref.get(scrollCalls);
+      assert.strictEqual(
+        afterNavigate,
+        beforeNavigate + 1,
+        `Expected one scroll application after navigation but saw ${afterNavigate - beforeNavigate}`,
+      );
+    }).pipe(Effect.provide(testLayerAt("/dashboard"))),
+  );
+
   scoped("Outlet component body should run only ONCE (not re-render on route change)", () =>
     Effect.gen(function* () {
       // The real Outlet uses SubscriptionRef.get (not Signal.get) to read the

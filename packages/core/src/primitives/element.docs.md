@@ -11,6 +11,9 @@ Use `Element` types and constructors when you are building lower-level JSX helpe
 ## Related exports
 
 - `Element`
+- `intrinsic`
+- `fragment`
+- `keyedList`
 - `Element.fromEffect`
 - `Element.fail`
 - `Element.fromUnknown`

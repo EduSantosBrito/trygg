@@ -703,27 +703,6 @@ export const Element: typeof ElementBase & {
 };
 
 /**
- * Create a component element from an Effect.
- *
- * This is the low-level alias used by existing internals.
- * For defining JSX-compatible components, use `Component()` from trygg instead.
- *
- * If the effect has unsatisfied requirements, it will fail
- * at runtime with "service not found".
- *
- * @remarks
- * `componentElement` is the compatibility escape hatch used by JSX and renderer
- * internals. Prefer `Element.fromEffect` at new call sites.
- *
- * @since 1.0.0
- * @internal
- */
-export const componentElement = <E, R>(
-  effect: Effect.Effect<Element, E, R>,
-  options?: ComponentElementOptions,
-): ComponentElementWithRequirements<R> => Element.fromEffect(effect, options);
-
-/**
  * Create a context boundary element.
  * @internal
  */

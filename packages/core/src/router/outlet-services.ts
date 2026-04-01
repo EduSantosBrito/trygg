@@ -245,6 +245,8 @@ export const AsyncLoadState = Data.taggedEnum<AsyncLoadState>();
 
 /** @since 1.0.0 */
 export interface AsyncLoaderShape {
+  /** Signal reflecting loading/refreshing/ready state. */
+  readonly state: Signal.Signal<AsyncLoadState>;
   /** Track a load effect with dedup by match key. Returns immediately; updates view signal. */
   readonly track: (
     matchKey: string,
@@ -334,22 +336,25 @@ export class AsyncLoader extends ServiceMap.Service<AsyncLoader, AsyncLoaderShap
           yield* Ref.set(currentFiberRef, Option.some(fiber));
         });
 
-      return { view, track } satisfies AsyncLoaderShape;
+      return { state, view, track } satisfies AsyncLoaderShape;
     });
 
   /** Passthrough AsyncLoader for testing (no async tracking, immediate render). */
   static readonly test = (fallbackElement: Element): AsyncLoaderShape => {
     // In test mode, track just resolves the effect synchronously and stores the result
     let lastElement: Element = fallbackElement;
+    const stateSignal = Signal.makeSync<AsyncLoadState>(AsyncLoadState.Loading());
     const viewSignal = Signal.makeSync(fallbackElement);
 
     return {
+      state: stateSignal,
       view: viewSignal,
       track: (_, loadEffect) =>
         Effect.gen(function* () {
           const exit = yield* Effect.exit(loadEffect);
           if (Exit.isSuccess(exit)) {
             lastElement = exit.value;
+            yield* Signal.set(stateSignal, AsyncLoadState.Ready({ element: lastElement }));
             yield* Signal.set(viewSignal, lastElement);
           }
         }),

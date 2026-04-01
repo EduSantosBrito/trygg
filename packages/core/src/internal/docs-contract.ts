@@ -40,6 +40,7 @@ interface DocsCategory {
 interface DocsOwner {
   readonly category: string;
   readonly entrypoint: string;
+  readonly memberExports: ReadonlyArray<string>;
   readonly module: string;
   readonly namedExports: ReadonlyArray<string>;
   readonly primaryExport: string;
@@ -218,6 +219,10 @@ const checkOwner = ({
       const names: Array<string> = [];
 
       if (owner.primaryKind === "namespace" && primaryReachable) {
+        names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
+      }
+
+       if (owner.memberExports.includes(exportName) && primaryReachable) {
         names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
       }
 
@@ -573,6 +578,7 @@ const parseOwner = (value: unknown): DocsOwner => {
   const topic = value["topic"];
   const category = value["category"];
   const entrypoint = value["entrypoint"];
+  const memberExportsValue = value["memberExports"];
   const module = value["module"];
   const primaryExport = value["primaryExport"];
   const primaryKindValue = value["primaryKind"];
@@ -582,14 +588,15 @@ const parseOwner = (value: unknown): DocsOwner => {
   if (
     typeof topic !== "string" ||
     typeof category !== "string" ||
-    typeof entrypoint !== "string" ||
-    typeof module !== "string" ||
-    typeof primaryExport !== "string" ||
-    typeof sidecar !== "string" ||
-    !Array.isArray(namedExportsValue)
-  ) {
-    throw new Error("migrated owner fields invalid");
-  }
+      typeof entrypoint !== "string" ||
+      typeof module !== "string" ||
+      typeof primaryExport !== "string" ||
+      typeof sidecar !== "string" ||
+      (memberExportsValue !== undefined && !Array.isArray(memberExportsValue)) ||
+      !Array.isArray(namedExportsValue)
+    ) {
+      throw new Error("migrated owner fields invalid");
+    }
 
   const primaryKind =
     primaryKindValue === undefined
@@ -599,6 +606,13 @@ const parseOwner = (value: unknown): DocsOwner => {
         : (() => {
             throw new Error("primaryKind must be named or namespace");
           })();
+
+  const memberExports = (memberExportsValue ?? []).map((memberExport) => {
+    if (typeof memberExport !== "string") {
+      throw new Error("memberExports must contain only strings");
+    }
+    return memberExport;
+  });
 
   const namedExports = namedExportsValue.map((namedExport) => {
     if (typeof namedExport !== "string") {
@@ -610,6 +624,7 @@ const parseOwner = (value: unknown): DocsOwner => {
   return {
     category,
     entrypoint,
+    memberExports,
     module,
     namedExports,
     primaryExport,

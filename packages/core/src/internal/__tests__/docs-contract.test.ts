@@ -38,6 +38,7 @@ const fixtureDocsContract = JSON.stringify(
         module: "src/owner.ts",
         primaryExport: "thing",
         primaryKind: "named",
+        memberExports: [],
         namedExports: [],
         sidecar: "src/owner.docs.md",
       },
@@ -51,6 +52,27 @@ const fixtureDocsContractWrongOwnerModule = fixtureDocsContract.replace(
   '"ownerModule": "src/owner.ts"',
   '"ownerModule": "src/not-owner.ts"',
 );
+
+const fixtureDocsContractWithMemberExports = [
+  "{",
+  '  "allowedTags": ["category", "example", "internal", "module", "public", "remarks", "see", "since"],',
+  '  "sidecarHeadings": ["When to use", "Behavior", "Related exports"],',
+  '  "categories": [{ "name": "Fixtures", "ownerModule": "src/owner.ts", "requiresSidecar": true }],',
+  '  "migratedOwners": [',
+  "    {",
+  '      "topic": "Fixture",',
+  '      "category": "Fixtures",',
+  '      "entrypoint": ".",',
+  '      "module": "src/owner.ts",',
+  '      "primaryExport": "thing",',
+  '      "primaryKind": "named",',
+  '      "memberExports": ["helper"],',
+  '      "namedExports": [],',
+  '      "sidecar": "src/owner.docs.md"',
+  "    }",
+  "  ]",
+  "}",
+].join("\n");
 
 const fixtureSidecar = [
   "# Fixture",
@@ -159,6 +181,10 @@ describe("docs contract", () => {
         "trygg.Component",
         "trygg.PropsMarker",
         "trygg.Element",
+        "trygg.Element.fromEffect",
+        "trygg.Element.fail",
+        "trygg.Element.fromUnknown",
+        "trygg.Element.fromChildren",
         "trygg.intrinsic",
         "trygg.Renderer",
         "trygg.RenderContext",
@@ -208,6 +234,69 @@ describe("docs contract", () => {
             publicName: "trygg.legacy",
           },
         ]);
+      }),
+    ),
+  );
+
+  it.effect("tracks member exports reachable off a named primary export", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixtureRoot = yield* makeDocsFixture({
+          docsContract: fixtureDocsContractWithMemberExports,
+          ownerSource: [
+            "/**",
+            " * Fixture owner module.",
+            " *",
+            " * @remarks",
+            " * Owns the migrated fixture surface.",
+            " *",
+            " * @see ./owner.docs.md - Source-owned topic guide",
+            " * @module trygg",
+            " */",
+            "",
+            "/**",
+            " * Fixture helper.",
+            " *",
+            " * @remarks",
+            " * `helper` stays reachable through `thing.helper`.",
+            " *",
+            " * @example",
+            " * ```ts",
+            " * const value = thing.helper",
+            " * ```",
+            " *",
+            " * @category Fixtures",
+            " * @public",
+            " * @since 1.0.0",
+            " */",
+            'export const helper = "ok";',
+            "",
+            "/**",
+            " * Fixture value.",
+            " *",
+            " * @remarks",
+            " * `thing` is the migrated surface under test.",
+            " *",
+            " * @example",
+            " * ```ts",
+            " * const value = thing",
+            " * ```",
+            " *",
+            " * @category Fixtures",
+            " * @public",
+            " * @since 1.0.0",
+            " */",
+            "export const thing = { helper };",
+            "",
+          ].join("\n"),
+        });
+
+        const report = yield* checkDocsContract({ packageRoot: fixtureRoot });
+
+        assert.deepStrictEqual(report.violations, []);
+        expect(report.reachableExports).toContain("trygg.thing");
+        expect(report.reachableExports).toContain("trygg.thing.helper");
+        expect(report.reachableExports).not.toContain("trygg.helper");
       }),
     ),
   );

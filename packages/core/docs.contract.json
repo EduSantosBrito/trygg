@@ -194,6 +194,12 @@
       "module": "src/primitives/element.ts",
       "primaryExport": "Element",
       "primaryKind": "named",
+      "memberExports": [
+        "fromEffect",
+        "fail",
+        "fromUnknown",
+        "fromChildren"
+      ],
       "namedExports": [
         "ElementKey",
         "ElementChild",
@@ -204,9 +210,7 @@
         "EventHandler",
         "intrinsic",
         "text",
-        "componentElement",
         "fragment",
-        "portal",
         "keyedList",
         "empty",
         "isElement",

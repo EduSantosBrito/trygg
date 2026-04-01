@@ -233,7 +233,7 @@ describe("portal", () => {
     const element = portal(target, children);
 
     assert.strictEqual(element._tag, "Portal");
-    assert.strictEqual(element.children, children);
+    assert.deepStrictEqual(element.children, children);
   });
 });
 

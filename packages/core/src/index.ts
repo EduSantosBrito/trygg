@@ -53,7 +53,6 @@ export {
   type EventHandler,
   intrinsic,
   text,
-  componentElement,
   fragment,
   keyedList,
   empty,

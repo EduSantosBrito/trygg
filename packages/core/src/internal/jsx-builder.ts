@@ -6,7 +6,7 @@ import {
   keyed,
   type ElementKey,
 } from "../primitives/element.js";
-import type { Element as RuntimeElement } from "../primitives/element.js";
+import type { Element as ElementType } from "../primitives/element.js";
 import { unsafeAsElementProps } from "./unsafe.js";
 
 type RuntimeProps = Record<string, unknown>;
@@ -19,7 +19,7 @@ export class InvalidJsxComponentInput extends Data.TaggedError("InvalidJsxCompon
 
 interface NormalizedJsxInput {
   readonly props: RuntimeProps;
-  readonly childElements: ReadonlyArray<RuntimeElement>;
+  readonly childElements: ReadonlyArray<ElementType>;
   readonly elementProps: import("../primitives/element.js").ElementProps;
   readonly resolvedKey: ElementKey | null;
 }
@@ -45,7 +45,10 @@ const collectProps = Effect.fn("JsxBuilder.collectProps")(function* (props: Runt
   return Object.fromEntries(entries.flat());
 });
 
-const normalizeInput = Effect.fn("JsxBuilder.normalizeInput")(function* (
+const normalizeInput: (
+  props: unknown,
+  key?: ElementKey,
+) => Effect.Effect<NormalizedJsxInput> = Effect.fn("JsxBuilder.normalizeInput")(function* (
   props: unknown,
   key?: ElementKey,
 ) {
@@ -88,11 +91,11 @@ const buildComponent = Effect.fn("JsxBuilder.buildComponent")(function* (
   return input.resolvedKey === null ? element : keyed(input.resolvedKey, element);
 });
 
-export const buildJsx: (
+const build: (
   type: unknown,
   props: unknown,
   key?: ElementKey,
-) => Effect.Effect<RuntimeElement, InvalidJsxComponentInput> = Effect.fn("JsxBuilder.build")(function* (
+) => Effect.Effect<ElementType, InvalidJsxComponentInput> = Effect.fn("JsxBuilder.build")(function* (
   type: unknown,
   props: unknown,
   key?: ElementKey,
@@ -125,3 +128,8 @@ export const buildJsx: (
     ),
   );
 });
+
+export const JsxBuilder = {
+  build,
+  normalizeInput,
+};

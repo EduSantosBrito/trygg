@@ -546,14 +546,15 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         const loader = yield* AsyncLoader.make(loadingElement, scope);
         yield* Ref.set(asyncLoaderRef, Option.some(loader));
 
-        // Propagate loader.view → viewSignal, apply deferred scroll on Ready.
-        // pendingScroll is set after loader.track returns — the Refreshing
-        // transition fires during track (sees null), only Ready consumes it.
+        // Propagate loader.view -> viewSignal. Deferred scroll is consumed only
+        // once the loader reaches Ready so loading/refreshing frames do not
+        // steal the pending navigation scroll.
         const _unsubLoader = yield* Signal.subscribe(loader.view, () =>
           unsafeEraseR(
             Effect.gen(function* () {
+              const state = yield* SubscriptionRef.get(loader.state._ref);
               const val = yield* SubscriptionRef.get(loader.view._ref);
-              if (pendingScroll !== null) {
+              if (pendingScroll !== null && state._tag === "Ready") {
                 const { strategyLayer } = pendingScroll;
                 pendingScroll = null;
                 yield* setViewAndAwaitSwap(val);
@@ -578,23 +579,29 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       Effect.gen(function* () {
         const nearestLoadingComp = boundaries.resolveLoading(match.route);
 
-        if (Option.isSome(nearestLoadingComp)) {
-          const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
-          const matchKey = buildMatchKey(match, queryString);
-          // Defer scroll: loader.track forks a render fiber and returns
-          // immediately. pendingScroll is set AFTER track returns so the
-          // loader.view subscription (which fires on Refreshing DURING track)
-          // sees null. Ready-state subscription consumes pendingScroll.
-          yield* loader.track(matchKey, renderEffect);
-          pendingScroll = { strategyLayer: resolveScrollStrategy(match.route) };
-          // Sync current loader.view → viewSignal (initial render)
-          const currentView = yield* SubscriptionRef.get(loader.view._ref);
-          yield* Signal.set(viewSignal, currentView);
-        } else {
-          yield* setViewAndAwaitSwap(yield* renderEffect);
-          yield* applyScroll(resolveScrollStrategy(match.route));
-        }
-      });
+          if (Option.isSome(nearestLoadingComp)) {
+            const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
+            const matchKey = buildMatchKey(match, queryString);
+            const strategyLayer = resolveScrollStrategy(match.route);
+            // Defer scroll across loading/refreshing states. `track` forks the
+            // render fiber, so fast loads can already be Ready by the time it
+            // returns; handle that window explicitly after track.
+            pendingScroll = { strategyLayer };
+            yield* loader.track(matchKey, renderEffect);
+            const currentState = yield* SubscriptionRef.get(loader.state._ref);
+            const currentView = yield* SubscriptionRef.get(loader.view._ref);
+            if (pendingScroll !== null && currentState._tag === "Ready") {
+              pendingScroll = null;
+              yield* setViewAndAwaitSwap(currentView);
+              yield* applyScroll(strategyLayer);
+            } else {
+              yield* Signal.set(viewSignal, currentView);
+            }
+          } else {
+            yield* setViewAndAwaitSwap(yield* renderEffect);
+            yield* applyScroll(resolveScrollStrategy(match.route));
+          }
+        });
 
     // -------------------------------------------------------------------------
     // processRoute — match, middleware, render, commit

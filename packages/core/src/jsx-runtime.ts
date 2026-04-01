@@ -20,7 +20,7 @@ import {
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType, ComponentProps } from "./primitives/component.js";
-import { buildJsx } from "./internal/jsx-builder.js";
+import { JsxBuilder } from "./internal/jsx-builder.js";
 import { unsafeAsElementFor } from "./internal/unsafe.js";
 
 /**
@@ -75,7 +75,7 @@ const runJsx = <Props extends Record<string, unknown>, Type extends JSXElementTy
 ): ElementFor<Type> =>
   unsafeAsElementFor<Type>(
     Effect.runSync(
-      buildJsx(type, props, key).pipe(
+      JsxBuilder.build(type, props, key).pipe(
         // Preserve lazy invalid-component failures. Any other failure/defect at
         // this sync bridge is unexpected and should still surface immediately.
         Effect.catchTag("InvalidJsxComponentInput", (error) =>
