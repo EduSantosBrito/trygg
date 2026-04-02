@@ -15,6 +15,7 @@ import {
   generateRouteTypes,
   transformRoutesForBuild,
   validateApiPlatform,
+  PluginBootstrapError,
   PluginValidationError,
   schemaToType,
   parseSchemaStruct,
@@ -53,6 +54,10 @@ describe("Vite Plugin", () => {
   // Scope: Plugin initialization
   // ─────────────────────────────────────────────────────────────────────────────
   describe("trygg function", () => {
+    const BuildStartHookSchema = Schema.declare(
+      (u: unknown): u is () => Promise<void> => typeof u === "function",
+    );
+
     it("should return a valid Vite plugin", () => {
       const plugin = trygg();
 
@@ -60,6 +65,24 @@ describe("Vite Plugin", () => {
       assert.isString(plugin.name);
       assert.strictEqual(plugin.name, "trygg");
       assert.isDefined(plugin.config);
+    });
+
+    it("should buildStart do not observe partial bootstrap while configResolved has not run", async () => {
+      // Test: should buildStart do not observe partial bootstrap while configResolved has not run
+      // Scope: guards the config-dependent hook boundary so plugin work cannot read uninitialized state.
+      // Assertion: buildStart rejects with PluginBootstrapError instead of crashing with an untyped error.
+      const plugin = trygg();
+      const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+      try {
+        await buildStart();
+        throw new Error("Expected buildStart to fail before configResolved");
+      } catch (error) {
+        if (!(error instanceof PluginBootstrapError)) {
+          throw error;
+        }
+        assert.strictEqual(error.reason, "NotReady");
+      }
     });
   });
 

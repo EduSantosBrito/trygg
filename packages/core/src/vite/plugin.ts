@@ -22,6 +22,7 @@ import {
   Layer,
   Logger,
   LogLevel,
+  ManagedRuntime,
   Match,
   Option,
   References,
@@ -43,6 +44,11 @@ import {
 } from "./dev-platform.js";
 import * as Debug from "../debug/debug.js";
 import { NodeDevPlatformLive } from "./dev-platform-node.js";
+import { Bootstrap, makeBootstrapLayer } from "./bootstrap.js";
+import {
+  PluginBootstrapError as PluginBootstrapErrorImpl,
+  PluginFileSystemError as PluginFileSystemErrorImpl,
+} from "./errors.js";
 // BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
 // =============================================================================
@@ -271,22 +277,6 @@ export class PluginValidationErrors extends Data.TaggedError("PluginValidationEr
 }
 
 /**
- * Plugin file system error.
- *
- * @remarks
- * Wraps file-system failures from generated file reads, writes, and directory
- * creation while keeping the original cause attached for logs and tests.
- *
- * @internal
- * @since 1.0.0
- */
-export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemError")<{
-  readonly operation: "read" | "write" | "mkdir" | "exists" | "readdir" | "stat" | "transform";
-  readonly path: string;
-  readonly cause: unknown;
-}> {}
-
-/**
  * Plugin parse error.
  *
  * @remarks
@@ -300,6 +290,32 @@ export class PluginParseError extends Data.TaggedError("PluginParseError")<{
   readonly message: string;
   readonly input: unknown;
 }> {}
+
+/**
+ * Plugin file system error.
+ *
+ * @remarks
+ * Wraps file-system failures from generated file reads, writes, and directory
+ * creation while keeping the original cause attached for logs and tests.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export const PluginFileSystemError = PluginFileSystemErrorImpl;
+
+/**
+ * Plugin bootstrap error.
+ *
+ * @remarks
+ * Raised when a Vite hook that depends on resolved configuration executes
+ * before plugin bootstrap has completed.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export const PluginBootstrapError = PluginBootstrapErrorImpl;
+
+type PluginFileSystemError = PluginFileSystemErrorImpl;
 
 // =============================================================================
 // Logging (consola - async reporters, non-blocking I/O)
@@ -1499,12 +1515,17 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
   // Create platform-specific plugin layer for dev server
   const pluginLayer = makePluginLayer(devPlatform);
-
-  let config: ResolvedConfig;
-  // Initialize with process.cwd() as fallback for early hooks
-  let appDir: string = nodePath.resolve(process.cwd(), APP_DIR);
-  let generatedDir: string = nodePath.resolve(process.cwd(), GENERATED_DIR);
-  let routesFilePath: string | undefined;
+  const pluginRuntime = ManagedRuntime.make(
+    Layer.mergeAll(
+      pluginLayer,
+      makeBootstrapLayer({
+        appDirName: APP_DIR,
+        generatedDirName: GENERATED_DIR,
+        platform: configPlatform,
+        output,
+      }),
+    ),
+  );
 
   const plugin = {
     name: "trygg",
@@ -1547,48 +1568,18 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     },
 
     async configResolved(resolvedConfig: ResolvedConfig) {
-      config = resolvedConfig;
-      appDir = nodePath.resolve(config.root, APP_DIR);
-      generatedDir = nodePath.resolve(config.root, GENERATED_DIR);
-
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-
-          // Auto-discover app/routes.ts
-          const discoveredRoutesPath = nodePath.join(appDir, "routes.ts");
-          const hasRoutes = yield* pathExists(discoveredRoutesPath);
-          if (hasRoutes) {
-            routesFilePath = discoveredRoutesPath;
-          }
-
-          yield* fs.makeDirectory(generatedDir, { recursive: true }).pipe(
-            Effect.catchTag("PlatformError", (e) =>
-              e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
-            ),
-            Effect.mapError(
-              (cause) =>
-                new PluginFileSystemError({
-                  operation: "mkdir",
-                  path: generatedDir,
-                  cause,
-                }),
-            ),
-          );
-          yield* Effect.logInfo("trygg configured");
-          yield* Effect.logDebug(`  App directory: ${appDir}`);
-          yield* Effect.logDebug(`  Generated directory: ${generatedDir}`);
-          yield* Effect.logDebug(`  Platform: ${configPlatform}`);
-          yield* Effect.logDebug(`  Output: ${output}`);
-          if (routesFilePath !== undefined) {
-            yield* Effect.logDebug(`  Routes: ${routesFilePath}`);
-          }
-        }).pipe(Effect.provide(pluginLayer)),
+      await pluginRuntime.runPromise(
+        Effect.flatMap(Bootstrap.asEffect(), (bootstrap) =>
+          bootstrap.initialize(resolvedConfig).pipe(Effect.tapError(logFileSystemError)),
+        ),
       );
     },
 
     async configureServer(server: ViteDevServer) {
       const effect = Effect.gen(function* () {
+        const bootstrap = yield* Bootstrap;
+        const { appDir, generatedDir, routesFilePath } = yield* bootstrap.awaitReady;
+
         // Get DevPlatform service
         const devPlatform = yield* DevPlatform;
 
@@ -1694,7 +1685,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
         // Vite boundary: file watcher callbacks use extracted runtime
         server.watcher.on("change", async (file) => {
-          await Effect.runPromise(
+          await pluginRuntime.runPromise(
             Effect.scoped(
               Effect.gen(function* () {
                 // Routes file changed - regenerate types
@@ -1716,16 +1707,14 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
                   yield* Effect.logDebug("Reloaded API handlers");
                 }
               }),
-            ).pipe(Effect.provide(pluginLayer)),
+            ),
           );
         });
 
         // Vite boundary: close scope when server closes (triggers finalizer)
         server.httpServer?.on("close", () => {
           if (Option.isSome(apiScope)) {
-            void Effect.runPromise(
-              Scope.close(apiScope.value, Exit.void).pipe(Effect.provide(pluginLayer)),
-            );
+            void pluginRuntime.runPromise(Scope.close(apiScope.value, Exit.void));
           }
         });
 
@@ -1755,12 +1744,12 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
               res.end(html);
             }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
 
-            void Effect.runPromise(effect.pipe(Effect.provide(pluginLayer)));
+            void pluginRuntime.runPromise(effect);
           });
         };
-      }).pipe(Effect.provide(pluginLayer));
+      });
 
-      return await Effect.runPromise(effect);
+      return await pluginRuntime.runPromise(effect);
     },
 
     configurePreviewServer(server: PreviewServerLike) {
@@ -1811,19 +1800,26 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     },
 
     async transform(code: string, id: string) {
-      // Only transform the routes file in production builds
-      if (routesFilePath === undefined) return null;
-      if (id !== routesFilePath) return null;
-      if (config.command !== "build") return null;
+      const result = await pluginRuntime.runPromise(
+        Effect.gen(function* () {
+          const bootstrap = yield* Bootstrap;
+          const { config, routesFilePath } = yield* bootstrap.awaitReady;
 
-      const result = await Effect.runPromise(
-        transformRoutesForBuild(code, id).pipe(Effect.provide(pluginLayer)),
+          // Only transform the routes file in production builds
+          if (routesFilePath === undefined) return null;
+          if (id !== routesFilePath) return null;
+          if (config.command !== "build") return null;
+
+          return yield* transformRoutesForBuild(code, id);
+        }),
       );
       return result !== code ? result : null;
     },
 
     async buildStart() {
       const effect = Effect.gen(function* () {
+        const bootstrap = yield* Bootstrap;
+        const { appDir, generatedDir, config, routesFilePath } = yield* bootstrap.awaitReady;
         const entryPath = nodePath.join(generatedDir, "entry.tsx");
         const apiPath = nodePath.join(appDir, "api.ts");
 
@@ -1851,18 +1847,21 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             );
           }
         }
-      }).pipe(Effect.provide(pluginLayer));
+      });
 
-      await Effect.runPromise(effect);
+      await pluginRuntime.runPromise(effect);
     },
 
     async closeBundle() {
-      // Only build server in production mode with server output
-      if (config.command !== "build" || output !== "server") {
-        return;
-      }
-
       const effect = Effect.gen(function* () {
+        const bootstrap = yield* Bootstrap;
+        const { config, appDir, generatedDir } = yield* bootstrap.awaitReady;
+
+        // Only build server in production mode with server output
+        if (config.command !== "build" || output !== "server") {
+          return;
+        }
+
         const apiPath = nodePath.join(appDir, "api.ts");
         const hasApi = yield* pathExists(apiPath);
 
@@ -1900,9 +1899,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         yield* Effect.logInfo("Server build complete").pipe(
           Effect.annotateLogs("style", "success"),
         );
-      }).pipe(Effect.provide(pluginLayer));
+      });
 
-      await Effect.runPromise(effect);
+      await pluginRuntime.runPromise(effect);
     },
   };
 
