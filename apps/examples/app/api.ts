@@ -4,7 +4,7 @@
  * Single file defining all API endpoints and handlers.
  */
 import { Data, Effect, Layer, Schema } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { FetchHttpClient } from "effect/unstable/http";
 import {
   HttpApi,
@@ -127,7 +127,7 @@ const client = HttpApiClient.make(Api, { baseUrl: "" });
 type ApiClientService = HttpApiClient.ForApi<typeof Api>;
 
 /** Tag for the typed API client. Yield in effects to get the client. */
-export class ApiClient extends ServiceMap.Service<ApiClient, ApiClientService>()("ApiClient") {}
+export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
 
 /** Layer that creates the ApiClient using FetchHttpClient. */
 export const ApiClientLive = Layer.effect(

@@ -13,23 +13,23 @@
  * The outlet.ts code has explicit workarounds (lines 704, 727) confirming this bug.
  */
 import { describe, effect } from "@effect/vitest";
-import { Deferred, Effect, Layer, ServiceMap } from "effect";
+import { Deferred, Effect, Layer, Context } from "effect";
 import * as Component from "../component.js";
 import { Element } from "../element.js";
 import { click, render } from "../../testing/index.js";
 import { unsafeWidenContext } from "../../internal/unsafe.js";
 
 // Two distinct services
-class ThemeService extends ServiceMap.Service<ThemeService, { readonly color: string }>()(
+class ThemeService extends Context.Service<ThemeService, { readonly color: string }>()(
   "test/ThemeService",
 ) {}
-class AuthService extends ServiceMap.Service<AuthService, { readonly user: string }>()(
+class AuthService extends Context.Service<AuthService, { readonly user: string }>()(
   "test/AuthService",
 ) {}
 
 // Create a Provide element wrapping a child with a partial context.
-const wrapProvide = <I, S>(key: ServiceMap.Key<I, S>, value: S, child: Element): Element =>
-  Element.Provide({ context: unsafeWidenContext(ServiceMap.make(key, value)), child });
+const wrapProvide = <I, S>(key: Context.Key<I, S>, value: S, child: Element): Element =>
+  Element.Provide({ context: unsafeWidenContext(Context.make(key, value)), child });
 
 describe("Provide context merging", () => {
   effect("nested Provide elements merge contexts for event handlers", () =>

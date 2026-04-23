@@ -2,12 +2,12 @@
  * @since 1.0.0
  * DevPlatform service for abstracting platform-specific APIs
  *
- * Uses ServiceMap.Service pattern to provide platform-agnostic dev API handling
+ * Uses Context.Service pattern to provide platform-agnostic dev API handling
  * for both Bun and Node.js runtimes.
  */
 import { FileSystem } from "effect";
 import { Data, Effect, Layer, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 
@@ -128,9 +128,9 @@ export interface DevPlatformService {
  * Service key for the DevPlatform service
  * @since 1.0.0
  */
-export interface DevPlatform extends ServiceMap.Service<DevPlatform, DevPlatformService> {}
+export interface DevPlatform extends Context.Service<DevPlatform, DevPlatformService> {}
 
-export const DevPlatform = ServiceMap.Service<DevPlatform, DevPlatformService>("trygg/DevPlatform");
+export const DevPlatform = Context.Service<DevPlatform, DevPlatformService>("trygg/DevPlatform");
 
 // =============================================================================
 // ServerPlatform — codegen fragments for the production server entry
@@ -155,9 +155,9 @@ export interface ServerPlatformService {
  * Service key for platform-specific production server codegen.
  * @since 1.0.0
  */
-export interface ServerPlatform extends ServiceMap.Service<ServerPlatform, ServerPlatformService> {}
+export interface ServerPlatform extends Context.Service<ServerPlatform, ServerPlatformService> {}
 
-export const ServerPlatform = ServiceMap.Service<ServerPlatform, ServerPlatformService>(
+export const ServerPlatform = Context.Service<ServerPlatform, ServerPlatformService>(
   "trygg/ServerPlatform",
 );
 

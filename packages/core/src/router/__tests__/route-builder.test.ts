@@ -7,7 +7,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Route from "../route.js";
 import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
@@ -435,7 +435,7 @@ describe("Route.provide", () => {
       (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
     // Create a service
-    class AuthService extends ServiceMap.Service<AuthService, { readonly userId: string }>()(
+    class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
       "AuthService",
     ) {}
     const AuthLive = Layer.succeed(AuthService)({ userId: "test" });
@@ -486,8 +486,8 @@ describe("Route.provide", () => {
     type Equals<X, Y> =
       (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
-    class ServiceA extends ServiceMap.Service<ServiceA, { readonly a: string }>()("ServiceA") {}
-    class ServiceB extends ServiceMap.Service<ServiceB, { readonly b: number }>()("ServiceB") {}
+    class ServiceA extends Context.Service<ServiceA, { readonly a: string }>()("ServiceA") {}
+    class ServiceB extends Context.Service<ServiceB, { readonly b: number }>()("ServiceB") {}
 
     const LayerA = Layer.succeed(ServiceA)({ a: "test" });
     const LayerB = Layer.succeed(ServiceB)({ b: 42 });

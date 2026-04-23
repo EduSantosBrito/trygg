@@ -6,9 +6,7 @@
 - If code can fail, return an `Effect`; do not throw from synchronous helpers.
 - Errors must be yieldable. Use `Data.TaggedError` or `Schema.TaggedError`.
 - Hold spawned fibers in a `Scope`. No floating `Effect.runFork`.
-- Use the cloned repos in this workspace as the primary Effect references:
-  - `./effect-smol` for Effect v4
-  - `./effect` for Effect v3 and migration comparison only
+- Use the `effect-glossary` skill as the primary Effect references
 - Before using `effect-solutions show <topic>`, run `effect-solutions list` and verify the topic exists.
 
 ## Preferred Patterns

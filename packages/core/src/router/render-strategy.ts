@@ -27,7 +27,7 @@
  * @module trygg/router/render-strategy
  */
 import { Data, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // =============================================================================
 // Strategy Variants (discriminated union)
@@ -158,7 +158,7 @@ const lazy: Lazy = { _tag: "Lazy" };
  * @public
  * @since 1.0.0
  */
-export class RenderStrategy extends ServiceMap.Service<RenderStrategy, RenderStrategyType>()(
+export class RenderStrategy extends Context.Service<RenderStrategy, RenderStrategyType>()(
   "trygg/RenderStrategy",
 ) {
   /**

@@ -4,7 +4,7 @@
 // .notFound(), .forbidden(), and manifest generation.
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import { empty } from "../../primitives/element.js";
@@ -30,7 +30,7 @@ const notFoundComp = makeComp();
 const forbiddenComp = makeComp();
 
 // Test service for R != never
-class AuthService extends ServiceMap.Service<AuthService, { readonly check: () => boolean }>()(
+class AuthService extends Context.Service<AuthService, { readonly check: () => boolean }>()(
   "AuthService",
 ) {}
 

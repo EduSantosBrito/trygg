@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import type { Severity } from "../errors/incidents";
 import { type Status, IncidentNotFound, InvalidTransition } from "../errors/incidents";
 
@@ -47,7 +47,7 @@ export interface IncidentService {
   readonly addTimelineEntry: (id: number, message: string) => Effect.Effect<void, IncidentNotFound>;
 }
 
-export class Incidents extends ServiceMap.Service<Incidents, IncidentService>()("Incidents") {}
+export class Incidents extends Context.Service<Incidents, IncidentService>()("Incidents") {}
 
 // ---------------------------------------------------------------------------
 // Mock implementation (in-memory)

@@ -11,7 +11,7 @@
  * @module trygg/primitives/head
  */
 import { Data, Effect, Option, Ref, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // =============================================================================
 // Constants
@@ -85,7 +85,7 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  * @public
  * @since 1.0.0
  */
-export class HeadStrategy extends ServiceMap.Service<HeadStrategy, HeadStrategyService>()(
+export class HeadStrategy extends Context.Service<HeadStrategy, HeadStrategyService>()(
   "trygg/HeadStrategy",
 ) {
   /**
@@ -283,7 +283,7 @@ export interface HeadService {
  * @public
  * @since 1.0.0
  */
-export interface Head extends ServiceMap.Service<Head, HeadService> {}
+export interface Head extends Context.Service<Head, HeadService> {}
 
 /**
  * Service tag for the current head manager.
@@ -301,7 +301,7 @@ export interface Head extends ServiceMap.Service<Head, HeadService> {}
  * @public
  * @since 1.0.0
  */
-export const Head = ServiceMap.Service<Head, HeadService>("trygg/Head");
+export const Head = Context.Service<Head, HeadService>("trygg/Head");
 
 // =============================================================================
 // Dedup Stack — Stack-based deduplication for keyed head elements
@@ -483,7 +483,7 @@ export const makeTestHead = (): Effect.Effect<HeadService, never, Scope.Scope> =
  * @internal
  * @since 1.0.0
  */
-export const CurrentHead = ServiceMap.Reference<HeadService | null>("trygg/Head/CurrentHead", {
+export const CurrentHead = Context.Reference<HeadService | null>("trygg/Head/CurrentHead", {
   defaultValue: () => null,
 });
 
@@ -499,7 +499,7 @@ export const CurrentHead = ServiceMap.Reference<HeadService | null>("trygg/Head/
  * @internal
  * @since 1.0.0
  */
-export const IsDocumentMount = ServiceMap.Reference<boolean>("trygg/Head/IsDocumentMount", {
+export const IsDocumentMount = Context.Reference<boolean>("trygg/Head/IsDocumentMount", {
   defaultValue: () => false,
 });
 

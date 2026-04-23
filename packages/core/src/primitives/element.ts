@@ -11,7 +11,7 @@
  * @module trygg/primitives/element
  */
 import { Cause, Data, Effect, Schema, Scope, SubscriptionRef } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import type { Signal } from "./signal.js";
 
 /**
@@ -366,7 +366,7 @@ export type Element = Data.TaggedEnum<{
    * @internal
    */
   readonly Provide: {
-    readonly context: ServiceMap.ServiceMap<unknown>;
+    readonly context: Context.Context<unknown>;
     readonly child: Element;
   };
   /**
@@ -708,7 +708,7 @@ export const Element: typeof ElementBase & {
  * Create a context boundary element.
  * @internal
  */
-export const provideElement = (context: ServiceMap.ServiceMap<unknown>, child: Element): Element =>
+export const provideElement = (context: Context.Context<unknown>, child: Element): Element =>
   ElementBase.Provide({ context, child });
 
 /**

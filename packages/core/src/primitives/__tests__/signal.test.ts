@@ -22,7 +22,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
@@ -1127,7 +1127,7 @@ describe("Signal.suspend", () => {
 
   scoped("should accumulate handler requirements in inferred component R", () =>
     Effect.gen(function* () {
-      class PendingTheme extends ServiceMap.Service<PendingTheme, { readonly label: string }>()(
+      class PendingTheme extends Context.Service<PendingTheme, { readonly label: string }>()(
         "PendingTheme",
       ) {}
 

@@ -12,7 +12,7 @@
  */
 import { Effect, Layer, Option, Ref, Schema } from "effect";
 import type { Layer as LayerType } from "effect/Layer";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import type { RouteDefinition } from "./route.js";
 import {
@@ -128,7 +128,7 @@ export interface RouteMatcherShape {
  * @public
  * @since 1.0.0
  */
-export class RouteMatcher extends ServiceMap.Service<RouteMatcher, RouteMatcherShape>()(
+export class RouteMatcher extends Context.Service<RouteMatcher, RouteMatcherShape>()(
   "trygg/RouteMatcher",
 ) {
   /** Create a RouteMatcher Layer from a RoutesManifest using trie-based matching. */

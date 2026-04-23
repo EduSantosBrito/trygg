@@ -1,6 +1,6 @@
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
-export class Theme extends ServiceMap.Service<
+export class Theme extends Context.Service<
   Theme,
   {
     readonly name: string;

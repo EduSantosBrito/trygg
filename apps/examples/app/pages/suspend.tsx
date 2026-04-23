@@ -1,5 +1,5 @@
 import { Cause, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { Signal, Component, type ComponentProps } from "trygg";
 import { UserProfileAsync } from "../components/suspend/user-profile-async";
 import { StatsAsync } from "../components/suspend/stats-async";
@@ -9,7 +9,7 @@ import { UserSkeleton } from "../components/suspend/user-skeleton";
 import { StatsSkeleton } from "../components/suspend/stats-skeleton";
 import { PostsSkeleton } from "../components/suspend/posts-skeleton";
 
-class SuspendUi extends ServiceMap.Service<
+class SuspendUi extends Context.Service<
   SuspendUi,
   {
     readonly pendingHint: string;

@@ -7,7 +7,7 @@
  * and registers a finalizer that removes the listener.
  */
 import { Data, Effect, Layer, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
@@ -42,12 +42,12 @@ export interface TestEventTargetService extends EventTargetService {
 // Tag
 // =============================================================================
 
-export interface PlatformEventTarget extends ServiceMap.Service<
+export interface PlatformEventTarget extends Context.Service<
   PlatformEventTarget,
   EventTargetService
 > {}
 
-export const PlatformEventTarget = ServiceMap.Service<PlatformEventTarget, EventTargetService>(
+export const PlatformEventTarget = Context.Service<PlatformEventTarget, EventTargetService>(
   "trygg/platform/EventTarget",
 );
 
@@ -61,7 +61,7 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
     on: (target, event, handler) =>
       Effect.gen(function* () {
         const scope = yield* Effect.scope;
-        const services = yield* Effect.services();
+        const services = yield* Effect.context();
         const listener = (e: Event) => {
           Effect.runForkWith(services)(
             Effect.forkIn(handler(e as never), scope, { startImmediately: true }),

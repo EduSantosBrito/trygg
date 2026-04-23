@@ -1345,7 +1345,7 @@ const ProductionMiddleware = HttpMiddleware.make((app) =>
             headers: { "content-type": ct, "cache-control": cache }
           })
         }),
-        Effect.catchAll(() => app)
+        Effect.catch(() => app)
       )
     }
 

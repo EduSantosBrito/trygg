@@ -22,7 +22,7 @@
  * @module trygg/router/scroll-strategy
  */
 import { Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 /**
  * Auto — save/restore scroll per history entry via sessionStorage.
@@ -113,7 +113,7 @@ const noneStrategy: ScrollNone = { _tag: "None" };
  * @public
  * @since 1.0.0
  */
-export class ScrollStrategy extends ServiceMap.Service<ScrollStrategy, ScrollStrategyType>()(
+export class ScrollStrategy extends Context.Service<ScrollStrategy, ScrollStrategyType>()(
   "trygg/ScrollStrategy",
 ) {
   /**

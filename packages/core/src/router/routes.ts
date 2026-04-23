@@ -20,7 +20,7 @@
  * @module trygg/router/routes
  */
 import { Option } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import type { RouteComponent, ComponentInput } from "./types.js";
 import type { RouteBuilder, RouteDefinition } from "./route.js";
 
@@ -192,7 +192,7 @@ export const make = (): RoutesCollection =>
  * @internal
  * @since 1.0.0
  */
-export const CurrentRoutesManifest = ServiceMap.Reference<Option.Option<RoutesManifest>>(
+export const CurrentRoutesManifest = Context.Reference<Option.Option<RoutesManifest>>(
   "trygg/Router/CurrentRoutesManifest",
   {
     defaultValue: Option.none,

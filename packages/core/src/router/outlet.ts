@@ -502,7 +502,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       return allLayers.length > 0
         ? Effect.flatMap(unsafeBuildContext<unknown>(allLayers), (services) =>
-            Effect.provideServices(renderBase, services),
+            Effect.provide(renderBase, services),
           )
         : renderBase;
     };

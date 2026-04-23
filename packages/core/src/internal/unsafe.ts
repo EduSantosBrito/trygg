@@ -8,7 +8,7 @@
  * - Runtime-effectful operations use Debug.log for observability
  * - This is the ONLY file where `as` casts are permitted
  */
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 import * as Debug from "../debug/debug.js";
 import type { Component } from "../primitives/component.js";
 import type { Element } from "../primitives/element.js";
@@ -56,18 +56,18 @@ export const unsafeMergeLayers = (
  */
 export const unsafeBuildContext = <A>(
   layers: ReadonlyArray<Layer.Any>,
-): Effect.Effect<ServiceMap.ServiceMap<A>, never, never> =>
+): Effect.Effect<Context.Context<A>, never, never> =>
   Effect.gen(function* () {
     yield* Debug.log({
       event: "unsafe.buildContext",
       layer_count: layers.length,
     });
     if (layers.length === 0) {
-      return ServiceMap.empty() as ServiceMap.ServiceMap<A>;
+      return Context.empty() as Context.Context<A>;
     }
     const merged = yield* unsafeMergeLayers(layers);
     return yield* Effect.scoped(Layer.build(merged as Parameters<typeof Layer.build>[0]));
-  }) as Effect.Effect<ServiceMap.ServiceMap<A>, never, never>;
+  }) as Effect.Effect<Context.Context<A>, never, never>;
 
 // =============================================================================
 // Component Tagging
@@ -179,22 +179,22 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
 /**
  * Narrow a service map to a subset of its services.
  *
- * SAFETY: ServiceMap<A | B> contains all services for both A and B.
- * Narrowing to ServiceMap<A> is sound because the services are still there.
+ * SAFETY: Context<A | B> contains all services for both A and B.
+ * Narrowing to Context<A> is sound because the services are still there.
  */
 export const unsafeNarrowContext = <R, S>(
-  ctx: ServiceMap.ServiceMap<S>,
-): ServiceMap.ServiceMap<R> => ctx as unknown as ServiceMap.ServiceMap<R>;
+  ctx: Context.Context<S>,
+): Context.Context<R> => ctx as unknown as Context.Context<R>;
 
 /**
  * Widen a specific service map to unknown for untyped boundaries.
  *
- * SAFETY: ServiceMap<R> contains runtime services regardless of R phantom.
+ * SAFETY: Context<R> contains runtime services regardless of R phantom.
  * Widening to unknown only erases compile-time detail.
  */
 export const unsafeWidenContext = <R>(
-  ctx: ServiceMap.ServiceMap<R>,
-): ServiceMap.ServiceMap<unknown> => ctx as unknown as ServiceMap.ServiceMap<unknown>;
+  ctx: Context.Context<R>,
+): Context.Context<unknown> => ctx as unknown as Context.Context<unknown>;
 
 // =============================================================================
 // Overloaded Function Dispatch

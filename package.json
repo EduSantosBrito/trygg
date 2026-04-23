@@ -23,9 +23,9 @@
     "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check"
   },
   "devDependencies": {
-    "@effect/platform-node": "^4.0.0-beta.27",
+    "@effect/platform-node": "4.0.0-beta.51",
     "@rollup/plugin-typescript": "^12.3.0",
-    "effect": "^4.0.0-beta.27",
+    "effect": "4.0.0-beta.51",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
     "typescript": "^5.9.3"

@@ -6,7 +6,7 @@
  * Auto-disconnects on scope close.
  */
 import { Data, Effect, Layer, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
@@ -64,9 +64,9 @@ export interface TestObserverService extends ObserverService {
 // Tag
 // =============================================================================
 
-export interface Observer extends ServiceMap.Service<Observer, ObserverService> {}
+export interface Observer extends Context.Service<Observer, ObserverService> {}
 
-export const Observer = ServiceMap.Service<Observer, ObserverService>("trygg/platform/Observer");
+export const Observer = Context.Service<Observer, ObserverService>("trygg/platform/Observer");
 
 // =============================================================================
 // Browser layer
@@ -78,7 +78,7 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
     intersection: (options) =>
       Effect.gen(function* () {
         const scope = yield* Effect.scope;
-        const services = yield* Effect.services();
+        const services = yield* Effect.context();
 
         const init: IntersectionObserverInit = {};
         if (options.threshold !== undefined) {
@@ -121,7 +121,7 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
     mutation: (target, options, handler) =>
       Effect.gen(function* () {
         const scope = yield* Effect.scope;
-        const services = yield* Effect.services();
+        const services = yield* Effect.context();
 
         const observer = new MutationObserver((mutations) => {
           Effect.runForkWith(services)(

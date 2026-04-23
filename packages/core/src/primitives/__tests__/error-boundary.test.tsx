@@ -17,7 +17,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Data, Effect, Layer, Option } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -42,7 +42,7 @@ const catchAllView = (content: string, testId?: string) =>
 describe("ErrorBoundary .provide() preservation", () => {
   it.effect("provide preserves error boundary wrapper", () =>
     Effect.gen(function* () {
-      const TestService = ServiceMap.Service<string>("TestService");
+      const TestService = Context.Service<string>("TestService");
       const TestLayer = Layer.succeed(TestService, "provided-value");
 
       const FailingComponent = Component.gen(function* () {
@@ -68,7 +68,7 @@ describe("ErrorBoundary .provide() preservation", () => {
 
   it.effect("services provided via .provide() available inside wrapped tree", () =>
     Effect.gen(function* () {
-      const TestService = ServiceMap.Service<string>("TestService");
+      const TestService = Context.Service<string>("TestService");
       const TestLayer = Layer.succeed(TestService, "provided-value");
 
       const ServiceComponent = Component.gen(function* () {
@@ -117,7 +117,7 @@ describe("ErrorBoundary .provide() preservation", () => {
 describe("ErrorBoundary handler requirements propagation", () => {
   it.effect("propagates handler service requirements", () =>
     Effect.gen(function* () {
-      const ErrorTheme = ServiceMap.Service<string>("ErrorTheme");
+      const ErrorTheme = Context.Service<string>("ErrorTheme");
       const ErrorThemeLayer = Layer.succeed(ErrorTheme, "error-theme");
 
       const RiskyComponent = Component.gen(function* () {

@@ -31,7 +31,7 @@ import {
   Scope,
   SynchronizedRef,
 } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import { type Component } from "./component.js";
@@ -426,7 +426,7 @@ export interface ResourceRegistry {
  * @public
  * @since 1.0.0
  */
-export class ResourceRegistryTag extends ServiceMap.Service<
+export class ResourceRegistryTag extends Context.Service<
   ResourceRegistryTag,
   ResourceRegistry
 >()("trygg/ResourceRegistry") {}
@@ -531,7 +531,7 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effe
 const fetchInternal = <A, E, R>(
   resource: Resource<A, E, R>,
   entry: RegistryEntry,
-  ctx: ServiceMap.ServiceMap<R>,
+  ctx: Context.Context<R>,
   startImmediately: boolean = false,
 ): Effect.Effect<Fiber.Fiber<void, never>> =>
   Effect.gen(function* () {
@@ -705,7 +705,7 @@ const fetchStatic = <A, E, R>(
       key: resource.key,
     });
 
-    const ctx = yield* Effect.services<R>();
+    const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
     const state = unsafeEntrySignal<A, E>(entry.state);
@@ -765,7 +765,7 @@ const fetchReactive = <P extends object, A, E, R>(
   ResourceRegistryTag | R | Scope.Scope
 > =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.services<ResourceRegistryTag | R>();
+    const ctx = yield* Effect.context<ResourceRegistryTag | R>();
     const scope = yield* Effect.scope;
 
     // Unwrap current values from reactive params.
@@ -1266,7 +1266,7 @@ export const invalidate = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<void, never, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.services<R>();
+    const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
     const maybeEntry = yield* registry.get(resource.key);
 
@@ -1315,7 +1315,7 @@ export const refresh = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<void, never, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
-    const ctx = yield* Effect.services<R>();
+    const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
     const entry = yield* registry.getOrCreate(resource.key);
     const state = unsafeEntrySignal<A, E>(entry.state);

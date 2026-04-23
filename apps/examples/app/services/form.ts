@@ -1,6 +1,6 @@
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
-export class FormTheme extends ServiceMap.Service<
+export class FormTheme extends Context.Service<
   FormTheme,
   {
     readonly errorColor: string;

@@ -6,7 +6,7 @@
  * with Layer factories for production and testing.
  */
 import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { Element, type Element as ElementType, provideElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
@@ -184,7 +184,7 @@ export interface OutletRendererShape {
  * OutletRenderer — component rendering with params/query injection.
  * @since 1.0.0
  */
-export class OutletRenderer extends ServiceMap.Service<OutletRenderer, OutletRendererShape>()(
+export class OutletRenderer extends Context.Service<OutletRenderer, OutletRendererShape>()(
   "trygg/OutletRenderer",
 ) {
   static readonly Live: Layer.Layer<OutletRenderer> = Layer.succeed(OutletRenderer, {
@@ -212,7 +212,7 @@ export interface BoundaryResolverShape {
  * BoundaryResolver — nearest-wins boundary resolution.
  * @since 1.0.0
  */
-export class BoundaryResolver extends ServiceMap.Service<BoundaryResolver, BoundaryResolverShape>()(
+export class BoundaryResolver extends Context.Service<BoundaryResolver, BoundaryResolverShape>()(
   "trygg/BoundaryResolver",
 ) {
   static readonly make = (manifest: RoutesManifest): BoundaryResolverShape => ({
@@ -265,7 +265,7 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends ServiceMap.Service<AsyncLoader, AsyncLoaderShape>()(
+export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>()(
   "trygg/AsyncLoader",
 ) {
   /** Create a live AsyncLoader. Must be called within a Scope. */
@@ -388,7 +388,7 @@ export function renderComponent(
   const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
     Element.fromEffect(
       Effect.gen(function* () {
-        const capturedContext = yield* Effect.services<unknown>();
+        const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
         return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
       }).pipe(unsafeEraseR),
@@ -434,7 +434,7 @@ export function renderLayout(
   const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
     Element.fromEffect(
       Effect.gen(function* () {
-        const capturedContext = yield* Effect.services<unknown>();
+        const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
         return provideElement(
           capturedContext,
@@ -485,7 +485,7 @@ export function renderError(
       const wrapErrorElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
         Element.fromEffect(
           Effect.gen(function* () {
-            const capturedContext = yield* Effect.services<unknown>();
+            const capturedContext = yield* Effect.context<unknown>();
             const element = yield* effect;
             return provideElement(
               capturedContext,

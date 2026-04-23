@@ -5,7 +5,7 @@
  * @since 1.0.0
  */
 import { Data, Effect } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // === Error Types ===
 
@@ -68,4 +68,4 @@ export interface PromptsService {
   readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
 }
 
-export class Prompts extends ServiceMap.Service<Prompts, PromptsService>()("@trygg/Prompts") {}
+export class Prompts extends Context.Service<Prompts, PromptsService>()("@trygg/Prompts") {}

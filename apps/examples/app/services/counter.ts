@@ -1,6 +1,6 @@
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
-export class CounterTheme extends ServiceMap.Service<
+export class CounterTheme extends Context.Service<
   CounterTheme,
   {
     readonly primary: string;

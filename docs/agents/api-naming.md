@@ -2,7 +2,7 @@
 
 ## Core Rules
 
-- Prefer Effect v4 naming. Use `./effect-smol` as the primary reference and `./effect` only for comparison.
+- Prefer Effect v4 naming. Use `effect-glossary` skill as the primary reference
 - Public domains should be PascalCase nouns and usually exported as namespace owners: `Signal`, `Resource`, `Route`, `Routes`, `Renderer`.
 - Public operations should be lowerCamelCase and use Effect's common verb set: `make`, `empty`, `fromX`, `toX`, `isX`, `getX`, `map`, `flatMap`, `match`, `withX`, `provideX`, `runX`.
 - Prefer namespace ownership over flat root exports. If an API belongs to `Route`, expose `Route.make`, not `routeMake`.

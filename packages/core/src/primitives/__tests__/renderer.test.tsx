@@ -19,7 +19,7 @@
 import { assert, describe } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { Cause, Data, Effect, Exit, Layer, Option, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 
 // Tagged errors for testing component failures
@@ -246,7 +246,7 @@ describe("SignalElement rendering", () => {
 
   scoped("should preserve provided context when swapping", () =>
     Effect.gen(function* () {
-      class Theme extends ServiceMap.Service<Theme, { value: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { value: string }>()("Theme") {}
       const themeLayer = Layer.succeed(Theme, { value: "themed" });
 
       const ViewA = Component.gen(function* () {
@@ -1295,7 +1295,7 @@ describe("Re-render behavior", () => {
 
   scoped("should rerender stable child when provided context changes without remounting", () =>
     Effect.gen(function* () {
-      class Theme extends ServiceMap.Service<Theme, { readonly value: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { readonly value: string }>()("Theme") {}
 
       const theme = Signal.makeSync("blue");
       let childRenderCount = 0;
@@ -1315,7 +1315,7 @@ describe("Re-render behavior", () => {
       const Parent = Component.gen(function* () {
         const value = yield* Signal.get(theme);
         return Element.Provide({
-          context: unsafeWidenContext(ServiceMap.make(Theme, { value })),
+          context: unsafeWidenContext(Context.make(Theme, { value })),
           child: <Child />,
         });
       });
@@ -2209,7 +2209,7 @@ describe("Renderer error handling", () => {
 describe("Provide element", () => {
   scoped("should provide context to child components", () =>
     Effect.gen(function* () {
-      class TestCtx extends ServiceMap.Service<TestCtx, { value: string }>()("TestCtx") {}
+      class TestCtx extends Context.Service<TestCtx, { value: string }>()("TestCtx") {}
 
       const Child = Component.gen(function* () {
         const ctx = yield* TestCtx;
@@ -2228,7 +2228,7 @@ describe("Provide element", () => {
 
   scoped("should propagate context to deeply nested components", () =>
     Effect.gen(function* () {
-      class DeepCtx extends ServiceMap.Service<DeepCtx, { nested: string }>()("DeepCtx") {}
+      class DeepCtx extends Context.Service<DeepCtx, { nested: string }>()("DeepCtx") {}
 
       const DeepChild = Component.gen(function* () {
         const ctx = yield* DeepCtx;

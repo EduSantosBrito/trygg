@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
-export class DashboardTheme extends ServiceMap.Service<
+export class DashboardTheme extends Context.Service<
   DashboardTheme,
   {
     readonly name: string;
@@ -14,14 +14,14 @@ export class DashboardTheme extends ServiceMap.Service<
   }
 >()("DashboardTheme") {}
 
-export class Analytics extends ServiceMap.Service<
+export class Analytics extends Context.Service<
   Analytics,
   {
     readonly track: (event: string, data?: Record<string, unknown>) => Effect.Effect<void>;
   }
 >()("Analytics") {}
 
-export class Logger extends ServiceMap.Service<
+export class Logger extends Context.Service<
   Logger,
   {
     readonly info: (message: string) => Effect.Effect<void>;

@@ -11,7 +11,7 @@
  * @module trygg/router/service
  */
 import { Data, Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { CurrentRouteQuery } from "./route.js";
 
 import * as Signal from "../primitives/signal.js";
@@ -183,9 +183,9 @@ const setupViewportPrefetch = (
  * @public
  * @since 1.0.0
  */
-export interface Router extends ServiceMap.Service<Router, RouterService> {}
+export interface Router extends Context.Service<Router, RouterService> {}
 
-export const Router = ServiceMap.Service<Router, RouterService>("@trygg/Router");
+export const Router = Context.Service<Router, RouterService>("@trygg/Router");
 
 /**
  * FiberRef to store current route params for the active route
@@ -193,7 +193,7 @@ export const Router = ServiceMap.Service<Router, RouterService>("@trygg/Router")
  * Uses GlobalValue to ensure single instance even with module duplication (Vite aliasing).
  * @internal
  */
-export const CurrentRouteParams = ServiceMap.Reference<RouteParams>(
+export const CurrentRouteParams = Context.Reference<RouteParams>(
   "trygg/Router/CurrentRouteParams",
   {
     defaultValue: () => ({}),
@@ -208,7 +208,7 @@ export const CurrentRouteParams = ServiceMap.Reference<RouteParams>(
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRouter = ServiceMap.Reference<Option.Option<RouterService>>(
+export const CurrentRouter = Context.Reference<Option.Option<RouterService>>(
   "trygg/Router/CurrentRouter",
   {
     defaultValue: Option.none,
@@ -221,7 +221,7 @@ export const CurrentRouter = ServiceMap.Reference<Option.Option<RouterService>>(
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentRouteError = ServiceMap.Reference<Option.Option<RouteErrorInfo>>(
+export const CurrentRouteError = Context.Reference<Option.Option<RouteErrorInfo>>(
   "trygg/Router/CurrentRouteError",
   {
     defaultValue: Option.none,
@@ -237,7 +237,7 @@ export const CurrentRouteError = ServiceMap.Reference<Option.Option<RouteErrorIn
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentOutletChild = ServiceMap.Reference<Option.Option<Element>>(
+export const CurrentOutletChild = Context.Reference<Option.Option<Element>>(
   "trygg/Router/CurrentOutletChild",
   {
     defaultValue: Option.none,

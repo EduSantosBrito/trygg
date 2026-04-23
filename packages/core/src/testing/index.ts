@@ -448,7 +448,7 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
  * @example
  * ```ts
  * // In a test with TestClock - fork first, then adjust time:
- * const fiber = yield* Effect.fork(waitFor(() => queryByTestId("element")))
+ * const fiber = yield* Effect.forkChild(waitFor(() => queryByTestId("element")))
  * yield* TestClock.adjust(1000)
  * const result = yield* Fiber.join(fiber)
  * ```

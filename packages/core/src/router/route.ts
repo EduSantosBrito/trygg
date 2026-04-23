@@ -21,7 +21,7 @@
  */
 import { Cause, Data, Effect, Option, Pipeable, Schema } from "effect";
 import type * as LayerTypes from "effect/Layer";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import type { ComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
@@ -802,7 +802,7 @@ export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
  * @internal
  * @since 1.0.0
  */
-export const CurrentRouteQuery = ServiceMap.Reference<Record<string, unknown>>(
+export const CurrentRouteQuery = Context.Reference<Record<string, unknown>>(
   "trygg/Router/CurrentRouteQuery",
   {
     defaultValue: () => ({}),

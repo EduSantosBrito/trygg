@@ -1,6 +1,6 @@
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
-export class ErrorTheme extends ServiceMap.Service<
+export class ErrorTheme extends Context.Service<
   ErrorTheme,
   {
     readonly errorBackground: string;

@@ -9,8 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform-browser": "^4.0.0-beta.27",
-    "effect": "^4.0.0-beta.27",
+    "@effect/platform-browser": "4.0.0-beta.51",
+    "effect": "4.0.0-beta.51",
     "shiki": "^3.22.0",
     "trygg": "^0.2.0-canary.4"
   },

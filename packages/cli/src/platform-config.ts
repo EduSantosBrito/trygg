@@ -4,7 +4,7 @@
  * @since 1.0.0
  */
 import * as Layer from "effect/Layer";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 /**
  * Platform-specific configuration for scaffolding
@@ -22,7 +22,7 @@ export interface PlatformConfigService {
  * Context tag for PlatformConfig service
  * @since 1.0.0
  */
-export class PlatformConfig extends ServiceMap.Service<PlatformConfig, PlatformConfigService>()(
+export class PlatformConfig extends Context.Service<PlatformConfig, PlatformConfigService>()(
   "trygg/PlatformConfig",
 ) {}
 

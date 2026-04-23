@@ -11,7 +11,7 @@
  * @module trygg/primitives/component
  */
 import { Data, Effect, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
 import { Element, provideElement, type ComponentElementWithRequirements } from "./element.js";
 
@@ -78,7 +78,7 @@ export interface PropsMarker<P> {
  * @public
  * @since 1.0.0
  */
-export type ComponentProps<P> = ServiceMap.Service<PropsMarker<P>, P>;
+export type ComponentProps<P> = Context.Service<PropsMarker<P>, P>;
 
 // =============================================================================
 // Component Types
@@ -176,12 +176,12 @@ const normalizeResult = <E, R>(
  * @since 1.0.0
  */
 function makeComponent<P extends object = {}>(): <E, R>(
-  effectFn: (Props: ServiceMap.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
+  effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
 ) => Component.Type<P, E, Exclude<R, PropsMarker<P>>> {
   return <E, R>(
-    effectFn: (Props: ServiceMap.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
+    effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
   ): Component.Type<P, E, Exclude<R, PropsMarker<P>>> => {
-    const PropsTag = ServiceMap.Service<PropsMarker<P>, P>("@trygg/Props");
+    const PropsTag = Context.Service<PropsMarker<P>, P>("@trygg/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, R> => {
@@ -344,16 +344,16 @@ function genWithProps<P extends object>(): <
   AEff extends ComponentResult,
 >(
   f: (
-    Props: ServiceMap.Service<PropsMarker<P>, P>,
+    Props: Context.Service<PropsMarker<P>, P>,
   ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
 ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
   return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
     f: (
-      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      Props: Context.Service<PropsMarker<P>, P>,
     ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> => {
     type E = ExtractError<Eff>;
-    const PropsTag = ServiceMap.Service<PropsMarker<P>, P>("@trygg/Props");
+    const PropsTag = Context.Service<PropsMarker<P>, P>("@trygg/Props");
 
     const runFn = (props: P): Effect.Effect<Element, E, unknown> => {
       const baseEffect = Effect.gen(() => f(PropsTag)(undefined));
@@ -384,7 +384,7 @@ function genWithPropsDirect<P extends object>(): <
   AEff extends ComponentResult,
 >(
   f: (
-    Props: ServiceMap.Service<PropsMarker<P>, P>,
+    Props: Context.Service<PropsMarker<P>, P>,
     resume?: LegacyGenResume,
   ) => Generator<Eff, AEff, never>,
 ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
@@ -392,7 +392,7 @@ function genWithPropsDirect<P extends object>(): <
 
   return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
     f: (
-      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      Props: Context.Service<PropsMarker<P>, P>,
       resume?: LegacyGenResume,
     ) => Generator<Eff, AEff, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> =>
@@ -429,7 +429,7 @@ type Gen = {
     Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
   >(
     f: (
-      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      Props: Context.Service<PropsMarker<P>, P>,
       resume?: LegacyGenResume,
     ) => Generator<Eff, ComponentResult, never>,
   ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
@@ -437,7 +437,7 @@ type Gen = {
     Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
   >(
     f: (
-      Props: ServiceMap.Service<PropsMarker<P>, P>,
+      Props: Context.Service<PropsMarker<P>, P>,
     ) => (resume: LegacyGenResume) => Generator<Eff, ComponentResult, never>,
   ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
 };

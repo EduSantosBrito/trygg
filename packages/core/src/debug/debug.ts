@@ -11,7 +11,7 @@
  * @module trygg/debug/debug
  */
 
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 
 /** Base fields for all events */
@@ -1127,10 +1127,10 @@ export const nextSpanId = (): string => `span_${++spanCounter}`;
 
 // --- Trace Context References ---
 
-const getReference = <A>(reference: ServiceMap.Reference<A>): Effect.Effect<A> =>
+const getReference = <A>(reference: Context.Reference<A>): Effect.Effect<A> =>
   getFiberRef(reference);
 
-const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.Effect<void> =>
+const setReference = <A>(reference: Context.Reference<A>, value: A): Effect.Effect<void> =>
   setFiberRef(reference, value);
 
 /**
@@ -1144,7 +1144,7 @@ const setReference = <A>(reference: ServiceMap.Reference<A>, value: A): Effect.E
  * @internal
  * @since 1.0.0
  */
-export const CurrentTraceId = ServiceMap.Reference<string | undefined>(
+export const CurrentTraceId = Context.Reference<string | undefined>(
   "trygg/Debug/CurrentTraceId",
   {
     defaultValue: () => undefined,
@@ -1162,7 +1162,7 @@ export const CurrentTraceId = ServiceMap.Reference<string | undefined>(
  * @internal
  * @since 1.0.0
  */
-export const CurrentSpanId = ServiceMap.Reference<string | undefined>("trygg/Debug/CurrentSpanId", {
+export const CurrentSpanId = Context.Reference<string | undefined>("trygg/Debug/CurrentSpanId", {
   defaultValue: () => undefined,
 });
 
@@ -1177,7 +1177,7 @@ export const CurrentSpanId = ServiceMap.Reference<string | undefined>("trygg/Deb
  * @internal
  * @since 1.0.0
  */
-export const CurrentParentSpanId = ServiceMap.Reference<string | undefined>(
+export const CurrentParentSpanId = Context.Reference<string | undefined>(
   "trygg/Debug/CurrentParentSpanId",
   {
     defaultValue: () => undefined,

@@ -31,8 +31,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.9.0",
-    "@effect/platform-bun": "^4.0.0-beta.27",
-    "effect": "^4.0.0-beta.27"
+    "@effect/platform-bun": "4.0.0-beta.51",
+    "effect": "4.0.0-beta.51"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -8,7 +8,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Component from "../primitives/component.js";
 import { getKey } from "../primitives/element.js";
 import { jsxDEV } from "../jsx-dev-runtime.js";
@@ -292,7 +292,7 @@ describe("JSX component validation", () => {
     // Test: should not require services while constructing valid effect components with jsx.
     // Scope: verifies the public sync bridge builds the element shell without running component requirements eagerly.
     // Assertion: jsx returns a component element immediately and preserves the explicit key without service provision.
-    class Theme extends ServiceMap.Service<Theme, { readonly value: string }>()("Theme") {}
+    class Theme extends Context.Service<Theme, { readonly value: string }>()("Theme") {}
 
     const NeedsTheme = Component.gen(function* (
       Props: Component.ComponentProps<{ readonly label: string }>,

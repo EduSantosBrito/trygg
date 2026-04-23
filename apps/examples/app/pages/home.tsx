@@ -24,7 +24,7 @@ const features = [
     title: "Theme (DI)",
     path: "/theme",
     description: "Dependency injection with Component.provide, swappable layers",
-    concepts: ["ServiceMap.Service", "Layer.succeed", "Component.provide", "Runtime switching"],
+    concepts: ["Context.Service", "Layer.succeed", "Component.provide", "Runtime switching"],
   },
   {
     title: "Form Validation",

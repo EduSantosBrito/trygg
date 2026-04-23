@@ -11,7 +11,7 @@
  * @module trygg/primitives/renderer
  */
 import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { Element, getKey, isElement, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
@@ -39,14 +39,14 @@ const isEventHandler = (value: unknown): value is EventHandler => typeof value =
  */
 const isEffectProp = (value: unknown): value is Effect.Effect<unknown> => Effect.isEffect(value);
 
-const emptyContext = unsafeWidenContext(ServiceMap.empty());
+const emptyContext = unsafeWidenContext(Context.empty());
 
 const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   _renderContext: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
+  context: Context.Context<unknown> | null,
 ): Effect.Effect<A, E, unknown> =>
-  context === null ? effect : Effect.provideServices(effect, context);
+  context === null ? effect : Effect.provide(effect, context);
 
 /**
  * Omit a single key from a props object.
@@ -108,20 +108,20 @@ export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHand
  * @since 1.0.0
  */
 export interface RenderContext {
-  readonly services: ServiceMap.ServiceMap<unknown>;
+  readonly services: Context.Context<unknown>;
   readonly scope: Scope.Scope;
 }
 
 const mergeRenderServices = (
   renderContext: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
-): ServiceMap.ServiceMap<unknown> =>
-  context === null ? renderContext.services : ServiceMap.merge(context, renderContext.services);
+  context: Context.Context<unknown> | null,
+): Context.Context<unknown> =>
+  context === null ? renderContext.services : Context.merge(context, renderContext.services);
 
 const runForkInRenderContext = <A, E>(
   effect: Effect.Effect<A, E, unknown>,
   renderContext: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
+  context: Context.Context<unknown> | null,
 ): void => {
   Effect.runForkWith(mergeRenderServices(renderContext, context))(
     effect.pipe(Scope.provide(renderContext.scope)),
@@ -138,7 +138,7 @@ const runForkInRenderContext = <A, E>(
  * @internal
  * @since 1.0.0
  */
-export const CurrentRenderContext = ServiceMap.Reference<RenderContext | null>(
+export const CurrentRenderContext = Context.Reference<RenderContext | null>(
   "trygg/Renderer/CurrentRenderContext",
   {
     defaultValue: () => null,
@@ -166,13 +166,13 @@ export interface RenderResult {
   readonly cleanup: Effect.Effect<void, unknown, unknown>;
   readonly reconcile?: (
     nextElement: Element,
-    nextContext: ServiceMap.ServiceMap<unknown> | null,
+    nextContext: Context.Context<unknown> | null,
   ) => Effect.Effect<boolean, unknown, unknown>;
 }
 
 const normalizeContext = (
-  context: ServiceMap.ServiceMap<unknown> | null,
-): ServiceMap.ServiceMap<unknown> => context ?? emptyContext;
+  context: Context.Context<unknown> | null,
+): Context.Context<unknown> => context ?? emptyContext;
 
 const equalOrChanged = (left: unknown, right: unknown): boolean => {
   try {
@@ -184,15 +184,15 @@ const equalOrChanged = (left: unknown, right: unknown): boolean => {
 
 const resolveReconcileTarget = (
   element: Element,
-  context: ServiceMap.ServiceMap<unknown> | null,
-): { readonly element: Element; readonly context: ServiceMap.ServiceMap<unknown> | null } => {
+  context: Context.Context<unknown> | null,
+): { readonly element: Element; readonly context: Context.Context<unknown> | null } => {
   let currentElement: Element = element;
   let currentContext = context;
 
   while (currentElement._tag === "Provide") {
     currentContext =
       currentContext !== null
-        ? ServiceMap.merge(currentContext, currentElement.context)
+        ? Context.merge(currentContext, currentElement.context)
         : currentElement.context;
     currentElement = currentElement.child;
   }
@@ -270,7 +270,7 @@ export interface RendererService {
  * @public
  * @since 1.0.0
  */
-export class Renderer extends ServiceMap.Service<Renderer, RendererService>()("@trygg/Renderer") {}
+export class Renderer extends Context.Service<Renderer, RendererService>()("@trygg/Renderer") {}
 
 /**
  * Apply a single prop value to a DOM element
@@ -351,7 +351,7 @@ const applyProps = Effect.fn("applyProps")(function* (
   node: HTMLElement,
   props: ElementProps,
   renderContext: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
+  context: Context.Context<unknown> | null,
 ) {
   const cleanups: Array<Effect.Effect<void>> = [];
 
@@ -443,7 +443,7 @@ const renderDocumentElement = (
   children: ReadonlyArray<Element>,
   _parent: Node,
   renderContext: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
+  context: Context.Context<unknown> | null,
   options: RenderOptions,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
   Effect.gen(function* () {
@@ -552,7 +552,7 @@ const renderElement = (
   element: Element,
   parent: Node,
   runtime: RenderContext,
-  context: ServiceMap.ServiceMap<unknown> | null,
+  context: Context.Context<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
   Match.value(element).pipe(
@@ -564,7 +564,7 @@ const renderElement = (
         return {
           node,
           cleanup: Effect.sync(() => node.remove()),
-          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.sync(() => {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
               if (resolved.element._tag !== "Text") {
@@ -616,7 +616,7 @@ const renderElement = (
             yield* unsubscribe;
             node.remove();
           }),
-          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.sync(() => {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
               if (resolved.element._tag !== "SignalText") {
@@ -780,7 +780,7 @@ const renderElement = (
     Match.tag("Provide", ({ context: providedContext, child }) =>
       Effect.gen(function* () {
         const mergedContext =
-          context !== null ? ServiceMap.merge(context, providedContext) : providedContext;
+          context !== null ? Context.merge(context, providedContext) : providedContext;
         const childResult = yield* renderElement(child, parent, runtime, mergedContext, options);
 
         return {
@@ -788,7 +788,7 @@ const renderElement = (
             return childResult.node;
           },
           cleanup: childResult.cleanup,
-          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.gen(function* () {
               if (nextElement._tag !== "Provide" || childResult.reconcile === undefined) {
                 return false;
@@ -796,7 +796,7 @@ const renderElement = (
 
               const nextMergedContext =
                 nextContext !== null
-                  ? ServiceMap.merge(nextContext, nextElement.context)
+                  ? Context.merge(nextContext, nextElement.context)
                   : nextElement.context;
 
               return yield* childResult.reconcile(nextElement.child, nextMergedContext);
@@ -877,7 +877,7 @@ const renderElement = (
 
         const renderChildSlot = (
           child: Element,
-          childContext: ServiceMap.ServiceMap<unknown> | null,
+          childContext: Context.Context<unknown> | null,
         ) =>
           Effect.gen(function* () {
             const fragment = document.createDocumentFragment();
@@ -969,7 +969,7 @@ const renderElement = (
             // Remove node
             node.remove();
           }),
-          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.gen(function* () {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
               const resolvedNextElement = resolved.element;
@@ -1421,7 +1421,7 @@ const renderElement = (
             yield* Scope.close(componentScope, Exit.void);
             anchor.remove();
           }),
-          reconcile: (nextElement: Element, nextContext: ServiceMap.ServiceMap<unknown> | null) =>
+          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.gen(function* () {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
               const resolvedNextElement = resolved.element;
@@ -2438,7 +2438,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       const headService = yield* Head.makeBrowserHead();
       yield* setFiberRef(Head.CurrentHead, headService);
 
-      const services = yield* Effect.services<unknown>();
+      const services = yield* Effect.context<unknown>();
       const renderContext: RenderContext = { services, scope };
 
       // Set up render context after renderer-local FiberRefs are installed
@@ -2460,7 +2460,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       // Register cleanup on scope finalization using acquireRelease pattern
       yield* Effect.addFinalizer(() =>
         Effect.catchCause(
-          Effect.provideServices(
+          Effect.provide(
             Effect.gen(function* () {
               yield* result.cleanup;
               mountAnchor.remove();
@@ -2474,7 +2474,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
 
     const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
       const scope = yield* Effect.scope;
-      const services = yield* Effect.services<unknown>();
+      const services = yield* Effect.context<unknown>();
       const renderContext: RenderContext = { services, scope };
       return yield* renderElement(element, parent, renderContext, null);
     });

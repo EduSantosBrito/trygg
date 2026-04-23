@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "vite";
 import { Deferred, Effect, FileSystem, Layer, Ref } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as nodePath from "node:path";
 import type { Platform, TryggConfig } from "../config.js";
 import { PluginBootstrapError, PluginFileSystemError } from "./errors.js";
@@ -27,9 +27,9 @@ export interface BootstrapService {
   readonly awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure>;
 }
 
-interface Bootstrap extends ServiceMap.Service<Bootstrap, BootstrapService> {}
+interface Bootstrap extends Context.Service<Bootstrap, BootstrapService> {}
 
-export const Bootstrap = ServiceMap.Service<Bootstrap, BootstrapService>("trygg/vite/Bootstrap");
+export const Bootstrap = Context.Service<Bootstrap, BootstrapService>("trygg/vite/Bootstrap");
 
 interface BootstrapOptions {
   readonly appDirName: string;

@@ -15,7 +15,7 @@
  * @module trygg/primitives/signal
  */
 import { Cause, Data, Effect, Equal, Exit, Pipeable, Ref, Scope, SubscriptionRef } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
@@ -95,10 +95,10 @@ type AnySignal = Signal<any>;
 type PropsInput<Props> = [Props] extends [never] ? {} : Props;
 
 declare global {
-  var __tryggSignalCurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> | undefined;
+  var __tryggSignalCurrentRenderPhase: Context.Reference<RenderPhase | null> | undefined;
   var __tryggSignalCurrentRenderPhaseId: string | undefined;
-  var __tryggSignalCurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> | undefined;
-  var __tryggSignalCurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> | undefined;
+  var __tryggSignalCurrentComponentScope: Context.Reference<Scope.Closeable | null> | undefined;
+  var __tryggSignalCurrentRenderScope: Context.Reference<Scope.Closeable | null> | undefined;
 }
 
 /**
@@ -132,8 +132,8 @@ export interface RenderPhase {
  * @since 1.0.0
  * @internal
  */
-export const CurrentRenderPhase: ServiceMap.Reference<RenderPhase | null> =
-  (globalThis.__tryggSignalCurrentRenderPhase ??= ServiceMap.Reference<RenderPhase | null>(
+export const CurrentRenderPhase: Context.Reference<RenderPhase | null> =
+  (globalThis.__tryggSignalCurrentRenderPhase ??= Context.Reference<RenderPhase | null>(
     "trygg/Signal/CurrentRenderPhase",
     {
       defaultValue: () => null,
@@ -163,8 +163,8 @@ export const _currentRenderPhaseId =
  * @since 1.0.0
  * @internal
  */
-export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null> =
-  (globalThis.__tryggSignalCurrentComponentScope ??= ServiceMap.Reference<Scope.Closeable | null>(
+export const CurrentComponentScope: Context.Reference<Scope.Closeable | null> =
+  (globalThis.__tryggSignalCurrentComponentScope ??= Context.Reference<Scope.Closeable | null>(
     "trygg/Signal/CurrentComponentScope",
     {
       defaultValue: () => null,
@@ -182,8 +182,8 @@ export const CurrentComponentScope: ServiceMap.Reference<Scope.Closeable | null>
  * @since 1.0.0
  * @internal
  */
-export const CurrentRenderScope: ServiceMap.Reference<Scope.Closeable | null> =
-  (globalThis.__tryggSignalCurrentRenderScope ??= ServiceMap.Reference<Scope.Closeable | null>(
+export const CurrentRenderScope: Context.Reference<Scope.Closeable | null> =
+  (globalThis.__tryggSignalCurrentRenderScope ??= Context.Reference<Scope.Closeable | null>(
     "trygg/Signal/CurrentRenderScope",
     {
       defaultValue: () => null,

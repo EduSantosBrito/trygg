@@ -1,5 +1,5 @@
 import { Effect, Layer, Scope } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { Signal } from "trygg";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ export interface AppThemeService {
   readonly toggle: Effect.Effect<void>;
 }
 
-export class AppTheme extends ServiceMap.Service<AppTheme, AppThemeService>()("AppTheme") {}
+export class AppTheme extends Context.Service<AppTheme, AppThemeService>()("AppTheme") {}
 
 // ---------------------------------------------------------------------------
 // Layers — same Tag, different initial configuration

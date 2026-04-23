@@ -389,7 +389,7 @@ const linkComponent: LinkComponent = Object.assign(
         <Path extends RoutePath>(props: LinkProps<Path>): Element => {
           const run = (): Effect.Effect<Element, E2, RIn> =>
             Effect.gen(function* () {
-              const context = yield* Effect.services<ROut>().pipe(
+              const context = yield* Effect.context<ROut>().pipe(
                 Effect.provide(layer),
                 Effect.map((ctx) => unsafeWidenContext(ctx)),
               );

@@ -11,19 +11,19 @@
  *       -> button onClick accesses Locale (ancestor) at click time
  */
 import { Effect, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 import { Signal, Component, type ComponentProps } from "trygg";
 
 // =============================================================================
 // Services — three layers of context
 // =============================================================================
 
-class Locale extends ServiceMap.Service<
+class Locale extends Context.Service<
   Locale,
   { readonly lang: string; readonly greeting: string }
 >()("demo/Locale") {}
 
-class CardStyle extends ServiceMap.Service<
+class CardStyle extends Context.Service<
   CardStyle,
   { readonly bg: string; readonly border: string; readonly accent: string }
 >()("demo/CardStyle") {}

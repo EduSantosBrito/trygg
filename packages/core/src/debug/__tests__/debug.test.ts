@@ -9,7 +9,7 @@
  * - Verify metrics are recorded correctly
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, ServiceMap } from "effect";
+import { Effect, Context } from "effect";
 import * as Debug from "../debug.js";
 import * as Metrics from "../metrics.js";
 
@@ -471,10 +471,10 @@ describe("Trace context", () => {
     Effect.gen(function* () {
       yield* Effect.withFiber((fiber) =>
         Effect.sync(() => {
-          fiber.setServices(
-            ServiceMap.add(
-              ServiceMap.add(
-                ServiceMap.add(fiber.services, Debug.CurrentTraceId, "trace_abc"),
+          fiber.setContext(
+            Context.add(
+              Context.add(
+                Context.add(fiber.context, Debug.CurrentTraceId, "trace_abc"),
                 Debug.CurrentSpanId,
                 "span_123",
               ),

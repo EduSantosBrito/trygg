@@ -6,7 +6,7 @@
  * Two Tags: SessionStorage, LocalStorage — same interface, different browser backends.
  */
 import { Data, Effect, Layer } from "effect";
-import * as ServiceMap from "effect/ServiceMap";
+import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
@@ -32,15 +32,15 @@ export interface StorageService {
 // Tags
 // =============================================================================
 
-export interface SessionStorage extends ServiceMap.Service<SessionStorage, StorageService> {}
+export interface SessionStorage extends Context.Service<SessionStorage, StorageService> {}
 
-export const SessionStorage = ServiceMap.Service<SessionStorage, StorageService>(
+export const SessionStorage = Context.Service<SessionStorage, StorageService>(
   "trygg/platform/SessionStorage",
 );
 
-export interface LocalStorage extends ServiceMap.Service<LocalStorage, StorageService> {}
+export interface LocalStorage extends Context.Service<LocalStorage, StorageService> {}
 
-export const LocalStorage = ServiceMap.Service<LocalStorage, StorageService>(
+export const LocalStorage = Context.Service<LocalStorage, StorageService>(
   "trygg/platform/LocalStorage",
 );
 

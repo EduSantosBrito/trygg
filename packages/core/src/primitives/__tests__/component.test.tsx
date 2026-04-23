@@ -17,7 +17,7 @@
  * - Verify provide propagates to children
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Layer, Result, ServiceMap } from "effect";
+import { Data, Effect, Layer, Result, Context } from "effect";
 
 // Tagged error for testing component failures
 class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
@@ -26,7 +26,7 @@ import { unsafeBuildContext } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
 
 // Test service for DI tests
-class TestService extends ServiceMap.Service<TestService, { value: string }>()("TestService") {}
+class TestService extends Context.Service<TestService, { value: string }>()("TestService") {}
 const testServiceLayer = Layer.succeed(TestService, { value: "test-value" });
 
 // =============================================================================
@@ -241,7 +241,7 @@ describe("Component.provide", () => {
 
   it.effect("should merge with existing context from parent", () =>
     Effect.gen(function* () {
-      class AnotherService extends ServiceMap.Service<AnotherService, { other: string }>()(
+      class AnotherService extends Context.Service<AnotherService, { other: string }>()(
         "AnotherService",
       ) {}
 
@@ -267,8 +267,8 @@ describe("Component.provide", () => {
 
   it.effect("should support chaining multiple provides on same component", () =>
     Effect.gen(function* () {
-      class ServiceA extends ServiceMap.Service<ServiceA, { a: string }>()("ServiceA") {}
-      class ServiceB extends ServiceMap.Service<ServiceB, { b: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { a: string }>()("ServiceA") {}
+      class ServiceB extends Context.Service<ServiceB, { b: string }>()("ServiceB") {}
 
       const MyComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -315,7 +315,7 @@ describe("Service access", () => {
       const context = yield* unsafeBuildContext<unknown>([]);
       const result = yield* render(<MyComponent />).pipe(
         Effect.sandbox,
-        Effect.provideServices(context),
+        Effect.provide(context),
         Effect.result,
       );
 
@@ -338,7 +338,7 @@ describe("Error handling", () => {
 
       const context = yield* unsafeBuildContext<unknown>([]);
       const result = yield* render(<MyComponent />).pipe(
-        Effect.provideServices(context),
+        Effect.provide(context),
         Effect.result,
       );
 
@@ -361,7 +361,7 @@ describe("Error handling", () => {
       });
 
       const context = yield* unsafeBuildContext<unknown>([]);
-      const result = yield* render(<Parent />).pipe(Effect.provideServices(context), Effect.result);
+      const result = yield* render(<Parent />).pipe(Effect.provide(context), Effect.result);
 
       assert.isTrue(Result.isFailure(result));
     }),
@@ -479,7 +479,7 @@ describe("Component function API", () => {
 describe("Layer Precedence", () => {
   it.effect("should override via chaining (last provision wins)", () =>
     Effect.gen(function* () {
-      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -499,7 +499,7 @@ describe("Layer Precedence", () => {
 
   it.effect("should override via array order (last in array wins)", () =>
     Effect.gen(function* () {
-      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -517,7 +517,7 @@ describe("Layer Precedence", () => {
 
   it.effect("should allow override after full provision", () =>
     Effect.gen(function* () {
-      class Theme extends ServiceMap.Service<Theme, { color: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -557,8 +557,8 @@ describe("Immutability", () => {
 
   it.effect("should create independent variants from base", () =>
     Effect.gen(function* () {
-      class ServiceA extends ServiceMap.Service<ServiceA, { value: string }>()("ServiceA") {}
-      class ServiceB extends ServiceMap.Service<ServiceB, { value: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { value: string }>()("ServiceA") {}
+      class ServiceB extends Context.Service<ServiceB, { value: string }>()("ServiceB") {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -582,8 +582,8 @@ describe("Immutability", () => {
 
   it.effect("should fail when partial provision leaves unsatisfied services", () =>
     Effect.gen(function* () {
-      class ServiceA extends ServiceMap.Service<ServiceA, { value: string }>()("ServiceA") {}
-      class ServiceB extends ServiceMap.Service<ServiceB, { value: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { value: string }>()("ServiceA") {}
+      class ServiceB extends Context.Service<ServiceB, { value: string }>()("ServiceB") {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -601,7 +601,7 @@ describe("Immutability", () => {
       const context = yield* unsafeBuildContext<unknown>([]);
       const result = yield* render(<VariantA />).pipe(
         Effect.sandbox,
-        Effect.provideServices(context),
+        Effect.provide(context),
         Effect.result,
       );
       assert.isTrue(Result.isFailure(result));
