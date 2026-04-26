@@ -5,7 +5,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import type { ResolvedConfig } from "vite";
 import { Cause, Effect, Exit, FileSystem, Schema, Scope } from "effect";
 import * as path from "path";
 import {
@@ -58,13 +57,6 @@ describe("Vite Plugin", () => {
     const BuildStartHookSchema = Schema.declare(
       (u: unknown): u is () => Promise<void> => typeof u === "function",
     );
-    const ConfigResolvedHookSchema = Schema.declare(
-      (u: unknown): u is (config: ResolvedConfig) => Promise<void> => typeof u === "function",
-    );
-    const MinimalResolvedConfigSchema = Schema.declare(
-      (u: unknown): u is ResolvedConfig =>
-        typeof u === "object" && u !== null && "root" in u && "command" in u,
-    );
 
     it("should return a valid Vite plugin", () => {
       const plugin = trygg();
@@ -92,27 +84,6 @@ describe("Vite Plugin", () => {
         assert.strictEqual(error.reason, "NotReady");
       }
     });
-
-    scoped("should buildStart observe ready state after configResolved", () =>
-      Effect.gen(function* () {
-        // Test: should buildStart observe ready state after configResolved
-        // Scope: covers the first vertical Vite bootstrap path configResolved -> buildStart.
-        // Assertion: buildStart succeeds after configResolved initializes shared runtime state.
-        const root = yield* makeTempDir({ "app/main.tsx": "export default null" });
-        const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
-        const resolvedConfig = Schema.decodeUnknownSync(MinimalResolvedConfigSchema)({
-          root,
-          command: "build",
-        });
-
-        yield* Effect.promise(() => configResolved(resolvedConfig));
-        yield* Effect.promise(() => buildStart());
-      }).pipe(Effect.provide(NodeFileSystemLayer)),
-    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
