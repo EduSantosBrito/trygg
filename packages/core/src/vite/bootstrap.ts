@@ -106,24 +106,28 @@ export const makeBootstrapLayer = (options: BootstrapOptions): Layer.Layer<Boots
       const initialize = (
         resolvedConfig: ResolvedConfig,
       ): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
-        Effect.flatMap(Ref.get(statusRef), (status) => {
+        Effect.flatten(Ref.modify(statusRef, (status): readonly [
+          Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
+          BootstrapStatus,
+        ] => {
           switch (status._tag) {
             case "Pending":
-              return Effect.gen(function* () {
-                yield* Ref.set(statusRef, { _tag: "Bootstrapping" });
-                yield* makeState(resolvedConfig, options).pipe(
+              return [
+                makeState(resolvedConfig, options).pipe(
                   Effect.tap(markReady),
                   Effect.tapError(markFailed),
-                );
-              });
+                  Effect.asVoid,
+                ),
+                { _tag: "Bootstrapping" },
+              ];
             case "Bootstrapping":
-              return Deferred.await(ready).pipe(Effect.asVoid);
+              return [Deferred.await(ready).pipe(Effect.asVoid), status];
             case "Ready":
-              return Effect.void;
+              return [Effect.void, status];
             case "Failed":
-              return Effect.fail(status.error);
+              return [Effect.fail(status.error), status];
           }
-        });
+        }));
 
       const awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure> =
         Effect.gen(function* () {
