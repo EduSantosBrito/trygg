@@ -64,7 +64,7 @@
     },
     "packages/core": {
       "name": "trygg",
-      "version": "0.2.0-canary.4",
+      "version": "0.3.0-canary.0",
       "dependencies": {
         "consola": "^3.4.2",
       },
@@ -762,6 +762,8 @@
     "@vitest/mocker/estree-walker": ["estree-walker@3.0.3", "", { "dependencies": { "@types/estree": "^1.0.0" } }, "sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g=="],
 
     "bun-types/@types/node": ["@types/node@25.0.9", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-/rpCXHlCWeqClNBwUhDcusJxXYDjZTyE8v5oTO7WbL8eij2nKhUeU89/6xgjU7N4/Vh3He0BtyhJdQbDyhiXAw=="],
+
+    "trygg-www/trygg": ["trygg@0.2.0-canary.4", "", { "dependencies": { "consola": "^3.4.2" }, "peerDependencies": { "@effect/platform-browser": "^4.0.0-beta.27", "@effect/platform-bun": "^4.0.0-beta.27", "@effect/platform-node": "^4.0.0-beta.27", "effect": "^4.0.0-beta.27", "typescript": "^5", "vite": "^5.0.0 || ^6.0.0" }, "optionalPeers": ["@effect/platform-browser", "@effect/platform-bun", "@effect/platform-node", "vite"] }, "sha512-dQaP+cIgSl94DcMjUiVfReDd//0j/6w39bz6yQEdZE+et1489wPi//BH5F9FdMnatclBq8eKXk/pIVeSSVX3Sw=="],
 
     "vite-node/vite": ["vite@7.3.1", "", { "dependencies": { "esbuild": "^0.27.0", "fdir": "^6.5.0", "picomatch": "^4.0.3", "postcss": "^8.5.6", "rollup": "^4.43.0", "tinyglobby": "^0.2.15" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "jiti": ">=1.21.0", "less": "^4.0.0", "lightningcss": "^1.21.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "jiti", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA=="],
 

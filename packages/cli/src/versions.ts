@@ -11,8 +11,8 @@
 export const TRYGG_VERSION = "^0.2.0-canary.4";
 
 /** Effect ecosystem versions */
-export const EFFECT_VERSION = "^4.0.0-beta.27";
-export const EFFECT_PLATFORM_BROWSER_VERSION = "^4.0.0-beta.27";
+export const EFFECT_VERSION = "^4.0.0-beta.51";
+export const EFFECT_PLATFORM_BROWSER_VERSION = "^4.0.0-beta.51";
 export const EFFECT_LANGUAGE_SERVICE_VERSION = "^0.77.0";
 
 /** Dev tooling versions */

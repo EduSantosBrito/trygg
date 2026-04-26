@@ -4,7 +4,7 @@
  */
 import { layer, type PlatformConfigService } from "../platform-config.js";
 
-const BUN_VERSION = "^4.0.0-beta.27";
+const BUN_VERSION = "^4.0.0-beta.51";
 
 const config: PlatformConfigService = {
   name: "bun",

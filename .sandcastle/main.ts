@@ -678,7 +678,6 @@ const program = Effect.gen(function* () {
               MERGE_STEPS: mergeSteps(vcs)
                 .replaceAll("{{BRANCH}}", branch)
                 .replaceAll("{{COMPLETION_SIGNAL}}", completionSignal),
-              COMPLETION_SIGNAL: completionSignal,
             },
             maxIterations: agentIterations,
             completionSignal,
