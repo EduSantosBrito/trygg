@@ -20,9 +20,11 @@
     "format": "oxfmt packages apps '!**/dist/**' --check",
     "format:fix": "oxfmt packages apps '!**/dist/**' --write",
     "effect:check": "bun run --cwd packages/core effect:check",
+    "sandcastle": "bun .sandcastle/main.ts",
     "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check"
   },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.5.4",
     "@effect/platform-node": "4.0.0-beta.51",
     "@rollup/plugin-typescript": "^12.3.0",
     "effect": "4.0.0-beta.51",
