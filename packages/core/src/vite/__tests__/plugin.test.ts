@@ -58,6 +58,11 @@ describe("Vite Plugin", () => {
       (u: unknown): u is () => Promise<void> => typeof u === "function",
     );
 
+    const ConfigResolvedHookSchema = Schema.declare(
+      (u: unknown): u is (config: { readonly root: string; readonly command: string }) => Promise<void> =>
+        typeof u === "function",
+    );
+
     it("should return a valid Vite plugin", () => {
       const plugin = trygg();
 
@@ -84,6 +89,33 @@ describe("Vite Plugin", () => {
         assert.strictEqual(error.reason, "NotReady");
       }
     });
+
+    scoped("should buildStart generate build files after configResolved", () =>
+      Effect.gen(function* () {
+        // Test: should buildStart generate build files after configResolved
+        // Scope: verifies configResolved bootstraps shared plugin-instance state for buildStart.
+        // Assertion: buildStart succeeds and writes the build entry files from resolved config state.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+
+        const entry = yield* fs.readFileString(path.join(root, ".trygg", "entry.tsx"));
+        const index = yield* fs.readFileString(path.join(root, ".trygg", "index.html"));
+
+        assert.include(entry, 'import { routes } from "../app/routes"');
+        assert.include(index, '<script type="module" src="/.trygg/entry.tsx"></script>');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
