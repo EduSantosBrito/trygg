@@ -5,8 +5,13 @@
  * extraction and body block rendering.
  */
 import { describe, it, expect } from "vitest";
-import { parseChangelogMeta, renderChangelogBody, type ChangelogBlock } from "./changelog";
-import fixture from "../content/changelog/2026-04-28-generated-api-client.md?raw";
+import {
+  parseChangelogMeta,
+  renderChangelogBody,
+  parseChangelogEntries,
+  type ChangelogBlock,
+} from "./changelog";
+import fixture from "../../changelogs/2026-04-28-generated-api-client.md?raw";
 
 // =============================================================================
 // parseChangelogMeta
@@ -141,5 +146,79 @@ describe("renderChangelogBody", () => {
     expect(tags[1]).toBe("Paragraph");
     expect(tags[2]).toBe("Heading");
     expect(tags[3]).toBe("BulletList");
+  });
+});
+
+// =============================================================================
+// parseChangelogEntries
+// =============================================================================
+
+describe("parseChangelogEntries", () => {
+  // Scope: verifies entries are sorted newest first by filename date prefix.
+  // Assertion: entries ordered descending by ISO date string.
+  it("should sort entries newest first by date", () => {
+    const modules: Record<string, string> = {
+      "2026-04-28-entry-a.md": "---\ntitle: A\nversion: 1.0.0\nsummary: Summary A\n---\n",
+      "2026-05-01-entry-b.md": "---\ntitle: B\nversion: 1.0.0\nsummary: Summary B\n---\n",
+      "2026-04-01-entry-c.md": "---\ntitle: C\nversion: 1.0.0\nsummary: Summary C\n---\n",
+    };
+
+    const entries = parseChangelogEntries(modules);
+
+    expect(entries.length).toBe(3);
+    expect(entries[0].date).toBe("2026-05-01");
+    expect(entries[1].date).toBe("2026-04-28");
+    expect(entries[2].date).toBe("2026-04-01");
+  });
+
+  // Scope: verifies name and date extraction from filename.
+  // Assertion: name strips .md extension; date comes from YYYY-MM-DD prefix.
+  it("should extract name and date from filename", () => {
+    const modules: Record<string, string> = {
+      "2026-04-28-generated-api-client.md":
+        "---\ntitle: Generated API Client\nversion: 0.3.0-canary.0\nsummary: Introduces a generated API client.\n---\n",
+    };
+
+    const entries = parseChangelogEntries(modules);
+
+    expect(entries.length).toBe(1);
+    expect(entries[0].name).toBe("2026-04-28-generated-api-client");
+    expect(entries[0].date).toBe("2026-04-28");
+  });
+
+  // Scope: verifies malformed filenames without YYYY-MM-DD prefix are excluded.
+  // Assertion: entries array does not include malformed filenames.
+  it("should skip files without YYYY-MM-DD prefix", () => {
+    const modules: Record<string, string> = {
+      "no-date-prefix.md": "---\ntitle: No Date\nversion: 1.0.0\nsummary: Missing date.\n---\n",
+      "2026-04-28-valid.md": "---\ntitle: Valid\nversion: 1.0.0\nsummary: Has date.\n---\n",
+    };
+
+    const entries = parseChangelogEntries(modules);
+
+    expect(entries.length).toBe(1);
+    expect(entries[0].name).toBe("2026-04-28-valid");
+  });
+
+  // Scope: verifies entries with invalid metadata are excluded.
+  // Assertion: entries array filters out files with missing or empty frontmatter fields.
+  it("should skip files with invalid metadata", () => {
+    const modules: Record<string, string> = {
+      "2026-04-28-invalid.md": '---\ntitle: ""\nversion: 1.0.0\nsummary: Something\n---\n',
+      "2026-04-28-valid.md": "---\ntitle: Valid\nversion: 1.0.0\nsummary: Good metadata.\n---\n",
+    };
+
+    const entries = parseChangelogEntries(modules);
+
+    expect(entries.length).toBe(1);
+    expect(entries[0].name).toBe("2026-04-28-valid");
+  });
+
+  // Scope: verifies empty modules return empty array.
+  // Assertion: no entries produced from empty record.
+  it("should return empty array for empty modules", () => {
+    const entries = parseChangelogEntries({});
+
+    expect(entries.length).toBe(0);
   });
 });

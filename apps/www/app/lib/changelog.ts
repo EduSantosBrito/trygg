@@ -202,7 +202,7 @@ export const renderChangelogBody = (raw: string): ReadonlyArray<ChangelogBlock> 
 // Registry
 // =============================================================================
 
-const rawModules = import.meta.glob<string>("../content/changelog/*.md", {
+const rawModules = import.meta.glob<string>("../../changelogs/*.md", {
   query: "?raw",
   import: "default",
   eager: true,
@@ -210,25 +210,39 @@ const rawModules = import.meta.glob<string>("../content/changelog/*.md", {
 
 export type ChangelogEntry = {
   readonly name: string;
+  readonly date: string;
   readonly meta: ChangelogMeta;
   readonly blocks: ReadonlyArray<ChangelogBlock>;
 };
 
-const parseEntry = (name: string, raw: string): ChangelogEntry | undefined => {
+const dateFromFilename = (filename: string): string | undefined => {
+  const match = filename.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1];
+};
+
+const parseEntry = (name: string, date: string, raw: string): ChangelogEntry | undefined => {
   const meta = parseChangelogMeta(raw);
   if (!meta) return undefined;
   const blocks = renderChangelogBody(raw);
-  return { name, meta, blocks };
+  return { name, date, meta, blocks };
 };
 
-export const changelogEntries: ReadonlyArray<ChangelogEntry> = Object.entries(
-  rawModules as Record<string, string>,
-)
-  .map(([path, raw]) => {
-    const name = path.replace(/^.*\//, "").replace(/\.md$/, "");
-    return parseEntry(name, raw);
-  })
-  .filter((entry): entry is ChangelogEntry => entry !== undefined);
+export const parseChangelogEntries = (
+  modules: Record<string, string>,
+): ReadonlyArray<ChangelogEntry> => {
+  return Object.entries(modules)
+    .map(([path, raw]) => {
+      const filename = path.replace(/^.*\//, "");
+      const name = filename.replace(/\.md$/, "");
+      const date = dateFromFilename(filename);
+      if (!date) return undefined;
+      return parseEntry(name, date, raw);
+    })
+    .filter((entry): entry is ChangelogEntry => entry !== undefined)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+};
+
+export const changelogEntries: ReadonlyArray<ChangelogEntry> = parseChangelogEntries(rawModules);
 
 export const findChangelogEntry = (name: string): ChangelogEntry | undefined =>
   changelogEntries.find((entry) => entry.name === name);
