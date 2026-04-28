@@ -90,14 +90,6 @@ const STATIC_API_WARNING =
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
 
-const LoadHookSchema = Schema.declare(
-  (u: unknown): u is (id: string) => Promise<string | null> => typeof u === "function",
-);
-
-const ResolveIdHookSchema = Schema.declare(
-  (u: unknown): u is (id: string) => string | null => typeof u === "function",
-);
-
 interface HandlerFactoryBoundaryModule {
   readonly makeApiLayer: (
     mod: Record<string, unknown>,
@@ -968,6 +960,104 @@ export const routes = { manifest: [] }
         assert.include(code, 'import { Api } from "/app/api"');
         assert.include(code, "export class ApiClient");
         assert.include(code, "export const ApiClientLive");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should importing trygg/api fail clearly when app api module is missing", () =>
+      Effect.gen(function* () {
+        // Test: should importing trygg/api fail clearly when app api module is missing
+        // Scope: covers the Vite virtual-module import boundary for generated API client loading.
+        // Assertion: the user-visible error explains that app/api.ts must export Api.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+
+        yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+        const resolved = resolveId("trygg/api");
+        assert.strictEqual(resolved, "\0trygg/api");
+
+        const error = yield* Effect.promise(() =>
+          load(resolved ?? "trygg/api").then(
+            () => new Error("Expected trygg/api import to fail"),
+            (cause) => cause,
+          ),
+        );
+
+        assert.instanceOf(error, Error);
+        assert.include(error.message, "app/api.ts must export Api");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should importing trygg/api fail clearly when app api module lacks Api export", () =>
+      Effect.gen(function* () {
+        // Test: should importing trygg/api fail clearly when app api module lacks Api export
+        // Scope: covers validation before the generated client imports the app API module.
+        // Assertion: the user-visible error explains the required export.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "const Api = {}\nexport default {}",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+
+        yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+        const resolved = resolveId("trygg/api");
+        assert.strictEqual(resolved, "\0trygg/api");
+
+        const error = yield* Effect.promise(() =>
+          load(resolved ?? "trygg/api").then(
+            () => new Error("Expected trygg/api import to fail"),
+            (cause) => cause,
+          ),
+        );
+
+        assert.instanceOf(error, Error);
+        assert.include(error.message, "app/api.ts must export Api");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should importing trygg/api ignore Api export text in app api string literals", () =>
+      Effect.gen(function* () {
+        // Test: should importing trygg/api ignore Api export text in app api string literals
+        // Scope: covers invalid API validation before generated code imports named exports.
+        // Assertion: string contents do not bypass the actionable missing-export diagnostic.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": 'const message = "export const Api"\nexport default {}',
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+
+        yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+        const resolved = resolveId("trygg/api");
+        assert.strictEqual(resolved, "\0trygg/api");
+
+        const error = yield* Effect.promise(() =>
+          load(resolved ?? "trygg/api").then(
+            () => new Error("Expected trygg/api import to fail"),
+            (cause) => cause,
+          ),
+        );
+
+        assert.instanceOf(error, Error);
+        assert.include(error.message, "app/api.ts must export Api");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });

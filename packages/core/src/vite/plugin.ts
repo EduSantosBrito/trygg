@@ -1126,7 +1126,76 @@ const stripComments = (source: string): string =>
 const nodePlatformImportPattern =
   /\b(?:import|export)\s+(?:[^"']+from\s+)?["']@effect\/platform-node(?:\/[^"']*)?["']/;
 
-const apiExportPattern = /\bexport\s+const\s+Api\b/;
+const apiExportPattern = /(?:^|[;\n\r])\s*export\s+const\s+Api\b/;
+
+const stripNonCodeText = (source: string): string => {
+  let output = "";
+  let index = 0;
+
+  while (index < source.length) {
+    const current = source[index];
+    const next = source[index + 1];
+
+    if (current === undefined) {
+      break;
+    }
+
+    if (current === "/" && next === "/") {
+      output += "  ";
+      index += 2;
+      while (index < source.length && source[index] !== "\n") {
+        output += " ";
+        index += 1;
+      }
+      continue;
+    }
+
+    if (current === "/" && next === "*") {
+      output += "  ";
+      index += 2;
+      while (index < source.length) {
+        const blockCurrent = source[index];
+        const blockNext = source[index + 1];
+        if (blockCurrent === "*" && blockNext === "/") {
+          output += "  ";
+          index += 2;
+          break;
+        }
+        output += blockCurrent === "\n" ? "\n" : " ";
+        index += 1;
+      }
+      continue;
+    }
+
+    if (current === '"' || current === "'" || current === "`") {
+      const quote = current;
+      output += " ";
+      index += 1;
+      while (index < source.length) {
+        const quotedCurrent = source[index];
+        if (quotedCurrent === undefined) {
+          break;
+        }
+        if (quotedCurrent === "\\") {
+          output += "  ";
+          index += 2;
+          continue;
+        }
+        output += quotedCurrent === "\n" ? "\n" : " ";
+        index += 1;
+        if (quotedCurrent === quote) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    output += current;
+    index += 1;
+  }
+
+  return output;
+};
 
 // =============================================================================
 // File System Operations
@@ -1250,7 +1319,7 @@ const validateGeneratedApiClient = (
       ),
     );
 
-    if (!apiExportPattern.test(stripComments(source))) {
+    if (!apiExportPattern.test(stripNonCodeText(source))) {
       return yield* PluginValidationError.invalidStructure(API_EXPORT_MESSAGE, apiPath);
     }
   });
@@ -1283,8 +1352,10 @@ export { Api }
 // Code Generation
 // =============================================================================
 
-const toModuleImportPath = (fromDir: string, toFileOrDir: string): string =>
-  nodePath.relative(fromDir, toFileOrDir).replace(/\\/g, "/");
+const toModuleImportPath = (fromDir: string, toFileOrDir: string): string => {
+  const relative = nodePath.relative(fromDir, toFileOrDir).replace(/\\/g, "/");
+  return relative.startsWith(".") ? relative : `./${relative}`;
+};
 
 const stripTypeScriptExtension = (modulePath: string): string => modulePath.replace(/\.tsx?$/, "");
 
@@ -1581,11 +1652,6 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
 
 const generatedApiClientTypesPath = (generatedDir: string): string =>
   nodePath.join(generatedDir, "api.d.ts");
-
-const toModuleImportPath = (fromDir: string, toDir: string): string => {
-  const relative = nodePath.relative(fromDir, toDir).replace(/\\/g, "/");
-  return relative.startsWith(".") ? relative : `./${relative}`;
-};
 
 const writeGeneratedApiClientTypes = (
   appDir: string,
