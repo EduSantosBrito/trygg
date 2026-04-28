@@ -5,7 +5,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Cause, Context, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
+import { Cause, Context, Deferred, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -13,6 +13,7 @@ import * as path from "path";
 import { createServer as createViteServer } from "vite";
 import { DevPlatform } from "../dev-platform.js";
 import { NodeDevPlatformLive } from "../dev-platform-node.js";
+import type { Connect } from "vite";
 import {
   trygg,
   extractParamNames,
@@ -31,7 +32,9 @@ import {
   resolveRoutePaths,
   PluginFiles,
   makePluginFilesLayer,
+  makeViteServer,
   type ParsedRoute,
+  type ViteServerSource,
 } from "../plugin.js";
 
 /**
@@ -269,6 +272,69 @@ export const routes = { manifest: [] }
         assert.include(entry, 'import { routes } from "../app/routes"');
         assert.include(html, '<script type="module" src="/.trygg/entry.tsx"></script>');
       }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should mount API middleware through ViteServer adapter", () =>
+      Effect.gen(function* () {
+        // Test: should mount API middleware through ViteServer adapter
+        // Scope: covers the adapter boundary where dev API middleware is installed into Vite.
+        // Assertion: the named API mount operation registers the exact middleware with Vite.
+        const mounted: Array<Connect.NextHandleFunction> = [];
+        const middleware: Connect.NextHandleFunction = (_req, _res, next) => next();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          httpServer: undefined,
+          middlewares: {
+            use: (handler) => {
+              mounted.push(handler);
+            },
+          },
+          transformIndexHtml: (_url, html) => Promise.resolve(html),
+        };
+
+        yield* makeViteServer(source).mountApiMiddleware(middleware);
+
+        assert.strictEqual(mounted.length, 1);
+        assert.strictEqual(mounted[0], middleware);
+      }),
+    );
+
+    scoped("should close API scope when Vite server closes", () =>
+      Effect.gen(function* () {
+        // Test: should close API scope when Vite server closes
+        // Scope: covers cleanup ownership at the Vite server adapter boundary.
+        // Assertion: triggering the registered Vite close handler runs API scope finalizers.
+        const closeHandlers: Array<() => void> = [];
+        const cleaned = yield* Deferred.make<void>();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          httpServer: {
+            on: (_event, handler) => {
+              closeHandlers.push(handler);
+            },
+          },
+          middlewares: { use: () => undefined },
+          transformIndexHtml: (_url, html) => Promise.resolve(html),
+        };
+        const scope = yield* Scope.make();
+        let closeRuns = 0;
+        const runPromise = (effect: Effect.Effect<void>) => {
+          closeRuns += 1;
+          return Effect.runPromise(effect);
+        };
+        yield* Scope.addFinalizer(scope, Deferred.succeed(cleaned, undefined).pipe(Effect.asVoid));
+
+        yield* makeViteServer(source, runPromise).closeApiScopeOnServerClose(scope);
+        for (const handler of closeHandlers) {
+          handler();
+        }
+
+        assert.strictEqual(closeHandlers.length, 1);
+        assert.strictEqual(closeRuns, 1);
+        yield* Deferred.await(cleaned);
+      }),
     );
 
     scoped("should load handler factory virtual module with make vocabulary", () =>

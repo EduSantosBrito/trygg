@@ -1758,13 +1758,53 @@ interface PreviewServerLike {
   };
 }
 
-interface ViteServerAdapter {
+/**
+ * Minimal Vite dev server surface consumed by the internal adapter.
+ *
+ * @remarks
+ * Keeps direct `ViteDevServer` coupling at the plugin hook boundary while tests
+ * exercise the adapter through a structural source.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export interface ViteServerSource {
+  readonly ssrLoadModule: (id: string) => Promise<Record<string, unknown>>;
+  readonly watcher: {
+    readonly on: (event: "change", handler: (file: string) => void | Promise<void>) => void;
+  };
+  readonly httpServer?:
+    | {
+        readonly on: (event: "close", handler: () => void) => unknown;
+      }
+    | null
+    | undefined;
+  readonly middlewares: {
+    readonly use: (middleware: Connect.NextHandleFunction) => void;
+  };
+  readonly transformIndexHtml: (url: string, html: string) => Promise<string>;
+}
+
+/**
+ * Named adapter operations for Vite dev server effects.
+ *
+ * @remarks
+ * API mount and close cleanup use explicit operations so lifecycle ownership is
+ * isolated from the rest of `configureServer`.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export interface ViteServer {
   readonly loadModule: (
     id: string,
     message: string,
   ) => Effect.Effect<Record<string, unknown>, ApiInitError>;
   readonly onFileChange: (handler: (file: string) => void | Promise<void>) => Effect.Effect<void>;
-  readonly onServerClose: (handler: () => void) => Effect.Effect<void>;
+  readonly closeApiScopeOnServerClose: (scope: Scope.Closeable) => Effect.Effect<void>;
+  readonly mountApiMiddleware: (middleware: Connect.NextHandleFunction) => Effect.Effect<void>;
   readonly useMiddleware: (middleware: Connect.NextHandleFunction) => Effect.Effect<void>;
   readonly transformIndexHtml: (
     url: string,
@@ -1772,7 +1812,23 @@ interface ViteServerAdapter {
   ) => Effect.Effect<string, PluginFileSystemError>;
 }
 
-const makeViteServerAdapter = (server: ViteDevServer): ViteServerAdapter => ({
+type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
+
+/**
+ * Build the short-lived Vite server adapter for dev-server hooks.
+ *
+ * @remarks
+ * The adapter is created per Vite server configuration and should not outlive
+ * that server instance.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export const makeViteServer = (
+  server: ViteServerSource,
+  runPromise: ViteServerRunPromise = Effect.runPromise,
+): ViteServer => ({
   loadModule: (id, message) =>
     Effect.tryPromise({
       try: () => server.ssrLoadModule(id),
@@ -1780,8 +1836,13 @@ const makeViteServerAdapter = (server: ViteDevServer): ViteServerAdapter => ({
     }),
   onFileChange: (handler) =>
     Effect.sync(() => server.watcher.on("change", handler)).pipe(Effect.asVoid),
-  onServerClose: (handler) =>
-    Effect.sync(() => server.httpServer?.on("close", handler)).pipe(Effect.asVoid),
+  closeApiScopeOnServerClose: (scope) =>
+    Effect.sync(() =>
+      server.httpServer?.on("close", () => {
+        void runPromise(Scope.close(scope, Exit.void));
+      }),
+    ).pipe(Effect.asVoid),
+  mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
   useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
   transformIndexHtml: (url, html) =>
     Effect.tryPromise({
@@ -1887,7 +1948,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     },
 
     async configureServer(server: ViteDevServer) {
-      const viteServer = makeViteServerAdapter(server);
+      const viteServer = makeViteServer(server, (effect) => pluginRuntime.runPromise(effect));
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { appDir, generatedDir } = yield* bootstrap.awaitReady;
@@ -1912,7 +1973,6 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         );
 
         let apiHandle: Option.Option<DevApiHandle> = Option.none();
-        let apiScope: Option.Option<Scope.Closeable> = Option.none();
         const hasApi = yield* pathExists(apiPath);
 
         if (hasApi) {
@@ -1966,7 +2026,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           );
 
           apiHandle = Option.some(handle);
-          apiScope = Option.some(scope);
+          yield* viteServer.closeApiScopeOnServerClose(scope);
 
           yield* Effect.logInfo("API handlers loaded").pipe(
             Effect.annotateLogs("style", "success"),
@@ -1996,15 +2056,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           );
         });
 
-        // Vite boundary: close scope when server closes (triggers finalizer)
-        yield* viteServer.onServerClose(() => {
-          if (Option.isSome(apiScope)) {
-            void pluginRuntime.runPromise(Scope.close(apiScope.value, Exit.void));
-          }
-        });
-
         if (Option.isSome(apiHandle)) {
-          yield* viteServer.useMiddleware(apiHandle.value.middleware);
+          yield* viteServer.mountApiMiddleware(apiHandle.value.middleware);
         }
 
         return () => {
