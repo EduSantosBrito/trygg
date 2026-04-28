@@ -8,7 +8,9 @@ import { scaffoldProject } from "../scaffold.js";
 import { generateApiClientTypes } from "../generators/api-client-types.js";
 
 const TEMPLATES_DIR = path.join(import.meta.dirname, "../../templates");
-const WORKSPACE_TEMP_DIR = path.resolve(import.meta.dirname, "../../../../apps/examples");
+const WORKSPACE_ROOT = path.resolve(import.meta.dirname, "../../../..");
+const TRYGG_CORE_ABS = path.join(WORKSPACE_ROOT, "packages/core");
+const WORKSPACE_TEMP_DIR = path.join(WORKSPACE_ROOT, "apps/examples");
 
 const runScaffold = (
   targetDir: string,
@@ -82,6 +84,22 @@ const checkNoTryggApiImports = (dir: string): Effect.Effect<void, unknown, FileS
       }
     }
   });
+
+const patchPackageJsonForLocalTrygg = (
+  targetDir: string,
+): Effect.Effect<void, unknown, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pkgPath = path.join(targetDir, "package.json");
+    const pkgText = yield* fs.readFileString(pkgPath);
+    const pkg = JSON.parse(pkgText);
+    const relativeTryggPath = path.relative(targetDir, TRYGG_CORE_ABS);
+    pkg.dependencies.trygg = "file:" + relativeTryggPath;
+    yield* fs.writeFileString(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  });
+
+const bunInstall = (cwd: string): Effect.Effect<CommandResult, Error> =>
+  runCommand(cwd, "bun", ["install"]);
 
 describe("scaffoldProject", () => {
   it.effect("should generate .trygg/api.d.ts for incident template", () =>
@@ -178,6 +196,14 @@ describe("scaffoldProject", () => {
       );
 
       yield* runScaffold(targetDir, "blank");
+      yield* patchPackageJsonForLocalTrygg(targetDir);
+
+      const installResult = yield* bunInstall(targetDir);
+      assert.strictEqual(
+        installResult.exitCode,
+        0,
+        `bun install should pass. stderr: ${installResult.stderr}`,
+      );
 
       const typecheckResult = yield* runCommand(targetDir, "bun", ["run", "typecheck"]);
       assert.strictEqual(
@@ -211,6 +237,14 @@ describe("scaffoldProject", () => {
         );
 
         yield* runScaffold(targetDir, "blank");
+        yield* patchPackageJsonForLocalTrygg(targetDir);
+
+        const installResult = yield* bunInstall(targetDir);
+        assert.strictEqual(
+          installResult.exitCode,
+          0,
+          `bun install should pass. stderr: ${installResult.stderr}`,
+        );
 
         const homePath = path.join(targetDir, "app", "pages", "home.tsx");
         const homeContent = yield* fs.readFileString(homePath);
