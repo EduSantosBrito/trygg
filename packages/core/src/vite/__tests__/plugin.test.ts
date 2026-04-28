@@ -33,6 +33,7 @@ import {
   PluginFiles,
   PluginApi,
   makePluginFilesLayer,
+  makePluginApi,
   makeViteServer,
   type ParsedRoute,
   type ViteServerSource,
@@ -335,6 +336,44 @@ export const routes = { manifest: [] }
         assert.strictEqual(closeHandlers.length, 1);
         assert.strictEqual(closeRuns, 1);
         yield* Deferred.await(cleaned);
+      }),
+    );
+
+    scoped("should delegate one api.ts reload request to PluginApi", () =>
+      Effect.gen(function* () {
+        // Test: should delegate one api.ts reload request to PluginApi
+        // Scope: covers the file-change boundary between the Vite watcher and active API handle.
+        // Assertion: an api.ts change runs exactly one reload and unrelated files do not reload.
+        let reloads = 0;
+        const api = makePluginApi({
+          middleware: (_req, _res, next) => next(),
+          reload: Effect.sync(() => {
+            reloads += 1;
+          }),
+          dispose: Effect.void,
+        });
+
+        yield* api.reloadChangedFile(path.join("app", "api.ts"));
+        yield* api.reloadChangedFile(path.join("app", "routes.ts"));
+
+        assert.strictEqual(reloads, 1);
+      }),
+    );
+
+    scoped("should keep dev middleware alive when PluginApi reload fails", () =>
+      Effect.gen(function* () {
+        // Test: should keep dev middleware alive when PluginApi reload fails
+        // Scope: covers reload failure isolation at the dev watcher boundary.
+        // Assertion: a typed reload failure is logged and does not fail the surrounding effect.
+        const api = makePluginApi({
+          middleware: (_req, _res, next) => next(),
+          reload: Effect.fail(new ApiInitError({ message: "reload failed" })),
+          dispose: Effect.void,
+        });
+
+        const exit = yield* Effect.exit(api.reloadChangedFile(path.join("app", "api.ts")));
+
+        assert.isTrue(Exit.isSuccess(exit));
       }),
     );
 

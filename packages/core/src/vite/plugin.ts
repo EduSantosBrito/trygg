@@ -38,6 +38,7 @@ import {
   NodeServerPlatform,
   BunServerPlatform,
   type ServerPlatformService,
+  type DevApiErrors,
   type DevApiHandle,
   type HandlerFactory,
   ApiInitError,
@@ -1837,6 +1838,22 @@ export namespace PluginApi {
 
   export type InitialState = Absent | Loading | Ready | Failed;
 
+  /**
+   * Active dev API facade owned by the plugin layer.
+   *
+   * @remarks
+   * Keeps api.ts change handling beside the active dev API handle so Vite watcher
+   * code delegates reload requests instead of knowing reload semantics directly.
+   *
+   * @internal
+   * @category Vite Plugin
+   * @since 1.0.0
+   */
+  export interface Active {
+    readonly middleware: Connect.NextHandleFunction;
+    readonly reloadChangedFile: (file: string) => Effect.Effect<void>;
+  }
+
   export interface InitialLoadOptions<RHasApi> {
     readonly apiPath: string;
     readonly hasApi: Effect.Effect<boolean, never, RHasApi>;
@@ -1889,6 +1906,39 @@ export namespace PluginApi {
     state._tag === "Ready" ? Scope.close(state.scope, Exit.void) : Effect.void;
 }
 
+const logPluginApiReloadError = (error: DevApiErrors): Effect.Effect<void> =>
+  Effect.logError(`[api] reload.failed: ${error.message}`).pipe(
+    Effect.annotateLogs("error_tag", error._tag),
+  );
+
+/**
+ * Create a plugin-owned facade for an active dev API handle.
+ *
+ * @remarks
+ * The facade preserves existing dev reload behavior: one api.ts change requests
+ * one scoped handle reload, successful reloads log debug output, and typed reload
+ * failures are logged without failing unrelated watcher work.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export const makePluginApi = (handle: DevApiHandle): PluginApi.Active => ({
+  middleware: handle.middleware,
+  reloadChangedFile: (file) => {
+    if (!file.endsWith("api.ts")) {
+      return Effect.void;
+    }
+
+    return Effect.scoped(handle.reload).pipe(
+      Effect.tap(() => Effect.logDebug("Reloaded API handlers")),
+      Effect.catchTags({
+        ApiInitError: logPluginApiReloadError,
+        ImportError: logPluginApiReloadError,
+      }),
+    );
+  },
+});
 type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
 
 /**
@@ -2096,6 +2146,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             }),
         });
 
+        const pluginApi = apiState._tag === "Ready" ? makePluginApi(apiState.handle) : undefined;
+
         if (apiState._tag === "Ready") {
           yield* viteServer.closeApiScopeOnServerClose(apiState.scope);
           yield* Effect.logInfo("API handlers loaded").pipe(
@@ -2121,17 +2173,16 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
                   yield* files.regenerateGeneratedRouteTypes(paths);
                 }
 
-                if (file.endsWith("api.ts") && apiState._tag === "Ready") {
-                  yield* apiState.handle.reload;
-                  yield* Effect.logDebug("Reloaded API handlers");
+                if (pluginApi !== undefined) {
+                  yield* pluginApi.reloadChangedFile(file);
                 }
               }),
             ),
           );
         });
 
-        if (apiState._tag === "Ready") {
-          yield* viteServer.mountApiMiddleware(apiState.handle.middleware);
+        if (pluginApi !== undefined) {
+          yield* viteServer.mountApiMiddleware(pluginApi.middleware);
         }
 
         return () => {
