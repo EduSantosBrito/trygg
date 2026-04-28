@@ -1356,10 +1356,9 @@ interface PluginFilesService {
   readonly writeBuildEntryFiles: (
     paths: PluginFilePaths,
   ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
-  readonly writeServerEntryFile: (
+  readonly writeProductionServerEntry: (
     paths: PluginFilePaths,
-    content: string,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  ) => Effect.Effect<string, PluginFileSystemError, FileSystem.FileSystem | ServerPlatform>;
 }
 
 /**
@@ -1498,8 +1497,15 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
               generateHtmlTemplate(),
             );
           }),
-        writeServerEntryFile: (paths, content) =>
-          writeFileSafe(nodePath.join(paths.generatedDir, "server-entry.ts"), content),
+        writeProductionServerEntry: (paths) =>
+          Effect.gen(function* () {
+            const hasApi = yield* pathExists(nodePath.join(paths.appDir, "api.ts"));
+            const serverEntryPath = nodePath.join(paths.generatedDir, "server-entry.ts");
+            const content = yield* generateServerEntry(hasApi);
+
+            yield* writeFileSafe(serverEntryPath, content);
+            return serverEntryPath;
+          }),
       } satisfies PluginFilesService;
     }),
   );
@@ -1754,11 +1760,8 @@ export const makeBuildOutput = ({ buildServer }: BuildOutputDeps): BuildOutputSe
       : Effect.gen(function* () {
           const files = yield* PluginFiles;
           const paths = { appDir, generatedDir };
-          const hasApi = yield* files.appApiExists(paths);
-          const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
-          const serverEntryContent = yield* generateServerEntry(hasApi);
+          const serverEntryPath = yield* files.writeProductionServerEntry(paths);
 
-          yield* files.writeServerEntryFile(paths, serverEntryContent);
           yield* Effect.logInfo("Building production server...");
           yield* buildServer(serverEntryPath, config);
           yield* Effect.logInfo("Server build complete").pipe(

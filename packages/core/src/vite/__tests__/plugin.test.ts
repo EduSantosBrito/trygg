@@ -176,6 +176,10 @@ describe("Vite Plugin", () => {
         typeof u === "function",
     );
 
+    const CloseBundleHookSchema = Schema.declare(
+      (u: unknown): u is () => Promise<void> => typeof u === "function",
+    );
+
     it("should return a valid Vite plugin", () => {
       const plugin = trygg();
 
@@ -340,6 +344,39 @@ export const routes = { manifest: [] }
           Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
         ),
       ),
+    );
+
+    scoped("should closeBundle build production server without deleting client files", () =>
+      Effect.gen(function* () {
+        // Test: should closeBundle build production server without deleting client files
+        // Scope: covers the production server build through the real plugin hook path.
+        // Assertion: dist/server.js is emitted and an existing dist/client file remains.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg({ platform: "node", output: "server" });
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+        const closeBundle = Schema.decodeUnknownSync(CloseBundleHookSchema)(plugin.closeBundle);
+        const clientFile = path.join(root, "dist", "client", "client.txt");
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+        yield* fs.makeDirectory(path.dirname(clientFile), { recursive: true }).pipe(Effect.orDie);
+        yield* fs.writeFileString(clientFile, "client artifact").pipe(Effect.orDie);
+
+        yield* Effect.promise(() => closeBundle());
+
+        const serverExists = yield* fs.exists(path.join(root, "dist", "server.js"));
+        const clientExists = yield* fs.exists(clientFile);
+
+        assert.isTrue(serverExists);
+        assert.isTrue(clientExists);
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
     scoped("should configureServer generate dev entry and serve SPA shell through Vite", () =>
