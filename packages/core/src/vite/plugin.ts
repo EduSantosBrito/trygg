@@ -1232,22 +1232,73 @@ export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
   <body></body>
 </html>`;
 
-interface BuildEntryFilesInput {
+interface PluginFilePaths {
   readonly appDir: string;
   readonly generatedDir: string;
-  readonly routesFilePath: string | undefined;
 }
 
 interface PluginFilesService {
-  readonly appApiExists: (appDir: string) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
+  readonly appApiExists: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
+  readonly routesFilePath: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<string | undefined, never, FileSystem.FileSystem>;
+  readonly isRoutesFile: (
+    paths: PluginFilePaths,
+    filePath: string,
+  ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
+  readonly writeEntryFile: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  readonly writeGeneratedRouteTypes: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  readonly regenerateGeneratedRouteTypes: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
   readonly writeBuildEntryFiles: (
-    input: BuildEntryFilesInput,
+    paths: PluginFilePaths,
   ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
 }
 
-interface PluginFiles extends Context.Service<PluginFiles, PluginFilesService> {}
+/**
+ * Owns generated plugin file path discovery and writes.
+ *
+ * @remarks
+ * Internal service boundary that keeps generated route and entry file work out
+ * of Vite hook orchestration.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export interface PluginFiles extends Context.Service<PluginFiles, PluginFilesService> {}
 
-const PluginFiles = Context.Service<PluginFiles, PluginFilesService>("trygg/vite/PluginFiles");
+/**
+ * Service tag for generated plugin file operations.
+ *
+ * @remarks
+ * Used by the Vite plugin runtime and local tests to request named generated
+ * file operations.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export const PluginFiles = Context.Service<PluginFiles, PluginFilesService>(
+  "trygg/vite/PluginFiles",
+);
+
+const routeSourcePath = (paths: PluginFilePaths): string =>
+  nodePath.join(paths.appDir, "routes.ts");
+
+const generatedRouteTypesPath = (paths: PluginFilePaths): string =>
+  nodePath.join(paths.generatedDir, "routes.d.ts");
+
+const generatedEntryPath = (paths: PluginFilePaths): string =>
+  nodePath.join(paths.generatedDir, "entry.tsx");
+
+const sameFilePath = (left: string, right: string): boolean =>
+  nodePath.resolve(left) === nodePath.resolve(right);
 
 const readRoutesSource = (
   routesFilePath: string,
@@ -1258,43 +1309,97 @@ const readRoutesSource = (
   });
 
 const writeRouteTypesFromRoutes = (
-  generatedDir: string,
   routesFilePath: string,
-): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
+  routeTypesPath: string,
+): Effect.Effect<boolean, PluginFileSystemError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const routeSource = yield* readRoutesSource(routesFilePath);
     if (routeSource.length === 0) {
-      return;
+      return false;
     }
 
     const parsed = yield* parseRoutes(routeSource);
     const content = yield* generateRouteTypes(parsed);
-    yield* writeFileSafe(nodePath.join(generatedDir, "routes.d.ts"), content);
-    yield* Effect.logDebug("Generated route types");
+    yield* writeFileSafe(routeTypesPath, content);
+    return true;
   });
 
-const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
+/**
+ * Creates the live generated plugin file service.
+ *
+ * @remarks
+ * Derives route and generated file paths from canonical plugin directories at
+ * call time instead of storing duplicate path state.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
   Layer.effect(
     PluginFiles,
-    Effect.succeed({
-      appApiExists: (appDir) => pathExists(nodePath.join(appDir, "api.ts")),
-      writeBuildEntryFiles: ({ appDir, generatedDir, routesFilePath }) =>
+    Effect.gen(function* () {
+      const routesFilePath = (paths: PluginFilePaths) =>
         Effect.gen(function* () {
-          const entryPath = nodePath.join(generatedDir, "entry.tsx");
-          const hasEntry = yield* pathExists(entryPath);
+          const filePath = routeSourcePath(paths);
+          const exists = yield* pathExists(filePath);
+          return exists ? filePath : undefined;
+        });
 
-          if (!hasEntry || routesFilePath !== undefined) {
-            const content = yield* generateEntryModule(appDir, generatedDir, routesFilePath);
-            yield* writeFileSafe(entryPath, content);
+      const writeEntryFile = (paths: PluginFilePaths) =>
+        Effect.gen(function* () {
+          const routesFile = yield* routesFilePath(paths);
+          const content = yield* generateEntryModule(paths.appDir, paths.generatedDir, routesFile);
+          yield* writeFileSafe(generatedEntryPath(paths), content);
+        });
+
+      const writeRouteTypesWithLog = (paths: PluginFilePaths, message: string) =>
+        Effect.gen(function* () {
+          const routesFile = yield* routesFilePath(paths);
+          if (routesFile !== undefined) {
+            const wroteTypes = yield* writeRouteTypesFromRoutes(
+              routesFile,
+              generatedRouteTypesPath(paths),
+            );
+            if (wroteTypes) {
+              yield* Effect.logDebug(message);
+            }
           }
+        });
 
-          if (routesFilePath !== undefined) {
-            yield* writeRouteTypesFromRoutes(generatedDir, routesFilePath);
-          }
+      const writeGeneratedRouteTypes = (paths: PluginFilePaths) =>
+        writeRouteTypesWithLog(paths, "Generated route types");
 
-          yield* writeFileSafe(nodePath.join(generatedDir, "index.html"), generateHtmlTemplate());
-        }),
-    } satisfies PluginFilesService),
+      return {
+        appApiExists: (paths) => pathExists(nodePath.join(paths.appDir, "api.ts")),
+        routesFilePath,
+        isRoutesFile: (paths, filePath) =>
+          Effect.gen(function* () {
+            const routesFile = yield* routesFilePath(paths);
+            return routesFile !== undefined && sameFilePath(filePath, routesFile);
+          }),
+        writeEntryFile,
+        writeGeneratedRouteTypes,
+        regenerateGeneratedRouteTypes: (paths) =>
+          writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
+        writeBuildEntryFiles: (paths) =>
+          Effect.gen(function* () {
+            const entryPath = generatedEntryPath(paths);
+            const hasEntry = yield* pathExists(entryPath);
+            const routesFile = yield* routesFilePath(paths);
+
+            if (!hasEntry || routesFile !== undefined) {
+              yield* writeEntryFile(paths);
+            }
+
+            yield* writeGeneratedRouteTypes(paths);
+
+            yield* writeFileSafe(
+              nodePath.join(paths.generatedDir, "index.html"),
+              generateHtmlTemplate(),
+            );
+          }),
+      } satisfies PluginFilesService;
+    }),
   );
 
 /**
@@ -1683,13 +1788,13 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       const viteServer = makeViteServerAdapter(server);
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
-        const { appDir, generatedDir, routesFilePath } = yield* bootstrap.awaitReady;
+        const { appDir, generatedDir } = yield* bootstrap.awaitReady;
+        const paths = { appDir, generatedDir };
+        const files = yield* PluginFiles;
 
         // Get DevPlatform service
         const devPlatform = yield* DevPlatform;
 
-        const routeTypesPath = nodePath.join(generatedDir, "routes.d.ts");
-        const entryPath = nodePath.join(generatedDir, "entry.tsx");
         const apiPath = nodePath.join(appDir, "api.ts");
 
         // Validate API imports
@@ -1697,22 +1802,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           Effect.tapError(logApiValidationError),
         );
 
-        // Generate route types from routes file
-        if (routesFilePath !== undefined) {
-          const fs = yield* FileSystem.FileSystem;
-          const routeSource = yield* fs
-            .readFileString(routesFilePath)
-            .pipe(Effect.orElseSucceed(() => ""));
-          if (routeSource.length > 0) {
-            const parsed = yield* parseRoutes(routeSource);
-            const content = yield* generateRouteTypes(parsed);
-            yield* writeFileSafe(routeTypesPath, content);
-            yield* Effect.logDebug("Generated route types");
-          }
-        }
-
-        const entryContent = yield* generateEntryModule(appDir, generatedDir, routesFilePath);
-        yield* writeFileSafe(entryPath, entryContent);
+        yield* files.writeGeneratedRouteTypes(paths);
+        yield* files.writeEntryFile(paths);
 
         yield* Effect.logInfo(`Generated files in ${GENERATED_DIR}/`).pipe(
           Effect.annotateLogs("style", "success"),
@@ -1789,18 +1880,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           await pluginRuntime.runPromise(
             Effect.scoped(
               Effect.gen(function* () {
-                // Routes file changed - regenerate types
-                if (routesFilePath !== undefined && file === routesFilePath) {
-                  const fs = yield* FileSystem.FileSystem;
-                  const routeSource = yield* fs
-                    .readFileString(routesFilePath)
-                    .pipe(Effect.orElseSucceed(() => ""));
-                  if (routeSource.length > 0) {
-                    const parsed = yield* parseRoutes(routeSource);
-                    const content = yield* generateRouteTypes(parsed);
-                    yield* writeFileSafe(routeTypesPath, content);
-                    yield* Effect.logDebug("Regenerated routes.d.ts");
-                  }
+                const isRoutesFile = yield* files.isRoutesFile(paths, file);
+                if (isRoutesFile) {
+                  yield* files.regenerateGeneratedRouteTypes(paths);
                 }
 
                 if (file.endsWith("api.ts") && Option.isSome(apiHandle)) {
@@ -1901,11 +1983,13 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       const result = await pluginRuntime.runPromise(
         Effect.gen(function* () {
           const bootstrap = yield* Bootstrap;
-          const { config, routesFilePath } = yield* bootstrap.awaitReady;
+          const { appDir, generatedDir, config } = yield* bootstrap.awaitReady;
+          const files = yield* PluginFiles;
+          const paths = { appDir, generatedDir };
+          const isRoutesFile = yield* files.isRoutesFile(paths, id);
 
           // Only transform the routes file in production builds
-          if (routesFilePath === undefined) return null;
-          if (id !== routesFilePath) return null;
+          if (!isRoutesFile) return null;
           if (config.command !== "build") return null;
 
           return yield* transformRoutesForBuild(code, id);
@@ -1917,8 +2001,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     async buildStart() {
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
-        const { appDir, generatedDir, config, routesFilePath } = yield* bootstrap.awaitReady;
+        const { appDir, generatedDir, config } = yield* bootstrap.awaitReady;
         const files = yield* PluginFiles;
+        const paths = { appDir, generatedDir };
 
         const apiPath = nodePath.join(appDir, "api.ts");
         yield* validateApiPlatform(apiPath, configPlatform).pipe(
@@ -1927,10 +2012,10 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
         // Only write index.html for production builds (Rollup needs physical input)
         if (config.command === "build") {
-          yield* files.writeBuildEntryFiles({ appDir, generatedDir, routesFilePath });
+          yield* files.writeBuildEntryFiles(paths);
 
           // Warn if API exists with static output
-          const hasApi = yield* files.appApiExists(appDir);
+          const hasApi = yield* files.appApiExists(paths);
           if (hasApi && output === "static") {
             yield* Effect.logWarning(
               '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',

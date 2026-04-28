@@ -9,7 +9,6 @@ interface BootstrapState {
   readonly config: ResolvedConfig;
   readonly appDir: string;
   readonly generatedDir: string;
-  readonly routesFilePath: string | undefined;
 }
 
 type BootstrapFailure = PluginFileSystemError;
@@ -47,12 +46,6 @@ const makeState = (
     const appDir = nodePath.resolve(resolvedConfig.root, options.appDirName);
     const generatedDir = nodePath.resolve(resolvedConfig.root, options.generatedDirName);
 
-    const discoveredRoutesPath = nodePath.join(appDir, "routes.ts");
-    const hasRoutes = yield* fs
-      .exists(discoveredRoutesPath)
-      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
-    const routesFilePath = hasRoutes ? discoveredRoutesPath : undefined;
-
     yield* fs.makeDirectory(generatedDir, { recursive: true }).pipe(
       Effect.catchTag("PlatformError", (e) =>
         e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
@@ -72,15 +65,11 @@ const makeState = (
     yield* Effect.logDebug(`  Generated directory: ${generatedDir}`);
     yield* Effect.logDebug(`  Platform: ${options.platform}`);
     yield* Effect.logDebug(`  Output: ${options.output}`);
-    if (routesFilePath !== undefined) {
-      yield* Effect.logDebug(`  Routes: ${routesFilePath}`);
-    }
 
     return {
       config: resolvedConfig,
       appDir,
       generatedDir,
-      routesFilePath,
     };
   });
 

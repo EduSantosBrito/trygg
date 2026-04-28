@@ -5,7 +5,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Cause, Effect, Exit, FileSystem, Schema, Scope } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
 import { createServer } from "vite";
@@ -22,6 +22,8 @@ import {
   schemaToType,
   parseSchemaStruct,
   resolveRoutePaths,
+  PluginFiles,
+  makePluginFilesLayer,
   type ParsedRoute,
 } from "../plugin.js";
 
@@ -174,6 +176,78 @@ export const routes = { manifest: [] }
         assert.include(entry, 'import { routes } from "../app/routes"');
         assert.include(html, '<script type="module" src="/.trygg/entry.tsx"></script>');
       }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: PluginFiles service
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("PluginFiles", () => {
+    scoped("should write generated route types from canonical app routes path", () =>
+      Effect.gen(function* () {
+        // Test: should write generated route types from canonical app routes path
+        // Scope: verifies route generation at the PluginFiles service boundary.
+        // Assertion: writes unchanged route type content to the generated routes path.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/routes.ts": `
+import { Route } from "trygg/router"
+
+Route.make("/users/:id")
+  .params(Schema.Struct({ id: Schema.NumberFromString }))
+  .component(UsersPage)
+`,
+        });
+        const files = yield* PluginFiles;
+        const paths = { appDir: path.join(root, "app"), generatedDir: path.join(root, ".trygg") };
+
+        yield* files.writeGeneratedRouteTypes(paths);
+
+        const routeTypes = yield* fs.readFileString(path.join(root, ".trygg", "routes.d.ts"));
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
+      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+    );
+
+    scoped("should derive routes file path from canonical app directory", () =>
+      Effect.gen(function* () {
+        // Test: should derive routes file path from canonical app directory
+        // Scope: verifies path behavior at the PluginFiles service boundary.
+        // Assertion: app/routes.ts is reported only when it exists under the provided appDir.
+        const root = yield* makeTempDir({
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const files = yield* PluginFiles;
+
+        const existing = yield* files.routesFilePath({
+          appDir: path.join(root, "app"),
+          generatedDir: path.join(root, ".trygg"),
+        });
+        const missing = yield* files.routesFilePath({
+          appDir: path.join(root, "other-app"),
+          generatedDir: path.join(root, ".trygg"),
+        });
+
+        assert.strictEqual(existing, path.join(root, "app", "routes.ts"));
+        assert.isUndefined(missing);
+      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+    );
+
+    scoped("should match routes file by normalized path", () =>
+      Effect.gen(function* () {
+        // Test: should match routes file by normalized path
+        // Scope: verifies semantic route path matching at the PluginFiles boundary.
+        // Assertion: equivalent paths identify the canonical app/routes.ts file.
+        const root = yield* makeTempDir({
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const files = yield* PluginFiles;
+        const paths = { appDir: path.join(root, "app"), generatedDir: path.join(root, ".trygg") };
+        const equivalentPath = path.join(root, "app", "..", "app", "routes.ts");
+
+        const matches = yield* files.isRoutesFile(paths, equivalentPath);
+
+        assert.isTrue(matches);
+      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
     );
   });
 
