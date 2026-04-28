@@ -1334,6 +1334,7 @@ interface PluginFilePaths {
 }
 
 interface PluginFilesService {
+  readonly appApiPath: (paths: PluginFilePaths) => string;
   readonly appApiExists: (
     paths: PluginFilePaths,
   ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
@@ -1390,6 +1391,8 @@ export const PluginFiles = Context.Service<PluginFiles, PluginFilesService>(
 const routeSourcePath = (paths: PluginFilePaths): string =>
   nodePath.join(paths.appDir, "routes.ts");
 
+const appApiPath = (paths: PluginFilePaths): string => nodePath.join(paths.appDir, "api.ts");
+
 const generatedRouteTypesPath = (paths: PluginFilePaths): string =>
   nodePath.join(paths.generatedDir, "routes.d.ts");
 
@@ -1398,6 +1401,15 @@ const generatedEntryPath = (paths: PluginFilePaths): string =>
 
 const sameFilePath = (left: string, right: string): boolean =>
   nodePath.resolve(left) === nodePath.resolve(right);
+
+const pathIsFile = (filePath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.stat(filePath).pipe(
+      Effect.map((info) => info.type === "File"),
+      Effect.orElseSucceed(() => false),
+    );
+  });
 
 const readRoutesSource = (
   routesFilePath: string,
@@ -1469,7 +1481,8 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
         writeRouteTypesWithLog(paths, "Generated route types");
 
       return {
-        appApiExists: (paths) => pathExists(nodePath.join(paths.appDir, "api.ts")),
+        appApiPath,
+        appApiExists: (paths) => pathIsFile(appApiPath(paths)),
         routesFilePath,
         isRoutesFile: (paths, filePath) =>
           Effect.gen(function* () {
@@ -1737,7 +1750,7 @@ export const makeBuildOutput = ({ buildServer }: BuildOutputDeps): BuildOutputSe
     Effect.gen(function* () {
       const files = yield* PluginFiles;
       const paths = { appDir, generatedDir };
-      const apiPath = nodePath.join(appDir, "api.ts");
+      const apiPath = files.appApiPath(paths);
 
       yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
 
@@ -2454,7 +2467,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         // Get DevPlatform service
         const devPlatform = yield* DevPlatform;
 
-        const apiPath = nodePath.join(appDir, "api.ts");
+        const apiPath = files.appApiPath(paths);
 
         // Validate API imports
         yield* validateApiPlatform(apiPath, configPlatform).pipe(

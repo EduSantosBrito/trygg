@@ -82,6 +82,9 @@ const makeTempDir = (
     return dir;
   });
 
+const STATIC_API_WARNING =
+  '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".';
+
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
 
@@ -295,9 +298,48 @@ export const routes = { manifest: [] }
 
         assert.isTrue(indexExists);
         assert.isFalse(serverEntryExists);
-        assert.deepStrictEqual(warnings, [
-          '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
-        ]);
+        assert.deepStrictEqual(warnings, [STATIC_API_WARNING]);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
+        ),
+      ),
+    );
+
+    scoped("should build output static without api file not warn", () =>
+      Effect.gen(function* () {
+        // Test: should build output static without api file not warn
+        // Scope: covers the static build hook service path when app/api.ts is absent.
+        // Assertion: client build files exist and no API exclusion warning is logged.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const appDir = path.join(root, "app");
+        const generatedDir = path.join(root, ".trygg");
+        const warnings: Array<string> = [];
+        const warningLogger = Logger.make<unknown, void>(({ logLevel, message }) => {
+          if (logLevel === "Warn") {
+            warnings.push(String(message));
+          }
+        });
+        const buildOutput = makeBuildOutput({ buildServer: () => Effect.void });
+
+        yield* buildOutput
+          .buildStart({
+            appDir,
+            generatedDir,
+            config: { command: "build", root },
+            output: "static",
+            platform: "node",
+          })
+          .pipe(Effect.provide(Logger.layer([warningLogger])));
+
+        const indexExists = yield* fs.exists(path.join(generatedDir, "index.html"));
+
+        assert.isTrue(indexExists);
+        assert.deepStrictEqual(warnings, []);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
@@ -851,6 +893,40 @@ Route.make("/users/:id")
         const matches = yield* files.isRoutesFile(paths, equivalentPath);
 
         assert.isTrue(matches);
+      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+    );
+
+    scoped("should detect app api only when canonical path is a file", () =>
+      Effect.gen(function* () {
+        // Test: should detect app api only when canonical path is a file
+        // Scope: verifies API path behavior at the PluginFiles service boundary.
+        // Assertion: app/api.ts is reported for regular files, not missing paths or directories.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/api.ts": "export default {}",
+        });
+        const directoryAppDir = path.join(root, "directory-app");
+        yield* fs.makeDirectory(path.join(directoryAppDir, "api.ts"), { recursive: true });
+        const files = yield* PluginFiles;
+        const generatedDir = path.join(root, ".trygg");
+
+        const existing = yield* files.appApiExists({
+          appDir: path.join(root, "app"),
+          generatedDir,
+        });
+        const directory = yield* files.appApiExists({ appDir: directoryAppDir, generatedDir });
+        const missing = yield* files.appApiExists({
+          appDir: path.join(root, "missing-app"),
+          generatedDir,
+        });
+
+        assert.strictEqual(
+          files.appApiPath({ appDir: path.join(root, "app"), generatedDir }),
+          path.join(root, "app", "api.ts"),
+        );
+        assert.isTrue(existing);
+        assert.isFalse(directory);
+        assert.isFalse(missing);
       }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
     );
   });
