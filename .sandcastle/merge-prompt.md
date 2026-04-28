@@ -1,4 +1,6 @@
-Merge branch {{BRANCH}} into the current branch for issue {{ISSUE_FILE}}.
+Integrate branch {{BRANCH}} into the current trunk for issue {{ISSUE_FILE}}.
+
+Do not create merge commits. This repository uses trunk-based stacked history.
 
 VCS:
 

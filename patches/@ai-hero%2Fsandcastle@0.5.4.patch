@@ -1,0 +1,140 @@
+diff --git a/dist/Display.js b/dist/Display.js
+index de05f31..2fdf20c 100644
+--- a/dist/Display.js
++++ b/dist/Display.js
+@@ -1,5 +1,5 @@
+ import * as clack from "@clack/prompts";
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { dirname } from "node:path";
+ import { Context, Effect, Layer, Ref } from "effect";
+ import { styleText } from "node:util";
+diff --git a/dist/EnvResolver.js b/dist/EnvResolver.js
+index 40d4c0c..acd58e3 100644
+--- a/dist/EnvResolver.js
++++ b/dist/EnvResolver.js
+@@ -1,4 +1,4 @@
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { Effect } from "effect";
+ import { join } from "node:path";
+ const parseEnvFile = (filePath) => Effect.gen(function* () {
+diff --git a/dist/InitService.js b/dist/InitService.js
+index a859d26..be5fa97 100644
+--- a/dist/InitService.js
++++ b/dist/InitService.js
+@@ -1,4 +1,4 @@
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { Effect } from "effect";
+ import { dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
+diff --git a/dist/PromptResolver.js b/dist/PromptResolver.js
+index 4a93ef3..de33046 100644
+--- a/dist/PromptResolver.js
++++ b/dist/PromptResolver.js
+@@ -1,4 +1,4 @@
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { Effect } from "effect";
+ import { PromptError } from "./errors.js";
+ export const resolvePrompt = (options) => {
+diff --git a/dist/SandboxFactory.js b/dist/SandboxFactory.js
+index 5a58b69..0930b8c 100644
+--- a/dist/SandboxFactory.js
++++ b/dist/SandboxFactory.js
+@@ -1,5 +1,5 @@
+ import { Context, Effect, Exit, Layer } from "effect";
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { join, resolve } from "node:path";
+ import { AgentError, AgentIdleTimeoutError, CopyError, ExecError, WorktreeError, } from "./errors.js";
+ import * as WorktreeManager from "./WorktreeManager.js";
+diff --git a/dist/WorktreeManager.js b/dist/WorktreeManager.js
+index b90e61b..3873d5c 100644
+--- a/dist/WorktreeManager.js
++++ b/dist/WorktreeManager.js
+@@ -1,5 +1,5 @@
+ import { Effect, Option } from "effect";
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { execFile } from "node:child_process";
+ import { join } from "node:path";
+ import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+diff --git a/dist/cli.js b/dist/cli.js
+index b503982..8979d9b 100644
+--- a/dist/cli.js
++++ b/dist/cli.js
+@@ -1,5 +1,5 @@
+ import { Command, Options } from "@effect/cli";
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { Effect } from "effect";
+ import * as clack from "@clack/prompts";
+ import { execSync } from "node:child_process";
+diff --git a/dist/createSandbox.js b/dist/createSandbox.js
+index 6a2e765..b087418 100644
+--- a/dist/createSandbox.js
++++ b/dist/createSandbox.js
+@@ -1,4 +1,5 @@
+-import { NodeContext, NodeFileSystem } from "@effect/platform-node";
++import * as NodeContext from "@effect/platform-node/NodeContext";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+ import { join } from "node:path";
+ import { Effect, Layer, Ref } from "effect";
+ import { ClackDisplay, Display, FileDisplay, SilentDisplay, } from "./Display.js";
+diff --git a/dist/createWorktree.js b/dist/createWorktree.js
+index d980dd7..3294cfd 100644
+--- a/dist/createWorktree.js
++++ b/dist/createWorktree.js
+@@ -1,4 +1,5 @@
+-import { NodeContext, NodeFileSystem } from "@effect/platform-node";
++import * as NodeContext from "@effect/platform-node/NodeContext";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+ import { existsSync } from "node:fs";
+ import { join } from "node:path";
+ import { Effect, Layer } from "effect";
+diff --git a/dist/interactive.js b/dist/interactive.js
+index 86b6268..f5cf670 100644
+--- a/dist/interactive.js
++++ b/dist/interactive.js
+@@ -1,4 +1,5 @@
+-import { NodeContext, NodeFileSystem } from "@effect/platform-node";
++import * as NodeContext from "@effect/platform-node/NodeContext";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+ import { join } from "node:path";
+ import * as clack from "@clack/prompts";
+ import { Effect } from "effect";
+diff --git a/dist/main.js b/dist/main.js
+index a96e1c8..672dadc 100644
+--- a/dist/main.js
++++ b/dist/main.js
+@@ -1,5 +1,6 @@
+ #!/usr/bin/env node
+-import { NodeContext, NodeRuntime } from "@effect/platform-node";
++import * as NodeContext from "@effect/platform-node/NodeContext";
++import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+ import { Effect, Layer } from "effect";
+ import { cli } from "./cli.js";
+ import { ClackDisplay } from "./Display.js";
+diff --git a/dist/resolveCwd.js b/dist/resolveCwd.js
+index c00dc96..e92c183 100644
+--- a/dist/resolveCwd.js
++++ b/dist/resolveCwd.js
+@@ -1,4 +1,4 @@
+-import { FileSystem } from "@effect/platform";
++import * as FileSystem from "@effect/platform/FileSystem";
+ import { resolve } from "node:path";
+ import { Data, Effect } from "effect";
+ /** The provided `cwd` path does not exist or is not a directory. */
+diff --git a/dist/run.js b/dist/run.js
+index b3292c9..99c1b67 100644
+--- a/dist/run.js
++++ b/dist/run.js
+@@ -1,4 +1,5 @@
+-import { NodeContext, NodeFileSystem } from "@effect/platform-node";
++import * as NodeContext from "@effect/platform-node/NodeContext";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+ import { existsSync } from "node:fs";
+ import path, { join } from "node:path";
+ import { styleText } from "node:util";

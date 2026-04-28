@@ -18,38 +18,38 @@ SOURCE:
 
 {{ISSUE_BODY}}
 
+# PLAN
+
+The planner produced this implementation plan. Follow it unless you find a better approach — if so, explain why.
+
+{{PLAN}}
+
 # CONTEXT
 
 Before implementing, use the `tdd` skill. Follow its red-green-refactor workflow for this issue.
 
 Read the relevant repo docs before changing code:
 
-- `AGENTS.md`
-- `docs/agents/code-quality.md`
-- `docs/agents/effect-typescript.md`
-- `docs/agents/testing.md`
-- `docs/agents/vcs.md`
+{{REPO_DOCS}}
+
+{{TYPE_SAFETY_RULES}}
 
 Use local code search to find the smallest relevant surface area. Pay close attention to tests near changed code.
 
 # EXECUTION
 
 - Make minimal, surgical changes.
-- Preserve type safety: no `any`, no non-null assertions, no type assertions.
-- Use Effect v4 APIs and repo patterns for async, resourceful, or fallible code.
 - Add deterministic tests for acceptance criteria when behavior changes.
 - Prefer red-green-refactor for bug fixes and behavior changes.
 - Do not modify `.sandcastle`.
 
 # FEEDBACK LOOPS
 
-Run relevant narrow checks while iterating, then always run full verification before completion:
+Run relevant checks before committing. Prefer narrow checks first, then broader checks if practical:
 
-- `bun run typecheck`
-- `bun run test`
-- `bun run check`
+{{FEEDBACK_LOOPS}}
 
-`bun run check` is required before final commit/completion. It may rewrite files; include every changed file in the final commit.
+{{VERIFY_STEP}}
 
 # COMMIT
 

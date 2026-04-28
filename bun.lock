@@ -5,7 +5,7 @@
     "": {
       "name": "effect-ui",
       "devDependencies": {
-        "@ai-hero/sandcastle": "^0.5.4",
+        "@ai-hero/sandcastle": "0.5.4",
         "@effect/platform-node": "4.0.0-beta.51",
         "@rollup/plugin-typescript": "^12.3.0",
         "effect": "4.0.0-beta.51",
@@ -95,6 +95,9 @@
         "vite",
       ],
     },
+  },
+  "patchedDependencies": {
+    "@ai-hero/sandcastle@0.5.4": "patches/@ai-hero%2Fsandcastle@0.5.4.patch",
   },
   "packages": {
     "@ai-hero/sandcastle": ["@ai-hero/sandcastle@0.5.4", "", { "dependencies": { "@clack/prompts": "^1.1.0", "@effect/cli": "^0.74.0", "@effect/platform": "^0.95.0", "@effect/platform-node": "^0.105.0", "@effect/printer": "^0.48.0", "@effect/printer-ansi": "^0.48.0", "effect": "^3.20.0" }, "peerDependencies": { "@daytona/sdk": "^0.164.0", "@vercel/sandbox": ">=1.0.0" }, "optionalPeers": ["@daytona/sdk", "@vercel/sandbox"], "bin": { "sandcastle": "dist/main.js" } }, "sha512-m4CcrgR5Sj4Qv4gnyKE3uCKqbywLcor8CoLSg11DXJtS6rm2xcZ/rjeiBr1zoqF2zpMqV6vIMKvSPAt8bcFW1g=="],

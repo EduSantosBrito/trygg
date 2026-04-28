@@ -22,10 +22,7 @@ Read the diff carefully:
 
 Apply repo standards from:
 
-- `AGENTS.md`
-- `docs/agents/code-quality.md`
-- `docs/agents/effect-typescript.md`
-- `docs/agents/testing.md`
+{{REPO_DOCS}}
 
 # REVIEW PROCESS
 
@@ -45,13 +42,13 @@ Improve code only when it preserves behavior and materially improves clarity, sa
 
 # EXECUTION
 
-- Run relevant tests/checks first if practical, then run `bun run check` before completion.
+- Run relevant tests/checks first if practical.
 - Add missing semantic tests when the diff has uncovered risk.
 - Fix real issues directly on this branch.
 - Preserve exact intended behavior.
 - Do not modify `.sandcastle`.
 - Commit review changes only if you made changes.
-- `bun run check` may rewrite files; include every changed file in the final review commit.
+{{VERIFY_STEP}}
 - Do not signal completion with a dirty worktree; commit all verification changes first.
 
 If code is already clean, tested, and safe, do nothing.
