@@ -23,7 +23,13 @@ const getHighlighter = async () => {
   if (!highlighter) {
     highlighter = await createHighlighterCore({
       themes: [import("shiki/themes/github-dark.mjs")],
-      langs: [import("shiki/langs/tsx.mjs")],
+      langs: [
+        import("shiki/langs/tsx.mjs"),
+        import("shiki/langs/ts.mjs"),
+        import("shiki/langs/js.mjs"),
+        import("shiki/langs/json.mjs"),
+        import("shiki/langs/bash.mjs"),
+      ],
       engine: createOnigurumaEngine(import("shiki/wasm")),
     });
   }
@@ -68,10 +74,17 @@ interface HighlightedLine {
   nodes: HastNode[];
 }
 
+const normalizeLanguage = (lang: string): string => {
+  if (lang === "" || lang === "sh") return "bash";
+  const supported = ["tsx", "ts", "js", "json", "bash"];
+  return supported.includes(lang) ? lang : "text";
+};
+
 export async function highlightCode(code: string, lang = "tsx"): Promise<HighlightedLine[]> {
   const hl = await getHighlighter();
+  const normalizedLang = normalizeLanguage(lang);
   const hast: HastRoot = hl.codeToHast(code, {
-    lang,
+    lang: normalizedLang,
     theme: "github-dark",
   });
 

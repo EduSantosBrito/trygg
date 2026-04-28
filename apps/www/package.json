@@ -6,13 +6,16 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@effect/platform-browser": "4.0.0-beta.51",
+    "@effect/vitest": "^0.29.0",
     "effect": "4.0.0-beta.51",
     "shiki": "^3.22.0",
-    "trygg": "^0.3.0-canary.0"
+    "trygg": "^0.3.0-canary.0",
+    "vitest": "^4.1.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
