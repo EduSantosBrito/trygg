@@ -33,7 +33,7 @@ import {
 import type { Layer as LayerType } from "effect/Layer";
 import * as Context from "effect/Context";
 import * as nodePath from "node:path";
-import type { TryggConfig, Platform } from "../config.js";
+import type { TryggConfig, Platform, Output } from "../config.js";
 import {
   DevPlatform,
   ServerPlatform,
@@ -418,7 +418,10 @@ const importBunDevPlatform = Effect.tryPromise({
  */
 const makePluginLayer = (
   platform: Platform,
-): LayerType<FileSystem.FileSystem | DevPlatform | ServerPlatform | PluginFiles, ImportError> => {
+): LayerType<
+  FileSystem.FileSystem | DevPlatform | ServerPlatform | PluginFiles | BuildOutput,
+  ImportError
+> => {
   const devLayer = platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
   const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
@@ -426,6 +429,7 @@ const makePluginLayer = (
     devLayer,
     serverLayer,
     makePluginFilesLayer(),
+    makeBuildOutputLayer(),
     Logger.layer([PluginLogger]),
     Layer.effect(References.MinimumLogLevel, Effect.succeed("Debug")),
   );
@@ -1347,6 +1351,10 @@ interface PluginFilesService {
   readonly writeBuildEntryFiles: (
     paths: PluginFilePaths,
   ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  readonly writeServerEntryFile: (
+    paths: PluginFilePaths,
+    content: string,
+  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
 }
 
 /**
@@ -1485,6 +1493,8 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
               generateHtmlTemplate(),
             );
           }),
+        writeServerEntryFile: (paths, content) =>
+          writeFileSafe(nodePath.join(paths.generatedDir, "server-entry.ts"), content),
       } satisfies PluginFilesService;
     }),
   );
@@ -1653,6 +1663,134 @@ export const generateServerEntry = (
     const platform = yield* ServerPlatform;
     return renderProductionServerEntryModule({ hasApi, platform });
   });
+
+interface BuildOutputConfig {
+  readonly command: string;
+  readonly root: string;
+}
+
+interface BuildOutputStartInput {
+  readonly appDir: string;
+  readonly generatedDir: string;
+  readonly config: BuildOutputConfig;
+  readonly output: Output;
+  readonly platform: Platform;
+}
+
+interface BuildOutputCloseInput {
+  readonly appDir: string;
+  readonly generatedDir: string;
+  readonly config: BuildOutputConfig;
+  readonly output: Output;
+}
+
+interface BuildOutputService {
+  readonly buildStart: (
+    input: BuildOutputStartInput,
+  ) => Effect.Effect<
+    void,
+    PluginValidationError | PluginFileSystemError,
+    FileSystem.FileSystem | PluginFiles
+  >;
+  readonly closeBundle: (
+    input: BuildOutputCloseInput,
+  ) => Effect.Effect<
+    void,
+    PluginFileSystemError,
+    FileSystem.FileSystem | PluginFiles | ServerPlatform
+  >;
+}
+
+interface BuildOutputDeps {
+  readonly buildServer: (
+    serverEntryPath: string,
+    config: BuildOutputConfig,
+  ) => Effect.Effect<void, PluginFileSystemError>;
+}
+
+interface BuildOutput extends Context.Service<BuildOutput, BuildOutputService> {}
+
+const BuildOutput = Context.Service<BuildOutput, BuildOutputService>("trygg/vite/BuildOutput");
+
+/**
+ * Create build output hook operations.
+ *
+ * @remarks
+ * Test seam for replacing the production server build while preserving the
+ * same Effect-owned build output orchestration used by Vite hooks.
+ *
+ * @internal
+ */
+export const makeBuildOutput = ({ buildServer }: BuildOutputDeps): BuildOutputService => ({
+  buildStart: ({ appDir, generatedDir, config, output, platform }) =>
+    Effect.gen(function* () {
+      const files = yield* PluginFiles;
+      const paths = { appDir, generatedDir };
+      const apiPath = nodePath.join(appDir, "api.ts");
+
+      yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+
+      if (config.command !== "build") {
+        return;
+      }
+
+      yield* files.writeBuildEntryFiles(paths);
+
+      const hasApi = yield* files.appApiExists(paths);
+      if (hasApi && output === "static") {
+        yield* Effect.logWarning(
+          '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
+        );
+      }
+    }),
+  closeBundle: ({ appDir, generatedDir, config, output }) =>
+    config.command !== "build" || output !== "server"
+      ? Effect.void
+      : Effect.gen(function* () {
+          const files = yield* PluginFiles;
+          const paths = { appDir, generatedDir };
+          const hasApi = yield* files.appApiExists(paths);
+          const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
+          const serverEntryContent = yield* generateServerEntry(hasApi);
+
+          yield* files.writeServerEntryFile(paths, serverEntryContent);
+          yield* Effect.logInfo("Building production server...");
+          yield* buildServer(serverEntryPath, config);
+          yield* Effect.logInfo("Server build complete").pipe(
+            Effect.annotateLogs("style", "success"),
+          );
+        }),
+});
+
+const viteServerBuild = (
+  serverEntryPath: string,
+  config: BuildOutputConfig,
+): Effect.Effect<void, PluginFileSystemError> =>
+  Effect.tryPromise({
+    try: () =>
+      build({
+        configFile: false,
+        root: config.root,
+        build: {
+          ssr: serverEntryPath,
+          outDir: nodePath.join(config.root, "dist"),
+          emptyOutDir: false,
+          rollupOptions: {
+            output: { entryFileNames: "server.js" },
+            external: ["effect", /^@effect\//, /^node:/, /^bun:/],
+          },
+        },
+      }),
+    catch: (err) =>
+      new PluginFileSystemError({
+        operation: "transform",
+        path: serverEntryPath,
+        cause: err,
+      }),
+  }).pipe(Effect.asVoid);
+
+const makeBuildOutputLayer = (): Layer.Layer<BuildOutput> =>
+  Layer.succeed(BuildOutput, makeBuildOutput({ buildServer: viteServerBuild }));
 
 // =============================================================================
 // Plugin
@@ -2395,26 +2533,15 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { appDir, generatedDir, config } = yield* bootstrap.awaitReady;
-        const files = yield* PluginFiles;
-        const paths = { appDir, generatedDir };
+        const buildOutput = yield* BuildOutput;
 
-        const apiPath = nodePath.join(appDir, "api.ts");
-        yield* validateApiPlatform(apiPath, configPlatform).pipe(
-          Effect.tapError(logApiValidationError),
-        );
-
-        // Only write index.html for production builds (Rollup needs physical input)
-        if (config.command === "build") {
-          yield* files.writeBuildEntryFiles(paths);
-
-          // Warn if API exists with static output
-          const hasApi = yield* files.appApiExists(paths);
-          if (hasApi && output === "static") {
-            yield* Effect.logWarning(
-              '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
-            );
-          }
-        }
+        yield* buildOutput.buildStart({
+          appDir,
+          generatedDir,
+          config,
+          output,
+          platform: configPlatform,
+        });
       });
 
       await pluginRuntime.runPromise(effect);
@@ -2424,49 +2551,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { config, appDir, generatedDir } = yield* bootstrap.awaitReady;
+        const buildOutput = yield* BuildOutput;
 
-        // Only build server in production mode with server output
-        if (config.command !== "build" || output !== "server") {
-          return;
-        }
-
-        const apiPath = nodePath.join(appDir, "api.ts");
-        const hasApi = yield* pathExists(apiPath);
-
-        // Generate server entry
-        const serverEntryPath = nodePath.join(generatedDir, "server-entry.ts");
-        const serverEntryContent = yield* generateServerEntry(hasApi);
-        yield* writeFileSafe(serverEntryPath, serverEntryContent);
-
-        yield* Effect.logInfo("Building production server...");
-
-        // Build server with Vite SSR
-        yield* Effect.tryPromise({
-          try: () =>
-            build({
-              configFile: false,
-              root: config.root,
-              build: {
-                ssr: serverEntryPath,
-                outDir: nodePath.join(config.root, "dist"),
-                emptyOutDir: false, // Don't delete client files
-                rollupOptions: {
-                  output: { entryFileNames: "server.js" },
-                  external: ["effect", /^@effect\//, /^node:/, /^bun:/],
-                },
-              },
-            }),
-          catch: (err) =>
-            new PluginFileSystemError({
-              operation: "transform",
-              path: serverEntryPath,
-              cause: err,
-            }),
-        });
-
-        yield* Effect.logInfo("Server build complete").pipe(
-          Effect.annotateLogs("style", "success"),
-        );
+        yield* buildOutput.closeBundle({ appDir, generatedDir, config, output });
       });
 
       await pluginRuntime.runPromise(effect);

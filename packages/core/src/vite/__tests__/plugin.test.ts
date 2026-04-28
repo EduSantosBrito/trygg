@@ -14,6 +14,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Schema,
   Scope,
 } from "effect";
@@ -22,7 +23,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
 import { createServer as createViteServer } from "vite";
-import { ApiInitError, DevPlatform } from "../dev-platform.js";
+import { ApiInitError, DevPlatform, NodeServerPlatform } from "../dev-platform.js";
 import { NodeDevPlatformLive } from "../dev-platform-node.js";
 import type { Connect } from "vite";
 import {
@@ -47,6 +48,7 @@ import {
   makePluginApi,
   makeViteServer,
   generateHtmlTemplate,
+  makeBuildOutput,
   type ParsedRoute,
   type ViteServerSource,
 } from "../plugin.js";
@@ -244,6 +246,99 @@ export const routes = { manifest: [] }
         assert.include(index, '<script type="module" src="/.trygg/entry.tsx"></script>');
         assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
       }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should build output write static files and skip server output", () =>
+      Effect.gen(function* () {
+        // Test: should build output write static files and skip server output
+        // Scope: covers static production output at the build output service boundary.
+        // Assertion: client build files exist and closeBundle does not emit a server entry.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "export default {}",
+        });
+        const appDir = path.join(root, "app");
+        const generatedDir = path.join(root, ".trygg");
+        const warnings: Array<string> = [];
+        const warningLogger = Logger.make<unknown, void>(({ logLevel, message }) => {
+          if (logLevel === "Warn") {
+            warnings.push(String(message));
+          }
+        });
+        const buildOutput = makeBuildOutput({ buildServer: () => Effect.void });
+
+        yield* buildOutput
+          .buildStart({
+            appDir,
+            generatedDir,
+            config: { command: "build", root },
+            output: "static",
+            platform: "node",
+          })
+          .pipe(Effect.provide(Logger.layer([warningLogger])));
+        yield* buildOutput.closeBundle({
+          appDir,
+          generatedDir,
+          config: { command: "build", root },
+          output: "static",
+        });
+
+        const indexExists = yield* fs.exists(path.join(generatedDir, "index.html"));
+        const serverEntryExists = yield* fs.exists(path.join(generatedDir, "server-entry.ts"));
+
+        assert.isTrue(indexExists);
+        assert.isFalse(serverEntryExists);
+        assert.deepStrictEqual(warnings, [
+          '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
+        ]);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
+        ),
+      ),
+    );
+
+    scoped("should build output write server entry and invoke server build", () =>
+      Effect.gen(function* () {
+        // Test: should build output write server entry and invoke server build
+        // Scope: covers server production output at the build output service boundary.
+        // Assertion: closeBundle emits the server entry with API wiring and invokes the server build once.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "export default {}",
+        });
+        const appDir = path.join(root, "app");
+        const generatedDir = path.join(root, ".trygg");
+        const builtEntries: Array<string> = [];
+        const buildOutput = makeBuildOutput({
+          buildServer: (serverEntryPath) =>
+            Effect.sync(() => {
+              builtEntries.push(serverEntryPath);
+            }),
+        });
+
+        yield* buildOutput.closeBundle({
+          appDir,
+          generatedDir,
+          config: { command: "build", root },
+          output: "server",
+        });
+
+        const serverEntryPath = path.join(generatedDir, "server-entry.ts");
+        const serverEntry = yield* fs.readFileString(serverEntryPath);
+
+        assert.deepStrictEqual(builtEntries, [serverEntryPath]);
+        assert.include(serverEntry, 'import ApiLive from "../app/api.js"');
+        assert.include(serverEntry, "HttpRouter.serve(ApiLive");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
+        ),
+      ),
     );
 
     scoped("should configureServer generate dev entry and serve SPA shell through Vite", () =>

@@ -11,7 +11,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
-const outerIterations = 10;
+const outerIterations = 100;
 const agentIterations = 100;
 const completionSignal = "<promise>COMPLETE</promise>";
 const dockerImageName = "sandcastle:trygg";
