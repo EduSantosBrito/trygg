@@ -5,11 +5,7 @@
  * extraction and body block rendering.
  */
 import { describe, it, expect } from "vitest";
-import {
-  parseChangelogMeta,
-  renderChangelogBody,
-  type ChangelogBlock,
-} from "./changelog";
+import { parseChangelogMeta, renderChangelogBody, type ChangelogBlock } from "./changelog";
 import fixture from "../content/changelog/2026-04-28-generated-api-client.md?raw";
 
 // =============================================================================

@@ -69,7 +69,7 @@ function parseStyle(styleStr: string): Record<string, string> {
   return style;
 }
 
-interface HighlightedLine {
+export interface HighlightedLine {
   lineNumber: number;
   nodes: HastNode[];
 }
