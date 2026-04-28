@@ -79,7 +79,15 @@ export interface HandlerFactory {
     unknown,
     Scope.Scope
   >;
-  /** Create a web-standard handler from a composed API layer */
+  /**
+   * Create a web-standard handler from a composed API layer.
+   *
+   * Decision (#120): this constructor remains synchronous. It only merges the
+   * API layer with platform services and asks HttpRouter for a web handler;
+   * acquisition/lifecycle work is deferred behind the returned handler and
+   * dispose callback, so wrapping the factory itself in Effect would not model
+   * an extra dependency or lifecycle boundary.
+   */
   readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => {
     readonly handler: (request: Request) => Promise<Response>;
     readonly dispose: () => void;

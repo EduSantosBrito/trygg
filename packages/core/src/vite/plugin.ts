@@ -139,6 +139,9 @@ export const makeApiLayer = (mod) =>
   });
 
 export const makeWebHandler = (apiLive) => {
+  // Decision (#120): pure constructor. This only composes layer values and
+  // builds the handler facade; resource acquisition is owned by handler usage
+  // and the returned dispose callback.
   const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerServices);
   return HttpRouter.toWebHandler(apiLayer);
 };
