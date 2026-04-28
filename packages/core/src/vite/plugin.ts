@@ -1725,16 +1725,19 @@ export const renderApiClientModule = ({
 import { Effect, Layer } from "effect"
 import * as Context from "effect/Context"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Api } from "${apiImportPath}"
+import { Api } from ${JSON.stringify(apiImportPath)}
 
 const client = HttpApiClient.make(Api, { baseUrl: "" })
+type ApiClientService = HttpApiClient.ForApi<typeof Api>
 
-export class ApiClient extends Context.Service()("ApiClient") {}
+export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
 
 export const ApiClientLive = Layer.effect(
   ApiClient,
   client.pipe(Effect.provide(FetchHttpClient.layer)),
 )
+
+export { Api }
 `;
 
 /**
