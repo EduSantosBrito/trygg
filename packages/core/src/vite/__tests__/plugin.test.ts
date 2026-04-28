@@ -37,6 +37,8 @@ import {
   makeClientEntryModuleOwner,
   renderClientEntryModule,
   renderProductionServerEntryModule,
+  renderApiClientModule,
+  renderApiClientDeclarations,
   PluginBootstrapError,
   PluginValidationError,
   schemaToType,
@@ -912,6 +914,60 @@ export const routes = { manifest: [] }
         );
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should buildStart generate API client declarations when api exists", () =>
+      Effect.gen(function* () {
+        // Test: should buildStart generate API client declarations when api exists
+        // Scope: verifies generated module declarations are written from the app API contract.
+        // Assertion: .trygg/api.d.ts augments trygg/api and imports the app Api type.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "export const Api = {}",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+
+        const apiTypes = yield* fs.readFileString(path.join(root, ".trygg", "api.d.ts"));
+
+        assert.include(apiTypes, 'declare module "trygg/api"');
+        assert.include(apiTypes, 'import type { Api } from "../app/api"');
+        assert.include(apiTypes, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
+        assert.include(apiTypes, "export const ApiClient: Context.ServiceClass");
+        assert.include(apiTypes, "export const ApiClientLive: Layer.Layer<ApiClient>");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should resolve and load trygg/api virtual module", () =>
+      Effect.gen(function* () {
+        // Test: should resolve and load trygg/api virtual module
+        // Scope: validates the API client virtual module contract at the plugin boundary.
+        // Assertion: resolveId returns framework virtual id and load returns generated module code.
+        const plugin = trygg({ platform: "node", output: "server" });
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolvedId = resolveId("trygg/api");
+        if (resolvedId === null) {
+          return yield* Effect.die(new Error("Expected trygg/api virtual module to resolve"));
+        }
+
+        const code = yield* Effect.promise(() => load(resolvedId));
+        if (code === null) {
+          return yield* Effect.die(new Error("Expected trygg/api virtual module to load"));
+        }
+
+        assert.include(code, 'import { Api } from "/app/api"');
+        assert.include(code, "export class ApiClient");
+        assert.include(code, "export const ApiClientLive");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
@@ -2420,6 +2476,41 @@ Route.make("/admin")
         assert.isTrue(result.includes(".layout(AdminLayout)"));
       }),
     );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: API client generated modules
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("API client generated modules", () => {
+    it("should render API client runtime module from import path", () => {
+      // Test: should render API client runtime module from import path
+      // Scope: covers the virtual module runtime code generation without Vite or filesystem effects.
+      // Assertion: output imports Api, creates ApiClient, and provides FetchHttpClient.layer.
+      const output = renderApiClientModule({ apiImportPath: "/app/api" });
+
+      assert.include(output, 'import { Api } from "/app/api"');
+      assert.include(output, 'import { HttpApiClient } from "effect/unstable/httpapi"');
+      assert.include(output, 'import { FetchHttpClient } from "effect/unstable/http"');
+      assert.include(output, 'HttpApiClient.make(Api, { baseUrl: "" })');
+      assert.include(output, "export class ApiClient");
+      assert.include(output, "export const ApiClientLive");
+      assert.include(output, "Effect.provide(FetchHttpClient.layer)");
+    });
+
+    it("should render API client declarations from type import path", () => {
+      // Test: should render API client declarations from type import path
+      // Scope: covers the generated .trygg/api.d.ts augmentation without Vite or filesystem effects.
+      // Assertion: output augments trygg/api, imports typeof Api, and types ApiClientService correctly.
+      const output = renderApiClientDeclarations({ apiTypeImportPath: "../app/api" });
+
+      assert.include(output, 'declare module "trygg/api"');
+      assert.include(output, 'import type { Api } from "../app/api"');
+      assert.include(output, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
+      assert.include(output, "export interface ApiClient {}");
+      assert.include(output, 'export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient",');
+      assert.include(output, "export const ApiClientLive: Layer.Layer<ApiClient>");
+      assert.include(output, "export {}");
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────────

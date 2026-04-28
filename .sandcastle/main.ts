@@ -106,6 +106,15 @@ type Vcs =
       readonly type: "git";
     };
 
+type MergeTarget =
+  | {
+      readonly type: "jj-working-copy";
+    }
+  | {
+      readonly type: "git-branch";
+      readonly branch: string;
+    };
+
 class SandcastleError extends Data.TaggedError("SandcastleError")<{
   readonly message: string;
   readonly cause?: unknown;
@@ -192,6 +201,21 @@ const syncJjFromGit = (vcs: Vcs) =>
 const syncJjToGit = (vcs: Vcs) =>
   vcs.type === "jj" ? jj(["git", "export"]).pipe(Effect.asVoid) : Effect.void;
 
+const currentGitTargetBranch = git(["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
+  Effect.map((branch) => branch.trim()),
+  Effect.filterOrFail(
+    (branch) => branch.length > 0 && branch !== "HEAD",
+    () => new SandcastleError({ message: "Git Sandcastle runs must start from a named branch." }),
+  ),
+);
+
+const currentMergeTarget = (vcs: Vcs) =>
+  vcs.type === "jj"
+    ? Effect.succeed({ type: "jj-working-copy" } satisfies MergeTarget)
+    : currentGitTargetBranch.pipe(
+        Effect.map((branch) => ({ type: "git-branch", branch }) satisfies MergeTarget),
+      );
+
 const vcsInstructions = (vcs: Vcs) =>
   vcs.type === "jj"
     ? [
@@ -227,32 +251,29 @@ const sourceInstructions = () =>
         "If the issue file is a local markdown path, treat that file as the source of truth.",
       ].join("\n");
 
-const mergeSteps = (vcs: Vcs, build: string) =>
-  vcs.type === "jj"
+const mergeSteps = (target: MergeTarget) =>
+  target.type === "jj-working-copy"
     ? [
         "- If `.jj/` exists, run `jj git import`.",
-        "- Rebase the issue stack onto trunk with `jj rebase -s {{BRANCH}} -o main`.",
+        "- Rebase the issue stack onto the current trunk working copy with `jj rebase -s {{BRANCH}} -d @`.",
         "- Do not use `jj new @ {{BRANCH}}`; that creates a merge commit and breaks trunk-based history.",
         "- If there are conflicts, resolve them correctly by reading both sides, then run `jj resolve` as needed.",
-        `- Run relevant tests/build, usually ${build}.`,
+        `- Run relevant tests/build, usually ${buildCmd}.`,
         "- If tests fail, fix them before finishing.",
-        "- Advance trunk with `jj bookmark set main -r {{BRANCH}}`.",
-        "- Move the working copy to trunk with `jj edit main`.",
-        "- Leave the issue bookmark `{{BRANCH}}` on the issue head; do not create a separate integration commit.",
-        "- Verify `jj log -r 'main::@ & merges()'` prints nothing for the integrated trunk stack.",
-        "- Run `jj git export` after `main` points at the rebased issue head so Git `main` advances by fast-forward.",
-        "- If `.jj/` does not exist, use Git fast-forward trunk integration: `git checkout {{BRANCH}}`, `git rebase main`, `git checkout main`, then `git merge --ff-only {{BRANCH}}`.",
-        "- Do not run plain `git merge`; only `git merge --ff-only` is allowed.",
+        "- Move the trunk working copy to the rebased issue head with `jj edit {{BRANCH}}`.",
+        "- Leave the issue bookmark `{{BRANCH}}` on the issue head; do not create a merge commit or separate integration commit.",
+        "- Verify `jj log -r 'heads(::@ & ::{{BRANCH}}) & merges()'` prints nothing for the integrated trunk stack.",
+        "- Run `jj git export` after `@` points at the rebased issue head so Git refs are synchronized.",
         "- Do not modify `.sandcastle`.",
         "- When complete, output {{COMPLETION_SIGNAL}}.",
       ].join("\n")
     : [
         "- Run `git checkout {{BRANCH}}`.",
-        "- Rebase the issue branch onto trunk with `git rebase main`.",
+        `- Rebase the issue branch onto trunk with \`git rebase ${target.branch}\`.`,
         "- If there are conflicts, resolve them correctly by reading both sides.",
-        `- Run relevant tests/build, usually ${build}.`,
+        `- Run relevant tests/build, usually ${buildCmd}.`,
         "- If tests fail, fix them before finishing.",
-        "- Advance trunk with `git checkout main` then `git merge --ff-only {{BRANCH}}`.",
+        `- Advance trunk with \`git checkout ${target.branch}\` then \`git merge --ff-only {{BRANCH}}\`.`,
         "- Do not run plain `git merge`; only fast-forward integration is allowed.",
         "- Do not modify `.sandcastle`.",
         "- When complete, output {{COMPLETION_SIGNAL}}.",
@@ -708,6 +729,7 @@ const program = Effect.gen(function* () {
   const reviewerAgent = sandboxedOpenCode("deepseek/deepseek-v4-pro", "max");
   const mergerAgent = sandboxedOpenCode("openai/gpt-5.5", "medium");
   const vcs = yield* detectVcs();
+  const mergeTarget = yield* currentMergeTarget(vcs);
 
   yield* Effect.acquireUseRelease(
     createOpenCodeState(),
@@ -808,7 +830,7 @@ const program = Effect.gen(function* () {
             promptFile: mergePromptFile,
             promptArgs: {
               ...basePromptArgs,
-              MERGE_STEPS: mergeSteps(vcs, buildCmd)
+              MERGE_STEPS: mergeSteps(mergeTarget)
                 .replaceAll("{{BRANCH}}", branch)
                 .replaceAll("{{COMPLETION_SIGNAL}}", completionSignal),
             },
