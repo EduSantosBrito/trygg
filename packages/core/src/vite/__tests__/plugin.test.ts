@@ -1138,6 +1138,18 @@ mountDocument(<App />, { manifest: routes.manifest })
   // Scope: DevPlatform service
   // ─────────────────────────────────────────────────────────────────────────────
   describe("DevPlatform", () => {
+    scoped("should expose makeApi constructor naming on Node", () =>
+      Effect.gen(function* () {
+        // Test: should expose makeApi constructor naming on Node
+        // Scope: covers the internal DevPlatform service contract used by API middleware setup.
+        // Assertion: makeApi is present and the old createDevApi constructor name is absent.
+        const devPlatform = yield* DevPlatform;
+
+        assert.isFunction(devPlatform.makeApi);
+        assert.strictEqual("createDevApi" in devPlatform, false);
+      }).pipe(Effect.provide(NodeDevPlatformLive)),
+    );
+
     scoped("should makeApi handle API middleware requests on Node", () =>
       Effect.gen(function* () {
         // Test: should makeApi handle API middleware requests on Node
