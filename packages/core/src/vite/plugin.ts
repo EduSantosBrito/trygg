@@ -30,6 +30,7 @@ import {
   Scope,
 } from "effect";
 import type { Layer as LayerType } from "effect/Layer";
+import * as Context from "effect/Context";
 import * as nodePath from "node:path";
 import type { TryggConfig, Platform } from "../config.js";
 import {
@@ -366,13 +367,14 @@ const importBunDevPlatform = Effect.tryPromise({
  */
 const makePluginLayer = (
   platform: Platform,
-): LayerType<FileSystem.FileSystem | DevPlatform | ServerPlatform, ImportError> => {
+): LayerType<FileSystem.FileSystem | DevPlatform | ServerPlatform | PluginFiles, ImportError> => {
   const devLayer = platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
   const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
   return Layer.mergeAll(
     devLayer,
     serverLayer,
+    makePluginFilesLayer(),
     Logger.layer([PluginLogger]),
     Layer.effect(References.MinimumLogLevel, Effect.succeed("Debug")),
   );
@@ -1230,6 +1232,71 @@ export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
   <body></body>
 </html>`;
 
+interface BuildEntryFilesInput {
+  readonly appDir: string;
+  readonly generatedDir: string;
+  readonly routesFilePath: string | undefined;
+}
+
+interface PluginFilesService {
+  readonly appApiExists: (appDir: string) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
+  readonly writeBuildEntryFiles: (
+    input: BuildEntryFilesInput,
+  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+}
+
+interface PluginFiles extends Context.Service<PluginFiles, PluginFilesService> {}
+
+const PluginFiles = Context.Service<PluginFiles, PluginFilesService>("trygg/vite/PluginFiles");
+
+const readRoutesSource = (
+  routesFilePath: string,
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.readFileString(routesFilePath).pipe(Effect.orElseSucceed(() => ""));
+  });
+
+const writeRouteTypesFromRoutes = (
+  generatedDir: string,
+  routesFilePath: string,
+): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const routeSource = yield* readRoutesSource(routesFilePath);
+    if (routeSource.length === 0) {
+      return;
+    }
+
+    const parsed = yield* parseRoutes(routeSource);
+    const content = yield* generateRouteTypes(parsed);
+    yield* writeFileSafe(nodePath.join(generatedDir, "routes.d.ts"), content);
+    yield* Effect.logDebug("Generated route types");
+  });
+
+const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
+  Layer.effect(
+    PluginFiles,
+    Effect.succeed({
+      appApiExists: (appDir) => pathExists(nodePath.join(appDir, "api.ts")),
+      writeBuildEntryFiles: ({ appDir, generatedDir, routesFilePath }) =>
+        Effect.gen(function* () {
+          const entryPath = nodePath.join(generatedDir, "entry.tsx");
+          const hasEntry = yield* pathExists(entryPath);
+
+          if (!hasEntry || routesFilePath !== undefined) {
+            const content = yield* generateEntryModule(appDir, generatedDir, routesFilePath);
+            yield* writeFileSafe(entryPath, content);
+          }
+
+          if (routesFilePath !== undefined) {
+            yield* writeRouteTypesFromRoutes(generatedDir, routesFilePath);
+          }
+
+          yield* writeFileSafe(nodePath.join(generatedDir, "index.html"), generateHtmlTemplate());
+        }),
+    } satisfies PluginFilesService),
+  );
+
 /**
  * Generate server entry point for production builds.
  *
@@ -1820,27 +1887,19 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { appDir, generatedDir, config, routesFilePath } = yield* bootstrap.awaitReady;
-        const entryPath = nodePath.join(generatedDir, "entry.tsx");
-        const apiPath = nodePath.join(appDir, "api.ts");
+        const files = yield* PluginFiles;
 
+        const apiPath = nodePath.join(appDir, "api.ts");
         yield* validateApiPlatform(apiPath, configPlatform).pipe(
           Effect.tapError(logApiValidationError),
         );
 
-        // Always regenerate entry when routes file is configured
-        const hasEntry = yield* pathExists(entryPath);
-        if (!hasEntry || routesFilePath !== undefined) {
-          const content = yield* generateEntryModule(appDir, generatedDir, routesFilePath);
-          yield* writeFileSafe(entryPath, content);
-        }
-
         // Only write index.html for production builds (Rollup needs physical input)
         if (config.command === "build") {
-          const indexPath = nodePath.join(generatedDir, "index.html");
-          yield* writeFileSafe(indexPath, generateHtmlTemplate());
+          yield* files.writeBuildEntryFiles({ appDir, generatedDir, routesFilePath });
 
           // Warn if API exists with static output
-          const hasApi = yield* pathExists(apiPath);
+          const hasApi = yield* files.appApiExists(appDir);
           if (hasApi && output === "static") {
             yield* Effect.logWarning(
               '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',

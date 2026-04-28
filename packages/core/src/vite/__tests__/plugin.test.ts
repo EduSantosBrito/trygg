@@ -59,7 +59,9 @@ describe("Vite Plugin", () => {
     );
 
     const ConfigResolvedHookSchema = Schema.declare(
-      (u: unknown): u is (config: { readonly root: string; readonly command: string }) => Promise<void> =>
+      (
+        u: unknown,
+      ): u is (config: { readonly root: string; readonly command: string }) => Promise<void> =>
         typeof u === "function",
     );
 
@@ -98,7 +100,15 @@ describe("Vite Plugin", () => {
         const fs = yield* FileSystem.FileSystem;
         const root = yield* makeTempDir({
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
-          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/routes.ts": `
+import { Route } from "trygg/router"
+
+Route.make("/users/:id")
+  .params(Schema.Struct({ id: Schema.NumberFromString }))
+  .component(UsersPage)
+
+export const routes = { manifest: [] }
+`,
         });
         const plugin = trygg();
         const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
@@ -111,9 +121,11 @@ describe("Vite Plugin", () => {
 
         const entry = yield* fs.readFileString(path.join(root, ".trygg", "entry.tsx"));
         const index = yield* fs.readFileString(path.join(root, ".trygg", "index.html"));
+        const routeTypes = yield* fs.readFileString(path.join(root, ".trygg", "routes.d.ts"));
 
         assert.include(entry, 'import { routes } from "../app/routes"');
         assert.include(index, '<script type="module" src="/.trygg/entry.tsx"></script>');
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
