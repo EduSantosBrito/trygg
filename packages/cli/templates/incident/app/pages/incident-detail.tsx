@@ -3,7 +3,7 @@ import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 import { incidentResource, incidentsResource, type Incident } from "../resources/incidents";
 import { IncidentNotFound, type Status } from "../errors/incidents";
-import { ApiClient } from "../api";
+import { ApiClient } from "trygg/api";
 import { TRANSITIONS } from "../services/incidents";
 import { StatusBadge } from "../components/status-badge";
 import { SeverityBadge } from "../components/severity-badge";

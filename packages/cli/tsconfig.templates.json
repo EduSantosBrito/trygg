@@ -12,7 +12,15 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "trygg": ["../core/src/index.ts"],
+      "trygg/api": ["../core/src/api/types.ts"],
+      "trygg/router": ["../core/src/router/index.ts"],
+      "trygg/jsx-runtime": ["../core/src/jsx-runtime.ts"],
+      "trygg/jsx-dev-runtime": ["../core/src/jsx-dev-runtime.ts"]
+    }
   },
-  "include": ["templates/**/*.ts", "templates/**/*.tsx"]
+  "include": ["templates/**/*.ts", "templates/**/*.tsx", "templates/**/*.d.ts"]
 }

@@ -255,15 +255,18 @@ const mergeSteps = (target: MergeTarget) =>
   target.type === "jj-working-copy"
     ? [
         "- If `.jj/` exists, run `jj git import`.",
-        "- Rebase the issue stack onto the current trunk working copy with `jj rebase -s {{BRANCH}} -d @`.",
+        "- Rebase the current trunk working-copy stack onto the issue head with `jj rebase -s @ -d {{BRANCH}}`.",
+        "- The resulting order must be previous trunk ancestors, then the issue branch commits, then the original trunk working-copy commit.",
         "- Do not use `jj new @ {{BRANCH}}`; that creates a merge commit and breaks trunk-based history.",
+        "- Before finishing, inspect the graph and ensure the issue commits are ancestors of `@`, not a sibling head beside trunk.",
         "- If there are conflicts, resolve them correctly by reading both sides, then run `jj resolve` as needed.",
         `- Run relevant tests/build, usually ${buildCmd}.`,
         "- If tests fail, fix them before finishing.",
-        "- Move the trunk working copy to the rebased issue head with `jj edit {{BRANCH}}`.",
-        "- Leave the issue bookmark `{{BRANCH}}` on the issue head; do not create a merge commit or separate integration commit.",
+        "- Keep `@` at the rebased trunk head; do not move it back to the issue branch.",
+        "- Do not create a merge commit or separate integration commit.",
         "- Verify `jj log -r 'heads(::@ & ::{{BRANCH}}) & merges()'` prints nothing for the integrated trunk stack.",
-        "- Run `jj git export` after `@` points at the rebased issue head so Git refs are synchronized.",
+        "- Verify `jj log -r '{{BRANCH}}..@'` includes the rebased trunk/reviewer commits above the issue head.",
+        "- Run `jj git export` after `@` points at the rebased trunk head so Git refs are synchronized.",
         "- Do not modify `.sandcastle`.",
         "- When complete, output {{COMPLETION_SIGNAL}}.",
       ].join("\n")

@@ -1,10 +1,7 @@
 import { Effect, Layer, Schema } from "effect";
-import * as Context from "effect/Context";
-import { FetchHttpClient } from "effect/unstable/http";
 import {
   HttpApi,
   HttpApiBuilder,
-  HttpApiClient,
   HttpApiEndpoint,
   HttpApiGroup,
   HttpApiSchema,
@@ -90,7 +87,7 @@ const IncidentsGroup = HttpApiGroup.make("incidents")
   )
   .prefix("/api");
 
-const Api = HttpApi.make("app").add(HelloGroup).add(IncidentsGroup);
+export const Api = HttpApi.make("app").add(HelloGroup).add(IncidentsGroup);
 
 // =============================================================================
 // Helpers
@@ -150,20 +147,4 @@ export default HttpApiBuilder.layer(Api).pipe(
   Layer.provide(HelloLive),
   Layer.provide(IncidentsHandlers),
   Layer.provide(IncidentsLive),
-);
-
-// =============================================================================
-// Typed API Client
-// =============================================================================
-
-const _client = HttpApiClient.make(Api, { baseUrl: "" });
-type ApiClientService = HttpApiClient.ForApi<typeof Api>;
-
-/** Tag for the typed API client. Yield in effects to get the client. */
-export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
-
-/** Layer that creates the ApiClient using FetchHttpClient. */
-export const ApiClientLive = Layer.effect(
-  ApiClient,
-  _client.pipe(Effect.provide(FetchHttpClient.layer)),
 );

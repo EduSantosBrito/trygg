@@ -2,7 +2,7 @@ import "../styles.css";
 import { Effect } from "effect";
 import { Component, DevMode, Signal } from "trygg";
 import * as Router from "trygg/router";
-import { ApiClientLive } from "./api";
+import { ApiClientLive } from "trygg/api";
 import { AppTheme, AppThemeDark } from "./services/theme";
 import { CommandPalette } from "./components/command-palette";
 

@@ -9,7 +9,7 @@
  */
 import { Effect } from "effect";
 import { Resource } from "trygg";
-import { ApiClient } from "../api";
+import { ApiClient } from "trygg/api";
 import type { Incident } from "../api";
 
 export { type Incident };

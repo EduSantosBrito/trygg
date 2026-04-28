@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
-import { ApiClient } from "../api";
+import { ApiClient } from "trygg/api";
 import { type Severity } from "../errors/incidents";
 import { incidentsResource } from "../resources/incidents";
 
