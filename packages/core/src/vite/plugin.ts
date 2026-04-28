@@ -2803,9 +2803,6 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           }),
         );
       }
-      if (id === RESOLVED_API_ID) {
-        return renderApiClientModule({ apiImportPath: "/app/api" });
-      }
       return null;
     },
 
