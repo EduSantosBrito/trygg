@@ -17,6 +17,79 @@ export type ChangelogBlock =
   | { readonly _tag: "BulletList"; readonly items: ReadonlyArray<string> }
   | { readonly _tag: "CodeBlock"; readonly language: string; readonly code: string };
 
+export type InlineSegment =
+  | { readonly _tag: "Text"; readonly text: string }
+  | { readonly _tag: "InlineCode"; readonly code: string }
+  | { readonly _tag: "Link"; readonly text: string; readonly href: string };
+
+const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
+
+const parseLinksInText = (text: string): ReadonlyArray<InlineSegment> => {
+  const segments: Array<InlineSegment> = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(LINK_RE)) {
+    if (match.index > lastIndex) {
+      segments.push({ _tag: "Text", text: text.slice(lastIndex, match.index) });
+    }
+    segments.push({ _tag: "Link", text: match[1], href: match[2] });
+    lastIndex = (match.index ?? 0) + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ _tag: "Text", text: text.slice(lastIndex) });
+  }
+
+  return segments;
+};
+
+export const parseInlineSegments = (text: string): ReadonlyArray<InlineSegment> => {
+  const segments: Array<InlineSegment> = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    const tick = remaining.indexOf("`");
+    if (tick === -1) {
+      segments.push({ _tag: "Text", text: remaining });
+      break;
+    }
+
+    if (tick > 0) {
+      segments.push({ _tag: "Text", text: remaining.slice(0, tick) });
+    }
+
+    const end = remaining.indexOf("`", tick + 1);
+    if (end === -1) {
+      const last = segments[segments.length - 1];
+      if (last && last._tag === "Text") {
+        segments[segments.length - 1] = { _tag: "Text", text: last.text + remaining.slice(tick) };
+      } else {
+        segments.push({ _tag: "Text", text: remaining.slice(tick) });
+      }
+      break;
+    }
+
+    const code = remaining.slice(tick + 1, end);
+    if (code.length > 0) {
+      segments.push({ _tag: "InlineCode", code });
+    }
+
+    remaining = remaining.slice(end + 1);
+  }
+
+  return segments.flatMap((seg) => (seg._tag === "Text" ? parseLinksInText(seg.text) : [seg]));
+};
+
+export const resolveChangelogLink = (href: string): string => {
+  if (href.startsWith("http://") || href.startsWith("https://")) return href;
+
+  // Resolve relative path from apps/www/changelogs/ to repo root
+  const changelogDir = "apps/www/changelogs/";
+  const resolved = new URL(href, new URL(changelogDir, "file:///")).pathname.slice(1);
+
+  return `https://github.com/EduSantosBrito/trygg/blob/main/${resolved}`;
+};
+
 // =============================================================================
 // Frontmatter
 // =============================================================================
@@ -54,20 +127,58 @@ const extractFrontmatter = (raw: string): Record<string, string> | undefined => 
   return frontmatter;
 };
 
+const stripFrontmatter = (raw: string): string => {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("---")) return trimmed;
+
+  const end = trimmed.indexOf("\n---", 3);
+  if (end === -1) return trimmed;
+
+  return trimmed.slice(end + 4).trimStart();
+};
+
+const toPlainSummary = (text: string): string =>
+  text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1").replace(/`([^`]+)`/g, "$1");
+
+const extractSummarySection = (raw: string): string | undefined => {
+  const lines = stripFrontmatter(raw).split("\n");
+  const summaryIndex = lines.findIndex((line) => line.trim() === "## Summary");
+  if (summaryIndex === -1) return undefined;
+
+  const paragraph: Array<string> = [];
+
+  for (const line of lines.slice(summaryIndex + 1)) {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("## ")) break;
+    if (trimmed.length === 0) {
+      if (paragraph.length > 0) break;
+      continue;
+    }
+    if (trimmed.startsWith("```")) break;
+
+    paragraph.push(trimmed);
+  }
+
+  if (paragraph.length === 0) return undefined;
+
+  return toPlainSummary(paragraph.join(" "));
+};
+
 export const parseChangelogMeta = (raw: string): ChangelogMeta | undefined => {
   const frontmatter = extractFrontmatter(raw);
   if (!frontmatter) return undefined;
 
   const title = frontmatter.title;
   const version = frontmatter.version;
-  const summary = frontmatter.summary;
+  const summary = extractSummarySection(raw);
 
   if (
     typeof title !== "string" ||
     title.length === 0 ||
     typeof version !== "string" ||
     version.length === 0 ||
-    typeof summary !== "string" ||
+    summary === undefined ||
     summary.length === 0
   ) {
     return undefined;
@@ -118,17 +229,7 @@ const flushState = (state: ParseState): ReadonlyArray<ChangelogBlock> => {
 };
 
 export const renderChangelogBody = (raw: string): ReadonlyArray<ChangelogBlock> => {
-  const trimmed = raw.trimStart();
-
-  let bodyStart = 0;
-  if (trimmed.startsWith("---")) {
-    const end = trimmed.indexOf("\n---", 3);
-    if (end !== -1) {
-      bodyStart = end + 4; // Skip past \n---
-    }
-  }
-
-  const body = trimmed.slice(bodyStart).trimStart();
+  const body = stripFrontmatter(raw);
   const lines = body.split("\n");
 
   const blocks: Array<ChangelogBlock> = [];
@@ -220,6 +321,80 @@ const dateFromFilename = (filename: string): string | undefined => {
   return match?.[1];
 };
 
+type SemverVersion = {
+  readonly major: number;
+  readonly minor: number;
+  readonly patch: number;
+  readonly prerelease: ReadonlyArray<string>;
+};
+
+const parseSemverVersion = (version: string): SemverVersion | undefined => {
+  const normalized = version.includes("@") ? version.slice(version.lastIndexOf("@") + 1) : version;
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+  if (!match) return undefined;
+
+  const major = Number.parseInt(match[1], 10);
+  const minor = Number.parseInt(match[2], 10);
+  const patch = Number.parseInt(match[3], 10);
+  const prerelease = match[4]?.split(".") ?? [];
+
+  return { major, minor, patch, prerelease };
+};
+
+const comparePrereleaseIdentifier = (left: string, right: string): number => {
+  if (left === right) return 0;
+
+  const leftNumber = Number.parseInt(left, 10);
+  const rightNumber = Number.parseInt(right, 10);
+  const leftIsNumber = left === String(leftNumber);
+  const rightIsNumber = right === String(rightNumber);
+
+  if (leftIsNumber && rightIsNumber) return leftNumber - rightNumber;
+  if (leftIsNumber) return -1;
+  if (rightIsNumber) return 1;
+
+  return left.localeCompare(right);
+};
+
+const compareSemver = (left: string, right: string): number => {
+  const leftVersion = parseSemverVersion(left);
+  const rightVersion = parseSemverVersion(right);
+  if (!leftVersion || !rightVersion) return left.localeCompare(right);
+
+  const major = leftVersion.major - rightVersion.major;
+  if (major !== 0) return major;
+
+  const minor = leftVersion.minor - rightVersion.minor;
+  if (minor !== 0) return minor;
+
+  const patch = leftVersion.patch - rightVersion.patch;
+  if (patch !== 0) return patch;
+
+  if (leftVersion.prerelease.length === 0 && rightVersion.prerelease.length === 0) return 0;
+  if (leftVersion.prerelease.length === 0) return 1;
+  if (rightVersion.prerelease.length === 0) return -1;
+
+  const maxLength = Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length);
+  for (let i = 0; i < maxLength; i++) {
+    const leftIdentifier = leftVersion.prerelease[i];
+    const rightIdentifier = rightVersion.prerelease[i];
+    if (leftIdentifier === undefined) return -1;
+    if (rightIdentifier === undefined) return 1;
+
+    const identifier = comparePrereleaseIdentifier(leftIdentifier, rightIdentifier);
+    if (identifier !== 0) return identifier;
+  }
+
+  return 0;
+};
+
+const compareChangelogEntries = (left: ChangelogEntry, right: ChangelogEntry): number => {
+  const date = right.date.localeCompare(left.date);
+  if (date !== 0) return date;
+
+  return compareSemver(right.meta.version, left.meta.version);
+};
+
 const parseEntry = (name: string, date: string, raw: string): ChangelogEntry | undefined => {
   const meta = parseChangelogMeta(raw);
   if (!meta) return undefined;
@@ -239,7 +414,7 @@ export const parseChangelogEntries = (
       return parseEntry(name, date, raw);
     })
     .filter((entry): entry is ChangelogEntry => entry !== undefined)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort(compareChangelogEntries);
 };
 
 export const changelogEntries: ReadonlyArray<ChangelogEntry> = parseChangelogEntries(rawModules);

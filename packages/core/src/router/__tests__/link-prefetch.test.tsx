@@ -37,8 +37,9 @@ describe("Link prefetch", () => {
       const log = yield* Ref.make<ReadonlyArray<string>>([]);
 
       const About: RouteComponent = Effect.succeed(text("About"));
+      const context = yield* Effect.context<never>();
       const aboutLoader: ComponentLoader = () => {
-        Effect.runSync(Ref.update(log, (entries) => [...entries, "about"]));
+        Effect.runSyncWith(context)(Ref.update(log, (entries) => [...entries, "about"]));
         return Promise.resolve({ default: About });
       };
 

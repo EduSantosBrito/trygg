@@ -4,11 +4,10 @@
  * Renders the full <html>/<head>/<body> structure.
  * Docs-style layout with fixed sidebar navigation and scrollable content area.
  */
-import "../styles.css";
-
 import { Component, DevMode } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
+import "../styles.css";
 
 export default Component.gen(function* () {
   return (

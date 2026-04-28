@@ -154,6 +154,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
         options: DevApiOptions,
       ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
         Effect.gen(function* () {
+          const context = yield* Effect.context<never>();
           const state = yield* Ref.make<HandlerState>(emptyState);
 
           yield* initHandler(state, options);
@@ -188,10 +189,15 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
                   onSome: (e) => (e instanceof Error ? e.message : String(e)),
                 });
                 yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const body = Schema.encodeSync(ApiUnavailableBody)({
+                const body = yield* Schema.encodeEffect(ApiUnavailableBody)({
                   error: "API handler not available",
                   message: errorMessage,
-                });
+                }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ApiInitError({ message: "Failed to encode error response", cause }),
+                  ),
+                );
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
                 res.end(body);
@@ -201,7 +207,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
               currentState.handler.value(req, res);
             });
 
-            void Effect.runPromise(effect).catch((_error: unknown) => {
+            void Effect.runPromiseWith(context)(effect).catch((_error: unknown) => {
               if (!res.headersSent) {
                 res.statusCode = 500;
                 res.end("Internal Server Error");

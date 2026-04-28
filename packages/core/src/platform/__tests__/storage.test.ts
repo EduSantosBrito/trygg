@@ -79,7 +79,7 @@ describe("SessionStorage", () => {
       const PointJson = Schema.fromJsonString(
         Schema.Struct({ x: Schema.Number, y: Schema.Number }),
       );
-      const data = Schema.encodeSync(PointJson)({ x: 100, y: 200 });
+      const data = yield* Schema.encodeEffect(PointJson)({ x: 100, y: 200 });
       yield* storage.set("scroll:page-1", data);
       const result = yield* storage.get("scroll:page-1");
       assert.strictEqual(result, data);

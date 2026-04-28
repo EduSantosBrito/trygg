@@ -23,7 +23,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
 import { createServer as createViteServer } from "vite";
-import { ApiInitError, DevPlatform, NodeServerPlatform } from "../dev-platform.js";
+import { ApiInitError, DevPlatform, NodeServerPlatform, ServerPlatform } from "../dev-platform.js";
 import { NodeDevPlatformLive } from "../dev-platform-node.js";
 import type { Connect } from "vite";
 import {
@@ -86,6 +86,8 @@ const makeTempDir = (
 
 const STATIC_API_WARNING =
   '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".';
+
+const PluginFilesTestLayer = makePluginFilesLayer().pipe(Layer.provideMerge(NodeFileSystemLayer));
 
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
@@ -154,7 +156,7 @@ const loadHandlerFactoryModule = (): Effect.Effect<
     const rawModule = yield* Effect.promise(() =>
       server.ssrLoadModule("virtual:trygg/handler-factory"),
     );
-    return Schema.decodeUnknownSync(HandlerFactoryBoundaryModuleSchema)(rawModule);
+    return yield* Schema.decodeUnknownEffect(HandlerFactoryBoundaryModuleSchema)(rawModule);
   });
 
 describe("Vite Plugin", () => {
@@ -231,10 +233,12 @@ export const routes = { manifest: [] }
 `,
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+          plugin.buildStart,
+        );
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -258,12 +262,41 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    scoped("should buildStart leave stylesheet imports to app modules", () =>
+      Effect.gen(function* () {
+        // Test: should buildStart leave stylesheet imports to app modules
+        // Scope: guards against framework-owned filename magic in generated browser entry.
+        // Assertion: .trygg/entry.tsx does not import unrelated root CSS by convention.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "styles.css": '@import "tailwindcss";',
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+          plugin.buildStart,
+        );
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+
+        const entry = yield* fs.readFileString(path.join(root, ".trygg", "entry.tsx"));
+        assert.notInclude(entry, 'import "../styles.css"');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped("should build output write static files and skip server output", () =>
       Effect.gen(function* () {
         // Test: should build output write static files and skip server output
         // Scope: covers static production output at the build output service boundary.
         // Assertion: client build files exist and closeBundle does not emit a server entry.
         const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
         const root = yield* makeTempDir({
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "app/routes.ts": "export const routes = { manifest: [] }",
@@ -277,7 +310,12 @@ export const routes = { manifest: [] }
             warnings.push(String(message));
           }
         });
-        const buildOutput = makeBuildOutput({ buildServer: () => Effect.void });
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
 
         yield* buildOutput
           .buildStart({
@@ -301,11 +339,7 @@ export const routes = { manifest: [] }
         assert.isTrue(indexExists);
         assert.isFalse(serverEntryExists);
         assert.deepStrictEqual(warnings, [STATIC_API_WARNING]);
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
     scoped("should build output static without api file not warn", () =>
@@ -314,6 +348,8 @@ export const routes = { manifest: [] }
         // Scope: covers the static build hook service path when app/api.ts is absent.
         // Assertion: client build files exist and no API exclusion warning is logged.
         const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
         const root = yield* makeTempDir({
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "app/routes.ts": "export const routes = { manifest: [] }",
@@ -326,7 +362,12 @@ export const routes = { manifest: [] }
             warnings.push(String(message));
           }
         });
-        const buildOutput = makeBuildOutput({ buildServer: () => Effect.void });
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
 
         yield* buildOutput
           .buildStart({
@@ -342,11 +383,7 @@ export const routes = { manifest: [] }
 
         assert.isTrue(indexExists);
         assert.deepStrictEqual(warnings, []);
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
     scoped("should build output write server entry and invoke server build", () =>
@@ -355,6 +392,8 @@ export const routes = { manifest: [] }
         // Scope: covers server production output at the build output service boundary.
         // Assertion: closeBundle emits the server entry with API wiring and invokes the server build once.
         const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
         const root = yield* makeTempDir({
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "app/routes.ts": "export const routes = { manifest: [] }",
@@ -364,6 +403,9 @@ export const routes = { manifest: [] }
         const generatedDir = path.join(root, ".trygg");
         const builtEntries: Array<string> = [];
         const buildOutput = makeBuildOutput({
+          fileSystem: fs,
+          files,
+          serverPlatform,
           buildServer: (serverEntryPath) =>
             Effect.sync(() => {
               builtEntries.push(serverEntryPath);
@@ -383,11 +425,7 @@ export const routes = { manifest: [] }
         assert.deepStrictEqual(builtEntries, [serverEntryPath]);
         assert.include(serverEntry, 'import ApiLive from "../app/api.js"');
         assert.include(serverEntry, "HttpRouter.serve(ApiLive");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer(), NodeServerPlatform),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
     scoped("should closeBundle build production server without deleting client files", () =>
@@ -401,11 +439,15 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg({ platform: "node", output: "server" });
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
-        const closeBundle = Schema.decodeUnknownSync(CloseBundleHookSchema)(plugin.closeBundle);
+        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+          plugin.buildStart,
+        );
+        const closeBundle = yield* Schema.decodeUnknownEffect(CloseBundleHookSchema)(
+          plugin.closeBundle,
+        );
         const clientFile = path.join(root, "dist", "client", "client.txt");
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
@@ -437,11 +479,15 @@ export const routes = { manifest: [] }
             "app/api.ts": "export default {}",
           });
           const plugin = trygg({ platform: "node", output: "server" });
-          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
             plugin.configResolved,
           );
-          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
-          const closeBundle = Schema.decodeUnknownSync(CloseBundleHookSchema)(plugin.closeBundle);
+          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+            plugin.buildStart,
+          );
+          const closeBundle = yield* Schema.decodeUnknownEffect(CloseBundleHookSchema)(
+            plugin.closeBundle,
+          );
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -688,9 +734,10 @@ export const routes = { manifest: [] }
         };
         const scope = yield* Scope.make();
         let closeRuns = 0;
+        const context = yield* Effect.context<never>();
         const runPromise = (effect: Effect.Effect<void>) => {
           closeRuns += 1;
-          return Effect.runPromise(effect);
+          return Effect.runPromiseWith(context)(effect);
         };
         yield* Scope.addFinalizer(scope, Deferred.succeed(cleaned, undefined).pipe(Effect.asVoid));
 
@@ -749,8 +796,8 @@ export const routes = { manifest: [] }
         // Scope: validates the SSR-loaded virtual module contract at the plugin load boundary.
         // Assertion: generated module exports make/from/to/get names and omits superseded create/detect names.
         const plugin = trygg({ platform: "node", output: "server" });
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
         const resolvedId = resolveId("virtual:trygg/handler-factory");
         if (resolvedId === null) {
           return yield* Effect.die(new Error("Expected handler factory virtual module to resolve"));
@@ -870,11 +917,11 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
@@ -903,11 +950,11 @@ export const routes = { manifest: [] }
           "app/api.ts": "const Api = {}\nexport default {}",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
@@ -936,11 +983,11 @@ export const routes = { manifest: [] }
           "app/api.ts": "export default {}",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
@@ -968,7 +1015,7 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
 
@@ -988,21 +1035,32 @@ export const routes = { manifest: [] }
           "app/api.ts": "export const Api = {}",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+          plugin.buildStart,
+        );
+
+        yield* fs.makeDirectory(path.join(root, ".trygg"), { recursive: true }).pipe(Effect.orDie);
+        yield* fs
+          .writeFileString(path.join(root, ".trygg", "api-types.ts"), "// stale legacy file")
+          .pipe(Effect.orDie);
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
 
         const apiTypes = yield* fs.readFileString(path.join(root, ".trygg", "api.d.ts"));
+        const legacyApiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api-types.ts"));
 
         assert.include(apiTypes, 'declare module "trygg/api"');
         assert.include(apiTypes, 'import type { Api } from "../app/api"');
+        assert.include(apiTypes, 'import type { Layer } from "effect/Layer"');
         assert.include(apiTypes, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
         assert.include(apiTypes, "export const ApiClient: Context.ServiceClass");
         assert.include(apiTypes, "export const ApiClientLive: Layer.Layer<ApiClient>");
+        assert.include(apiTypes, "export { Api }");
+        assert.isFalse(legacyApiTypesExists);
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -1017,10 +1075,12 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+          plugin.buildStart,
+        );
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -1044,10 +1104,12 @@ export const routes = { manifest: [] }
             "app/api.ts": "export default {}",
           });
           const plugin = trygg();
-          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
             plugin.configResolved,
           );
-          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+            plugin.buildStart,
+          );
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -1078,10 +1140,12 @@ export const routes = { manifest: [] }
             .writeFileString(path.join(root, ".trygg", "api.d.ts"), "// stale generated file")
             .pipe(Effect.orDie);
           const plugin = trygg();
-          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
             plugin.configResolved,
           );
-          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
+            plugin.buildStart,
+          );
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -1102,11 +1166,11 @@ export const routes = { manifest: [] }
           "app/api.ts": "export const Api = {}",
         });
         const plugin = trygg({ platform: "node", output: "server" });
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolvedId = resolveId("trygg/api");
@@ -1139,11 +1203,11 @@ export const routes = { manifest: [] }
           "app/api.ts": 'const message = "export const Api"\nexport default {}',
         });
         const plugin = trygg();
-        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
           plugin.configResolved,
         );
-        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
-        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
+        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
@@ -1188,7 +1252,7 @@ Route.make("/users/:id")
 
         const routeTypes = yield* fs.readFileString(path.join(root, ".trygg", "routes.d.ts"));
         assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
-      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+      }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
 
     scoped("should derive routes file path from canonical app directory", () =>
@@ -1212,7 +1276,7 @@ Route.make("/users/:id")
 
         assert.strictEqual(existing, path.join(root, "app", "routes.ts"));
         assert.isUndefined(missing);
-      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+      }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
 
     scoped("should match routes file by normalized path", () =>
@@ -1230,7 +1294,7 @@ Route.make("/users/:id")
         const matches = yield* files.isRoutesFile(paths, equivalentPath);
 
         assert.isTrue(matches);
-      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+      }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
 
     scoped("should detect app api only when canonical path is a file", () =>
@@ -1264,7 +1328,7 @@ Route.make("/users/:id")
         assert.isTrue(existing);
         assert.isFalse(directory);
         assert.isFalse(missing);
-      }).pipe(Effect.provide(Layer.mergeAll(NodeFileSystemLayer, makePluginFilesLayer()))),
+      }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
   });
 
@@ -1288,7 +1352,6 @@ Route.make("/users/:id")
 import { mountDocument, Component } from "trygg"
 import { routes } from "../app/routes"
 import Layout from "../app/layout"
-
 const App = Component.gen(function* () {
   return <Layout />
 })
@@ -1296,6 +1359,15 @@ const App = Component.gen(function* () {
 mountDocument(<App />, { manifest: routes.manifest })
 `,
       );
+    });
+
+    it("should render favicon link in generated html shell", () => {
+      // Test: should render favicon link in generated html shell
+      // Scope: covers browser favicon discovery before document head hydration.
+      // Assertion: generated HTML links the SVG favicon to avoid browser fallback 404s.
+      const html = generateHtmlTemplate();
+
+      assert.include(html, '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />');
     });
 
     it("should render production server entry module from owner state", () => {
@@ -2695,6 +2767,7 @@ Route.make("/admin")
 
       assert.include(output, 'declare module "trygg/api"');
       assert.include(output, 'import type { Api } from "../app/api"');
+      assert.include(output, 'import type { Layer } from "effect/Layer"');
       assert.include(output, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
       assert.include(output, "export interface ApiClient {}");
       assert.include(
@@ -2702,7 +2775,7 @@ Route.make("/admin")
         'export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient",',
       );
       assert.include(output, "export const ApiClientLive: Layer.Layer<ApiClient>");
-      assert.include(output, "export {}");
+      assert.include(output, "export { Api }");
     });
   });
 

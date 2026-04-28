@@ -126,7 +126,7 @@ export async function highlightCode(code: string, lang = "tsx"): Promise<Highlig
 
 export const CodeBlock = Component.gen(function* (
   Props: ComponentProps<{
-    lines: HighlightedLine[];
+    lines: ReadonlyArray<HighlightedLine>;
     header?: string;
     fileType?: string;
   }>,

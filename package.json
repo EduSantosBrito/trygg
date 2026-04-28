@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun run --cwd packages/core build",
     "typecheck": "bun run --cwd packages/core typecheck",
-    "typecheck:templates": "tsc -p packages/cli/tsconfig.templates.json",
+    "typecheck:templates": "tsgo -p packages/cli/tsconfig.templates.json",
     "test": "bun run --cwd packages/core test && bun run --cwd apps/www test",
     "test:watch": "bun run --cwd packages/core test:watch",
     "examples": "bun run build && bun run --cwd apps/examples dev",
@@ -21,12 +21,14 @@
     "format:fix": "oxfmt packages apps '!**/dist/**' --write",
     "effect:check": "bun run --cwd packages/core effect:check",
     "sandcastle": "bun .sandcastle/main.ts",
-    "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check"
+    "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check",
+    "prepare": "effect-tsgo patch"
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "0.5.4",
     "@effect/platform-node": "4.0.0-beta.51",
-    "@rollup/plugin-typescript": "^12.3.0",
+    "@effect/tsgo": "0.5.2",
+    "@typescript/native-preview": "latest",
     "effect": "4.0.0-beta.51",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",

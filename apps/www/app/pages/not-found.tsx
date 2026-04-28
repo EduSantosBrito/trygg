@@ -2,6 +2,7 @@
  * 404 page for unknown routes.
  */
 import { Component } from "trygg";
+import * as Router from "trygg/router";
 
 import { sections } from "../content/copy";
 
@@ -33,13 +34,13 @@ export default Component.gen(function* () {
             </p>
 
             <div className="mt-7 flex flex-col sm:flex-row gap-3">
-              <a
-                href="/"
+              <Router.Link
+                to="/"
                 className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
               >
                 Go home
                 <span aria-hidden="true">&rarr;</span>
-              </a>
+              </Router.Link>
 
               <a
                 href={sections.community.github.href}

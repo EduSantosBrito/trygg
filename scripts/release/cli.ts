@@ -500,9 +500,28 @@ const detectTryggBump = Command.make("detect-trygg-bump", {
 
     if (beforeSha === "") {
       const syncResult = yield* syncCreateTrygg(true, false);
-      const tryggTagExists = yield* remoteTagExists(`trygg@${currentVersion}`);
-      const cliTagExists = yield* remoteTagExists(`create-trygg@${syncResult.cliVersion}`);
-      const shouldRelease = !tryggTagExists || !cliTagExists;
+      const tryggPublished = yield* npmLookup("trygg", currentVersion);
+      const cliPublished = yield* npmLookup("create-trygg", syncResult.cliVersion);
+
+      if (tryggPublished._tag === "Failed") {
+        return yield* new ReleaseCliError({
+          message: `Failed to check npm for trygg@${currentVersion}`,
+          stdout: tryggPublished.stdout,
+          stderr: tryggPublished.stderr,
+          exitCode: tryggPublished.exitCode,
+        });
+      }
+
+      if (cliPublished._tag === "Failed") {
+        return yield* new ReleaseCliError({
+          message: `Failed to check npm for create-trygg@${syncResult.cliVersion}`,
+          stdout: cliPublished.stdout,
+          stderr: cliPublished.stderr,
+          exitCode: cliPublished.exitCode,
+        });
+      }
+
+      const shouldRelease = tryggPublished._tag === "NotFound" || cliPublished._tag === "NotFound";
 
       yield* writeShouldRelease(shouldRelease);
       yield* Console.log(JSON.stringify({
@@ -657,6 +676,7 @@ const publishPackage = Command.make("publish-package", {
     const published = yield* npmLookup(packageName, packageVersion);
 
     if (published._tag === "Found") {
+      yield* writeGithubOutput("published", "false");
       yield* Console.log(JSON.stringify({ packageName, version: packageVersion, published: false, reason: "already-exists" }));
       return;
     }
@@ -675,8 +695,22 @@ const publishPackage = Command.make("publish-package", {
       ? ["publish", "--provenance", "--access", "public"]
       : ["publish", "--provenance", "--access", "public", "--tag", distTag];
 
-    yield* runCommand("npm", args, { cwd });
-    yield* Console.log(JSON.stringify({ packageName, version: packageVersion, published: true }));
+    yield* Effect.tap(
+      Effect.tapError(runCommand("npm", args, { cwd }), () =>
+        Effect.gen(function* () {
+          yield* writeGithubOutput("published", "false");
+          yield* Console.log(
+            JSON.stringify({ packageName, version: packageVersion, published: false, reason: "publish-failed" }),
+          );
+        }),
+      ),
+      Effect.gen(function* () {
+        yield* writeGithubOutput("published", "true");
+        yield* Console.log(
+          JSON.stringify({ packageName, version: packageVersion, published: true }),
+        );
+      }),
+    );
   })),
 );
 

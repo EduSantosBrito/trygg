@@ -96,12 +96,15 @@ jobs:
         run: bun run build
 
       - name: Publish trygg
+        id: publish
         run: bun ./scripts/release/cli.ts publish-package --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}" --cwd packages/core
 
       - name: Push trygg tag
+        if: steps.publish.outputs.published == 'true'
         run: bun ./scripts/release/cli.ts push-tag --tag "trygg@${{ needs.prepare.outputs.trygg_version }}" --target "${{ github.sha }}" --message "trygg v${{ needs.prepare.outputs.trygg_version }}"
 
       - name: Create trygg release
+        if: steps.publish.outputs.published == 'true'
         uses: actions/github-script@v8
         env:
           TRYGG_VERSION: ${{ needs.prepare.outputs.trygg_version }}
@@ -201,12 +204,15 @@ jobs:
         run: bun ./scripts/release/cli.ts wait-for-npm --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}"
 
       - name: Publish create-trygg
+        id: publish
         run: bun ./scripts/release/cli.ts publish-package --package create-trygg --package-version "${{ needs.sync.outputs.cli_version }}" --cwd packages/cli
 
       - name: Push create-trygg tag
+        if: steps.publish.outputs.published == 'true'
         run: bun ./scripts/release/cli.ts push-tag --tag "create-trygg@${{ needs.sync.outputs.cli_version }}" --target "${{ needs.sync.outputs.commit_sha }}" --message "create-trygg v${{ needs.sync.outputs.cli_version }}"
 
       - name: Create create-trygg release
+        if: steps.publish.outputs.published == 'true'
         uses: actions/github-script@v8
         env:
           CLI_VERSION: ${{ needs.sync.outputs.cli_version }}

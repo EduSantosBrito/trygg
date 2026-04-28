@@ -75,6 +75,40 @@ describe("mount", () => {
       assert.strictEqual((yield* getByTestId("reactive")).textContent, "5");
     }),
   );
+
+  scoped("should preserve services captured when browser renderer layer is created", () =>
+    (() => {
+      class RenderLabel extends Context.Service<RenderLabel, { readonly value: string }>()(
+        "test/RenderLabel",
+      ) {}
+
+      const labelLayer = Layer.succeed(RenderLabel, { value: "provided" });
+
+      return unsafeEraseR(
+        Effect.gen(function* () {
+          const renderer = yield* Renderer;
+          const container = document.createElement("div");
+          document.body.appendChild(container);
+          yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+          const Child = Component.gen(function* () {
+            const label = yield* RenderLabel;
+            return <div data-testid="captured-service">{label.value}</div>;
+          });
+
+          const result = yield* unsafeEraseR(renderer.render(<Child />, container));
+          yield* Effect.addFinalizer(() =>
+            unsafeEraseR(result.cleanup.pipe(Effect.catchCause(() => Effect.void))),
+          );
+
+          assert.strictEqual(
+            container.querySelector('[data-testid="captured-service"]')?.textContent,
+            "provided",
+          );
+        }).pipe(Effect.provide(browserLayer.pipe(Layer.provideMerge(labelLayer)))),
+      );
+    })(),
+  );
 });
 
 // =============================================================================

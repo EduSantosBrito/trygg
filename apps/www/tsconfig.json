@@ -10,7 +10,12 @@
     "esModuleInterop": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "trygg"
+    "jsxImportSource": "trygg",
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   },
   "include": ["app/**/*"]
 }

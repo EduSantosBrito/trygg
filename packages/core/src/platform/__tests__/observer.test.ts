@@ -179,6 +179,7 @@ describe("Observer browser supervision", () => {
       class FakeIntersectionObserver implements IntersectionObserver {
         readonly root = null;
         readonly rootMargin = "0px";
+        readonly scrollMargin = "0px";
         readonly thresholds = [0];
 
         constructor(cb: IntersectionObserverCallback) {

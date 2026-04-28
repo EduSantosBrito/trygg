@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "node dist/server.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -14,7 +14,7 @@
     "@effect/vitest": "^0.29.0",
     "effect": "4.0.0-beta.51",
     "shiki": "^3.22.0",
-    "trygg": "^0.3.0-canary.0",
+    "trygg": "^0.4.0-canary.0",
     "vitest": "^4.1.5"
   },
   "devDependencies": {
@@ -22,7 +22,6 @@
     "@types/hast": "^3.0.4",
     "oxlint": "^1.41.0",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }
 }

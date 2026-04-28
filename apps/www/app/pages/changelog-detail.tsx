@@ -4,8 +4,14 @@
 import { Component, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 
-import { changelogEntries, type ChangelogBlock } from "../lib/changelog";
+import {
+  changelogEntries,
+  parseInlineSegments,
+  resolveChangelogLink,
+  type ChangelogBlock,
+} from "../lib/changelog";
 import { CodeBlock, highlightCode } from "../components/code-block";
+import { Footer } from "../components/footer";
 import type { HighlightedLine } from "../components/code-block";
 
 // =============================================================================
@@ -51,6 +57,72 @@ const findRenderedEntry = (name: string): RenderedEntry | undefined =>
   renderedEntries.find((entry) => entry.name === name);
 
 // =============================================================================
+// Inline segments renderer
+// =============================================================================
+
+const InlineRenderer = Component.gen(function* (Props: ComponentProps<{ readonly text: string }>) {
+  const { text } = yield* Props;
+  const segments = parseInlineSegments(text);
+
+  return (
+    <>
+      {segments.map((seg, i) => {
+        switch (seg._tag) {
+          case "InlineCode":
+            return (
+              <code
+                key={i}
+                className="font-mono text-xs bg-[rgba(255,255,255,0.06)] rounded px-1 py-0.5 text-[var(--color-text)]"
+              >
+                {seg.code}
+              </code>
+            );
+          case "Link":
+            return (
+              <a
+                key={i}
+                href={resolveChangelogLink(seg.href)}
+                className="text-[var(--color-accent)] hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {seg.text}
+              </a>
+            );
+          case "Text":
+            return <span key={i}>{seg.text}</span>;
+        }
+      })}
+    </>
+  );
+});
+
+const BREAKING_CHANGE_PREFIX = "Breaking:";
+
+const ChangelogListItem = Component.gen(function* (
+  Props: ComponentProps<{ readonly item: string }>,
+) {
+  const { item } = yield* Props;
+
+  if (!item.startsWith(BREAKING_CHANGE_PREFIX)) {
+    return (
+      <li>
+        <InlineRenderer text={item} />
+      </li>
+    );
+  }
+
+  const detail = item.slice(BREAKING_CHANGE_PREFIX.length).trimStart();
+
+  return (
+    <li>
+      <strong className="font-bold text-red-400 text-xs">Breaking:</strong>{" "}
+      <InlineRenderer text={detail} />
+    </li>
+  );
+});
+
+// =============================================================================
 // Block renderer
 // =============================================================================
 
@@ -69,12 +141,16 @@ const BlockRenderer = Component.gen(function* (
       );
     }
     case "Paragraph":
-      return <p className="text-[var(--color-text-muted)] leading-relaxed mb-4">{block.text}</p>;
+      return (
+        <p className="text-[var(--color-text-muted)] leading-relaxed mb-4">
+          <InlineRenderer text={block.text} />
+        </p>
+      );
     case "BulletList":
       return (
         <ul className="list-disc list-inside text-[var(--color-text-muted)] leading-relaxed mb-4 space-y-1">
           {block.items.map((item, i) => (
-            <li key={i}>{item}</li>
+            <ChangelogListItem key={i} item={item} />
           ))}
         </ul>
       );
@@ -102,37 +178,41 @@ export default Component.gen(function* () {
         <title>Changelog entry not found | trygg</title>
         <meta name="robots" content="noindex" />
 
-        <main id="main-content" className="bg-grid min-h-screen px-6 py-16">
-          <div className="max-w-3xl mx-auto">
-            <a
-              href="/changelog"
-              className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
-            >
-              <span aria-hidden="true">&larr;</span>
-              Back to changelog
-            </a>
-
-            <section
-              aria-labelledby="not-found-title"
-              className="rounded-2xl border border-[var(--color-border)] bg-[rgba(5,5,8,0.86)] backdrop-blur-sm p-8 sm:p-12"
-            >
-              <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
-                Error 404
-              </p>
-
-              <h1
-                id="not-found-title"
-                className="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]"
+        <div className="bg-grid min-h-screen flex flex-col">
+          <main id="main-content" className="flex-1 px-6 py-16">
+            <div className="max-w-3xl mx-auto">
+              <Router.Link
+                to="/changelog"
+                className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
               >
-                Changelog entry not found
-              </h1>
+                <span aria-hidden="true">&larr;</span>
+                Back to changelog
+              </Router.Link>
 
-              <p className="mt-4 text-[var(--color-text-muted)] leading-relaxed">
-                The changelog entry you are looking for does not exist.
-              </p>
-            </section>
-          </div>
-        </main>
+              <section
+                aria-labelledby="not-found-title"
+                className="rounded-2xl border border-[var(--color-border)] bg-[rgba(5,5,8,0.86)] backdrop-blur-sm p-8 sm:p-12"
+              >
+                <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
+                  Error 404
+                </p>
+
+                <h1
+                  id="not-found-title"
+                  className="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]"
+                >
+                  Changelog entry not found
+                </h1>
+
+                <p className="mt-4 text-[var(--color-text-muted)] leading-relaxed">
+                  The changelog entry you are looking for does not exist.
+                </p>
+              </section>
+            </div>
+          </main>
+
+          <Footer />
+        </div>
       </>
     );
   }
@@ -142,35 +222,36 @@ export default Component.gen(function* () {
       <title>{entry.meta.title} — Changelog | trygg</title>
       <meta name="description" content={entry.meta.summary} />
 
-      <main id="main-content" className="bg-grid min-h-screen px-6 py-16">
-        <article className="max-w-3xl mx-auto">
-          <a
-            href="/changelog"
-            className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
-          >
-            <span aria-hidden="true">&larr;</span>
-            Back to changelog
-          </a>
+      <div className="bg-grid min-h-screen flex flex-col">
+        <main id="main-content" className="flex-1 px-6 py-16">
+          <article className="max-w-3xl mx-auto">
+            <Router.Link
+              to="/changelog"
+              className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
+            >
+              <span aria-hidden="true">&larr;</span>
+              Back to changelog
+            </Router.Link>
 
-          <header className="mb-10">
-            <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)] mb-3">
-              {entry.meta.version}
-            </p>
-            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]">
-              {entry.meta.title}
-            </h1>
-            <p className="mt-4 text-[var(--color-text-muted)] leading-relaxed">
-              {entry.meta.summary}
-            </p>
-          </header>
+            <header className="mb-10">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)] mb-3">
+                {entry.meta.version}
+              </p>
+              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]">
+                {entry.meta.title}
+              </h1>
+            </header>
 
-          <div>
-            {entry.renderedBlocks.map((block, i) => (
-              <BlockRenderer key={i} block={block} />
-            ))}
-          </div>
-        </article>
-      </main>
+            <div>
+              {entry.renderedBlocks.map((block, i) => (
+                <BlockRenderer key={i} block={block} />
+              ))}
+            </div>
+          </article>
+        </main>
+
+        <Footer />
+      </div>
     </>
   );
 });

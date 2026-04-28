@@ -434,11 +434,12 @@ const makePluginLayer = (
   const devLayer = platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
   const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
 
+  const platformLayer = Layer.mergeAll(devLayer, serverLayer);
+  const pluginFilesLayer = makePluginFilesLayer().pipe(Layer.provideMerge(platformLayer));
+  const buildOutputLayer = makeBuildOutputLayer().pipe(Layer.provideMerge(pluginFilesLayer));
+
   return Layer.mergeAll(
-    devLayer,
-    serverLayer,
-    makePluginFilesLayer(),
-    makeBuildOutputLayer(),
+    buildOutputLayer,
     Logger.layer([PluginLogger]),
     Layer.effect(References.MinimumLogLevel, Effect.succeed("Debug")),
   );
@@ -1353,6 +1354,7 @@ import { HttpApiClient } from "effect/unstable/httpapi"
 import { Api } from ${JSON.stringify(apiImportPath)}
 
 const client = HttpApiClient.make(Api, { baseUrl: "" })
+
 type ApiClientService = HttpApiClient.ForApi<typeof Api>
 
 export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
@@ -1419,7 +1421,6 @@ export const renderClientEntryModule = (owner: ClientEntryModuleOwner): string =
 import { mountDocument, Component } from "trygg"
 import { routes } from "${owner.routesImportPath}"
 import Layout from "${owner.layoutImportPath}"
-
 const App = Component.gen(function* () {
   return <Layout />
 })
@@ -1447,7 +1448,11 @@ export const generateEntryModule = (
 ): Effect.Effect<string> =>
   Effect.succeed(
     renderClientEntryModule(
-      makeClientEntryModuleOwner({ appDir, generatedDir, routesFilePath: routesFile }),
+      makeClientEntryModuleOwner({
+        appDir,
+        generatedDir,
+        routesFilePath: routesFile,
+      }),
     ),
   );
 
@@ -1468,6 +1473,7 @@ export const generateHtmlTemplate = (): string => `<!DOCTYPE html>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script type="module" src="/${GENERATED_DIR}/entry.tsx"></script>
   </head>
   <body></body>
@@ -1480,31 +1486,22 @@ interface PluginFilePaths {
 
 interface PluginFilesService {
   readonly appApiPath: (paths: PluginFilePaths) => string;
-  readonly appApiExists: (
-    paths: PluginFilePaths,
-  ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
-  readonly routesFilePath: (
-    paths: PluginFilePaths,
-  ) => Effect.Effect<string | undefined, never, FileSystem.FileSystem>;
-  readonly isRoutesFile: (
-    paths: PluginFilePaths,
-    filePath: string,
-  ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
-  readonly writeEntryFile: (
-    paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  readonly appApiExists: (paths: PluginFilePaths) => Effect.Effect<boolean>;
+  readonly routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined>;
+  readonly isRoutesFile: (paths: PluginFilePaths, filePath: string) => Effect.Effect<boolean>;
+  readonly writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeGeneratedRouteTypes: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  ) => Effect.Effect<void, PluginFileSystemError>;
   readonly regenerateGeneratedRouteTypes: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeBuildEntryFiles: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
+  ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeProductionServerEntry: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<string, PluginFileSystemError, FileSystem.FileSystem | ServerPlatform>;
+  ) => Effect.Effect<string, PluginFileSystemError, ServerPlatform>;
 }
 
 /**
@@ -1547,39 +1544,6 @@ const generatedEntryPath = (paths: PluginFilePaths): string =>
 const sameFilePath = (left: string, right: string): boolean =>
   nodePath.resolve(left) === nodePath.resolve(right);
 
-const pathIsFile = (filePath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.stat(filePath).pipe(
-      Effect.map((info) => info.type === "File"),
-      Effect.orElseSucceed(() => false),
-    );
-  });
-
-const readRoutesSource = (
-  routesFilePath: string,
-): Effect.Effect<string, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.readFileString(routesFilePath).pipe(Effect.orElseSucceed(() => ""));
-  });
-
-const writeRouteTypesFromRoutes = (
-  routesFilePath: string,
-  routeTypesPath: string,
-): Effect.Effect<boolean, PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const routeSource = yield* readRoutesSource(routesFilePath);
-    if (routeSource.length === 0) {
-      return false;
-    }
-
-    const parsed = yield* parseRoutes(routeSource);
-    const content = yield* generateRouteTypes(parsed);
-    yield* writeFileSafe(routeTypesPath, content);
-    return true;
-  });
-
 /**
  * Creates the live generated plugin file service.
  *
@@ -1590,15 +1554,71 @@ const writeRouteTypesFromRoutes = (
  * @internal
  * @since 1.0.0
  */
-export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
+export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSystem.FileSystem> =>
   Layer.effect(
     PluginFiles,
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+
+      const pathExists = (filePath: string): Effect.Effect<boolean> =>
+        fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));
+
+      const writeFileSafe = (
+        filePath: string,
+        content: string,
+      ): Effect.Effect<void, PluginFileSystemError> =>
+        Effect.gen(function* () {
+          const dir = nodePath.dirname(filePath);
+
+          yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+            Effect.catchTag("PlatformError", (e) =>
+              e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
+            ),
+            Effect.mapError(
+              (cause) =>
+                new PluginFileSystemError({
+                  operation: "mkdir",
+                  path: dir,
+                  cause,
+                }),
+            ),
+          );
+
+          yield* fs.writeFileString(filePath, content).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PluginFileSystemError({
+                  operation: "write",
+                  path: filePath,
+                  cause,
+                }),
+            ),
+          );
+        });
+
       const routesFilePath = (paths: PluginFilePaths) =>
         Effect.gen(function* () {
           const filePath = routeSourcePath(paths);
           const exists = yield* pathExists(filePath);
           return exists ? filePath : undefined;
+        });
+
+      const writeRouteTypesFromRoutesWithFs = (
+        routesFilePath: string,
+        routeTypesPath: string,
+      ): Effect.Effect<boolean, PluginFileSystemError> =>
+        Effect.gen(function* () {
+          const routeSource = yield* fs
+            .readFileString(routesFilePath)
+            .pipe(Effect.orElseSucceed(() => ""));
+          if (routeSource.length === 0) {
+            return false;
+          }
+
+          const parsed = yield* parseRoutes(routeSource);
+          const content = yield* generateRouteTypes(parsed);
+          yield* writeFileSafe(routeTypesPath, content);
+          return true;
         });
 
       const writeEntryFile = (paths: PluginFilePaths) =>
@@ -1612,7 +1632,7 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
         Effect.gen(function* () {
           const routesFile = yield* routesFilePath(paths);
           if (routesFile !== undefined) {
-            const wroteTypes = yield* writeRouteTypesFromRoutes(
+            const wroteTypes = yield* writeRouteTypesFromRoutesWithFs(
               routesFile,
               generatedRouteTypesPath(paths),
             );
@@ -1627,7 +1647,17 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
 
       return {
         appApiPath,
-        appApiExists: (paths) => pathIsFile(appApiPath(paths)),
+        appApiExists: (paths) =>
+          pathExists(appApiPath(paths)).pipe(
+            Effect.flatMap((exists) =>
+              exists
+                ? fs.stat(appApiPath(paths)).pipe(
+                    Effect.map((info) => info.type === "File"),
+                    Effect.orElseSucceed(() => false),
+                  )
+                : Effect.succeed(false),
+            ),
+          ),
         routesFilePath,
         isRoutesFile: (paths, filePath) =>
           Effect.gen(function* () {
@@ -1671,6 +1701,31 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles> =>
 const generatedApiClientTypesPath = (generatedDir: string): string =>
   nodePath.join(generatedDir, "api.d.ts");
 
+const legacyGeneratedApiClientTypesPath = (generatedDir: string): string =>
+  nodePath.join(generatedDir, "api-types.ts");
+
+const removeFileIfExists = (
+  filePath: string,
+): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const exists = yield* pathExists(filePath);
+    if (!exists) {
+      return;
+    }
+
+    yield* fs.remove(filePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginFileSystemError({
+            operation: "remove",
+            path: filePath,
+            cause,
+          }),
+      ),
+    );
+  });
+
 const writeGeneratedApiClientTypes = (
   appDir: string,
   generatedDir: string,
@@ -1678,6 +1733,8 @@ const writeGeneratedApiClientTypes = (
   Effect.gen(function* () {
     const apiPath = nodePath.join(appDir, "api.ts");
     const contract = yield* readApiClientContract(apiPath);
+
+    yield* removeFileIfExists(legacyGeneratedApiClientTypesPath(generatedDir));
 
     if (contract._tag === "ClientEnabled") {
       const appImportPath = toModuleImportPath(generatedDir, appDir);
@@ -1689,21 +1746,8 @@ const writeGeneratedApiClientTypes = (
     }
 
     // Remove stale generated declarations for Absent and ServerOnly
-    const fs = yield* FileSystem.FileSystem;
     const typesPath = generatedApiClientTypesPath(generatedDir);
-    const exists = yield* pathExists(typesPath);
-    if (exists) {
-      yield* fs.remove(typesPath).pipe(
-        Effect.mapError(
-          (cause) =>
-            new PluginFileSystemError({
-              operation: "remove",
-              path: typesPath,
-              cause,
-            }),
-        ),
-      );
-    }
+    yield* removeFileIfExists(typesPath);
   });
 
 /**
@@ -1728,6 +1772,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Api } from ${JSON.stringify(apiImportPath)}
 
 const client = HttpApiClient.make(Api, { baseUrl: "" })
+
 type ApiClientService = HttpApiClient.ForApi<typeof Api>
 
 export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
@@ -1755,7 +1800,7 @@ export const renderApiClientDeclarations = ({
 }: {
   readonly apiTypeImportPath: string;
 }): string =>
-  `// Auto-generated by trygg\ndeclare module "trygg/api" {\n  import type * as Context from "effect/Context"\n  import type { Layer } from "effect"\n  import type { HttpApiClient } from "effect/unstable/httpapi"\n  import type { Api } from "${apiTypeImportPath}"\n\n  type ApiClientService = HttpApiClient.ForApi<typeof Api>\n\n  export interface ApiClient {}\n  export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient", ApiClientService>\n  export const ApiClientLive: Layer.Layer<ApiClient>\n}\n\nexport {}\n`;
+  `// Auto-generated by trygg\nimport type * as Context from "effect/Context"\nimport type { Layer } from "effect/Layer"\nimport type { HttpApiClient } from "effect/unstable/httpapi"\nimport type { Api } from "${apiTypeImportPath}"\n\ntype ApiClientService = HttpApiClient.ForApi<typeof Api>\n\ndeclare module "trygg/api" {\n  export interface ApiClient {}\n  export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient", ApiClientService>\n  export const ApiClientLive: Layer.Layer<ApiClient>\n  export { Api }\n}\n`;
 
 const renderProductionServerLive = ({
   hasApi,
@@ -1945,18 +1990,10 @@ interface BuildOutputCloseInput {
 interface BuildOutputService {
   readonly buildStart: (
     input: BuildOutputStartInput,
-  ) => Effect.Effect<
-    void,
-    PluginValidationError | PluginFileSystemError,
-    FileSystem.FileSystem | PluginFiles
-  >;
+  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
   readonly closeBundle: (
     input: BuildOutputCloseInput,
-  ) => Effect.Effect<
-    void,
-    PluginFileSystemError,
-    FileSystem.FileSystem | PluginFiles | ServerPlatform
-  >;
+  ) => Effect.Effect<void, PluginFileSystemError>;
 }
 
 interface BuildOutputDeps {
@@ -1964,6 +2001,9 @@ interface BuildOutputDeps {
     serverEntryPath: string,
     config: BuildOutputConfig,
   ) => Effect.Effect<void, PluginFileSystemError>;
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly files: PluginFilesService;
+  readonly serverPlatform: ServerPlatformService;
 }
 
 interface BuildOutput extends Context.Service<BuildOutput, BuildOutputService> {}
@@ -1979,14 +2019,21 @@ const BuildOutput = Context.Service<BuildOutput, BuildOutputService>("trygg/vite
  *
  * @internal
  */
-export const makeBuildOutput = ({ buildServer }: BuildOutputDeps): BuildOutputService => ({
+export const makeBuildOutput = ({
+  buildServer,
+  fileSystem,
+  files,
+  serverPlatform,
+}: BuildOutputDeps): BuildOutputService => ({
   buildStart: ({ appDir, generatedDir, config, output, platform }) =>
     Effect.gen(function* () {
-      const files = yield* PluginFiles;
       const paths = { appDir, generatedDir };
       const apiPath = files.appApiPath(paths);
 
-      yield* validateApiPlatform(apiPath, platform).pipe(Effect.tapError(logApiValidationError));
+      yield* validateApiPlatform(apiPath, platform).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.tapError(logApiValidationError),
+      );
 
       if (config.command !== "build") {
         return;
@@ -2005,9 +2052,10 @@ export const makeBuildOutput = ({ buildServer }: BuildOutputDeps): BuildOutputSe
     config.command !== "build" || output !== "server"
       ? Effect.void
       : Effect.gen(function* () {
-          const files = yield* PluginFiles;
           const paths = { appDir, generatedDir };
-          const serverEntryPath = yield* files.writeProductionServerEntry(paths);
+          const serverEntryPath = yield* files
+            .writeProductionServerEntry(paths)
+            .pipe(Effect.provideService(ServerPlatform, serverPlatform));
 
           yield* Effect.logInfo("Building production server...");
           yield* buildServer(serverEntryPath, config);
@@ -2044,8 +2092,20 @@ const viteServerBuild = (
       }),
   }).pipe(Effect.asVoid);
 
-const makeBuildOutputLayer = (): Layer.Layer<BuildOutput> =>
-  Layer.succeed(BuildOutput, makeBuildOutput({ buildServer: viteServerBuild }));
+const makeBuildOutputLayer = (): Layer.Layer<
+  BuildOutput,
+  never,
+  FileSystem.FileSystem | PluginFiles | ServerPlatform
+> =>
+  Layer.effect(
+    BuildOutput,
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const files = yield* PluginFiles;
+      const serverPlatform = yield* ServerPlatform;
+      return makeBuildOutput({ buildServer: viteServerBuild, fileSystem, files, serverPlatform });
+    }),
+  );
 
 // =============================================================================
 // Plugin

@@ -17,7 +17,6 @@
     "noEmit": true,
 
     // Path mapping for JSX runtime
-    "baseUrl": ".",
     "paths": {
       "#jsx/jsx-runtime": ["./src/jsx-runtime.ts"],
       "#jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
@@ -36,6 +35,7 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
+    "types": ["bun"],
 
     // Source maps for debugging
     "sourceMap": true,

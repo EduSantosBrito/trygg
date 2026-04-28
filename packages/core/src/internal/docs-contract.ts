@@ -159,9 +159,20 @@ export const checkDocsContract = ({
       violations,
     };
 
+    const json = yield* Schema.encodeEffect(Schema.fromJsonString(ReportPayloadSchema))(
+      payload,
+    ).pipe(
+      Effect.mapError(
+        () =>
+          new DocsContractConfigError({
+            detail: "unable to encode report JSON",
+          }),
+      ),
+    );
+
     return {
       human: formatHuman(payload),
-      json: Schema.encodeSync(Schema.fromJsonString(ReportPayloadSchema))(payload),
+      json,
       reachableExports,
       violations,
     };
@@ -457,14 +468,15 @@ const loadPackageExports = (
 const readJsonFile = (path: string): Effect.Effect<unknown, DocsContractError> =>
   readUtf8(path).pipe(
     Effect.flatMap((text) =>
-      Effect.try({
-        try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(text),
-        catch: () =>
-          new DocsContractFileError({
-            detail: "invalid JSON",
-            path,
-          }),
-      }),
+      Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+        Effect.mapError(
+          () =>
+            new DocsContractFileError({
+              detail: "invalid JSON",
+              path,
+            }),
+        ),
+      ),
     ),
   );
 

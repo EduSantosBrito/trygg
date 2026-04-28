@@ -1,6 +1,6 @@
 {
   "name": "trygg",
-  "version": "0.3.0-canary.0",
+  "version": "0.4.0-canary.0",
   "description": "Effect-native UI framework with JSX support and fine-grained reactivity",
   "keywords": [
     "effect",
@@ -64,10 +64,10 @@
   "scripts": {
     "prepublishOnly": "bun run build",
     "prepare": "effect-language-service patch",
-    "build": "rm -rf dist && rolldown -c && tsc --project tsconfig.build.json",
+    "build": "rm -rf dist && rolldown -c && tsgo --project tsconfig.build.json",
     "docs:check": "bun ./src/internal/docs-check.ts",
     "docs:check:json": "bun ./src/internal/docs-check.ts --json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "effect:check": "effect-language-service diagnostics --project tsconfig.json",
     "test": "npx vitest run",
     "test:watch": "npx vitest"
@@ -81,7 +81,7 @@
     "@effect/platform-node": "4.0.0-beta.51",
     "@effect/sql-sqlite-bun": "4.0.0-beta.51",
     "@effect/vitest": "4.0.0-beta.51",
-    "@types/bun": "latest",
+    "@types/bun": "^1.3.13",
     "happy-dom": "^20.3.1",
     "rolldown": "^1.0.0-rc.1",
     "vite": "^6.0.0",

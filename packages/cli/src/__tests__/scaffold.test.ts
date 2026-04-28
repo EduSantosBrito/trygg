@@ -121,6 +121,7 @@ describe("scaffoldProject", () => {
       const content = yield* fs.readFileString(apiDtsPath);
       assert.include(content, 'declare module "trygg/api"');
       assert.include(content, 'import type { Api } from "../app/api"');
+      assert.include(content, 'import type { Layer } from "effect/Layer"');
       assert.include(content, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
       assert.include(content, "export interface ApiClient {}");
       assert.include(
@@ -128,7 +129,7 @@ describe("scaffoldProject", () => {
         'export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient",',
       );
       assert.include(content, "export const ApiClientLive: Layer.Layer<ApiClient>");
-      assert.include(content, "export {}");
+      assert.include(content, "export { Api }");
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
@@ -273,6 +274,7 @@ describe("scaffoldProject", () => {
         const output = yield* generateApiClientTypes({ apiTypeImportPath: "../app/api" });
         assert.include(output, 'declare module "trygg/api"');
         assert.include(output, 'import type { Api } from "../app/api"');
+        assert.include(output, 'import type { Layer } from "effect/Layer"');
         assert.include(output, "type ApiClientService = HttpApiClient.ForApi<typeof Api>");
         assert.include(output, "export interface ApiClient {}");
         assert.include(
@@ -280,7 +282,7 @@ describe("scaffoldProject", () => {
           'export const ApiClient: Context.ServiceClass<ApiClient, "ApiClient",',
         );
         assert.include(output, "export const ApiClientLive: Layer.Layer<ApiClient>");
-        assert.include(output, "export {}");
+        assert.include(output, "export { Api }");
       }),
   );
 });

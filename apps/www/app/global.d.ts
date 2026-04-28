@@ -11,6 +11,8 @@ declare module "*.md?raw" {
   export default content;
 }
 
+declare module "*.css";
+
 interface ImportMeta {
   glob<T>(
     pattern: string,

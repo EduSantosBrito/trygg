@@ -10,7 +10,6 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "baseUrl": ".",
     "paths": {
       "trygg": ["../../packages/core/src/index.ts"],
       "trygg/api": ["../../packages/core/src/api/types.ts"],
@@ -18,7 +17,12 @@
       "trygg/vite-plugin": ["../../packages/core/src/vite-plugin.ts"],
       "trygg/jsx-runtime": ["../../packages/core/src/jsx-runtime.ts"],
       "trygg/jsx-dev-runtime": ["../../packages/core/src/jsx-dev-runtime.ts"]
-    }
+    },
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   },
   "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", ".trygg/**/*.ts", ".trygg/**/*.d.ts"],
   "exclude": ["vite.config.ts"]

@@ -241,7 +241,7 @@ export interface RendererService {
   readonly mount: (
     container: HTMLElement,
     element: Element,
-  ) => Effect.Effect<void, unknown, unknown>;
+  ) => Effect.Effect<void, unknown, Scope.Scope>;
 
   /**
    * Render an Element to a DOM node
@@ -249,7 +249,7 @@ export interface RendererService {
   readonly render: (
     element: Element,
     parent: Node,
-  ) => Effect.Effect<RenderResult, unknown, unknown>;
+  ) => Effect.Effect<RenderResult, unknown, Scope.Scope>;
 }
 
 /**
@@ -2423,18 +2423,22 @@ const renderElement = (
 export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
   Renderer,
   Effect.gen(function* () {
+    const services = unsafeWidenContext(yield* Effect.context<never>());
+
     const mountElement = Effect.fn("Renderer.mount")(function* (
       container: HTMLElement,
       element: Element,
     ) {
       const scope = yield* Effect.scope;
-
-      // Create Head service for head element hoisting
       const headService = yield* Head.makeBrowserHead();
+
+      // Set Head service for head element hoisting
       yield* setFiberRef(Head.CurrentHead, headService);
 
-      const services = yield* Effect.context<unknown>();
-      const renderContext: RenderContext = { services, scope };
+      const methodServices = unsafeWidenContext(yield* Effect.context<never>());
+      const renderServices = Context.merge(services, methodServices);
+
+      const renderContext: RenderContext = { services: renderServices, scope };
 
       // Set up render context after renderer-local FiberRefs are installed
       yield* setFiberRef(CurrentRenderContext, renderContext);
@@ -2447,7 +2451,10 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       // Render the element tree - content is inserted before the anchor
       // by the renderElement function (for Component, Fragment, etc.)
       // For elements that append directly, they go after existing content
-      const result = yield* renderElement(element, container, renderContext, null);
+      const result = yield* Effect.provide(
+        renderElement(element, container, renderContext, null),
+        renderServices,
+      );
 
       // Move rendered content before the anchor for consistent ordering
       container.insertBefore(result.node, mountAnchor);
@@ -2460,7 +2467,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
               yield* result.cleanup;
               mountAnchor.remove();
             }),
-            services,
+            renderServices,
           ),
           () => Effect.void,
         ),
@@ -2469,9 +2476,13 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
 
     const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
       const scope = yield* Effect.scope;
-      const services = yield* Effect.context<unknown>();
-      const renderContext: RenderContext = { services, scope };
-      return yield* renderElement(element, parent, renderContext, null);
+      const methodServices = unsafeWidenContext(yield* Effect.context<never>());
+      const renderServices = Context.merge(services, methodServices);
+      const renderContext: RenderContext = { services: renderServices, scope };
+      return yield* Effect.provide(
+        renderElement(element, parent, renderContext, null),
+        renderServices,
+      );
     });
 
     return Renderer.of({ mount: mountElement, render: renderToParent });
@@ -2581,7 +2592,8 @@ export const mount = <E>(
     import("../router/index.js"),
   ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-    const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
+    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistryLive);
+    const appLayer = browserLayer.pipe(Layer.provideMerge(appServicesLayer));
     runMain(
       unsafeEraseR(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer))),
     );
@@ -2697,7 +2709,8 @@ export const mountDocument = <E>(
     import("../router/index.js"),
   ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-    const appLayer = Layer.mergeAll(browserLayer, routerLayer, ResourceRegistryLive);
+    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistryLive);
+    const appLayer = browserLayer.pipe(Layer.provideMerge(appServicesLayer));
     runMain(
       unsafeEraseR(
         renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer)),

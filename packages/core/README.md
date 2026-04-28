@@ -62,8 +62,10 @@ Use `trygg/api` type utilities inside `app/api.ts`. The owner docs in [`src/api/
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "effect/unstable/httpapi";
 import { Effect, Layer, Schema } from "effect";
 
+const UserSchema = Schema.Struct({ id: Schema.String, name: Schema.String });
+
 const Group = HttpApiGroup.make("users").add(
-  HttpApiEndpoint.get("list", "/api/users").addSuccess(Schema.Array(UserSchema)),
+  HttpApiEndpoint.get("list", "/api/users", { success: Schema.Array(UserSchema) }),
 );
 
 export const Api = HttpApi.make("app").add(Group);
