@@ -1,12 +1,14 @@
 import { Effect } from "effect";
 import * as FileSystem from "effect/FileSystem";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 import { assert, describe, it } from "@effect/vitest";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import { scaffoldProject } from "../scaffold.js";
 import { generateApiClientTypes } from "../generators/api-client-types.js";
 
 const TEMPLATES_DIR = path.join(import.meta.dirname, "../../templates");
+const WORKSPACE_TEMP_DIR = path.resolve(import.meta.dirname, "../../../../apps/examples");
 
 const runScaffold = (
   targetDir: string,
@@ -24,6 +26,62 @@ const runScaffold = (
     },
     TEMPLATES_DIR,
   );
+
+interface CommandResult {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+const runCommand = (
+  cwd: string,
+  command: string,
+  args: ReadonlyArray<string>,
+): Effect.Effect<CommandResult, Error> =>
+  Effect.promise(
+    () =>
+      new Promise((resolve, reject) => {
+        const proc = spawn(command, args, { cwd, shell: false });
+        let stdout = "";
+        let stderr = "";
+
+        if (proc.stdout) {
+          proc.stdout.on("data", (data: Buffer) => {
+            stdout += data.toString();
+          });
+        }
+
+        if (proc.stderr) {
+          proc.stderr.on("data", (data: Buffer) => {
+            stderr += data.toString();
+          });
+        }
+
+        proc.on("close", (exitCode) => {
+          resolve({ exitCode, stdout, stderr });
+        });
+
+        proc.on("error", (error) => {
+          reject(error);
+        });
+      }),
+  );
+
+const checkNoTryggApiImports = (dir: string): Effect.Effect<void, unknown, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const entries = yield* fs.readDirectory(dir);
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry);
+      const stat = yield* fs.stat(entryPath);
+      if (stat.type === "Directory") {
+        yield* checkNoTryggApiImports(entryPath);
+      } else if (entry.endsWith(".ts") || entry.endsWith(".tsx")) {
+        const content = yield* fs.readFileString(entryPath);
+        assert.notInclude(content, "trygg/api", `${entryPath} should not import from trygg/api`);
+      }
+    }
+  });
 
 describe("scaffoldProject", () => {
   it.effect("should generate .trygg/api.d.ts for incident template", () =>
@@ -75,22 +133,101 @@ describe("scaffoldProject", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
-  it.effect("should NOT generate .trygg/api.d.ts for blank template", () =>
+  it.effect("should NOT generate API boilerplate for blank template", () =>
     Effect.gen(function* () {
-      // Scope: verifies blank scaffold is not affected by API client generation.
-      // Assertion: .trygg directory is absent when template has no app/api.ts.
+      // Scope: verifies blank scaffold stays safe as a no-API app.
+      // Assertion: no app/api.ts, no .trygg/api.d.ts, no trygg-api.d.ts, and no trygg/api imports.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
+      const targetDir = yield* fs.makeTempDirectory({
+        directory: WORKSPACE_TEMP_DIR,
+        prefix: "trygg-scaffold-test-",
+      });
       yield* Effect.addFinalizer(() =>
         fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
       );
 
       yield* runScaffold(targetDir, "blank");
 
+      const apiFilePath = path.join(targetDir, "app", "api.ts");
+      const apiFileExists = yield* fs.exists(apiFilePath);
+      assert.isFalse(apiFileExists, "app/api.ts should not exist for blank template");
+
       const tryggDirPath = path.join(targetDir, ".trygg");
       const tryggExists = yield* fs.exists(tryggDirPath);
       assert.isFalse(tryggExists, ".trygg directory should not exist for blank template");
+
+      const tryggApiDtsPath = path.join(targetDir, "trygg-api.d.ts");
+      const tryggApiDtsExists = yield* fs.exists(tryggApiDtsPath);
+      assert.isFalse(tryggApiDtsExists, "trygg-api.d.ts should not exist for blank template");
+
+      yield* checkNoTryggApiImports(path.join(targetDir, "app"));
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
+  it.effect("blank scaffold should typecheck and build successfully", () =>
+    Effect.gen(function* () {
+      // Scope: verifies a freshly scaffolded blank app works without any API setup.
+      // Assertion: bun run typecheck and bun run build both exit 0.
+      const fs = yield* FileSystem.FileSystem;
+      const targetDir = yield* fs.makeTempDirectory({
+        directory: WORKSPACE_TEMP_DIR,
+        prefix: "trygg-scaffold-test-",
+      });
+      yield* Effect.addFinalizer(() =>
+        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
+      );
+
+      yield* runScaffold(targetDir, "blank");
+
+      const typecheckResult = yield* runCommand(targetDir, "bun", ["run", "typecheck"]);
+      assert.strictEqual(
+        typecheckResult.exitCode,
+        0,
+        `typecheck should pass. stdout: ${typecheckResult.stdout}\nstderr: ${typecheckResult.stderr}`,
+      );
+
+      const buildResult = yield* runCommand(targetDir, "bun", ["run", "build"]);
+      assert.strictEqual(
+        buildResult.exitCode,
+        0,
+        `build should pass. stdout: ${buildResult.stdout}\nstderr: ${buildResult.stderr}`,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
+  it.effect(
+    "blank scaffold with explicit trygg/api import should fail build with clear diagnostic",
+    () =>
+      Effect.gen(function* () {
+        // Scope: verifies the generated-client failure mode is preserved for explicit opt-in.
+        // Assertion: importing ApiClientLive from trygg/api causes build to fail with the missing-Api message.
+        const fs = yield* FileSystem.FileSystem;
+        const targetDir = yield* fs.makeTempDirectory({
+          directory: WORKSPACE_TEMP_DIR,
+          prefix: "trygg-scaffold-test-",
+        });
+        yield* Effect.addFinalizer(() =>
+          fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
+        );
+
+        yield* runScaffold(targetDir, "blank");
+
+        const homePath = path.join(targetDir, "app", "pages", "home.tsx");
+        const homeContent = yield* fs.readFileString(homePath);
+        yield* fs.writeFileString(
+          homePath,
+          `import { ApiClientLive } from "trygg/api";\n${homeContent}`,
+        );
+
+        const buildResult = yield* runCommand(targetDir, "bun", ["run", "build"]);
+        assert.notStrictEqual(
+          buildResult.exitCode,
+          0,
+          "build should fail when trygg/api is imported without app/api.ts",
+        );
+        const output = `${buildResult.stdout}\n${buildResult.stderr}`;
+        assert.include(output, "app/api.ts must export Api");
+      }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
   it.effect(
