@@ -105,17 +105,17 @@ export interface DevApiOptions {
 
 /**
  * DevPlatform service interface
- * Abstracts platform-specific file system and dev API creation
+ * Abstracts platform-specific file system and dev API construction
  * @since 1.0.0
  */
 export interface DevPlatformService {
   /** Layer providing the platform's FileSystem implementation */
   readonly fileSystemLayer: Layer.Layer<FileSystem.FileSystem>;
   /**
-   * Create a dev API instance
+   * Make a dev API instance
    * Returns a handle with middleware, reload, and dispose capabilities
    */
-  readonly createDevApi: (
+  readonly makeApi: (
     options: DevApiOptions,
   ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope>;
 }

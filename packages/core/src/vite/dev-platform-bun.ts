@@ -167,7 +167,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
       const bunFs = yield* importBunFileSystem;
       const fileSystemLayer = bunFs.layer;
 
-      const createDevApi = (
+      const makeApi = (
         options: DevApiOptions,
       ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
         Effect.gen(function* () {
@@ -297,7 +297,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
 
       const service: DevPlatformService = {
         fileSystemLayer,
-        createDevApi,
+        makeApi,
       };
 
       return Layer.mergeAll(Layer.succeed(DevPlatform, service), fileSystemLayer);

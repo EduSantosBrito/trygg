@@ -1952,9 +1952,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             };
           })();
 
-          // Create dev API using platform-specific implementation
+          // Make dev API using platform-specific implementation
           const handle = yield* Scope.provide(
-            devPlatform.createDevApi({
+            devPlatform.makeApi({
               loadApiModule: () => viteServer.loadModule(apiPath, "Failed to load API module"),
               onError: (error) =>
                 Effect.logError(

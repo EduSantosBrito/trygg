@@ -5,12 +5,14 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Cause, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
+import { Cause, Context, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
 import { createServer as createViteServer } from "vite";
+import { DevPlatform } from "../dev-platform.js";
+import { NodeDevPlatformLive } from "../dev-platform-node.js";
 import {
   trygg,
   extractParamNames,
@@ -659,6 +661,84 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         yield* validateApiPlatform(apiPath, "bun");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: DevPlatform service
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("DevPlatform", () => {
+    scoped("should makeApi handle API middleware requests on Node", () =>
+      Effect.gen(function* () {
+        // Test: should makeApi handle API middleware requests on Node
+        // Scope: verifies the platform API creation boundary through observable middleware behavior.
+        // Assertion: a request under /api/ is handled by the generated middleware response.
+        const devPlatform = yield* DevPlatform;
+        const scope = yield* Effect.acquireRelease(Scope.make(), (apiScope) =>
+          Scope.close(apiScope, Exit.void),
+        );
+        const apiLayer = Layer.succeedContext(Context.makeUnsafe<unknown>(new Map()));
+        const module = { default: apiLayer };
+        const handle = yield* Scope.provide(
+          devPlatform.makeApi({
+            loadApiModule: () => Effect.succeed(module),
+            onError: () => Effect.void,
+            handlerFactory: {
+              makeApiLayer: () => Effect.succeed(apiLayer),
+              makeNodeHandler: () =>
+                Effect.succeed({
+                  handler: (_req, res) => {
+                    res.statusCode = 204;
+                    res.end();
+                  },
+                  dispose: Effect.void,
+                }),
+              makeWebHandler: () => ({
+                handler: () => Promise.resolve(new Response(null, { status: 204 })),
+                dispose: () => undefined,
+              }),
+            },
+          }),
+          scope,
+        );
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            createHttpServer((req, res) =>
+              handle.middleware(req, res, () => {
+                res.statusCode = 404;
+                res.end();
+              }),
+            ),
+          ),
+          (httpServer) =>
+            Effect.promise(() => new Promise<void>((resolve) => httpServer.close(() => resolve()))),
+        );
+
+        yield* Effect.promise(
+          () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+        );
+        const address = server.address();
+        if (!isAddressInfo(address)) {
+          throw new Error("Expected HTTP server to listen on a TCP port");
+        }
+
+        const status = yield* Effect.promise(
+          () =>
+            new Promise<number>((resolve, reject) => {
+              const req = httpRequest(
+                { hostname: "127.0.0.1", port: address.port, path: "/api/health" },
+                (res) => {
+                  res.resume();
+                  res.on("end", () => resolve(res.statusCode ?? 0));
+                },
+              );
+              req.on("error", reject);
+              req.end();
+            }),
+        );
+
+        assert.strictEqual(status, 204);
+      }).pipe(Effect.provide(NodeDevPlatformLive)),
     );
   });
 

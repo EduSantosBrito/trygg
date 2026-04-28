@@ -150,7 +150,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
       const nodeFs = yield* importNodeFileSystem;
       const fileSystemLayer = nodeFs.layer;
 
-      const createDevApi = (
+      const makeApi = (
         options: DevApiOptions,
       ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
         Effect.gen(function* () {
@@ -225,7 +225,7 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
 
       const service: DevPlatformService = {
         fileSystemLayer,
-        createDevApi,
+        makeApi,
       };
 
       return Layer.mergeAll(Layer.succeed(DevPlatform, service), fileSystemLayer);
