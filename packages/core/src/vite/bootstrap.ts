@@ -48,9 +48,9 @@ const makeState = (
     const generatedDir = nodePath.resolve(resolvedConfig.root, options.generatedDirName);
 
     const discoveredRoutesPath = nodePath.join(appDir, "routes.ts");
-    const hasRoutes = yield* fs.exists(discoveredRoutesPath).pipe(
-      Effect.catchTag("PlatformError", () => Effect.succeed(false)),
-    );
+    const hasRoutes = yield* fs
+      .exists(discoveredRoutesPath)
+      .pipe(Effect.catchTag("PlatformError", () => Effect.succeed(false)));
     const routesFilePath = hasRoutes ? discoveredRoutesPath : undefined;
 
     yield* fs.makeDirectory(generatedDir, { recursive: true }).pipe(
@@ -106,28 +106,35 @@ export const makeBootstrapLayer = (options: BootstrapOptions): Layer.Layer<Boots
       const initialize = (
         resolvedConfig: ResolvedConfig,
       ): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
-        Effect.flatten(Ref.modify(statusRef, (status): readonly [
-          Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
-          BootstrapStatus,
-        ] => {
-          switch (status._tag) {
-            case "Pending":
-              return [
-                makeState(resolvedConfig, options).pipe(
-                  Effect.tap(markReady),
-                  Effect.tapError(markFailed),
-                  Effect.asVoid,
-                ),
-                { _tag: "Bootstrapping" },
-              ];
-            case "Bootstrapping":
-              return [Deferred.await(ready).pipe(Effect.asVoid), status];
-            case "Ready":
-              return [Effect.void, status];
-            case "Failed":
-              return [Effect.fail(status.error), status];
-          }
-        }));
+        Effect.flatten(
+          Ref.modify(
+            statusRef,
+            (
+              status,
+            ): readonly [
+              Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
+              BootstrapStatus,
+            ] => {
+              switch (status._tag) {
+                case "Pending":
+                  return [
+                    makeState(resolvedConfig, options).pipe(
+                      Effect.tap(markReady),
+                      Effect.tapError(markFailed),
+                      Effect.asVoid,
+                    ),
+                    { _tag: "Bootstrapping" },
+                  ];
+                case "Bootstrapping":
+                  return [Deferred.await(ready).pipe(Effect.asVoid), status];
+                case "Ready":
+                  return [Effect.void, status];
+                case "Failed":
+                  return [Effect.fail(status.error), status];
+              }
+            },
+          ),
+        );
 
       const awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure> =
         Effect.gen(function* () {

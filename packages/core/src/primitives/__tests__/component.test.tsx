@@ -337,10 +337,7 @@ describe("Error handling", () => {
       });
 
       const context = yield* unsafeBuildContext<unknown>([]);
-      const result = yield* render(<MyComponent />).pipe(
-        Effect.provide(context),
-        Effect.result,
-      );
+      const result = yield* render(<MyComponent />).pipe(Effect.provide(context), Effect.result);
 
       assert.isTrue(Result.isFailure(result));
     }),

@@ -426,10 +426,9 @@ export interface ResourceRegistry {
  * @public
  * @since 1.0.0
  */
-export class ResourceRegistryTag extends Context.Service<
-  ResourceRegistryTag,
-  ResourceRegistry
->()("trygg/ResourceRegistry") {}
+export class ResourceRegistryTag extends Context.Service<ResourceRegistryTag, ResourceRegistry>()(
+  "trygg/ResourceRegistry",
+) {}
 
 /**
  * Create a ResourceRegistry layer with an in-memory cache.

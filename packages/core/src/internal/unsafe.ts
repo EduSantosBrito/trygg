@@ -182,9 +182,8 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
  * SAFETY: Context<A | B> contains all services for both A and B.
  * Narrowing to Context<A> is sound because the services are still there.
  */
-export const unsafeNarrowContext = <R, S>(
-  ctx: Context.Context<S>,
-): Context.Context<R> => ctx as unknown as Context.Context<R>;
+export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Context<R> =>
+  ctx as unknown as Context.Context<R>;
 
 /**
  * Widen a specific service map to unknown for untyped boundaries.
@@ -192,9 +191,8 @@ export const unsafeNarrowContext = <R, S>(
  * SAFETY: Context<R> contains runtime services regardless of R phantom.
  * Widening to unknown only erases compile-time detail.
  */
-export const unsafeWidenContext = <R>(
-  ctx: Context.Context<R>,
-): Context.Context<unknown> => ctx as unknown as Context.Context<unknown>;
+export const unsafeWidenContext = <R>(ctx: Context.Context<R>): Context.Context<unknown> =>
+  ctx as unknown as Context.Context<unknown>;
 
 // =============================================================================
 // Overloaded Function Dispatch

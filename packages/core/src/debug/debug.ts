@@ -1144,12 +1144,9 @@ const setReference = <A>(reference: Context.Reference<A>, value: A): Effect.Effe
  * @internal
  * @since 1.0.0
  */
-export const CurrentTraceId = Context.Reference<string | undefined>(
-  "trygg/Debug/CurrentTraceId",
-  {
-    defaultValue: () => undefined,
-  },
-);
+export const CurrentTraceId = Context.Reference<string | undefined>("trygg/Debug/CurrentTraceId", {
+  defaultValue: () => undefined,
+});
 
 /**
  * Reference for current span ID.

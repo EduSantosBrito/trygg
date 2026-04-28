@@ -45,12 +45,14 @@ Improve code only when it preserves behavior and materially improves clarity, sa
 
 # EXECUTION
 
-- Run relevant tests/checks first if practical.
+- Run relevant tests/checks first if practical, then run `bun run check` before completion.
 - Add missing semantic tests when the diff has uncovered risk.
 - Fix real issues directly on this branch.
 - Preserve exact intended behavior.
 - Do not modify `.sandcastle`.
 - Commit review changes only if you made changes.
+- `bun run check` may rewrite files; include every changed file in the final review commit.
+- Do not signal completion with a dirty worktree; commit all verification changes first.
 
 If code is already clean, tested, and safe, do nothing.
 

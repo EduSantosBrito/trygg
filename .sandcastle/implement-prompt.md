@@ -43,15 +43,18 @@ Use local code search to find the smallest relevant surface area. Pay close atte
 
 # FEEDBACK LOOPS
 
-Run relevant checks before committing. Prefer narrow checks first, then broader checks if practical:
+Run relevant narrow checks while iterating, then always run full verification before completion:
 
 - `bun run typecheck`
 - `bun run test`
-- `bun run check` when broad validation is warranted
+- `bun run check`
+
+`bun run check` is required before final commit/completion. It may rewrite files; include every changed file in the final commit.
 
 # COMMIT
 
 Commit your changes with a concise conventional commit message. If `.jj/` exists, use `jj describe`; otherwise use `git commit`.
+Do not signal completion with a dirty worktree; commit all verification changes first.
 
 If the task cannot be completed, commit only complete safe work and explain blockers in the final output.
 

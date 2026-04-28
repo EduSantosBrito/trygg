@@ -11,7 +11,7 @@
  * @since 1.0.0
  * @module trygg/vite-plugin
  */
-import type { ResolvedConfig, ViteDevServer } from "vite";
+import type { Connect, ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
 import {
   Array,
@@ -1551,6 +1551,43 @@ interface PreviewServerLike {
   };
 }
 
+interface ViteServerAdapter {
+  readonly loadModule: (
+    id: string,
+    message: string,
+  ) => Effect.Effect<Record<string, unknown>, ApiInitError>;
+  readonly onFileChange: (handler: (file: string) => void | Promise<void>) => Effect.Effect<void>;
+  readonly onServerClose: (handler: () => void) => Effect.Effect<void>;
+  readonly useMiddleware: (middleware: Connect.NextHandleFunction) => Effect.Effect<void>;
+  readonly transformIndexHtml: (
+    url: string,
+    html: string,
+  ) => Effect.Effect<string, PluginFileSystemError>;
+}
+
+const makeViteServerAdapter = (server: ViteDevServer): ViteServerAdapter => ({
+  loadModule: (id, message) =>
+    Effect.tryPromise({
+      try: () => server.ssrLoadModule(id),
+      catch: (cause) => new ApiInitError({ message, cause }),
+    }),
+  onFileChange: (handler) =>
+    Effect.sync(() => server.watcher.on("change", handler)).pipe(Effect.asVoid),
+  onServerClose: (handler) =>
+    Effect.sync(() => server.httpServer?.on("close", handler)).pipe(Effect.asVoid),
+  useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
+  transformIndexHtml: (url, html) =>
+    Effect.tryPromise({
+      try: () => server.transformIndexHtml(url, html),
+      catch: (cause) =>
+        new PluginFileSystemError({
+          operation: "transform",
+          path: "bootstrap-shell",
+          cause,
+        }),
+    }),
+});
+
 /**
  * Create trygg Vite plugin with platform-aware dev API.
  *
@@ -1643,6 +1680,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     },
 
     async configureServer(server: ViteDevServer) {
+      const viteServer = makeViteServerAdapter(server);
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { appDir, generatedDir, routesFilePath } = yield* bootstrap.awaitReady;
@@ -1690,14 +1728,10 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
           // SSR-load handler factory — resolves @effect/platform from project root,
           // same module instance as user's api.ts, preventing Router.Live identity mismatches.
-          const rawFactoryMod = yield* Effect.tryPromise({
-            try: () => server.ssrLoadModule(VIRTUAL_HANDLER_FACTORY_ID),
-            catch: (cause) =>
-              new ApiInitError({
-                message: "Failed to SSR-load handler factory",
-                cause,
-              }),
-          });
+          const rawFactoryMod = yield* viteServer.loadModule(
+            VIRTUAL_HANDLER_FACTORY_ID,
+            "Failed to SSR-load handler factory",
+          );
           // Validate factory shape at runtime instead of using `as` cast
           if (
             typeof rawFactoryMod.detectAndComposeLayer !== "function" ||
@@ -1708,27 +1742,27 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
                 "Handler factory module missing required exports (detectAndComposeLayer, createWebHandler)",
             });
           }
-          const factoryMod: HandlerFactory = {
-            detectAndComposeLayer: rawFactoryMod.detectAndComposeLayer,
-            createWebHandler: rawFactoryMod.createWebHandler,
-            createNodeHandler:
-              typeof rawFactoryMod.createNodeHandler === "function"
-                ? rawFactoryMod.createNodeHandler
-                : undefined,
+          const detectAndComposeLayer = rawFactoryMod.detectAndComposeLayer;
+          const createWebHandler = rawFactoryMod.createWebHandler;
+          const baseFactoryMod: HandlerFactory = {
+            detectAndComposeLayer: (mod: Record<string, unknown>) => detectAndComposeLayer(mod),
+            createWebHandler: (apiLive: Layer.Layer<unknown>) => createWebHandler(apiLive),
           };
+          const factoryMod: HandlerFactory = (() => {
+            if (typeof rawFactoryMod.createNodeHandler !== "function") {
+              return baseFactoryMod;
+            }
+            const createNodeHandler = rawFactoryMod.createNodeHandler;
+            return {
+              ...baseFactoryMod,
+              createNodeHandler: (apiLive: Layer.Layer<unknown>) => createNodeHandler(apiLive),
+            };
+          })();
 
           // Create dev API using platform-specific implementation
           const handle = yield* Scope.provide(
             devPlatform.createDevApi({
-              loadApiModule: () =>
-                Effect.tryPromise({
-                  try: () => server.ssrLoadModule(apiPath),
-                  catch: (cause) =>
-                    new ApiInitError({
-                      message: "Failed to load API module",
-                      cause,
-                    }),
-                }),
+              loadApiModule: () => viteServer.loadModule(apiPath, "Failed to load API module"),
               onError: (error) =>
                 Effect.logError(
                   `[api] middleware.error: ${error instanceof Error ? error.message : String(error)}`,
@@ -1751,7 +1785,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         }
 
         // Vite boundary: file watcher callbacks use extracted runtime
-        server.watcher.on("change", async (file) => {
+        yield* viteServer.onFileChange(async (file) => {
           await pluginRuntime.runPromise(
             Effect.scoped(
               Effect.gen(function* () {
@@ -1779,40 +1813,37 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         });
 
         // Vite boundary: close scope when server closes (triggers finalizer)
-        server.httpServer?.on("close", () => {
+        yield* viteServer.onServerClose(() => {
           if (Option.isSome(apiScope)) {
             void pluginRuntime.runPromise(Scope.close(apiScope.value, Exit.void));
           }
         });
 
         if (Option.isSome(apiHandle)) {
-          server.middlewares.use(apiHandle.value.middleware);
+          yield* viteServer.useMiddleware(apiHandle.value.middleware);
         }
 
         return () => {
-          server.middlewares.use((req, res, next) => {
-            if (!req.url || req.url.includes(".") || req.method !== "GET") {
-              return next();
-            }
+          void pluginRuntime.runPromise(
+            viteServer.useMiddleware((req, res, next) => {
+              if (!req.url || req.url.includes(".") || req.method !== "GET") {
+                return next();
+              }
 
-            const requestUrl = req.url;
-            const effect = Effect.gen(function* () {
-              const html = yield* Effect.tryPromise({
-                try: () => server.transformIndexHtml(requestUrl, generateHtmlTemplate()),
-                catch: (err) =>
-                  new PluginFileSystemError({
-                    operation: "transform",
-                    path: "bootstrap-shell",
-                    cause: err,
-                  }),
-              });
-              res.statusCode = 200;
-              res.setHeader("Content-Type", "text/html");
-              res.end(html);
-            }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
+              const requestUrl = req.url;
+              const effect = Effect.gen(function* () {
+                const html = yield* viteServer.transformIndexHtml(
+                  requestUrl,
+                  generateHtmlTemplate(),
+                );
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html");
+                res.end(html);
+              }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
 
-            void pluginRuntime.runPromise(effect);
-          });
+              void pluginRuntime.runPromise(effect);
+            }),
+          );
         };
       });
 

@@ -100,6 +100,12 @@ const sandboxedOpenCode = (model: string): AgentProvider => ({
 const command = (
   binary: string,
   args: ReadonlyArray<string>,
+): Effect.Effect<string, SandcastleError> => commandIn(process.cwd(), binary, args);
+
+const commandIn = (
+  cwd: string,
+  binary: string,
+  args: ReadonlyArray<string>,
 ): Effect.Effect<string, SandcastleError> =>
   Effect.tryPromise({
     try: (signal) =>
@@ -107,7 +113,7 @@ const command = (
         const child = execFile(
           binary,
           [...args],
-          { cwd: process.cwd(), encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+          { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
           (error, stdout, stderr) => {
             if (error !== null) {
               reject(stderr.trim().length > 0 ? stderr.trim() : error);
@@ -129,6 +135,8 @@ const pathExists = Effect.fn("pathExists")(function* (path: string) {
 });
 
 const git = (args: ReadonlyArray<string>) => command("git", args);
+
+const gitIn = (cwd: string, args: ReadonlyArray<string>) => commandIn(cwd, "git", args);
 
 const jj = (args: ReadonlyArray<string>) => command("jj", args);
 
@@ -331,6 +339,18 @@ const blockedByOpenIssue = (issue: GitHubIssue, openIssueNumbers: ReadonlySet<nu
   return false;
 };
 
+const loadCompletedIssueIds = Effect.fn("loadCompletedIssueIds")(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* pathExists(completedDir);
+  if (!exists) return new Set<string>();
+
+  const files = yield* fs
+    .readDirectory(completedDir)
+    .pipe(Effect.mapError(mapPlatformError(`Failed to read ${completedDir}`)));
+
+  return new Set(files);
+});
+
 const loadGitHubIssues = Effect.fn("loadGitHubIssues")(function* () {
   const text = yield* command("gh", [
     "issue",
@@ -345,10 +365,15 @@ const loadGitHubIssues = Effect.fn("loadGitHubIssues")(function* () {
     "number,title,body",
   ]);
   const issues = yield* parseGitHubIssues(text);
-  const openIssueNumbers = new Set(issues.map((issue) => issue.number));
+  const completedIssueIds = yield* loadCompletedIssueIds();
+  const blockingOpenIssueNumbers = new Set(
+    issues
+      .filter((issue) => !completedIssueIds.has(String(issue.number)))
+      .map((issue) => issue.number),
+  );
 
   return issues
-    .filter((issue) => !blockedByOpenIssue(issue, openIssueNumbers))
+    .filter((issue) => !blockedByOpenIssue(issue, blockingOpenIssueNumbers))
     .toSorted((left, right) => left.number - right.number)
     .map(
       (issue) =>
@@ -584,6 +609,26 @@ const runAgent = (options: Parameters<typeof sandcastle.run>[0]) =>
       new SandcastleError({ message: `Sandcastle run failed: ${options.name ?? "agent"}`, cause }),
   });
 
+const commitPreservedWorktreeChanges = Effect.fn("commitPreservedWorktreeChanges")(function* (
+  agentName: string,
+  result: { readonly preservedWorktreePath?: string },
+) {
+  const worktreePath = result.preservedWorktreePath;
+  if (worktreePath === undefined) return false;
+
+  const status = yield* gitIn(worktreePath, ["status", "--porcelain"]);
+  if (status.trim().length === 0) return false;
+
+  yield* Console.log(`[${agentName}] Committing uncommitted verification changes.`);
+  yield* gitIn(worktreePath, ["add", "--all"]);
+
+  const stagedFiles = yield* gitIn(worktreePath, ["diff", "--cached", "--name-only"]);
+  if (stagedFiles.trim().length === 0) return false;
+
+  yield* gitIn(worktreePath, ["commit", "-m", `chore: include ${agentName} verification changes`]);
+  return true;
+});
+
 const program = Effect.gen(function* () {
   const agent = sandboxedOpenCode("openai/gpt-5.5");
   const vcs = yield* detectVcs();
@@ -642,8 +687,13 @@ const program = Effect.gen(function* () {
 
           yield* Console.log(`${issue.id}: ${issue.title} -> ${branch}`);
 
-          if (implementation.commits.length > 0) {
-            yield* runAgent({
+          const implementationVerificationCommit = yield* commitPreservedWorktreeChanges(
+            "implementer",
+            implementation,
+          );
+
+          if (implementation.commits.length > 0 || implementationVerificationCommit) {
+            const review = yield* runAgent({
               agent,
               sandbox,
               name: "reviewer",
@@ -662,6 +712,8 @@ const program = Effect.gen(function* () {
               maxIterations: agentIterations,
               completionSignal,
             });
+
+            yield* commitPreservedWorktreeChanges("reviewer", review);
           }
 
           yield* runAgent({

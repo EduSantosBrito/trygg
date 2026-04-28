@@ -11,13 +11,13 @@ Use `Resource` when async data should be cached by key, deduplicated across call
 For API-backed components, define the client as a service, build a keyed resource from that service, and then pattern-match the returned state:
 
 ```tsx
-import { Effect, Layer } from "effect"
-import * as Context from "effect/Context"
-import { Component, Resource, Signal, type ComponentProps } from "trygg"
+import { Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import { Component, Resource, Signal, type ComponentProps } from "trygg";
 
 interface User {
-  readonly id: string
-  readonly name: string
+  readonly id: string;
+  readonly name: string;
 }
 
 class UsersApi extends Context.Service<
@@ -28,17 +28,17 @@ class UsersApi extends Context.Service<
 const userResource = Resource.make(
   ({ id }: { readonly id: string }) =>
     Effect.gen(function* () {
-      const api = yield* UsersApi
-      return yield* api.getUser(id)
+      const api = yield* UsersApi;
+      return yield* api.getUser(id);
     }),
   { key: ({ id }) => Resource.hash("users.get", { id }) },
-)
+);
 
 const UserPanel = Component.gen(function* (
   Props: ComponentProps<{ readonly userId: Signal.Signal<string> }>,
 ) {
-  const { userId } = yield* Props
-  const state = yield* Resource.fetch(userResource, { id: userId })
+  const { userId } = yield* Props;
+  const state = yield* Resource.fetch(userResource, { id: userId });
 
   return yield* Resource.match(state).pipe(
     Resource.on("Pending", () => <p>Loading user...</p>),
@@ -58,14 +58,14 @@ const UserPanel = Component.gen(function* (
     )),
     Resource.on("Failure", ({ error }) => <p>{String(error)}</p>),
     Resource.exhaustive,
-  )
-})
+  );
+});
 
 const App = UserPanel.provide(
   Layer.succeed(UsersApi, {
     getUser: (id) => Effect.succeed({ id, name: `User ${id}` }),
   }),
-)
+);
 ```
 
 Reactive fetches keep the output signal stable while params change. That means child views can stay mounted while the backing key switches, and in-flight work for the previous key is cancelled instead of racing the next result.
@@ -73,9 +73,9 @@ Reactive fetches keep the output signal stable while params change. That means c
 For full async lifecycle control — loading, success, error, retry, and timeout — combine `Resource` with `Effect.retry` and `Effect.timeout` inside the fetch descriptor. Trigger fetches from event handlers by calling `Resource.fetch` with updated signal params, or use `Resource.invalidate` to force a background refetch while keeping stale data visible:
 
 ```tsx
-import { Effect, Layer, Schedule } from "effect"
-import * as Context from "effect/Context"
-import { Component, Resource, Signal, type ComponentProps } from "trygg"
+import { Effect, Layer, Schedule } from "effect";
+import * as Context from "effect/Context";
+import { Component, Resource, Signal, type ComponentProps } from "trygg";
 
 class UsersApi extends Context.Service<
   UsersApi,
@@ -85,7 +85,7 @@ class UsersApi extends Context.Service<
 const userResource = Resource.make(
   ({ id }: { readonly id: string }) =>
     Effect.gen(function* () {
-      const api = yield* UsersApi
+      const api = yield* UsersApi;
       return yield* api.getUser(id).pipe(
         Effect.retry({
           schedule: Schedule.exponential("100 millis"),
@@ -93,16 +93,16 @@ const userResource = Resource.make(
         }),
         Effect.timeout("5 seconds"),
         Effect.tapError((e) => Effect.log(`fetch failed: ${e}`)),
-      )
+      );
     }),
   { key: ({ id }) => Resource.hash("users.get", { id }) },
-)
+);
 
 const AsyncUserPanel = Component.gen(function* (
   Props: ComponentProps<{ readonly userId: Signal.Signal<string> }>,
 ) {
-  const { userId } = yield* Props
-  const state = yield* Resource.fetch(userResource, { id: userId })
+  const { userId } = yield* Props;
+  const state = yield* Resource.fetch(userResource, { id: userId });
 
   return yield* Resource.match(state).pipe(
     Resource.on("Pending", () => <p>Loading user...</p>),
@@ -125,9 +125,7 @@ const AsyncUserPanel = Component.gen(function* (
         <p>{String(error)}</p>
         <button
           onClick={() =>
-            Signal.get(userId).pipe(
-              Effect.flatMap((id) => Resource.refresh(userResource({ id }))),
-            )
+            Signal.get(userId).pipe(Effect.flatMap((id) => Resource.refresh(userResource({ id }))))
           }
         >
           Retry
@@ -135,8 +133,8 @@ const AsyncUserPanel = Component.gen(function* (
       </div>
     )),
     Resource.exhaustive,
-  )
-})
+  );
+});
 ```
 
 When deciding between `Signal.get` and passing signals directly to JSX:

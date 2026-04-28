@@ -9,13 +9,7 @@
  * @since 1.0.0
  * @module trygg/jsx-dev-runtime
  */
-import {
-  jsx,
-  Fragment,
-  Element,
-  type JSXElementType,
-  type ElementKey,
-} from "./jsx-runtime.js";
+import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType } from "./primitives/component.js";
 import type { ComponentElementWithRequirements } from "./primitives/element.js";

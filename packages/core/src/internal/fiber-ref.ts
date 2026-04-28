@@ -1,9 +1,7 @@
 import { Effect } from "effect";
 import * as Context from "effect/Context";
 
-export const getFiberRef = <A>(
-  reference: Context.Reference<A>,
-): Effect.Effect<A, never, never> =>
+export const getFiberRef = <A>(reference: Context.Reference<A>): Effect.Effect<A, never, never> =>
   Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(reference)));
 
 export const setFiberRef = <A>(

@@ -14,38 +14,34 @@ Use `Signal.get` for structural branching, but keep leaf updates signal-driven:
 
 ```tsx
 const AuthStatus = Component.gen(function* () {
-  const signedIn = yield* Signal.make(false)
-  const label = yield* Signal.derive(signedIn, (value) =>
-    value ? "Sign out" : "Sign in",
-  )
+  const signedIn = yield* Signal.make(false);
+  const label = yield* Signal.derive(signedIn, (value) => (value ? "Sign out" : "Sign in"));
 
-  const showPrivateUi = yield* Signal.get(signedIn)
+  const showPrivateUi = yield* Signal.get(signedIn);
 
   return (
     <section>
       <button onClick={() => Signal.update(signedIn, (value) => !value)}>{label}</button>
       {showPrivateUi ? <Dashboard /> : <LoginPrompt />}
     </section>
-  )
-})
+  );
+});
 ```
 
 For conditional rendering with a boolean signal, use `Signal.get` when the branch changes component structure, and keep leaf content signal-driven:
 
 ```tsx
 const TogglePanel = Component.gen(function* () {
-  const isOpen = yield* Signal.make(false)
-  const showPanel = yield* Signal.get(isOpen)
+  const isOpen = yield* Signal.make(false);
+  const showPanel = yield* Signal.get(isOpen);
 
   return (
     <section>
-      <button onClick={() => Signal.update(isOpen, (v) => !v)}>
-        {isOpen ? "Close" : "Open"}
-      </button>
+      <button onClick={() => Signal.update(isOpen, (v) => !v)}>{isOpen ? "Close" : "Open"}</button>
       {showPanel ? <PanelContent /> : null}
     </section>
-  )
-})
+  );
+});
 ```
 
 Notice that `isOpen` is passed directly to JSX inside the button text for a surgical text update, while `Signal.get(isOpen)` is used for the structural `?` branch. Pass signals directly to JSX when only DOM content changes; call `Signal.get` only when the component must re-run for structural decisions.
@@ -54,35 +50,33 @@ For lists, `Signal.each` keeps item scopes keyed by identity, so reordering or r
 
 ```tsx
 const TodoList = Component.gen(function* () {
-  const items = yield* Signal.make<
-    ReadonlyArray<{ readonly id: string; readonly text: string }>
-  >([])
+  const items = yield* Signal.make<ReadonlyArray<{ readonly id: string; readonly text: string }>>(
+    [],
+  );
 
   return (
     <ul>
-      {Signal.each(
-        items,
-        (item) => Effect.succeed(<TodoRow text={item.text} />),
-        { key: (item) => item.id },
-      )}
+      {Signal.each(items, (item) => Effect.succeed(<TodoRow text={item.text} />), {
+        key: (item) => item.id,
+      })}
     </ul>
-  )
-})
+  );
+});
 ```
 
 There is no separate "signal middleware" primitive. The predictable cross-component pattern is to keep the raw signal private inside a service and expose typed Effect methods that intercept, transform, validate, log, or batch updates before writing. This gives you middleware behavior with full type safety:
 
 ```tsx
-import { Effect, Layer, Schedule } from "effect"
-import * as Context from "effect/Context"
+import { Effect, Layer, Schedule } from "effect";
+import * as Context from "effect/Context";
 
-const rawQuery = Signal.makeSync("")
+const rawQuery = Signal.makeSync("");
 
 class SearchStore extends Context.Service<
   SearchStore,
   {
-    readonly query: Signal.Signal<string>
-    readonly setQuery: (raw: string) => Effect.Effect<void>
+    readonly query: Signal.Signal<string>;
+    readonly setQuery: (raw: string) => Effect.Effect<void>;
   }
 >("example/SearchStore") {}
 
@@ -90,30 +84,28 @@ const SearchStoreLive = Layer.succeed(SearchStore, {
   query: rawQuery,
   setQuery: (raw) =>
     Effect.gen(function* () {
-      const next = raw.trim().replaceAll(/\s+/g, " ")
-      yield* Signal.set(rawQuery, next)
-      yield* Effect.log(`search.query:${next}`)
+      const next = raw.trim().replaceAll(/\s+/g, " ");
+      yield* Signal.set(rawQuery, next);
+      yield* Effect.log(`search.query:${next}`);
     }),
-})
+});
 
 const SearchInput = Component.gen(function* () {
-  const store = yield* SearchStore
+  const store = yield* SearchStore;
   return (
     <input
       value={store.query}
       onInput={(event) =>
-        event.target instanceof HTMLInputElement
-          ? store.setQuery(event.target.value)
-          : Effect.void
+        event.target instanceof HTMLInputElement ? store.setQuery(event.target.value) : Effect.void
       }
     />
-  )
-})
+  );
+});
 
 const SearchBadge = Component.gen(function* () {
-  const store = yield* SearchStore
-  return <p>Query: {store.query}</p>
-})
+  const store = yield* SearchStore;
+  return <p>Query: {store.query}</p>;
+});
 ```
 
 That pattern keeps update rules in one place, preserves type safety at the boundary, and lets multiple components share one signal without directly mutating it.
@@ -121,14 +113,14 @@ That pattern keeps update rules in one place, preserves type safety at the bound
 For cross-component interception, compose multiple middleware concerns in the service method:
 
 ```tsx
-const rawCount = Signal.makeSync(0)
+const rawCount = Signal.makeSync(0);
 
 class CounterStore extends Context.Service<
   CounterStore,
   {
-    readonly count: Signal.Signal<number>
-    readonly increment: () => Effect.Effect<void>
-    readonly decrement: () => Effect.Effect<void>
+    readonly count: Signal.Signal<number>;
+    readonly increment: () => Effect.Effect<void>;
+    readonly decrement: () => Effect.Effect<void>;
   }
 >("example/CounterStore") {}
 
@@ -136,24 +128,24 @@ const CounterStoreLive = Layer.succeed(CounterStore, {
   count: rawCount,
   increment: () =>
     Effect.gen(function* () {
-      const current = yield* Signal.get(rawCount)
+      const current = yield* Signal.get(rawCount);
       if (current >= 100) {
-        yield* Effect.log("max reached")
-        return
+        yield* Effect.log("max reached");
+        return;
       }
-      yield* Signal.update(rawCount, (n) => n + 1)
-      yield* Effect.log(`incremented to ${current + 1}`)
+      yield* Signal.update(rawCount, (n) => n + 1);
+      yield* Effect.log(`incremented to ${current + 1}`);
     }),
   decrement: () =>
     Effect.gen(function* () {
-      const current = yield* Signal.get(rawCount)
+      const current = yield* Signal.get(rawCount);
       if (current <= 0) {
-        yield* Effect.log("min reached")
-        return
+        yield* Effect.log("min reached");
+        return;
       }
-      yield* Signal.update(rawCount, (n) => n - 1)
+      yield* Signal.update(rawCount, (n) => n - 1);
     }),
-})
+});
 ```
 
 For debouncing, use `Effect.sleep` inside the service method so callers fire immediately but only the last update wins:
@@ -163,12 +155,12 @@ const DebouncedSearchStoreLive = Layer.succeed(SearchStore, {
   query: rawQuery,
   setQuery: (raw) =>
     Effect.gen(function* () {
-      yield* Effect.sleep("200 millis")
-      const next = raw.trim()
-      yield* Signal.set(rawQuery, next)
-      yield* Effect.log(`debounced:${next}`)
+      yield* Effect.sleep("200 millis");
+      const next = raw.trim();
+      yield* Signal.set(rawQuery, next);
+      yield* Effect.log(`debounced:${next}`);
     }),
-})
+});
 ```
 
 Because the raw signal is never exported, all mutations flow through the service boundary. Components read the signal directly for fine-grained updates, but write only through typed Effect methods. This makes interception, transformation, and cross-component coordination predictable and testable.

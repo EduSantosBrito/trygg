@@ -109,11 +109,7 @@ const runJsx = (
  * @public
  * @since 1.0.0
  */
-export function jsx(
-  type: string,
-  props: Record<string, unknown> | null,
-  key?: ElementKey,
-): Element;
+export function jsx(type: string, props: Record<string, unknown> | null, key?: ElementKey): Element;
 export function jsx<Props extends Record<string, unknown>, E, R>(
   type: ComponentType.Type<Props, E, R>,
   props: Props | null,

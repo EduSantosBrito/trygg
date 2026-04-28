@@ -45,8 +45,7 @@ const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   _renderContext: RenderContext,
   context: Context.Context<unknown> | null,
-): Effect.Effect<A, E, unknown> =>
-  context === null ? effect : Effect.provide(effect, context);
+): Effect.Effect<A, E, unknown> => (context === null ? effect : Effect.provide(effect, context));
 
 /**
  * Omit a single key from a props object.
@@ -170,9 +169,8 @@ export interface RenderResult {
   ) => Effect.Effect<boolean, unknown, unknown>;
 }
 
-const normalizeContext = (
-  context: Context.Context<unknown> | null,
-): Context.Context<unknown> => context ?? emptyContext;
+const normalizeContext = (context: Context.Context<unknown> | null): Context.Context<unknown> =>
+  context ?? emptyContext;
 
 const equalOrChanged = (left: unknown, right: unknown): boolean => {
   try {
@@ -875,10 +873,7 @@ const renderElement = (
             slot.endMarker.remove();
           });
 
-        const renderChildSlot = (
-          child: Element,
-          childContext: Context.Context<unknown> | null,
-        ) =>
+        const renderChildSlot = (child: Element, childContext: Context.Context<unknown> | null) =>
           Effect.gen(function* () {
             const fragment = document.createDocumentFragment();
             const startMarker = document.createComment("child-start");

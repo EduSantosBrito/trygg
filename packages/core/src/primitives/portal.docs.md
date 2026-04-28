@@ -12,7 +12,7 @@ For modal lifecycle, keep open state in a signal and pass it to `visible`. When 
 
 ```tsx
 const ModalDemo = Component.gen(function* () {
-  const isOpen = yield* Signal.make(false)
+  const isOpen = yield* Signal.make(false);
 
   const ModalRoot = yield* Portal.make(
     <div className="backdrop">
@@ -22,15 +22,15 @@ const ModalDemo = Component.gen(function* () {
       </div>
     </div>,
     { target: document.body },
-  )
+  );
 
   return (
     <>
       <button onClick={() => Signal.set(isOpen, true)}>Open modal</button>
       <ModalRoot visible={isOpen} />
     </>
-  )
-})
+  );
+});
 ```
 
 The modal still reads the same services and signals as the owner component because only DOM placement changes; ownership and Effect context do not.

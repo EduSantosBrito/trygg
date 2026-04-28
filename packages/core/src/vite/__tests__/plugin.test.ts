@@ -6,7 +6,9 @@ import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import { Cause, Effect, Exit, FileSystem, Schema, Scope } from "effect";
+import type { AddressInfo } from "node:net";
 import * as path from "path";
+import { createServer } from "vite";
 import {
   trygg,
   extractParamNames,
@@ -48,6 +50,9 @@ const makeTempDir = (
     );
     return dir;
   });
+
+const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
+  typeof address === "object" && address !== null;
 
 describe("Vite Plugin", () => {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -126,6 +131,48 @@ export const routes = { manifest: [] }
         assert.include(entry, 'import { routes } from "../app/routes"');
         assert.include(index, '<script type="module" src="/.trygg/entry.tsx"></script>');
         assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should configureServer generate dev entry and serve SPA shell through Vite", () =>
+      Effect.gen(function* () {
+        // Test: should configureServer generate dev entry and serve SPA shell through Vite
+        // Scope: covers the real dev-server hook path from Vite bootstrap to middleware response.
+        // Assertion: generated entry exists and a non-file GET returns the transformed SPA shell.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            createServer({
+              root,
+              configFile: false,
+              server: { host: "127.0.0.1", port: 0 },
+              plugins: [trygg()],
+            }),
+          ),
+          (viteServer) => Effect.promise(() => viteServer.close()).pipe(Effect.ignore),
+        );
+
+        yield* Effect.promise(() => server.listen(0));
+        const address = server.httpServer?.address() ?? null;
+        if (!isAddressInfo(address)) {
+          throw new Error("Expected Vite dev server to listen on a TCP port");
+        }
+
+        const entry = yield* fs.readFileString(path.join(root, ".trygg", "entry.tsx"));
+        const response = yield* Effect.promise(() =>
+          fetch(`http://127.0.0.1:${address.port}/dashboard?tab=dev`, {
+            headers: { accept: "text/html" },
+          }),
+        );
+        const html = yield* Effect.promise(() => response.text());
+
+        assert.strictEqual(response.status, 200);
+        assert.include(entry, 'import { routes } from "../app/routes"');
+        assert.include(html, '<script type="module" src="/.trygg/entry.tsx"></script>');
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
