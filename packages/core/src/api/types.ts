@@ -2,9 +2,12 @@
  * Type utilities for the `trygg/api` entrypoint.
  *
  * @remarks
- * Owner module for the API typing surface used by `app/api.ts`. These exports
- * stay compile-time only, and the same symbols are also reachable from the
- * root `trygg.Api` namespace.
+ * Owner module for the API typing surface used by `app/api.ts`. The same
+ * symbols are also reachable from the root `trygg.Api` namespace.
+ *
+ * When the Vite plugin is active and `app/api.ts` exports `const Api`, the
+ * `trygg/api` virtual module additionally provides runtime exports
+ * (`ApiClient`, `ApiClientLive`) generated from that `Api` definition.
  *
  * @see ./api.docs.md - Source-owned topic guide
  * @since 1.0.0

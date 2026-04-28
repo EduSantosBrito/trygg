@@ -59,23 +59,41 @@ Use `trygg/api` type utilities inside `app/api.ts`. The owner docs in [`src/api/
 
 ```ts
 // app/api.ts
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "@effect/platform";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiBuilder } from "effect/unstable/httpapi";
 import { Effect, Layer, Schema } from "effect";
 
-class UsersGroup extends HttpApiGroup.make("users")
-  .add(HttpApiEndpoint.get("list", "/users").addSuccess(Schema.Array(User)))
-  .prefix("/api") {}
-
-class Api extends HttpApi.make("app").add(UsersGroup) {}
-
-const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
-  handlers.handle("list", () => Effect.succeed(users)),
+const Group = HttpApiGroup.make("users").add(
+  HttpApiEndpoint.get("list", "/api/users").addSuccess(Schema.Array(UserSchema)),
 );
 
-export default HttpApiBuilder.api(Api).pipe(Layer.provide(UsersLive));
+export const Api = HttpApi.make("app").add(Group);
+
+const HandlersLive = HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(
+    HttpApiBuilder.group(Api, "users", (handlers) =>
+      handlers.handle("list", () => Effect.succeed(users)),
+    ),
+  ),
+);
+
+export default HandlersLive;
 ```
 
 The plugin serves API routes in dev and bundles them for production.
+
+When `app/api.ts` exports `const Api`, the plugin also generates `ApiClient` and `ApiClientLive` from `trygg/api`. Import them explicitly and provide the layer where needed:
+
+```ts
+import { ApiClient, ApiClientLive } from "trygg/api";
+
+const users = Resource.make(
+  () => Effect.gen(function* () {
+    const client = yield* ApiClient;
+    return yield* client.users.list();
+  }),
+  { key: "users.list" },
+).provide(ApiClientLive);
+```
 
 ## Core Concepts
 
