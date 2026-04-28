@@ -47,6 +47,7 @@ import {
   makePluginFilesLayer,
   makePluginApi,
   makeViteServer,
+  makeStableHandlerFactoryLoader,
   generateHtmlTemplate,
   makeBuildOutput,
   type ParsedRoute,
@@ -1148,6 +1149,85 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         assert.deepStrictEqual(seen, ["Loading", "Ready"]);
         assert.strictEqual(state._tag, "Ready");
+      }),
+    );
+
+    scoped("should load stable handler factory once while reloads reload api code", () =>
+      Effect.gen(function* () {
+        // Test: should load stable handler factory once while reloads reload api code
+        // Scope: covers the dev API bootstrap/reload boundary owned by the plugin lifecycle.
+        // Assertion: factory loading happens once, while initial load plus reloads run user API work.
+        let factoryLoads = 0;
+        let apiLoads = 0;
+        const stableHandlerFactory = makeStableHandlerFactoryLoader(
+          Effect.sync(() => {
+            factoryLoads += 1;
+            return handlerFactory;
+          }),
+        );
+
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: stableHandlerFactory,
+          makeApi: () =>
+            Effect.sync(() => {
+              apiLoads += 1;
+              return {
+                middleware: (_req, _res, next) => next(),
+                reload: Effect.sync(() => {
+                  apiLoads += 1;
+                }),
+                dispose: Effect.void,
+              };
+            }),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+
+        yield* state.handle.reload;
+        yield* state.handle.reload;
+        yield* stableHandlerFactory;
+
+        assert.strictEqual(factoryLoads, 1);
+        assert.strictEqual(apiLoads, 3);
+      }),
+    );
+
+    scoped("should share one stable handler factory load across overlapping callers", () =>
+      Effect.gen(function* () {
+        // Test: should share one stable handler factory load across overlapping callers
+        // Scope: covers rapid repeated bootstrap consumers before the first load completes.
+        // Assertion: overlapping calls await the same load and receive the same factory value.
+        const loadStarted = yield* Deferred.make<void, never>();
+        const releaseLoad = yield* Deferred.make<void, never>();
+        let factoryLoads = 0;
+        const stableHandlerFactory = makeStableHandlerFactoryLoader(
+          Effect.gen(function* () {
+            factoryLoads += 1;
+            yield* Deferred.succeed(loadStarted, undefined).pipe(Effect.asVoid);
+            yield* Deferred.await(releaseLoad);
+            return handlerFactory;
+          }),
+        );
+
+        const first = yield* stableHandlerFactory.pipe(Effect.forkChild);
+        yield* Deferred.await(loadStarted);
+        const second = yield* stableHandlerFactory.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(factoryLoads, 1);
+
+        yield* Deferred.succeed(releaseLoad, undefined).pipe(Effect.asVoid);
+        const [firstFactory, secondFactory] = yield* Effect.all([
+          Fiber.join(first),
+          Fiber.join(second),
+        ]);
+
+        assert.strictEqual(firstFactory, handlerFactory);
+        assert.strictEqual(secondFactory, handlerFactory);
+        assert.strictEqual(factoryLoads, 1);
       }),
     );
 

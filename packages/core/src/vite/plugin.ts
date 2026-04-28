@@ -2285,6 +2285,21 @@ const loadHandlerFactory = (viteServer: ViteServer): Effect.Effect<HandlerFactor
   });
 
 /**
+ * Memoize the dev API handler factory load for one plugin lifecycle.
+ *
+ * @remarks
+ * The handler factory is framework-owned and stable; API reloads should reuse it
+ * so Vite only reloads user API modules after bootstrap.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export const makeStableHandlerFactoryLoader = (
+  load: Effect.Effect<HandlerFactory, ApiInitError>,
+): Effect.Effect<HandlerFactory, ApiInitError> => Effect.runSync(Effect.cached(load));
+
+/**
  * Create trygg Vite plugin with platform-aware dev API.
  *
  * @remarks
@@ -2400,10 +2415,11 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           Effect.annotateLogs("style", "success"),
         );
 
+        const stableHandlerFactory = makeStableHandlerFactoryLoader(loadHandlerFactory(viteServer));
         const apiState = yield* PluginApi.loadInitial({
           apiPath,
           hasApi: pathExists(apiPath),
-          loadHandlerFactory: loadHandlerFactory(viteServer),
+          loadHandlerFactory: stableHandlerFactory,
           makeApi: (handlerFactory) =>
             devPlatform.makeApi({
               loadApiModule: () => viteServer.loadModule(apiPath, "Failed to load API module"),
