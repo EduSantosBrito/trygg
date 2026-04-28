@@ -99,7 +99,7 @@ const initHandler = (
 
     // Detect and compose API layer using SSR-loaded factory
     const factory = options.handlerFactory;
-    const apiLive = yield* factory.detectAndComposeLayer(mod.value).pipe(
+    const apiLive = yield* factory.makeApiLayer(mod.value).pipe(
       Effect.mapError(
         (cause) => new ApiInitError({ message: "Failed to detect API layer", cause }),
       ),
@@ -114,12 +114,12 @@ const initHandler = (
     if (Option.isNone(apiLive)) return;
 
     // Create Node handler using SSR-loaded factory
-    if (factory.createNodeHandler === undefined) {
+    if (factory.makeNodeHandler === undefined) {
       return yield* new ApiInitError({
-        message: "createNodeHandler not available in handler factory",
+        message: "makeNodeHandler not available in handler factory",
       });
     }
-    const result = yield* factory.createNodeHandler(apiLive.value).pipe(
+    const result = yield* factory.makeNodeHandler(apiLive.value).pipe(
       Effect.mapError(
         (cause) => new ApiInitError({ message: "Failed to create API handler", cause }),
       ),

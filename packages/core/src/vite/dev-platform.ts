@@ -67,11 +67,11 @@ export interface DevApiHandle {
  */
 export interface HandlerFactory {
   /** Extract default export from api module, validate as API layer */
-  readonly detectAndComposeLayer: (
+  readonly makeApiLayer: (
     mod: Record<string, unknown>,
   ) => Effect.Effect<Layer.Layer<unknown>, unknown>;
   /** Create a Node.js handler from a composed API layer (Node platform only) */
-  readonly createNodeHandler?: (apiLive: Layer.Layer<unknown>) => Effect.Effect<
+  readonly makeNodeHandler?: (apiLive: Layer.Layer<unknown>) => Effect.Effect<
     {
       readonly handler: (req: IncomingMessage, res: ServerResponse) => void;
       readonly dispose: Effect.Effect<void>;
@@ -80,7 +80,7 @@ export interface HandlerFactory {
     Scope.Scope
   >;
   /** Create a web-standard handler from a composed API layer */
-  readonly createWebHandler: (apiLive: Layer.Layer<unknown>) => {
+  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => {
     readonly handler: (request: Request) => Promise<Response>;
     readonly dispose: () => void;
   };

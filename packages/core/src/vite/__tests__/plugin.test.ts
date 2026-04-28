@@ -6,9 +6,11 @@ import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import { Cause, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
-import { createServer } from "vite";
+import { createServer as createViteServer } from "vite";
 import {
   trygg,
   extractParamNames,
@@ -39,7 +41,9 @@ const makeTempDir = (
 ): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const dir = yield* fs.makeTempDirectory({ prefix: "trygg-test-" }).pipe(Effect.orDie);
+    const dir = yield* fs
+      .makeTempDirectory({ directory: process.cwd(), prefix: "trygg-test-" })
+      .pipe(Effect.orDie);
     yield* Effect.addFinalizer(() => fs.remove(dir, { recursive: true }).pipe(Effect.ignore));
     yield* Effect.forEach(Object.entries(files), ([filePath, content]) =>
       Effect.gen(function* () {
@@ -58,6 +62,81 @@ const makeTempDir = (
 
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
+
+const LoadHookSchema = Schema.declare(
+  (u: unknown): u is (id: string) => Promise<string | null> => typeof u === "function",
+);
+
+const ResolveIdHookSchema = Schema.declare(
+  (u: unknown): u is (id: string) => string | null => typeof u === "function",
+);
+
+interface HandlerFactoryBoundaryModule {
+  readonly makeApiLayer: (
+    mod: Record<string, unknown>,
+  ) => Effect.Effect<Layer.Layer<unknown>, unknown>;
+  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => {
+    readonly handler: (request: Request) => Promise<Response>;
+    readonly dispose: () => void;
+  };
+  readonly makeNodeHandler: (apiLive: Layer.Layer<unknown>) => Effect.Effect<unknown, unknown>;
+  readonly fromNodeRequest: (req: IncomingMessage) => Promise<Request>;
+  readonly toNodeResponse: (response: Response, res: ServerResponse) => Promise<void>;
+  readonly getBody: (req: IncomingMessage) => Promise<Uint8Array | undefined>;
+}
+
+interface HttpResult {
+  readonly status: number;
+  readonly bridgeHeader: string | undefined;
+  readonly body: string;
+}
+
+const HandlerFactoryBoundaryModuleSchema = Schema.Struct({
+  makeApiLayer: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["makeApiLayer"] => typeof u === "function",
+  ),
+  makeWebHandler: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["makeWebHandler"] => typeof u === "function",
+  ),
+  makeNodeHandler: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["makeNodeHandler"] => typeof u === "function",
+  ),
+  fromNodeRequest: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["fromNodeRequest"] => typeof u === "function",
+  ),
+  toNodeResponse: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["toNodeResponse"] => typeof u === "function",
+  ),
+  getBody: Schema.declare(
+    (u: unknown): u is HandlerFactoryBoundaryModule["getBody"] => typeof u === "function",
+  ),
+});
+
+const loadHandlerFactoryModule = (): Effect.Effect<
+  HandlerFactoryBoundaryModule,
+  Error,
+  FileSystem.FileSystem | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const root = yield* makeTempDir({
+      "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+      "app/routes.ts": "export const routes = { manifest: [] }",
+    });
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        createViteServer({
+          root,
+          configFile: false,
+          plugins: [trygg({ platform: "node", output: "server" })],
+        }),
+      ),
+      (viteServer) => Effect.promise(() => viteServer.close()).pipe(Effect.ignore),
+    );
+    const rawModule = yield* Effect.promise(() =>
+      server.ssrLoadModule("virtual:trygg/handler-factory"),
+    );
+    return Schema.decodeUnknownSync(HandlerFactoryBoundaryModuleSchema)(rawModule);
+  });
 
 describe("Vite Plugin", () => {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -160,7 +239,7 @@ export const routes = { manifest: [] }
         });
         const server = yield* Effect.acquireRelease(
           Effect.promise(() =>
-            createServer({
+            createViteServer({
               root,
               configFile: false,
               server: { host: "127.0.0.1", port: 0 },
@@ -187,6 +266,123 @@ export const routes = { manifest: [] }
         assert.strictEqual(response.status, 200);
         assert.include(entry, 'import { routes } from "../app/routes"');
         assert.include(html, '<script type="module" src="/.trygg/entry.tsx"></script>');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should load handler factory virtual module with make vocabulary", () =>
+      Effect.gen(function* () {
+        // Test: should load handler factory virtual module with make vocabulary
+        // Scope: validates the SSR-loaded virtual module contract at the plugin load boundary.
+        // Assertion: generated module exports make/from/to/get names and omits superseded create/detect names.
+        const plugin = trygg({ platform: "node", output: "server" });
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+        const resolvedId = resolveId("virtual:trygg/handler-factory");
+        if (resolvedId === null) {
+          return yield* Effect.die(new Error("Expected handler factory virtual module to resolve"));
+        }
+
+        const code = yield* Effect.promise(() => load(resolvedId));
+        if (code === null) {
+          return yield* Effect.die(new Error("Expected handler factory virtual module to load"));
+        }
+
+        const mod = yield* loadHandlerFactoryModule();
+        assert.isFunction(mod.makeApiLayer);
+        assert.isFunction(mod.makeWebHandler);
+        assert.isFunction(mod.makeNodeHandler);
+        assert.isFunction(mod.fromNodeRequest);
+        assert.isFunction(mod.toNodeResponse);
+        assert.isFunction(mod.getBody);
+        assert.notInclude(code, "detectAndComposeLayer");
+        assert.notInclude(code, "createWebHandler");
+        assert.notInclude(code, "createNodeHandler");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should bridge node request and response at handler factory boundary", () =>
+      Effect.gen(function* () {
+        // Test: should bridge node request and response at handler factory boundary
+        // Scope: covers generated Node factory helpers where IncomingMessage/ServerResponse meet web Request/Response.
+        // Assertion: body, headers, URL, status, and response headers round-trip through fromNodeRequest/toNodeResponse.
+        const mod = yield* loadHandlerFactoryModule();
+
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            createHttpServer((req, res) => {
+              void mod
+                .fromNodeRequest(req)
+                .then(async (request) => {
+                  const body = await request.text();
+                  const response = new Response(`${request.method} ${request.url} ${body}`, {
+                    status: 201,
+                    headers: { "x-bridge": request.headers.get("x-repeat") ?? "" },
+                  });
+                  await mod.toNodeResponse(response, res);
+                })
+                .catch(() => {
+                  res.statusCode = 500;
+                  res.end("bridge failed");
+                });
+            }),
+          ),
+          (httpServer) =>
+            Effect.promise<void>(
+              () =>
+                new Promise((resolve) => {
+                  httpServer.close(() => resolve());
+                }),
+            ),
+        );
+        yield* Effect.promise<void>(
+          () =>
+            new Promise((resolve) => {
+              server.listen(0, "127.0.0.1", () => resolve());
+            }),
+        );
+        const address = server.address();
+        if (!isAddressInfo(address)) {
+          return yield* Effect.die(new Error("Expected test HTTP server to listen on a TCP port"));
+        }
+
+        const response = yield* Effect.promise<HttpResult>(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = httpRequest(
+                {
+                  hostname: "127.0.0.1",
+                  port: address.port,
+                  path: "/api/widgets?debug=1",
+                  method: "POST",
+                  headers: { "x-repeat": "alpha, beta" },
+                },
+                (res) => {
+                  const chunks: Array<string> = [];
+                  res.setEncoding("utf8");
+                  res.on("data", (chunk: string) => chunks.push(chunk));
+                  res.on("end", () => {
+                    const bridgeHeader = res.headers["x-bridge"];
+                    resolve({
+                      status: res.statusCode ?? 0,
+                      bridgeHeader: Array.isArray(bridgeHeader)
+                        ? bridgeHeader.join(", ")
+                        : bridgeHeader,
+                      body: chunks.join(""),
+                    });
+                  });
+                },
+              );
+              req.on("error", reject);
+              req.end("payload");
+            }),
+        );
+
+        assert.strictEqual(response.status, 201);
+        assert.strictEqual(response.bridgeHeader, "alpha, beta");
+        assert.strictEqual(
+          response.body,
+          `POST http://127.0.0.1:${address.port}/api/widgets?debug=1 payload`,
+        );
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });

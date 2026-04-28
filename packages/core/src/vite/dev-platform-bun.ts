@@ -51,7 +51,7 @@ const ApiUnavailableBody = Schema.fromJsonString(
  * Returns Option.none for bodyless methods.
  * @internal
  */
-const collectBody = (req: IncomingMessage): Promise<Option.Option<Uint8Array>> => {
+const getBody = (req: IncomingMessage): Promise<Option.Option<Uint8Array>> => {
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") {
     return Promise.resolve(Option.none());
@@ -94,13 +94,13 @@ const toWebHeaders = (nodeHeaders: IncomingMessage["headers"]): Headers => {
  * Convert Node.js IncomingMessage to a web-standard Request.
  * @internal
  */
-const toWebRequest = async (req: IncomingMessage): Promise<Request> => {
+const fromNodeRequest = async (req: IncomingMessage): Promise<Request> => {
   const protocol = "http";
   const host = req.headers.host ?? "localhost";
   const url = `${protocol}://${host}${req.url ?? "/"}`;
   const method = req.method ?? "GET";
   const headers = toWebHeaders(req.headers);
-  const body = await collectBody(req);
+  const body = await getBody(req);
 
   const init: RequestInit = { method, headers };
   if (Option.isSome(body)) {
@@ -119,7 +119,7 @@ const toWebRequest = async (req: IncomingMessage): Promise<Request> => {
  * Write a web-standard Response to a Node.js ServerResponse.
  * @internal
  */
-const writeWebResponse = async (webRes: Response, nodeRes: ServerResponse): Promise<void> => {
+const toNodeResponse = async (webRes: Response, nodeRes: ServerResponse): Promise<void> => {
   nodeRes.statusCode = webRes.status;
   webRes.headers.forEach((value, key) => {
     nodeRes.setHeader(key, value);
@@ -202,7 +202,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
 
             // Use SSR-loaded factory for layer detection and web handler creation
             const factory = options.handlerFactory;
-            const apiLive = yield* factory.detectAndComposeLayer(mod.value).pipe(
+            const apiLive = yield* factory.makeApiLayer(mod.value).pipe(
               Effect.mapError(
                 (cause) => new ApiInitError({ message: "Failed to detect API layer", cause }),
               ),
@@ -217,7 +217,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
             if (Option.isNone(apiLive)) return;
 
             const result = yield* Effect.try({
-              try: () => factory.createWebHandler(apiLive.value),
+              try: () => factory.makeWebHandler(apiLive.value),
               catch: (cause) =>
                 new ApiInitError({ message: "Failed to create web handler", cause }),
             }).pipe(Effect.option);
@@ -261,9 +261,9 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
               const { value: handler } = state.handler;
               yield* Effect.tryPromise({
                 try: async () => {
-                  const webReq = await toWebRequest(req);
+                  const webReq = await fromNodeRequest(req);
                   const webRes = await handler(webReq);
-                  await writeWebResponse(webRes, res);
+                  await toNodeResponse(webRes, res);
                 },
                 catch: (cause) => new ApiInitError({ message: "Request handling failed", cause }),
               });

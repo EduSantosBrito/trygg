@@ -109,13 +109,14 @@ export interface ProductionServerEntryModuleOwner {
   readonly platform: ServerPlatformService;
 }
 
-/**
- * Shared handler factory logic for virtual modules.
- * Requires the user module to have a default export that is a composed Layer.
- * No platform-specific imports — only effect http/httpapi modules.
- * @internal
- */
-const SHARED_FACTORY_CODE = `
+const HandlerFactoryModule = {
+  /**
+   * Shared handler factory logic for virtual modules.
+   * Requires the user module to have a default export that is a composed Layer.
+   * No platform-specific imports — only effect http/httpapi modules.
+   * @internal
+   */
+  makeShared: (): string => `
 import { HttpRouter, HttpServer } from "effect/unstable/http";
 import { Data, Effect, Layer } from "effect";
 
@@ -124,7 +125,7 @@ class FactoryError extends Data.TaggedError("FactoryError") {}
 // Trust boundary: TypeScript enforces Layer<HttpApi.Api> in user code.
 // At the SSR module boundary types are erased — Layer.isLayer is the
 // strongest runtime check possible (Layer type params are phantom).
-export const detectAndComposeLayer = (mod) =>
+export const makeApiLayer = (mod) =>
   Effect.gen(function* () {
     if (!("default" in mod) || !Layer.isLayer(mod.default)) {
       return yield* new FactoryError({
@@ -135,20 +136,20 @@ export const detectAndComposeLayer = (mod) =>
     return mod.default;
   });
 
-export const createWebHandler = (apiLive) => {
+export const makeWebHandler = (apiLive) => {
   const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerServices);
   return HttpRouter.toWebHandler(apiLayer);
 };
-`;
+`,
 
-/**
- * Node handler factory — extends shared code with Request/Response bridge.
- * @internal
- */
-const NODE_HANDLER_FACTORY_CODE =
-  SHARED_FACTORY_CODE +
-  `
-const collectBody = (req) => {
+  /**
+   * Node handler factory — extends shared code with Request/Response bridge.
+   * @internal
+   */
+  makeNode: (): string =>
+    HandlerFactoryModule.makeShared() +
+    `
+export const getBody = (req) => {
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") {
     return Promise.resolve(undefined);
@@ -171,14 +172,14 @@ const collectBody = (req) => {
   });
 };
 
-const toWebRequest = async (req) => {
+export const fromNodeRequest = async (req) => {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
     headers.set(key, Array.isArray(value) ? value.join(", ") : value);
   }
 
-  const body = await collectBody(req);
+  const body = await getBody(req);
   const init = { method: req.method ?? "GET", headers };
   if (body !== undefined) {
     init.body = body;
@@ -187,7 +188,7 @@ const toWebRequest = async (req) => {
   return new Request("http://" + (req.headers.host ?? "localhost") + (req.url ?? "/"), init);
 };
 
-const writeWebResponse = async (response, res) => {
+export const toNodeResponse = async (response, res) => {
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
     res.setHeader(key, value);
@@ -210,15 +211,15 @@ const writeWebResponse = async (response, res) => {
   res.end();
 };
 
-export const createNodeHandler = (apiLive) =>
+export const makeNodeHandler = (apiLive) =>
   Effect.succeed((() => {
-    const webHandler = createWebHandler(apiLive);
+    const webHandler = makeWebHandler(apiLive);
 
     return {
       handler: (req, res) => {
-        void toWebRequest(req)
+        void fromNodeRequest(req)
           .then((request) => webHandler.handler(request))
-          .then((response) => writeWebResponse(response, res))
+          .then((response) => toNodeResponse(response, res))
           .catch(() => {
             if (!res.headersSent) {
               res.statusCode = 500;
@@ -232,14 +233,15 @@ export const createNodeHandler = (apiLive) =>
       }).pipe(Effect.orDie),
     };
   })());
-`;
+`,
 
-/**
- * Bun handler factory — shared code only (no @effect/platform-node).
- * Uses createWebHandler for handler creation.
- * @internal
- */
-const BUN_HANDLER_FACTORY_CODE = SHARED_FACTORY_CODE;
+  /**
+   * Bun handler factory — shared code only (no @effect/platform-node).
+   * Uses makeWebHandler for handler creation.
+   * @internal
+   */
+  makeBun: (): string => HandlerFactoryModule.makeShared(),
+};
 
 // =============================================================================
 // Types
@@ -1925,28 +1927,28 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           );
           // Validate factory shape at runtime instead of using `as` cast
           if (
-            typeof rawFactoryMod.detectAndComposeLayer !== "function" ||
-            typeof rawFactoryMod.createWebHandler !== "function"
+            typeof rawFactoryMod.makeApiLayer !== "function" ||
+            typeof rawFactoryMod.makeWebHandler !== "function"
           ) {
             return yield* new ApiInitError({
               message:
-                "Handler factory module missing required exports (detectAndComposeLayer, createWebHandler)",
+                "Handler factory module missing required exports (makeApiLayer, makeWebHandler)",
             });
           }
-          const detectAndComposeLayer = rawFactoryMod.detectAndComposeLayer;
-          const createWebHandler = rawFactoryMod.createWebHandler;
+          const makeApiLayer = rawFactoryMod.makeApiLayer;
+          const makeWebHandler = rawFactoryMod.makeWebHandler;
           const baseFactoryMod: HandlerFactory = {
-            detectAndComposeLayer: (mod: Record<string, unknown>) => detectAndComposeLayer(mod),
-            createWebHandler: (apiLive: Layer.Layer<unknown>) => createWebHandler(apiLive),
+            makeApiLayer: (mod: Record<string, unknown>) => makeApiLayer(mod),
+            makeWebHandler: (apiLive: Layer.Layer<unknown>) => makeWebHandler(apiLive),
           };
           const factoryMod: HandlerFactory = (() => {
-            if (typeof rawFactoryMod.createNodeHandler !== "function") {
+            if (typeof rawFactoryMod.makeNodeHandler !== "function") {
               return baseFactoryMod;
             }
-            const createNodeHandler = rawFactoryMod.createNodeHandler;
+            const makeNodeHandler = rawFactoryMod.makeNodeHandler;
             return {
               ...baseFactoryMod,
-              createNodeHandler: (apiLive: Layer.Layer<unknown>) => createNodeHandler(apiLive),
+              makeNodeHandler: (apiLive: Layer.Layer<unknown>) => makeNodeHandler(apiLive),
             };
           })();
 
@@ -2074,7 +2076,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
     async load(id: string) {
       if (id === RESOLVED_HANDLER_FACTORY_ID) {
-        return devPlatform === "node" ? NODE_HANDLER_FACTORY_CODE : BUN_HANDLER_FACTORY_CODE;
+        return devPlatform === "node"
+          ? HandlerFactoryModule.makeNode()
+          : HandlerFactoryModule.makeBun();
       }
       return null;
     },
