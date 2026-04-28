@@ -1231,6 +1231,184 @@ mountDocument(<App />, { manifest: routes.manifest })
       }),
     );
 
+    scoped("should expose reloading failed and ready states across reload recovery", () =>
+      Effect.gen(function* () {
+        // Test: should expose reloading failed and ready states across reload recovery
+        // Scope: covers the explicit dev API lifecycle during failed and recovered reloads.
+        // Assertion: observes Reloading/Failed for a failed pass and Reloading/Ready for recovery.
+        const seen: Array<PluginApi.InitialState["_tag"]> = [];
+        const error = new ApiInitError({ message: "reload failed" });
+        let runs = 0;
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.gen(function* () {
+                runs += 1;
+                if (runs === 1) {
+                  return yield* error;
+                }
+              }),
+              dispose: Effect.void,
+            }),
+          observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+
+        yield* state.handle.reload.pipe(Effect.exit);
+        yield* state.handle.reload;
+
+        assert.deepStrictEqual(seen, [
+          "Loading",
+          "Ready",
+          "Reloading",
+          "Failed",
+          "Reloading",
+          "Ready",
+        ]);
+      }),
+    );
+
+    scoped("should run coalesced follow-up after active reload fails", () =>
+      Effect.gen(function* () {
+        // Test: should run coalesced follow-up after active reload fails
+        // Scope: covers rapid api.ts changes where the active reload fails after another request queues.
+        // Assertion: the queued request produces one recovery pass and both callers complete successfully.
+        const firstStarted = yield* Deferred.make<void, never>();
+        const releaseFirst = yield* Deferred.make<void, never>();
+        const secondStarted = yield* Deferred.make<void, never>();
+        const seen: Array<PluginApi.InitialState["_tag"]> = [];
+        const error = new ApiInitError({ message: "reload failed" });
+        let runs = 0;
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.gen(function* () {
+                runs += 1;
+                if (runs === 1) {
+                  yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
+                  yield* Deferred.await(releaseFirst);
+                  return yield* error;
+                }
+                if (runs === 2) {
+                  yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+                }
+              }),
+              dispose: Effect.void,
+            }),
+          observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+
+        const first = yield* state.handle.reload.pipe(Effect.forkChild);
+        yield* Deferred.await(firstStarted);
+        const followUp = yield* state.handle.reload.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(runs, 1);
+
+        yield* Deferred.succeed(releaseFirst, undefined).pipe(Effect.asVoid);
+        yield* Deferred.await(secondStarted);
+        yield* Effect.all([Fiber.join(first), Fiber.join(followUp)]);
+
+        assert.strictEqual(runs, 2);
+        assert.deepStrictEqual(seen, [
+          "Loading",
+          "Ready",
+          "Reloading",
+          "Failed",
+          "Reloading",
+          "Ready",
+        ]);
+      }),
+    );
+
+    scoped("should keep middleware available while reload is active", () =>
+      Effect.gen(function* () {
+        // Test: should keep middleware available while reload is active
+        // Scope: covers request handling availability while the API lifecycle is Reloading.
+        // Assertion: mounted middleware continues serving requests before the reload completes.
+        const reloadStarted = yield* Deferred.make<void, never>();
+        const finishReload = yield* Deferred.make<void, never>();
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, res, _next) => {
+                res.statusCode = 204;
+                res.end();
+              },
+              reload: Effect.gen(function* () {
+                yield* Deferred.succeed(reloadStarted, undefined).pipe(Effect.asVoid);
+                yield* Deferred.await(finishReload);
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+        const api = makePluginApi(state.handle);
+        const reload = yield* api
+          .reloadChangedFile(path.join("app", "api.ts"))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(reloadStarted);
+
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            createHttpServer((req, res) =>
+              api.middleware(req, res, () => {
+                res.statusCode = 404;
+                res.end();
+              }),
+            ),
+          ),
+          (httpServer) =>
+            Effect.promise(() => new Promise<void>((resolve) => httpServer.close(() => resolve()))),
+        );
+        yield* Effect.promise(
+          () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+        );
+        const address = server.address();
+        if (!isAddressInfo(address)) {
+          return yield* Effect.die(new Error("Expected test HTTP server to listen on a TCP port"));
+        }
+
+        const status = yield* Effect.promise(
+          () =>
+            new Promise<number>((resolve, reject) => {
+              const req = httpRequest(
+                { hostname: "127.0.0.1", port: address.port, path: "/api/health" },
+                (res) => {
+                  res.resume();
+                  res.on("end", () => resolve(res.statusCode ?? 0));
+                },
+              );
+              req.on("error", reject);
+              req.end();
+            }),
+        );
+
+        yield* Deferred.succeed(finishReload, undefined).pipe(Effect.asVoid);
+        yield* Fiber.join(reload);
+
+        assert.strictEqual(status, 204);
+      }),
+    );
+
     scoped("should loadInitial expose failed state and close initial scope on failure", () =>
       Effect.gen(function* () {
         // Test: should loadInitial expose failed state and close initial scope on failure

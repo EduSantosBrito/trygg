@@ -15,6 +15,7 @@ import type { Connect, ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
 import {
   Array,
+  Cause,
   Data,
   Deferred,
   Effect,
@@ -25,6 +26,7 @@ import {
   LogLevel,
   ManagedRuntime,
   Match,
+  Option,
   References,
   Result,
   Scope,
@@ -1974,13 +1976,20 @@ export namespace PluginApi {
     readonly scope: Scope.Closeable;
   }
 
+  export interface Reloading {
+    readonly _tag: "Reloading";
+    readonly apiPath: string;
+    readonly handle: DevApiHandle;
+    readonly scope: Scope.Closeable;
+  }
+
   export interface Failed {
     readonly _tag: "Failed";
     readonly apiPath: string;
     readonly error: ImportError | ApiInitError;
   }
 
-  export type InitialState = Absent | Loading | Ready | Failed;
+  export type InitialState = Absent | Loading | Ready | Reloading | Failed;
 
   /**
    * Active dev API facade owned by the plugin layer.
@@ -2038,7 +2047,11 @@ export namespace PluginApi {
     state: InitialState,
   ): Effect.Effect<void> => options.observe?.(state) ?? Effect.void;
 
-  const coalesceReload = (reload: DevApiHandle["reload"]): Effect.Effect<DevApiHandle["reload"]> =>
+  const coalesceReload = <RHasApi>(
+    options: InitialLoadOptions<RHasApi>,
+    reload: DevApiHandle["reload"],
+    getReady: () => Ready,
+  ): Effect.Effect<DevApiHandle["reload"]> =>
     Effect.gen(function* () {
       const reloadState = yield* SynchronizedRef.make<ReloadState>(reloadIdle);
 
@@ -2048,8 +2061,41 @@ export namespace PluginApi {
         Effect.suspend(() =>
           Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
+              const ready = getReady();
+              const reloading: Reloading = { ...ready, _tag: "Reloading" };
+              yield* observe(options, reloading);
               const exit = yield* restore(reload).pipe(Effect.exit);
               if (Exit.isFailure(exit)) {
+                const foundError = Cause.findErrorOption(exit.cause);
+                const canRetry = yield* Option.match(foundError, {
+                  onNone: () => Effect.succeed(false),
+                  onSome: (error) => {
+                    if (!(error instanceof ApiInitError || error instanceof ImportError)) {
+                      return Effect.succeed(false);
+                    }
+
+                    const failed: Failed = { apiPath: ready.apiPath, error, _tag: "Failed" };
+                    return observe(options, failed).pipe(Effect.as(true));
+                  },
+                });
+
+                if (canRetry) {
+                  const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
+                    if (state._tag === "Running" && state.followUp) {
+                      const next: ReloadRunning = { _tag: "Running", followUp: false, done };
+                      const result: readonly [boolean, ReloadState] = [true, next];
+                      return Effect.succeed(result);
+                    }
+
+                    const result: readonly [boolean, ReloadState] = [false, reloadIdle];
+                    return Effect.succeed(result);
+                  });
+
+                  if (shouldReload) {
+                    return yield* runReload(done);
+                  }
+                }
+
                 yield* SynchronizedRef.set(reloadState, reloadIdle);
                 yield* Deferred.done(done, exit).pipe(Effect.asVoid);
                 return yield* Effect.failCause(exit.cause);
@@ -2070,6 +2116,7 @@ export namespace PluginApi {
                 return yield* runReload(done);
               }
 
+              yield* observe(options, ready);
               yield* Deferred.succeed(done, undefined).pipe(Effect.asVoid);
             }),
           ),
@@ -2122,14 +2169,17 @@ export namespace PluginApi {
       return yield* Effect.gen(function* () {
         const handlerFactory = yield* options.loadHandlerFactory;
         const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
-        const reload = yield* coalesceReload(handle.reload);
-        const readyHandle: DevApiHandle = { ...handle, reload };
-        const ready: Ready = {
+        const initialReady: Ready = {
           _tag: "Ready",
           apiPath: options.apiPath,
-          handle: readyHandle,
+          handle,
           scope,
         };
+        let readyState = initialReady;
+        const reload = yield* coalesceReload(options, handle.reload, () => readyState);
+        const readyHandle: DevApiHandle = { ...handle, reload };
+        const ready: Ready = { ...initialReady, handle: readyHandle };
+        readyState = ready;
         yield* observe(options, ready);
         return ready;
       }).pipe(
