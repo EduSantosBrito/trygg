@@ -12,6 +12,7 @@ import { generateViteConfig } from "./generators/vite-config";
 import { generateTsConfig } from "./generators/tsconfig";
 import { generateGitignore } from "./generators/gitignore";
 import { generateOxlintConfig } from "./generators/oxlint-config";
+import { generateApiClientTypes } from "./generators/api-client-types";
 import { PlatformConfig } from "./platform-config";
 import { BunPlatformConfig, NodePlatformConfig } from "./platforms";
 
@@ -69,13 +70,24 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     // 3. Copy app/ from template
     yield* copyDir(fs, path.join(templateDir, "app"), path.join(targetDir, "app"));
 
-    // 4. Copy styles.css
+    // 4. Generate API client type declarations if template exports an API
+    const apiFilePath = path.join(templateDir, "app", "api.ts");
+    const apiFileExists = yield* fs.exists(apiFilePath);
+    if (apiFileExists) {
+      yield* fs.makeDirectory(path.join(targetDir, ".trygg"), { recursive: true });
+      const apiClientTypes = yield* generateApiClientTypes({
+        apiTypeImportPath: "../app/api",
+      });
+      yield* fs.writeFileString(path.join(targetDir, ".trygg", "api.d.ts"), apiClientTypes);
+    }
+
+    // 5. Copy styles.css
     yield* fs.copyFile(path.join(templateDir, "styles.css"), path.join(targetDir, "styles.css"));
 
-    // 5. Copy public/ assets
+    // 6. Copy public/ assets
     yield* copyDir(fs, path.join(templateDir, "public"), path.join(targetDir, "public"));
 
-    // 6. Generate package.json with platform-specific configuration
+    // 7. Generate package.json with platform-specific configuration
     const platformLayer = getPlatformLayer(options.platform);
     const packageJson = yield* generatePackageJson({
       name: options.name,
@@ -83,22 +95,22 @@ export const scaffoldProject = (targetDir: string, options: ProjectOptions, temp
     }).pipe(Effect.provide(platformLayer));
     yield* fs.writeFileString(path.join(targetDir, "package.json"), packageJson);
 
-    // 7. Generate vite.config.ts
+    // 8. Generate vite.config.ts
     const viteConfig = yield* generateViteConfig({
       platform: options.platform,
       output: options.output,
     });
     yield* fs.writeFileString(path.join(targetDir, "vite.config.ts"), viteConfig);
 
-    // 8. Generate tsconfig.json
+    // 9. Generate tsconfig.json
     const tsconfig = yield* generateTsConfig();
     yield* fs.writeFileString(path.join(targetDir, "tsconfig.json"), tsconfig);
 
-    // 9. Generate .gitignore
+    // 10. Generate .gitignore
     const gitignore = yield* generateGitignore();
     yield* fs.writeFileString(path.join(targetDir, ".gitignore"), gitignore);
 
-    // 10. Generate .oxlintrc.json
+    // 11. Generate .oxlintrc.json
     const oxlintConfig = yield* generateOxlintConfig();
     yield* fs.writeFileString(path.join(targetDir, ".oxlintrc.json"), oxlintConfig);
   });

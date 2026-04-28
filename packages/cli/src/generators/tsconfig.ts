@@ -28,6 +28,6 @@ export const generateTsConfig = (): Effect.Effect<string> =>
       }
     ]
   },
-  "include": ["app/**/*.ts", "app/**/*.tsx"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", ".trygg/**/*.d.ts"]
 }
 `);

@@ -43,13 +43,13 @@ export default Component.gen(function* () {
 
   // Derive filtered incidents based on severity filter
   const filteredIncidents = yield* Signal.deriveAll([incidentsSignal, filter], (incidents, f) =>
-    f === "all" ? incidents : incidents.filter((i) => i.severity === f),
+    f === "all" ? incidents : incidents.filter((i: Incident) => i.severity === f),
   );
 
   // Derive counts for summary
   const activeCount = yield* Signal.derive(
     incidentsSignal,
-    (incidents) => incidents.filter((i) => i.status !== "Resolved").length,
+    (incidents) => incidents.filter((i: Incident) => i.status !== "Resolved").length,
   );
 
   // Derive filter button active states
@@ -118,7 +118,7 @@ export default Component.gen(function* () {
                 className="btn btn--secondary btn--sm"
                 data-active={button.active}
                 aria-pressed={button.active}
-                onClick={Signal.set(filter, button.value)}
+                onClick={() => Signal.set(filter, button.value)}
               >
                 {button.value === "all" ? "All" : button.value}
               </button>
