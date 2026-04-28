@@ -939,6 +939,30 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    scoped("should buildStart skip API client declarations when api file is absent", () =>
+      Effect.gen(function* () {
+        // Test: should buildStart skip API client declarations when api file is absent
+        // Scope: covers the no-API app boundary where generated client typings must not be emitted.
+        // Assertion: buildStart succeeds and .trygg/api.d.ts is not created.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+
+        const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
+        assert.isFalse(apiTypesExists);
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped("should resolve and load trygg/api virtual module", () =>
       Effect.gen(function* () {
         // Test: should resolve and load trygg/api virtual module
