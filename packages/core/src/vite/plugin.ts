@@ -1298,13 +1298,18 @@ export const validateApiPlatform = (
     }
   });
 
-const validateGeneratedApiClient = (
+type ApiClientContract =
+  | { readonly _tag: "Absent" }
+  | { readonly _tag: "ServerOnly" }
+  | { readonly _tag: "ClientEnabled" };
+
+const readApiClientContract = (
   apiPath: string,
-): Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =>
+): Effect.Effect<ApiClientContract, PluginFileSystemError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const hasApi = yield* pathExists(apiPath);
     if (!hasApi) {
-      return yield* PluginValidationError.invalidStructure(API_EXPORT_MESSAGE, apiPath);
+      return { _tag: "Absent" } as const;
     }
 
     const fs = yield* FileSystem.FileSystem;
@@ -1319,9 +1324,22 @@ const validateGeneratedApiClient = (
       ),
     );
 
-    if (!apiExportPattern.test(stripNonCodeText(source))) {
-      return yield* PluginValidationError.invalidStructure(API_EXPORT_MESSAGE, apiPath);
+    if (apiExportPattern.test(stripNonCodeText(source))) {
+      return { _tag: "ClientEnabled" } as const;
     }
+
+    return { _tag: "ServerOnly" } as const;
+  });
+
+const validateGeneratedApiClient = (
+  apiPath: string,
+): Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const contract = yield* readApiClientContract(apiPath);
+    if (contract._tag === "ClientEnabled") {
+      return;
+    }
+    return yield* PluginValidationError.invalidStructure(API_EXPORT_MESSAGE, apiPath);
   });
 
 const generateApiClientModule = (apiPath: string): string => {
@@ -1658,16 +1676,34 @@ const writeGeneratedApiClientTypes = (
   generatedDir: string,
 ): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const hasApi = yield* pathExists(nodePath.join(appDir, "api.ts"));
-    if (!hasApi) {
+    const apiPath = nodePath.join(appDir, "api.ts");
+    const contract = yield* readApiClientContract(apiPath);
+
+    if (contract._tag === "ClientEnabled") {
+      const appImportPath = toModuleImportPath(generatedDir, appDir);
+      const content = renderApiClientDeclarations({
+        apiTypeImportPath: `${appImportPath}/api`,
+      });
+      yield* writeFileSafe(generatedApiClientTypesPath(generatedDir), content);
       return;
     }
 
-    const appImportPath = toModuleImportPath(generatedDir, appDir);
-    const content = renderApiClientDeclarations({
-      apiTypeImportPath: `${appImportPath}/api`,
-    });
-    yield* writeFileSafe(generatedApiClientTypesPath(generatedDir), content);
+    // Remove stale generated declarations for Absent and ServerOnly
+    const fs = yield* FileSystem.FileSystem;
+    const typesPath = generatedApiClientTypesPath(generatedDir);
+    const exists = yield* pathExists(typesPath);
+    if (exists) {
+      yield* fs.remove(typesPath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new PluginFileSystemError({
+              operation: "remove",
+              path: typesPath,
+              cause,
+            }),
+        ),
+      );
+    }
   });
 
 /**

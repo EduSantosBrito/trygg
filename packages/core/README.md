@@ -87,10 +87,11 @@ When `app/api.ts` exports `const Api`, the plugin also generates `ApiClient` and
 import { ApiClient, ApiClientLive } from "trygg/api";
 
 const users = Resource.make(
-  () => Effect.gen(function* () {
-    const client = yield* ApiClient;
-    return yield* client.users.list();
-  }),
+  () =>
+    Effect.gen(function* () {
+      const client = yield* ApiClient;
+      return yield* client.users.list();
+    }),
   { key: "users.list" },
 ).provide(ApiClientLive);
 ```

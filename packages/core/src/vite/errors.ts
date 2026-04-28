@@ -11,7 +11,15 @@ import { Data } from "effect";
  * @since 1.0.0
  */
 export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemError")<{
-  readonly operation: "read" | "write" | "mkdir" | "exists" | "readdir" | "stat" | "transform";
+  readonly operation:
+    | "read"
+    | "write"
+    | "mkdir"
+    | "exists"
+    | "readdir"
+    | "stat"
+    | "transform"
+    | "remove";
   readonly path: string;
   readonly cause: unknown;
 }> {}

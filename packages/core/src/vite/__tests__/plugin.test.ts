@@ -423,6 +423,40 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    scoped(
+      "should build production server entry with default import for default-only api module",
+      () =>
+        Effect.gen(function* () {
+          // Test: should build production server entry with default import for default-only api module
+          // Scope: covers the full plugin build path for legacy default-export API apps.
+          // Assertion: server entry includes default import and API wiring, and no generated client declarations are written.
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* makeTempDir({
+            "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+            "app/routes.ts": "export const routes = { manifest: [] }",
+            "app/api.ts": "export default {}",
+          });
+          const plugin = trygg({ platform: "node", output: "server" });
+          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+            plugin.configResolved,
+          );
+          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+          const closeBundle = Schema.decodeUnknownSync(CloseBundleHookSchema)(plugin.closeBundle);
+
+          yield* Effect.promise(() => configResolved({ root, command: "build" }));
+          yield* Effect.promise(() => buildStart());
+          yield* Effect.promise(() => closeBundle());
+
+          const serverEntryPath = path.join(root, ".trygg", "server-entry.ts");
+          const serverEntry = yield* fs.readFileString(serverEntryPath);
+          const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
+
+          assert.include(serverEntry, 'import ApiLive from "../app/api.js"');
+          assert.include(serverEntry, "HttpRouter.serve(ApiLive");
+          assert.isFalse(apiTypesExists);
+        }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped("should configureServer generate dev entry and serve SPA shell through Vite", () =>
       Effect.gen(function* () {
         // Test: should configureServer generate dev entry and serve SPA shell through Vite
@@ -891,6 +925,39 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    scoped("should importing trygg/api fail clearly for default-only legacy app api module", () =>
+      Effect.gen(function* () {
+        // Test: should importing trygg/api fail clearly for default-only legacy app api module
+        // Scope: covers the legacy default-export API app boundary where explicit trygg/api import must fail.
+        // Assertion: the user-visible error explains the required export.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "export default {}",
+        });
+        const plugin = trygg();
+        const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+          plugin.configResolved,
+        );
+        const resolveId = Schema.decodeUnknownSync(ResolveIdHookSchema)(plugin.resolveId);
+        const load = Schema.decodeUnknownSync(LoadHookSchema)(plugin.load);
+
+        yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+        const resolved = resolveId("trygg/api");
+        assert.strictEqual(resolved, "\0trygg/api");
+
+        const error = yield* Effect.promise(() =>
+          load(resolved ?? "trygg/api").then(
+            () => new Error("Expected trygg/api import to fail"),
+            (cause) => cause,
+          ),
+        );
+
+        assert.instanceOf(error, Error);
+        assert.include(error.message, "app/api.ts must export Api");
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped("should not validate app api when trygg/api is not imported", () =>
       Effect.gen(function* () {
         // Test: should not validate app api when trygg/api is not imported
@@ -961,6 +1028,67 @@ export const routes = { manifest: [] }
         const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
         assert.isFalse(apiTypesExists);
       }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped(
+      "should buildStart skip API client declarations when app api module is default-only",
+      () =>
+        Effect.gen(function* () {
+          // Test: should buildStart skip API client declarations when app api module is default-only
+          // Scope: covers the legacy default-export API app boundary where generated client typings must not be emitted.
+          // Assertion: buildStart succeeds and .trygg/api.d.ts is not created.
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* makeTempDir({
+            "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+            "app/routes.ts": "export const routes = { manifest: [] }",
+            "app/api.ts": "export default {}",
+          });
+          const plugin = trygg();
+          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+            plugin.configResolved,
+          );
+          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+          yield* Effect.promise(() => configResolved({ root, command: "build" }));
+          yield* Effect.promise(() => buildStart());
+
+          const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
+          assert.isFalse(apiTypesExists);
+        }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped(
+      "should buildStart remove stale API client declarations when app api module becomes default-only",
+      () =>
+        Effect.gen(function* () {
+          // Test: should buildStart remove stale API client declarations when app api module becomes default-only
+          // Scope: covers stale generated file cleanup when a legacy default-export API app is present.
+          // Assertion: buildStart succeeds and any pre-existing .trygg/api.d.ts is removed.
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* makeTempDir({
+            "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+            "app/routes.ts": "export const routes = { manifest: [] }",
+            "app/api.ts": "export default {}",
+          });
+          // Pre-create a stale api.d.ts
+          yield* fs
+            .makeDirectory(path.join(root, ".trygg"), { recursive: true })
+            .pipe(Effect.orDie);
+          yield* fs
+            .writeFileString(path.join(root, ".trygg", "api.d.ts"), "// stale generated file")
+            .pipe(Effect.orDie);
+          const plugin = trygg();
+          const configResolved = Schema.decodeUnknownSync(ConfigResolvedHookSchema)(
+            plugin.configResolved,
+          );
+          const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+
+          yield* Effect.promise(() => configResolved({ root, command: "build" }));
+          yield* Effect.promise(() => buildStart());
+
+          const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
+          assert.isFalse(apiTypesExists);
+        }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
     scoped("should resolve and load trygg/api virtual module", () =>

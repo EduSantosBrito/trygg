@@ -23,15 +23,16 @@ When `app/api.ts` exports `const Api`, the trygg Vite plugin generates a runtime
 The generated client uses same-origin `baseUrl: ""` by default. Provide `ApiClientLive` explicitly in consuming code rather than relying on hidden auto-provisioning:
 
 ```ts
-import { ApiClient, ApiClientLive } from "trygg/api"
+import { ApiClient, ApiClientLive } from "trygg/api";
 
 const users = Resource.make(
-  () => Effect.gen(function* () {
-    const client = yield* ApiClient
-    return yield* client.users.list()
-  }),
+  () =>
+    Effect.gen(function* () {
+      const client = yield* ApiClient;
+      return yield* client.users.list();
+    }),
   { key: "users.list" },
-).provide(ApiClientLive)
+).provide(ApiClientLive);
 ```
 
 ### Required `export const Api`
@@ -40,9 +41,9 @@ The generated client depends on a single named export from `app/api.ts`:
 
 ```ts
 // app/api.ts
-export const Api = HttpApi.make("app").add(Group)
+export const Api = HttpApi.make("app").add(Group);
 
-export default HttpApiBuilder.layer(Api).pipe(Layer.provide(HandlersLive))
+export default HttpApiBuilder.layer(Api).pipe(Layer.provide(HandlersLive));
 ```
 
 If `trygg/api` is imported without a valid exported `Api`, the plugin will error with:
