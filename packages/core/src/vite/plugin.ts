@@ -1812,6 +1812,7 @@ export interface ViteServer {
     url: string,
     html: string,
   ) => Effect.Effect<string, PluginFileSystemError>;
+  readonly mountHtmlFallbackMiddleware: (html: string) => Effect.Effect<void>;
 }
 
 export namespace PluginApi {
@@ -2055,23 +2056,8 @@ type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
 export const makeViteServer = (
   server: ViteServerSource,
   runPromise: ViteServerRunPromise = Effect.runPromise,
-): ViteServer => ({
-  loadModule: (id, message) =>
-    Effect.tryPromise({
-      try: () => server.ssrLoadModule(id),
-      catch: (cause) => new ApiInitError({ message, cause }),
-    }),
-  onFileChange: (handler) =>
-    Effect.sync(() => server.watcher.on("change", handler)).pipe(Effect.asVoid),
-  closeApiScopeOnServerClose: (scope) =>
-    Effect.sync(() =>
-      server.httpServer?.on("close", () => {
-        void runPromise(Scope.close(scope, Exit.void));
-      }),
-    ).pipe(Effect.asVoid),
-  mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
-  useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
-  transformIndexHtml: (url, html) =>
+): ViteServer => {
+  const transformIndexHtml: ViteServer["transformIndexHtml"] = (url, html) =>
     Effect.tryPromise({
       try: () => server.transformIndexHtml(url, html),
       catch: (cause) =>
@@ -2080,8 +2066,50 @@ export const makeViteServer = (
           path: "bootstrap-shell",
           cause,
         }),
-    }),
-});
+    });
+
+  return {
+    loadModule: (id, message) =>
+      Effect.tryPromise({
+        try: () => server.ssrLoadModule(id),
+        catch: (cause) => new ApiInitError({ message, cause }),
+      }),
+    onFileChange: (handler) =>
+      Effect.sync(() => server.watcher.on("change", handler)).pipe(Effect.asVoid),
+    closeApiScopeOnServerClose: (scope) =>
+      Effect.sync(() =>
+        server.httpServer?.on("close", () => {
+          void runPromise(Scope.close(scope, Exit.void));
+        }),
+      ).pipe(Effect.asVoid),
+    mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
+    useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
+    transformIndexHtml,
+    mountHtmlFallbackMiddleware: (htmlTemplate) =>
+      Effect.sync(() =>
+        server.middlewares.use((req, res, next) => {
+          if (
+            !req.url ||
+            req.url.includes(".") ||
+            req.method !== "GET" ||
+            req.url.startsWith("/api/")
+          ) {
+            return next();
+          }
+
+          const requestUrl = req.url;
+          const effect = Effect.gen(function* () {
+            const html = yield* transformIndexHtml(requestUrl, htmlTemplate);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "text/html");
+            res.end(html);
+          }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
+
+          void runPromise(effect);
+        }),
+      ),
+  };
+};
 
 const loadHandlerFactory = (viteServer: ViteServer): Effect.Effect<HandlerFactory, ApiInitError> =>
   Effect.gen(function* () {
@@ -2287,24 +2315,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
         return () => {
           void pluginRuntime.runPromise(
-            viteServer.useMiddleware((req, res, next) => {
-              if (!req.url || req.url.includes(".") || req.method !== "GET") {
-                return next();
-              }
-
-              const requestUrl = req.url;
-              const effect = Effect.gen(function* () {
-                const html = yield* viteServer.transformIndexHtml(
-                  requestUrl,
-                  generateHtmlTemplate(),
-                );
-                res.statusCode = 200;
-                res.setHeader("Content-Type", "text/html");
-                res.end(html);
-              }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
-
-              void pluginRuntime.runPromise(effect);
-            }),
+            viteServer.mountHtmlFallbackMiddleware(generateHtmlTemplate()),
           );
         };
       });

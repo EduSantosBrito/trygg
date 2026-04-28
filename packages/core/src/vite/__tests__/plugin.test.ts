@@ -46,6 +46,7 @@ import {
   makePluginFilesLayer,
   makePluginApi,
   makeViteServer,
+  generateHtmlTemplate,
   type ParsedRoute,
   type ViteServerSource,
 } from "../plugin.js";
@@ -310,6 +311,149 @@ export const routes = { manifest: [] }
 
         assert.strictEqual(mounted.length, 1);
         assert.strictEqual(mounted[0], middleware);
+      }),
+    );
+
+    scoped("should serve transformed HTML fallback through ViteServer adapter", () =>
+      Effect.gen(function* () {
+        // Test: should serve transformed HTML fallback through ViteServer adapter
+        // Scope: covers the dev SPA fallback adapter path for non-file GET navigations.
+        // Assertion: the response uses Vite HTML transforms and returns the SPA shell.
+        const mounted: Array<Connect.NextHandleFunction> = [];
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          httpServer: undefined,
+          middlewares: {
+            use: (handler) => {
+              mounted.push(handler);
+            },
+          },
+          transformIndexHtml: (url, html) =>
+            Promise.resolve(`${html}\n<!-- transformed:${url} -->`),
+        };
+
+        yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
+        const middleware = mounted[0];
+        if (middleware === undefined) {
+          return yield* Effect.die(new Error("Expected HTML fallback middleware to mount"));
+        }
+
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            createHttpServer((req, res) =>
+              middleware(req, res, () => {
+                res.statusCode = 404;
+                res.end("next");
+              }),
+            ),
+          ),
+          (httpServer) =>
+            Effect.promise(() => new Promise<void>((resolve) => httpServer.close(() => resolve()))),
+        );
+        yield* Effect.promise(
+          () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+        );
+        const address = server.address();
+        if (!isAddressInfo(address)) {
+          return yield* Effect.die(new Error("Expected HTTP server to listen on a TCP port"));
+        }
+
+        const response = yield* Effect.promise<HttpResult>(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = httpRequest(
+                { hostname: "127.0.0.1", port: address.port, path: "/dashboard?tab=dev" },
+                (res) => {
+                  const chunks: Array<string> = [];
+                  res.setEncoding("utf8");
+                  res.on("data", (chunk: string) => chunks.push(chunk));
+                  res.on("end", () => {
+                    const contentType = res.headers["content-type"];
+                    resolve({
+                      status: res.statusCode ?? 0,
+                      bridgeHeader: Array.isArray(contentType)
+                        ? contentType.join(", ")
+                        : contentType,
+                      body: chunks.join(""),
+                    });
+                  });
+                },
+              );
+              req.on("error", reject);
+              req.end();
+            }),
+        );
+
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual(response.bridgeHeader, "text/html");
+        assert.include(response.body, '<script type="module" src="/.trygg/entry.tsx"></script>');
+        assert.include(response.body, "<!-- transformed:/dashboard?tab=dev -->");
+      }),
+    );
+
+    scoped("should pass API and asset routes through HTML fallback adapter", () =>
+      Effect.gen(function* () {
+        // Test: should pass API and asset routes through HTML fallback adapter
+        // Scope: covers route boundaries the dev SPA fallback must not rewrite.
+        // Assertion: /api/* and file-like asset URLs call next instead of returning HTML.
+        const mounted: Array<Connect.NextHandleFunction> = [];
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          httpServer: undefined,
+          middlewares: {
+            use: (handler) => {
+              mounted.push(handler);
+            },
+          },
+          transformIndexHtml: (_url, html) => Promise.resolve(html),
+        };
+
+        yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
+        const middleware = mounted[0];
+        if (middleware === undefined) {
+          return yield* Effect.die(new Error("Expected HTML fallback middleware to mount"));
+        }
+
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            createHttpServer((req, res) =>
+              middleware(req, res, () => {
+                res.statusCode = 204;
+                res.end();
+              }),
+            ),
+          ),
+          (httpServer) =>
+            Effect.promise(() => new Promise<void>((resolve) => httpServer.close(() => resolve()))),
+        );
+        yield* Effect.promise(
+          () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+        );
+        const address = server.address();
+        if (!isAddressInfo(address)) {
+          return yield* Effect.die(new Error("Expected HTTP server to listen on a TCP port"));
+        }
+
+        const requestStatus = (pathName: string) =>
+          Effect.promise<number>(
+            () =>
+              new Promise((resolve, reject) => {
+                const req = httpRequest(
+                  { hostname: "127.0.0.1", port: address.port, path: pathName },
+                  (res) => {
+                    res.resume();
+                    res.on("end", () => resolve(res.statusCode ?? 0));
+                  },
+                );
+                req.on("error", reject);
+                req.end();
+              }),
+          );
+
+        assert.strictEqual(yield* requestStatus("/api/users"), 204);
+        assert.strictEqual(yield* requestStatus("/.trygg/entry.tsx"), 204);
       }),
     );
 
