@@ -5,7 +5,18 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
-import { Cause, Context, Deferred, Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
+import {
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Schema,
+  Scope,
+} from "effect";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -952,6 +963,166 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         assert.strictEqual(state._tag, "Ready");
         assert.strictEqual(finalized, 1);
+      }),
+    );
+
+    scoped("should serialize overlapping reload requests", () =>
+      Effect.gen(function* () {
+        // Test: should serialize overlapping reload requests
+        // Scope: covers concurrent file-change reload calls against one dev API handle.
+        // Assertion: no reload body overlaps, and both callers complete after both passes finish.
+        const firstStarted = yield* Deferred.make<void, never>();
+        const releaseFirst = yield* Deferred.make<void, never>();
+        const secondStarted = yield* Deferred.make<void, never>();
+        let active = 0;
+        let maxActive = 0;
+        let runs = 0;
+
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.gen(function* () {
+                runs += 1;
+                const run = runs;
+                active += 1;
+                maxActive = Math.max(maxActive, active);
+
+                if (run === 1) {
+                  yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
+                  yield* Deferred.await(releaseFirst);
+                }
+                if (run === 2) {
+                  yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+                }
+
+                active -= 1;
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+        const ready = state;
+
+        const first = yield* ready.handle.reload.pipe(Effect.forkChild);
+        yield* Deferred.await(firstStarted);
+        const second = yield* ready.handle.reload.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(runs, 1);
+        assert.strictEqual(maxActive, 1);
+
+        yield* Deferred.succeed(releaseFirst, undefined).pipe(Effect.asVoid);
+        yield* Deferred.await(secondStarted);
+        yield* Effect.all([Fiber.join(first), Fiber.join(second)]);
+
+        assert.strictEqual(runs, 2);
+        assert.strictEqual(maxActive, 1);
+      }),
+    );
+
+    scoped("should preserve one follow-up reload for many requests during active reload", () =>
+      Effect.gen(function* () {
+        // Test: should preserve one follow-up reload for many requests during active reload
+        // Scope: covers rapid file changes while one reload is already running.
+        // Assertion: many overlapping calls produce exactly one additional reload pass.
+        const firstStarted = yield* Deferred.make<void, never>();
+        const releaseFirst = yield* Deferred.make<void, never>();
+        const secondStarted = yield* Deferred.make<void, never>();
+        let runs = 0;
+
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.gen(function* () {
+                runs += 1;
+                if (runs === 1) {
+                  yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
+                  yield* Deferred.await(releaseFirst);
+                }
+                if (runs === 2) {
+                  yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+                }
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+        const ready = state;
+
+        const first = yield* ready.handle.reload.pipe(Effect.forkChild);
+        yield* Deferred.await(firstStarted);
+        const followUps = yield* Effect.all(
+          [ready.handle.reload, ready.handle.reload, ready.handle.reload],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+
+        assert.strictEqual(runs, 1);
+
+        yield* Deferred.succeed(releaseFirst, undefined).pipe(Effect.asVoid);
+        yield* Deferred.await(secondStarted);
+        yield* Effect.all([Fiber.join(first), Fiber.join(followUps)]);
+
+        assert.strictEqual(runs, 2);
+      }),
+    );
+
+    scoped("should reset reload coalescing state when active reload is interrupted", () =>
+      Effect.gen(function* () {
+        // Test: should reset reload coalescing state when active reload is interrupted
+        // Scope: covers cleanup of the synchronized reload state under fiber interruption.
+        // Assertion: a reload after interruption starts a fresh pass instead of awaiting stale state.
+        const firstStarted = yield* Deferred.make<void, never>();
+        const secondStarted = yield* Deferred.make<void, never>();
+        const blockFirst = yield* Deferred.make<void, never>();
+        let runs = 0;
+
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.gen(function* () {
+                runs += 1;
+                if (runs === 1) {
+                  yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
+                  yield* Deferred.await(blockFirst);
+                }
+                if (runs === 2) {
+                  yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+                }
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (state._tag !== "Ready") {
+          return yield* Effect.die(new Error("Expected ready API state"));
+        }
+        const ready = state;
+
+        const first = yield* ready.handle.reload.pipe(Effect.forkChild);
+        yield* Deferred.await(firstStarted);
+        yield* Fiber.interrupt(first);
+
+        const second = yield* ready.handle.reload.pipe(Effect.forkChild);
+        yield* Deferred.await(secondStarted);
+        yield* Fiber.join(second);
+
+        assert.strictEqual(runs, 2);
       }),
     );
   });

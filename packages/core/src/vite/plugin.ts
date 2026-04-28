@@ -16,6 +16,7 @@ import { build } from "vite";
 import {
   Array,
   Data,
+  Deferred,
   Effect,
   Exit,
   FileSystem,
@@ -27,6 +28,7 @@ import {
   References,
   Result,
   Scope,
+  SynchronizedRef,
 } from "effect";
 import type { Layer as LayerType } from "effect/Layer";
 import * as Context from "effect/Context";
@@ -38,8 +40,8 @@ import {
   NodeServerPlatform,
   BunServerPlatform,
   type ServerPlatformService,
-  type DevApiErrors,
   type DevApiHandle,
+  type DevApiErrors,
   type HandlerFactory,
   ApiInitError,
   ImportError,
@@ -1854,6 +1856,31 @@ export namespace PluginApi {
     readonly reloadChangedFile: (file: string) => Effect.Effect<void>;
   }
 
+  interface ReloadIdle {
+    readonly _tag: "Idle";
+  }
+
+  interface ReloadRunning {
+    readonly _tag: "Running";
+    readonly followUp: boolean;
+    readonly done: Deferred.Deferred<void, DevApiErrors>;
+  }
+
+  type ReloadState = ReloadIdle | ReloadRunning;
+
+  interface RunReload {
+    readonly _tag: "Run";
+    readonly done: Deferred.Deferred<void, DevApiErrors>;
+  }
+
+  interface AwaitReload {
+    readonly _tag: "Await";
+    readonly done: Deferred.Deferred<void, DevApiErrors>;
+  }
+
+  type ReloadDecision = RunReload | AwaitReload;
+
+  const reloadIdle: ReloadIdle = { _tag: "Idle" };
   export interface InitialLoadOptions<RHasApi> {
     readonly apiPath: string;
     readonly hasApi: Effect.Effect<boolean, never, RHasApi>;
@@ -1868,6 +1895,72 @@ export namespace PluginApi {
     options: InitialLoadOptions<RHasApi>,
     state: InitialState,
   ): Effect.Effect<void> => options.observe?.(state) ?? Effect.void;
+
+  const coalesceReload = (reload: DevApiHandle["reload"]): Effect.Effect<DevApiHandle["reload"]> =>
+    Effect.gen(function* () {
+      const reloadState = yield* SynchronizedRef.make<ReloadState>(reloadIdle);
+
+      const runReload = (
+        done: Deferred.Deferred<void, DevApiErrors>,
+      ): Effect.Effect<void, DevApiErrors, Scope.Scope> =>
+        Effect.suspend(() =>
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const exit = yield* restore(reload).pipe(Effect.exit);
+              if (Exit.isFailure(exit)) {
+                yield* SynchronizedRef.set(reloadState, reloadIdle);
+                yield* Deferred.done(done, exit).pipe(Effect.asVoid);
+                return yield* Effect.failCause(exit.cause);
+              }
+
+              const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
+                if (state._tag === "Running" && state.followUp) {
+                  const next: ReloadRunning = { _tag: "Running", followUp: false, done };
+                  const result: readonly [boolean, ReloadState] = [true, next];
+                  return Effect.succeed(result);
+                }
+
+                const result: readonly [boolean, ReloadState] = [false, reloadIdle];
+                return Effect.succeed(result);
+              });
+
+              if (shouldReload) {
+                return yield* runReload(done);
+              }
+
+              yield* Deferred.succeed(done, undefined).pipe(Effect.asVoid);
+            }),
+          ),
+        );
+
+      return yield* Effect.succeed(
+        Effect.gen(function* () {
+          const decision = yield* SynchronizedRef.modifyEffect(reloadState, (state) =>
+            Effect.gen(function* () {
+              if (state._tag === "Running") {
+                const next: ReloadRunning = { ...state, followUp: true };
+                const result: readonly [ReloadDecision, ReloadState] = [
+                  { _tag: "Await", done: state.done },
+                  next,
+                ];
+                return result;
+              }
+
+              const done = yield* Deferred.make<void, DevApiErrors>();
+              const next: ReloadRunning = { _tag: "Running", followUp: false, done };
+              const result: readonly [ReloadDecision, ReloadState] = [{ _tag: "Run", done }, next];
+              return result;
+            }),
+          );
+
+          if (decision._tag === "Await") {
+            return yield* Deferred.await(decision.done);
+          }
+
+          return yield* runReload(decision.done);
+        }),
+      );
+    });
 
   export const loadInitial = <RHasApi>(
     options: InitialLoadOptions<RHasApi>,
@@ -1887,7 +1980,14 @@ export namespace PluginApi {
       return yield* Effect.gen(function* () {
         const handlerFactory = yield* options.loadHandlerFactory;
         const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
-        const ready: Ready = { _tag: "Ready", apiPath: options.apiPath, handle, scope };
+        const reload = yield* coalesceReload(handle.reload);
+        const readyHandle: DevApiHandle = { ...handle, reload };
+        const ready: Ready = {
+          _tag: "Ready",
+          apiPath: options.apiPath,
+          handle: readyHandle,
+          scope,
+        };
         yield* observe(options, ready);
         return ready;
       }).pipe(
