@@ -11,7 +11,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
 import { createServer as createViteServer } from "vite";
-import { DevPlatform } from "../dev-platform.js";
+import { ApiInitError, DevPlatform } from "../dev-platform.js";
 import { NodeDevPlatformLive } from "../dev-platform-node.js";
 import type { Connect } from "vite";
 import {
@@ -31,6 +31,7 @@ import {
   parseSchemaStruct,
   resolveRoutePaths,
   PluginFiles,
+  PluginApi,
   makePluginFilesLayer,
   makeViteServer,
   type ParsedRoute,
@@ -805,6 +806,114 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         assert.strictEqual(status, 204);
       }).pipe(Effect.provide(NodeDevPlatformLive)),
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: PluginApi initial lifecycle
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("PluginApi", () => {
+    const apiLayer = Layer.succeedContext(Context.makeUnsafe<unknown>(new Map()));
+    const handlerFactory = {
+      makeApiLayer: () => Effect.succeed(apiLayer),
+      makeWebHandler: () => ({
+        handler: () => Promise.resolve(new Response(null, { status: 204 })),
+        dispose: () => undefined,
+      }),
+    };
+
+    scoped("should loadInitial expose absent state when api file is missing", () =>
+      Effect.gen(function* () {
+        // Test: should loadInitial expose absent state when api file is missing
+        // Scope: covers the no-api boundary before any handler factory or platform API work starts.
+        // Assertion: returns Absent and does not call API construction dependencies.
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(false),
+          loadHandlerFactory: Effect.die(new Error("handler factory should not load")),
+          makeApi: () => Effect.die(new Error("api should not load")),
+        });
+
+        assert.strictEqual(state._tag, "Absent");
+      }),
+    );
+
+    scoped("should loadInitial expose ready state after successful api load", () =>
+      Effect.gen(function* () {
+        // Test: should loadInitial expose ready state after successful api load
+        // Scope: covers the initial API construction boundary and loading observation.
+        // Assertion: observes Loading before returning Ready with a middleware handle.
+        const seen: Array<PluginApi.InitialState["_tag"]> = [];
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.void,
+              dispose: Effect.void,
+            }),
+          observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+        });
+
+        assert.deepStrictEqual(seen, ["Loading", "Ready"]);
+        assert.strictEqual(state._tag, "Ready");
+      }),
+    );
+
+    scoped("should loadInitial expose failed state and close initial scope on failure", () =>
+      Effect.gen(function* () {
+        // Test: should loadInitial expose failed state and close initial scope on failure
+        // Scope: covers resource cleanup when initial API construction fails after scope allocation.
+        // Assertion: observes Loading then Failed and runs the scope finalizer exactly once.
+        let finalized = 0;
+        const seen: Array<PluginApi.InitialState["_tag"]> = [];
+        const error = new ApiInitError({ message: "boom" });
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() => Effect.sync(() => (finalized += 1)));
+              return yield* error;
+            }),
+          observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+        });
+
+        assert.deepStrictEqual(seen, ["Loading", "Failed"]);
+        assert.strictEqual(state._tag, "Failed");
+        assert.strictEqual(finalized, 1);
+      }),
+    );
+
+    scoped("should closeInitial close ready initial api scope", () =>
+      Effect.gen(function* () {
+        // Test: should closeInitial close ready initial api scope
+        // Scope: covers dev-server shutdown cleanup for the initial API handle.
+        // Assertion: closing a Ready state closes its scope and runs registered finalizers once.
+        let finalized = 0;
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() => Effect.sync(() => (finalized += 1)));
+              return {
+                middleware: (_req, _res, next) => next(),
+                reload: Effect.void,
+                dispose: Effect.void,
+              };
+            }),
+        });
+
+        yield* PluginApi.closeInitial(state);
+
+        assert.strictEqual(state._tag, "Ready");
+        assert.strictEqual(finalized, 1);
+      }),
     );
   });
 

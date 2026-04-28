@@ -24,7 +24,6 @@ import {
   LogLevel,
   ManagedRuntime,
   Match,
-  Option,
   References,
   Result,
   Scope,
@@ -1812,6 +1811,84 @@ export interface ViteServer {
   ) => Effect.Effect<string, PluginFileSystemError>;
 }
 
+export namespace PluginApi {
+  export interface Absent {
+    readonly _tag: "Absent";
+    readonly apiPath: string;
+  }
+
+  export interface Loading {
+    readonly _tag: "Loading";
+    readonly apiPath: string;
+  }
+
+  export interface Ready {
+    readonly _tag: "Ready";
+    readonly apiPath: string;
+    readonly handle: DevApiHandle;
+    readonly scope: Scope.Closeable;
+  }
+
+  export interface Failed {
+    readonly _tag: "Failed";
+    readonly apiPath: string;
+    readonly error: ImportError | ApiInitError;
+  }
+
+  export type InitialState = Absent | Loading | Ready | Failed;
+
+  export interface InitialLoadOptions<RHasApi> {
+    readonly apiPath: string;
+    readonly hasApi: Effect.Effect<boolean, never, RHasApi>;
+    readonly loadHandlerFactory: Effect.Effect<HandlerFactory, ApiInitError>;
+    readonly makeApi: (
+      handlerFactory: HandlerFactory,
+    ) => Effect.Effect<DevApiHandle, ImportError | ApiInitError, Scope.Scope>;
+    readonly observe?: (state: InitialState) => Effect.Effect<void>;
+  }
+
+  const observe = <RHasApi>(
+    options: InitialLoadOptions<RHasApi>,
+    state: InitialState,
+  ): Effect.Effect<void> => options.observe?.(state) ?? Effect.void;
+
+  export const loadInitial = <RHasApi>(
+    options: InitialLoadOptions<RHasApi>,
+  ): Effect.Effect<Absent | Ready | Failed, never, RHasApi> =>
+    Effect.gen(function* () {
+      const hasApi = yield* options.hasApi;
+      if (!hasApi) {
+        const state: Absent = { _tag: "Absent", apiPath: options.apiPath };
+        yield* observe(options, state);
+        return state;
+      }
+
+      const loading: Loading = { _tag: "Loading", apiPath: options.apiPath };
+      yield* observe(options, loading);
+      const scope = yield* Scope.make();
+
+      return yield* Effect.gen(function* () {
+        const handlerFactory = yield* options.loadHandlerFactory;
+        const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
+        const ready: Ready = { _tag: "Ready", apiPath: options.apiPath, handle, scope };
+        yield* observe(options, ready);
+        return ready;
+      }).pipe(
+        Effect.catch((error: ImportError | ApiInitError) =>
+          Effect.gen(function* () {
+            yield* Scope.close(scope, Exit.fail(error));
+            const failed: Failed = { _tag: "Failed", apiPath: options.apiPath, error };
+            yield* observe(options, failed);
+            return failed;
+          }),
+        ),
+      );
+    });
+
+  export const closeInitial = (state: InitialState): Effect.Effect<void> =>
+    state._tag === "Ready" ? Scope.close(state.scope, Exit.void) : Effect.void;
+}
+
 type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
 
 /**
@@ -1855,6 +1932,38 @@ export const makeViteServer = (
         }),
     }),
 });
+
+const loadHandlerFactory = (viteServer: ViteServer): Effect.Effect<HandlerFactory, ApiInitError> =>
+  Effect.gen(function* () {
+    // SSR-load handler factory — resolves @effect/platform from project root,
+    // same module instance as user's api.ts, preventing Router.Live identity mismatches.
+    const rawFactoryMod = yield* viteServer.loadModule(
+      VIRTUAL_HANDLER_FACTORY_ID,
+      "Failed to SSR-load handler factory",
+    );
+    if (
+      typeof rawFactoryMod.makeApiLayer !== "function" ||
+      typeof rawFactoryMod.makeWebHandler !== "function"
+    ) {
+      return yield* new ApiInitError({
+        message: "Handler factory module missing required exports (makeApiLayer, makeWebHandler)",
+      });
+    }
+    const makeApiLayer = rawFactoryMod.makeApiLayer;
+    const makeWebHandler = rawFactoryMod.makeWebHandler;
+    const baseFactoryMod: HandlerFactory = {
+      makeApiLayer: (mod: Record<string, unknown>) => makeApiLayer(mod),
+      makeWebHandler: (apiLive: Layer.Layer<unknown>) => makeWebHandler(apiLive),
+    };
+    if (typeof rawFactoryMod.makeNodeHandler !== "function") {
+      return baseFactoryMod;
+    }
+    const makeNodeHandler = rawFactoryMod.makeNodeHandler;
+    return {
+      ...baseFactoryMod,
+      makeNodeHandler: (apiLive: Layer.Layer<unknown>) => makeNodeHandler(apiLive),
+    };
+  });
 
 /**
  * Create trygg Vite plugin with platform-aware dev API.
@@ -1972,62 +2081,23 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           Effect.annotateLogs("style", "success"),
         );
 
-        let apiHandle: Option.Option<DevApiHandle> = Option.none();
-        const hasApi = yield* pathExists(apiPath);
-
-        if (hasApi) {
-          // Create scope for API lifecycle
-          const scope = yield* Scope.make();
-
-          // SSR-load handler factory — resolves @effect/platform from project root,
-          // same module instance as user's api.ts, preventing Router.Live identity mismatches.
-          const rawFactoryMod = yield* viteServer.loadModule(
-            VIRTUAL_HANDLER_FACTORY_ID,
-            "Failed to SSR-load handler factory",
-          );
-          // Validate factory shape at runtime instead of using `as` cast
-          if (
-            typeof rawFactoryMod.makeApiLayer !== "function" ||
-            typeof rawFactoryMod.makeWebHandler !== "function"
-          ) {
-            return yield* new ApiInitError({
-              message:
-                "Handler factory module missing required exports (makeApiLayer, makeWebHandler)",
-            });
-          }
-          const makeApiLayer = rawFactoryMod.makeApiLayer;
-          const makeWebHandler = rawFactoryMod.makeWebHandler;
-          const baseFactoryMod: HandlerFactory = {
-            makeApiLayer: (mod: Record<string, unknown>) => makeApiLayer(mod),
-            makeWebHandler: (apiLive: Layer.Layer<unknown>) => makeWebHandler(apiLive),
-          };
-          const factoryMod: HandlerFactory = (() => {
-            if (typeof rawFactoryMod.makeNodeHandler !== "function") {
-              return baseFactoryMod;
-            }
-            const makeNodeHandler = rawFactoryMod.makeNodeHandler;
-            return {
-              ...baseFactoryMod,
-              makeNodeHandler: (apiLive: Layer.Layer<unknown>) => makeNodeHandler(apiLive),
-            };
-          })();
-
-          // Make dev API using platform-specific implementation
-          const handle = yield* Scope.provide(
+        const apiState = yield* PluginApi.loadInitial({
+          apiPath,
+          hasApi: pathExists(apiPath),
+          loadHandlerFactory: loadHandlerFactory(viteServer),
+          makeApi: (handlerFactory) =>
             devPlatform.makeApi({
               loadApiModule: () => viteServer.loadModule(apiPath, "Failed to load API module"),
               onError: (error) =>
                 Effect.logError(
                   `[api] middleware.error: ${error instanceof Error ? error.message : String(error)}`,
                 ),
-              handlerFactory: factoryMod,
+              handlerFactory,
             }),
-            scope,
-          );
+        });
 
-          apiHandle = Option.some(handle);
-          yield* viteServer.closeApiScopeOnServerClose(scope);
-
+        if (apiState._tag === "Ready") {
+          yield* viteServer.closeApiScopeOnServerClose(apiState.scope);
           yield* Effect.logInfo("API handlers loaded").pipe(
             Effect.annotateLogs("style", "success"),
           );
@@ -2035,6 +2105,10 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             event: "api.middleware.mounted",
             platform: configPlatform,
           });
+        }
+
+        if (apiState._tag === "Failed") {
+          return yield* apiState.error;
         }
 
         // Vite boundary: file watcher callbacks use extracted runtime
@@ -2047,8 +2121,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
                   yield* files.regenerateGeneratedRouteTypes(paths);
                 }
 
-                if (file.endsWith("api.ts") && Option.isSome(apiHandle)) {
-                  yield* apiHandle.value.reload;
+                if (file.endsWith("api.ts") && apiState._tag === "Ready") {
+                  yield* apiState.handle.reload;
                   yield* Effect.logDebug("Reloaded API handlers");
                 }
               }),
@@ -2056,8 +2130,8 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           );
         });
 
-        if (Option.isSome(apiHandle)) {
-          yield* viteServer.mountApiMiddleware(apiHandle.value.middleware);
+        if (apiState._tag === "Ready") {
+          yield* viteServer.mountApiMiddleware(apiState.handle.middleware);
         }
 
         return () => {
