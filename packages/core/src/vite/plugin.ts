@@ -1684,6 +1684,30 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
               nodePath.join(paths.generatedDir, "index.html"),
               generateHtmlTemplate(),
             );
+
+            // SSR entry for Cloudflare Workers static-site deployment.
+            // Proxies all non-asset requests to the SPA entry point.
+            yield* writeFileSafe(
+              nodePath.join(paths.generatedDir, "ssr-entry.js"),
+              [
+                `export default {`,
+                `  async fetch(request, env) {`,
+                `    const url = new URL(request.url);`,
+                `    const pathname = url.pathname;`,
+                ``,
+                `    // Let asset requests (JS, CSS, wasm, etc.) pass through to ASSETS directly.`,
+                `    if (pathname.startsWith("/assets/") || pathname.startsWith("/.trygg/")) {`,
+                `      return env.ASSETS.fetch(request);`,
+                `    }`,
+                ``,
+                `    // Serve the SPA shell for every other path.`,
+                `    const spa = new URL(request.url);`,
+                `    spa.pathname = "/.trygg/index.html";`,
+                `    return env.ASSETS.fetch(spa);`,
+                `  },`,
+                `};`,
+              ].join("\n"),
+            );
           }),
         writeProductionServerEntry: (paths) =>
           Effect.gen(function* () {
@@ -2706,7 +2730,27 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
     name: "trygg",
     enforce: "pre",
 
+    // For static output, only apply to the client environment.
+    // Multi-environment builds (e.g. alchemy's Cloudflare.Worker) create
+    // an SSR environment whose rollupOptions.input must not be an HTML file.
+    applyToEnvironment(environment: { readonly name: string }) {
+      if (output === "static") return environment.name === "client";
+      return true;
+    },
+
     config(_userConfig: unknown, env: { readonly command: string }) {
+      /*
+       * The SSR build environment receives this config from the plugin's config hook.
+       * `applyToEnvironment` above prevents the plugin from running hooks in the SSR
+       * environment, but the resolved config values (e.g. build.rollupOptions.input)
+       * are already baked in during the shared resolution phase.  Because Vite will
+       * fall back to `resolve("index.html")` whenever no input is present, and that
+       * file likely doesn't exist in a typical trygg project, we avoid the fallback
+       * by providing an explicit non-HTML input for SSR builds.  The value itself is
+       * irrelevant since the Worker entry is produced by the Cloudflare plugin; this
+       * merely silences Vite's HTML-in-SSR guard.
+       */
+
       return {
         appType: "custom",
         esbuild: {
@@ -2735,9 +2779,26 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         },
         build: {
           outDir: output === "server" ? "dist/client" : "dist",
-          // Only set input in build mode — .trygg/index.html doesn't exist in dev.
-          // Vite's dep scanner fails to resolve non-existent files, causing errors.
           rollupOptions: env.command === "build" ? { input: `${GENERATED_DIR}/index.html` } : {},
+        },
+      };
+    },
+
+    configEnvironment(name: string, _config: unknown, env: { readonly command: string }) {
+      if (env.command !== "build") return;
+      if (name === "client") {
+        return {
+          build: {
+            rollupOptions: { input: `${GENERATED_DIR}/index.html` },
+          },
+        };
+      }
+      // For the SSR environment, provide a non-HTML file as input so Vite's
+      // SSR guard does not trigger.  The real Worker entry is handled by the
+      // Cloudflare Vite plugin; this file simply satisfies Vite's input check.
+      return {
+        build: {
+          rollupOptions: { input: `${GENERATED_DIR}/ssr-entry.js` },
         },
       };
     },

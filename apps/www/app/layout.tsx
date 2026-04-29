@@ -56,13 +56,17 @@ export default Component.gen(function* () {
         <meta property="og:title" content={seo.title} />
         <meta property="og:description" content={seo.description} />
         <meta property="og:site_name" content="trygg" />
-        {/* TODO: add og:image when available */}
+        <meta property="og:image" content={`${seo.url}/og/og-image.png`} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:type" content="image/png" />
+        <meta property="og:image:alt" content="trygg — Effect-native UI framework" />
 
         {/* Twitter */}
-        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={seo.title} />
         <meta name="twitter:description" content={seo.description} />
-        {/* TODO: add twitter:image and twitter:site when available */}
+        <meta name="twitter:image" content={`${seo.url}/og/og-image.png`} />
 
         {/* Theme */}
         <meta name="theme-color" content="#050508" />
@@ -72,7 +76,7 @@ export default Component.gen(function* () {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" />
         <link
-          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@700&display=swap"
           rel="stylesheet"
         />
 

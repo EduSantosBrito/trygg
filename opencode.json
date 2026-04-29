@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "openai/gpt-5.5",
   "watcher": {
     "ignore": [
       "node_modules/**",
@@ -15,5 +16,29 @@
       ".git/**",
       "coverage/**"
     ]
+  },
+  "provider": {
+    "openai": {
+      "models": {
+        "gpt-5.5": {
+          "options": {
+            "reasoningEffort": "low"
+          }
+        }
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-v4-pro": {
+          "options": {
+            "reasoningEffort": "max"
+          }
+        }
+      }
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "reserved": 20000
   }
 }

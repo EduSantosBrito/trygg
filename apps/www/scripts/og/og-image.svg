@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none" role="img" aria-label="trygg — Effect-native UI framework">
+  <defs>
+    <style><![CDATA[
+      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&family=Space+Grotesk:wght@700&display=swap');
+    ]]></style>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9d6dfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f4f4f5" />
+      <stop offset="100%" stop-color="#a1a1aa" />
+    </linearGradient>
+    <!-- 64px grid, matching .bg-grid on the landing page -->
+    <pattern id="grid" x="0" y="0" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M 64 0 L 0 0 L 0 64" fill="none" stroke="#ffffff" stroke-width="1" stroke-opacity="0.02" />
+    </pattern>
+    <!-- Top-right radial glow -->
+    <radialGradient id="topRightGlow" cx="1" cy="0" r="1" fx="1" fy="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.25" />
+      <stop offset="40%" stop-color="#7c3aed" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#050508" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#050508" />
+  <rect width="1200" height="630" fill="url(#topRightGlow)" />
+  <rect width="1200" height="630" fill="url(#accentGrad)" opacity="0.03" />
+  <rect width="1200" height="630" fill="url(#grid)" />
+
+  <!-- Brand lockup top-left -->
+  <g transform="translate(80, 76)">
+    <g fill="#8b5cf6">
+      <rect y="37" width="7" height="7" />
+      <rect opacity=".6" x="7" y="37" width="7" height="7" />
+      <rect opacity=".32" x="14" y="37" width="7" height="7" />
+      <rect opacity=".07" x="21" y="37" width="7" height="7" />
+      <rect opacity=".6" y="30" width="7" height="7" />
+      <rect opacity=".32" x="7" y="30" width="7" height="7" />
+      <rect opacity=".07" x="7" y="23" width="7" height="7" />
+      <rect opacity=".07" x="14" y="30" width="7" height="7" />
+      <rect opacity=".32" y="23" width="7" height="7" />
+      <rect opacity=".07" y="16" width="7" height="7" />
+      <rect x="33" y="4" width="7" height="7" />
+      <rect opacity=".6" x="33" y="11" width="7" height="7" />
+      <rect opacity=".32" x="26" y="11" width="7" height="7" />
+      <rect opacity=".07" x="19" y="11" width="7" height="7" />
+      <rect opacity=".32" x="33" y="18" width="7" height="7" />
+      <rect opacity=".07" x="26" y="18" width="7" height="7" />
+      <rect opacity=".07" x="33" y="25" width="7" height="7" />
+      <rect opacity=".6" x="26" y="4" width="7" height="7" />
+      <rect opacity=".32" x="19" y="4" width="7" height="7" />
+      <rect opacity=".07" x="12" y="4" width="7" height="7" />
+    </g>
+    <text
+      x="60"
+      y="38"
+      font-family="'Space Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif"
+      font-weight="700"
+      font-size="34"
+      fill="#f4f4f5"
+      letter-spacing="-0.02em"
+    >trygg</text>
+  </g>
+
+  <!-- Headline -->
+  <g transform="translate(80, 230)">
+    <text
+      font-family="'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif"
+      font-weight="600"
+      font-size="64"
+      letter-spacing="-0.025em"
+      fill="url(#textGrad)"
+    >
+      <tspan x="0" y="72">Effect-native UI,</tspan>
+      <tspan x="0" y="154">type-safe by design.</tspan>
+    </text>
+  </g>
+
+  <!-- Subtitle -->
+  <g transform="translate(80, 435)">
+    <text
+      font-family="'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif"
+      font-weight="400"
+      font-size="22"
+      letter-spacing="-0.005em"
+      fill="#71717a"
+    >
+      <tspan x="0" y="0">Fine-grained reactivity without a virtual DOM.</tspan>
+      <tspan x="0" y="32">Dependency injection built in.</tspan>
+      <tspan x="0" y="64">Components that compose like Effects.</tspan>
+    </text>
+  </g>
+
+  <!-- Bottom: URL -->
+  <g transform="translate(80, 558)">
+    <text
+      font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace"
+      font-weight="500"
+      font-size="16"
+      fill="#8b5cf6"
+      letter-spacing="-0.005em"
+    >trygg.dev</text>
+  </g>
+</svg>

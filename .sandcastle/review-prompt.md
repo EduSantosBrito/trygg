@@ -1,56 +1,55 @@
 # TASK
 
-Review code changes on branch {{BRANCH}} for issue `{{ISSUE_FILE}}`: {{ISSUE_TITLE}}
-
-VCS:
-
-{{VCS_INSTRUCTIONS}}
-
-SOURCE:
-
-{{SOURCE_INSTRUCTIONS}}
-
-{{ISSUE_BODY}}
+Review the code changes on branch `{{BRANCH}}` and improve code clarity, consistency, and maintainability while preserving exact functionality.
 
 # CONTEXT
 
-Read the diff carefully:
+## Bookmark diff
 
-{{REVIEW_COMMANDS}}
+!`if [ -d .jj ]; then jj diff -r '{{BASE_REVISION}}..{{BRANCH}}'; else git diff '{{BASE_REVISION}}..{{BRANCH}}'; fi`
 
-- Relevant tests and modules touched by the diff
+## Commits on this bookmark
 
-Apply repo standards from:
-
-{{REPO_DOCS}}
+!`if [ -d .jj ]; then jj log -r '{{BASE_REVISION}}..{{BRANCH}}' --no-graph; else git log --oneline '{{BASE_REVISION}}..{{BRANCH}}'; fi`
 
 # REVIEW PROCESS
 
-Before reviewing, use the `improve-codebase-architecture` skill on the files affected by this branch. Scope its recommendations to this issue's changed files only; do not start unrelated architecture work.
+1. **Understand the change**: Read the diff and commits above to understand the intent.
 
-Look for bugs, regressions, missing edge cases, and avoidable complexity.
+2. **Analyze for improvements**: Look for opportunities to:
+   - Reduce unnecessary complexity and nesting
+   - Eliminate redundant code and abstractions
+   - Improve readability through clear variable and function names
+   - Consolidate related logic
+   - Remove unnecessary comments that describe obvious code
+   - Avoid nested ternary operators - prefer switch statements or if/else chains
+   - Choose clarity over brevity - explicit code is often better than overly compact code
 
-Stress changed code paths with hostile cases where relevant:
+3. **Check correctness**:
+   - Does the implementation match the intent? Are edge cases handled?
+   - Are new/changed behaviours covered by tests?
+   - Are there unsafe casts, `any` types, or unchecked assumptions?
+   - Does the change introduce injection vulnerabilities, credential leaks, or other security issues?
 
-- Empty values
-- Missing optional fields
-- Rapid repeated calls
-- Resource cleanup and interruption
-- Adjacent behavior regressions
+4. **Maintain balance**: Avoid over-simplification that could:
+   - Reduce code clarity or maintainability
+   - Create overly clever solutions that are hard to understand
+   - Combine too many concerns into single functions or components
+   - Remove helpful abstractions that improve code organization
+   - Make the code harder to debug or extend
 
-Improve code only when it preserves behavior and materially improves clarity, safety, or tests.
+5. **Apply project standards**: Follow the coding standards defined in @.sandcastle/CODING_STANDARDS.md
+
+6. **Preserve functionality**: Never change what the code does - only how it does it. All original features, outputs, and behaviors must remain intact.
 
 # EXECUTION
 
-- Run relevant tests/checks first if practical.
-- Add missing semantic tests when the diff has uncovered risk.
-- Fix real issues directly on this branch.
-- Preserve exact intended behavior.
-- Do not modify `.sandcastle`.
-- Commit review changes only if you made changes.
-{{VERIFY_STEP}}
-- Do not signal completion with a dirty worktree; commit all verification changes first.
+If you find improvements to make:
 
-If code is already clean, tested, and safe, do nothing.
+1. Make the changes directly on this branch
+2. Run tests and type checking to ensure nothing is broken
+3. Commit describing the refinements
 
-When complete, output {{COMPLETION_SIGNAL}}.
+If the code is already clean and well-structured, do nothing.
+
+Once complete, output <promise>COMPLETE</promise>.

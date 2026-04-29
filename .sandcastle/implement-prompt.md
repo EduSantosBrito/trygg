@@ -1,65 +1,62 @@
 # TASK
 
-Implement one vertical slice.
+Fix issue {{TASK_ID}}: {{ISSUE_TITLE}}
 
-Issue file: {{ISSUE_FILE}}
+Pull in the issue using `gh issue view {{TASK_ID}}`. If it has a parent PRD, pull that in too.
 
-Issue title: {{ISSUE_TITLE}}
+Only work on the issue specified.
 
-Branch: {{BRANCH}}
-
-VCS:
-
-{{VCS_INSTRUCTIONS}}
-
-SOURCE:
-
-{{SOURCE_INSTRUCTIONS}}
-
-{{ISSUE_BODY}}
-
-# PLAN
-
-The planner produced this implementation plan. Follow it unless you find a better approach — if so, explain why.
-
-{{PLAN}}
+Work on branch {{BRANCH}} inside the sandbox. Sandcastle sandboxes use Git worktrees even when the host repo is jj-managed. Make Git commits and run tests.
 
 # CONTEXT
 
-Before implementing, use the `tdd` skill. Follow its red-green-refactor workflow for this issue.
+Here are the last 10 commits:
 
-Read the relevant repo docs before changing code:
+<recent-commits>
 
-{{REPO_DOCS}}
+!`if [ -d .jj ]; then jj log --limit 10 --no-graph; else git log --oneline -10; fi`
 
-{{TYPE_SAFETY_RULES}}
+</recent-commits>
 
-Use local code search to find the smallest relevant surface area. Pay close attention to tests near changed code.
+# EXPLORATION
+
+Explore the repo and fill your context window with relevant information that will allow you to complete the task.
+
+Pay extra attention to test files that touch the relevant parts of the code.
 
 # EXECUTION
 
-- Make minimal, surgical changes.
-- Add deterministic tests for acceptance criteria when behavior changes.
-- Prefer red-green-refactor for bug fixes and behavior changes.
-- Do not modify `.sandcastle`.
+If applicable, use RGR to complete the task.
+
+1. RED: write one test
+2. GREEN: write the implementation to pass that test
+3. REPEAT until done
+4. REFACTOR the code
 
 # FEEDBACK LOOPS
 
-Run relevant checks before committing. Prefer narrow checks first, then broader checks if practical:
-
-{{FEEDBACK_LOOPS}}
-
-{{VERIFY_STEP}}
+Before committing, run `bun run typecheck` and `bun run test` to ensure the tests pass.
 
 # COMMIT
 
-Commit your changes with a concise conventional commit message. If `.jj/` exists, use `jj describe`; otherwise use `git commit`.
-Do not signal completion with a dirty worktree; commit all verification changes first.
+Commit the working copy. The commit message must:
 
-If the task cannot be completed, commit only complete safe work and explain blockers in the final output.
+1. Start with `RALPH:` prefix
+2. Include task completed + PRD reference
+3. Key decisions made
+4. Files changed
+5. Blockers or notes for next iteration
 
-When complete, output {{COMPLETION_SIGNAL}}.
+Keep it concise.
+
+# THE ISSUE
+
+If the task is not complete, leave a comment on the issue with what was done.
+
+Do not close the issue - this will be done later.
+
+Once complete, output <promise>COMPLETE</promise>.
 
 # FINAL RULES
 
-Only work on this issue. Do not start adjacent work.
+ONLY WORK ON A SINGLE TASK.

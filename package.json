@@ -26,10 +26,10 @@
   },
   "devDependencies": {
     "@ai-hero/sandcastle": "0.5.4",
-    "@effect/platform-node": "4.0.0-beta.51",
+    "@effect/platform-node": "4.0.0-beta.58",
     "@effect/tsgo": "0.5.2",
     "@typescript/native-preview": "latest",
-    "effect": "4.0.0-beta.51",
+    "effect": "4.0.0-beta.58",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
     "typescript": "^5.9.3"

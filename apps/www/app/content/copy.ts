@@ -13,7 +13,7 @@ export interface LandingCopy {
   readonly heroTitle: string;
   readonly heroSubtitle: string;
   readonly canaryWarning: string;
-  readonly primaryCtaLabel: "Try trygg";
+  readonly primaryCtaLabel: "Try it";
   readonly primaryCtaHref: string;
 }
 
@@ -22,7 +22,7 @@ export const copy: LandingCopy = {
   heroSubtitle:
     "Fine-grained reactivity without a virtual DOM. Dependency injection built in. Components that compose like Effects.",
   canaryWarning: "Canary — breaking changes expected",
-  primaryCtaLabel: "Try trygg",
+  primaryCtaLabel: "Try it",
   primaryCtaHref: "#install",
 } as const;
 

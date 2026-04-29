@@ -1444,6 +1444,53 @@ mountDocument(<App />, { manifest: routes.manifest })
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: configEnvironment hook
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("configEnvironment hook", () => {
+    const ConfigEnvironmentHookSchema = Schema.declare(
+      (
+        u: unknown,
+      ): u is (name: string, config: unknown, env: { readonly command: string }) => unknown =>
+        typeof u === "function",
+    );
+
+    const BuildConfigSchema = Schema.Struct({
+      build: Schema.optional(
+        Schema.Struct({
+          rollupOptions: Schema.optional(
+            Schema.Struct({
+              input: Schema.optional(Schema.String),
+            }),
+          ),
+        }),
+      ),
+    });
+
+    it("should set rollupOptions.input for client builds", () => {
+      const plugin = trygg();
+      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const result = hook("client", {}, { command: "build" });
+      const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
+      assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/index.html");
+    });
+
+    it("should not set rollupOptions.input for client in dev mode", () => {
+      const plugin = trygg();
+      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const result = hook("client", {}, { command: "serve" });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("should set rollupOptions.input for SSR to non-HTML file", () => {
+      const plugin = trygg();
+      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const result = hook("ssr", {}, { command: "build" });
+      const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
+      assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/ssr-entry.js");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Scope: Param extraction
   // ─────────────────────────────────────────────────────────────────────────────
   describe("extractParamNames", () => {

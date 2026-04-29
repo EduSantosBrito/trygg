@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { trygg } from "trygg/vite-plugin";
 
 export default defineConfig({
-  plugins: [tailwindcss(), trygg()],
+  plugins: [tailwindcss(), trygg({ output: "static", platform: "bun" })],
   build: {
     target: "esnext",
     chunkSizeWarningLimit: 700, // Shiki WASM is ~622KB

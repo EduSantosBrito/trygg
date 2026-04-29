@@ -2,6 +2,7 @@ import { Component } from "trygg";
 import * as Router from "trygg/router";
 
 import { sections } from "../content/copy";
+import { Logo } from "./logo";
 
 export const Footer = Component.gen(function* () {
   return (
@@ -12,7 +13,15 @@ export const Footer = Component.gen(function* () {
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col sm:flex-row justify-between gap-8 mb-12">
           <div className="max-w-xs">
-            <span className="text-xl font-semibold text-[var(--color-text)]">trygg</span>
+            <span className="flex items-center gap-2">
+              <Logo />
+              <span
+                className="text-xl font-bold text-[var(--color-text)]"
+                style={{ fontFamily: "var(--font-brand)" }}
+              >
+                trygg
+              </span>
+            </span>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
               Effect-native UI framework
             </p>

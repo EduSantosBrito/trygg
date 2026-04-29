@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 48" fill="none">
+  <style>
+    :root { --brand: #8b5cf6; }
+    @media (prefers-color-scheme: dark) { :root { --brand: #ffffff; } }
+    rect { fill: var(--brand); }
+  </style>
+  <rect y="37" width="7" height="7" />
+  <rect opacity=".6"  x="7"  y="37" width="7" height="7" />
+  <rect opacity=".32" x="14" y="37" width="7" height="7" />
+  <rect opacity=".07" x="21" y="37" width="7" height="7" />
+  <rect opacity=".6"         y="30" width="7" height="7" />
+  <rect opacity=".32" x="7"  y="30" width="7" height="7" />
+  <rect opacity=".07" x="7"  y="23" width="7" height="7" />
+  <rect opacity=".07" x="14" y="30" width="7" height="7" />
+  <rect opacity=".32"        y="23" width="7" height="7" />
+  <rect opacity=".07"        y="16" width="7" height="7" />
+  <rect                x="33" y="4"  width="7" height="7" />
+  <rect opacity=".6"  x="33" y="11" width="7" height="7" />
+  <rect opacity=".32" x="26" y="11" width="7" height="7" />
+  <rect opacity=".07" x="19" y="11" width="7" height="7" />
+  <rect opacity=".32" x="33" y="18" width="7" height="7" />
+  <rect opacity=".07" x="26" y="18" width="7" height="7" />
+  <rect opacity=".07" x="33" y="25" width="7" height="7" />
+  <rect opacity=".6"  x="26" y="4"  width="7" height="7" />
+  <rect opacity=".32" x="19" y="4"  width="7" height="7" />
+  <rect opacity=".07" x="12" y="4"  width="7" height="7" />
+</svg>

@@ -1,860 +1,485 @@
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
+// Parallel Planner with Review — four-phase orchestration loop
+//
+// This template drives a multi-phase workflow:
+//   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
+//                               dependency graph, and outputs a <plan> JSON
+//                               listing unblocked issues with branch names.
+//   Phase 2 (Execute + Review): For each issue, a sandbox is created via
+//                               createSandbox(). The implementer runs first
+//                               (100 iterations). If it produces commits, a
+//                               reviewer runs in the same sandbox on the same
+//                               branch (1 iteration). All issue pipelines run
+//                               concurrently via Promise.allSettled().
+//   Phase 3 (Merge):            A single agent merges all completed branches
+//                               into the current branch.
+//
+// The outer loop repeats up to MAX_ITERATIONS times so that newly unblocked
+// issues are picked up after each round of merges.
+//
+// Usage:
+//   npx tsx .sandcastle/main.ts
+// Or add to package.json:
+//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.ts" }
+
 import * as sandcastle from "@ai-hero/sandcastle";
 import type { AgentProvider } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import * as Console from "effect/Console";
-import * as Data from "effect/Data";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
+import { $ } from "bun";
+import { tmpdir } from "node:os";
+import {
+  mkdtempSync,
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  cpSync,
+  rmSync,
+} from "node:fs";
+import { join } from "node:path";
 
-// === PER-REPO CONFIGURATION ===
-const repoName = "trygg";
-const dockerImageName = `sandcastle:${repoName}`;
-const dockerfileHashLabel = `${repoName}.sandcastle.dockerfile-sha256`;
-const tempPrefix = `${repoName}-opencode-`;
-const githubRepo = process.env.SANDCASTLE_GITHUB_REPO ?? "EduSantosBrito/trygg";
-
-const repoDocs = [
-  "`AGENTS.md`",
-  "`docs/agents/code-quality.md`",
-  "`docs/agents/effect-typescript.md`",
-  "`docs/agents/testing.md`",
-  "`docs/agents/vcs.md`",
-].join("\n");
-
-const typeSafetyRules = "no `any`, no non-null assertions, no type assertions. Use Effect v4 APIs and repo patterns for async, resourceful, or fallible code.";
-
-const feedbackLoops = [
-  "`bun run typecheck`",
-  "`bun run test`",
-  "`bun run check`",
-].join("\n");
-
-const verifyStep = "`bun run check` is required before final commit/completion. It may rewrite files; include every changed file in the final commit.";
-
-const buildCmd = "`bun run typecheck` and targeted tests";
-
-const repoPromptArgs = {
-  REPO_DOCS: repoDocs,
-  TYPE_SAFETY_RULES: typeSafetyRules,
-  FEEDBACK_LOOPS: feedbackLoops,
-  VERIFY_STEP: verifyStep,
-} as const;
-
-// === CONSTANTS ===
-const outerIterations = 100;
-const agentIterations = 100;
-const agentIdleTimeoutSeconds = 30 * 60;
-const completionSignal = "<promise>COMPLETE</promise>";
-const dockerfile = join(process.cwd(), ".sandcastle", "Dockerfile");
-const jjRepoDir = join(process.cwd(), ".jj");
-const completedDir = join(process.cwd(), ".sandcastle", "completed");
-const planPromptFile = ".sandcastle/plan-prompt.md";
-const implementPromptFile = ".sandcastle/implement-prompt.md";
-const reviewPromptFile = ".sandcastle/review-prompt.md";
-const mergePromptFile = ".sandcastle/merge-prompt.md";
-const hostOpenCodeShareDir = join(process.env.HOME ?? "", ".local", "share", "opencode");
-const hostOpenCodeConfigDir = join(process.env.HOME ?? "", ".config", "opencode");
-const issueFilePattern = /^(\d{2,3})-.+\.md$/;
-const markdownFilePattern = /^.+\.md$/;
-const localPrdRoot = join(process.cwd(), "prds");
-const localIssueRoot = join(process.cwd(), "issues");
-const issueRootCandidates = [join(process.cwd(), "issues"), join(process.cwd(), ".plans")];
-const useLocalSources = process.argv.includes("--local");
-
-// === TYPES ===
 type Issue = {
-  readonly id: string;
-  readonly title: string;
-  readonly file: string;
-  readonly body: string;
-};
-
-type IssueFile = {
-  readonly id: string;
-  readonly file: string;
-};
-
-type Prd = {
-  readonly title: string;
-  readonly file: string;
-  readonly body: string;
-};
-
-type GitHubIssue = {
   readonly number: number;
   readonly title: string;
   readonly body: string;
 };
 
-type OpenCodeState = {
-  readonly root: string;
-  readonly shareDir: string;
-  readonly configDir: string;
+type PlannedIssue = {
+  readonly id: string;
+  readonly title: string;
+  readonly branch: string;
 };
 
-type Vcs =
-  | {
-      readonly type: "jj";
-    }
-  | {
-      readonly type: "git";
-    };
+const slugify = (title: string): string =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 
-type MergeTarget =
-  | {
-      readonly type: "jj-working-copy";
-    }
-  | {
-      readonly type: "git-branch";
-      readonly branch: string;
-    };
+const shellEscape = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
-class SandcastleError extends Data.TaggedError("SandcastleError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-const mapPlatformError = (message: string) => (cause: unknown) =>
-  new SandcastleError({ message, cause });
-
-const shellEscape = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-
-// === AGENT PROVIDER ===
 const sandboxedOpenCode = (model: string, variant?: string): AgentProvider => ({
   name: "opencode",
   env: {},
   captureSessions: false,
   buildPrintCommand: ({ prompt }) => ({
-    command: `opencode run --dangerously-skip-permissions --model ${shellEscape(model)}${variant ? ` --variant ${shellEscape(variant)}` : ""} ${shellEscape(prompt)}`,
+    command: [
+      "prompt_file=$(mktemp)",
+      "cat > \"$prompt_file\"",
+      [
+        "opencode run --dangerously-skip-permissions --model",
+        shellEscape(model),
+        variant === undefined ? "" : `--variant ${shellEscape(variant)}`,
+        shellEscape("Read the attached prompt file and follow it exactly."),
+        "--file \"$prompt_file\"",
+      ]
+        .filter((part) => part.length > 0)
+        .join(" "),
+      "status=$?",
+      "rm -f \"$prompt_file\"",
+      "exit $status",
+    ]
+      .filter((part) => part.length > 0)
+      .join("; "),
+    stdin: prompt,
   }),
   buildInteractiveArgs: ({ prompt }) => {
-    const args = ["opencode", "--dangerously-skip-permissions", "--model", model];
-    if (variant) args.push("--variant", variant);
-    if (prompt.length > 0) args.push("-p", prompt);
+    const args = [
+      "opencode",
+      "--dangerously-skip-permissions",
+      "--model",
+      model,
+    ];
+    if (variant !== undefined) {
+      args.push("--variant", variant);
+    }
+    if (prompt.length > 0) {
+      args.push("-p", prompt);
+    }
     return args;
   },
   parseStreamLine: () => [],
 });
 
-// === SHELL ===
-const command = (
-  binary: string,
-  args: ReadonlyArray<string>,
-): Effect.Effect<string, SandcastleError> => commandIn(process.cwd(), binary, args);
-
-const commandIn = (
-  cwd: string,
-  binary: string,
-  args: ReadonlyArray<string>,
-): Effect.Effect<string, SandcastleError> =>
-  Effect.tryPromise({
-    try: (signal) =>
-      new Promise<string>((resolve, reject) => {
-        const child = execFile(
-          binary,
-          [...args],
-          { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
-          (error, stdout, stderr) => {
-            if (error !== null) {
-              reject(stderr.trim().length > 0 ? stderr.trim() : error);
-              return;
-            }
-
-            resolve(stdout.trim());
-          },
-        );
-
-        signal.addEventListener("abort", () => child.kill(), { once: true });
-      }),
-    catch: (cause) => new SandcastleError({ message: `${binary} ${args.join(" ")} failed`, cause }),
-  });
-
-const pathExists = Effect.fn("pathExists")(function* (path: string) {
-  const fs = yield* FileSystem.FileSystem;
-  return yield* fs.exists(path).pipe(Effect.mapError(mapPlatformError(`Failed to check ${path}`)));
-});
-
-const git = (args: ReadonlyArray<string>) => command("git", args);
-
-const gitIn = (cwd: string, args: ReadonlyArray<string>) => commandIn(cwd, "git", args);
-
-const jj = (args: ReadonlyArray<string>) => command("jj", args);
-
-// === VCS ===
-const detectVcs = Effect.fn("detectVcs")(function* () {
-  const isJjRepo = yield* pathExists(jjRepoDir);
-  if (!isJjRepo) return { type: "git" } satisfies Vcs;
-
-  yield* jj(["--version"]);
-  return { type: "jj" } satisfies Vcs;
-});
-
-const syncJjFromGit = (vcs: Vcs) =>
-  vcs.type === "jj" ? jj(["git", "import"]).pipe(Effect.asVoid) : Effect.void;
-
-const syncJjToGit = (vcs: Vcs) =>
-  vcs.type === "jj" ? jj(["git", "export"]).pipe(Effect.asVoid) : Effect.void;
-
-const currentGitTargetBranch = git(["rev-parse", "--abbrev-ref", "HEAD"]).pipe(
-  Effect.map((branch) => branch.trim()),
-  Effect.filterOrFail(
-    (branch) => branch.length > 0 && branch !== "HEAD",
-    () => new SandcastleError({ message: "Git Sandcastle runs must start from a named branch." }),
-  ),
-);
-
-const currentMergeTarget = (vcs: Vcs) =>
-  vcs.type === "jj"
-    ? Effect.succeed({ type: "jj-working-copy" } satisfies MergeTarget)
-    : currentGitTargetBranch.pipe(
-        Effect.map((branch) => ({ type: "git-branch", branch }) satisfies MergeTarget),
-      );
-
-const vcsInstructions = (vcs: Vcs) =>
-  vcs.type === "jj"
-    ? [
-        "This host repository is jj-managed (`.jj/` exists).",
-        "Prefer `jj` commands whenever `.jj/` exists in your working directory.",
-        "If the Sandcastle worktree has no `.jj/`, it is a Git-backed compatibility worktree; use Git there.",
-        "When using Git in that compatibility worktree, keep the branch `{{BRANCH}}` updated with normal commits.",
-      ].join("\n")
-    : "This repository is Git-managed. Use Git commands.";
-
-const reviewCommands = (vcs: Vcs) =>
-  vcs.type === "jj"
-    ? [
-        "- If `.jj/` exists: `jj diff --from 'roots(immutable_heads()..@)' --to @`",
-        "- If `.jj/` exists: `jj status`",
-        "- Otherwise: `git diff HEAD~1..HEAD`",
-        "- Otherwise: `git status --short`",
-      ].join("\n")
-    : ["- `git diff HEAD~1..HEAD`", "- `git status --short`"].join("\n");
-
-const sourceInstructions = () =>
-  useLocalSources
-    ? [
-        "Issue source mode: local.",
-        "Use only `./issues` for implementation tasks.",
-        "Use `./prds` only as product context for the selected issue.",
-        "Do not fetch remote issue trackers or infer work from external tickets.",
-      ].join("\n")
-    : [
-        "Issue source mode: default.",
-        "Use the issue body provided below as the source of truth.",
-        "If the issue file is a tracker reference like `#123`, treat it as an already-loaded remote issue.",
-        "If the issue file is a local markdown path, treat that file as the source of truth.",
-      ].join("\n");
-
-const mergeSteps = (target: MergeTarget) =>
-  target.type === "jj-working-copy"
-    ? [
-        "- If `.jj/` exists, run `jj git import`.",
-        "- Rebase the current trunk working-copy stack onto the issue head with `jj rebase -s @ -d {{BRANCH}}`.",
-        "- The resulting order must be previous trunk ancestors, then the issue branch commits, then the original trunk working-copy commit.",
-        "- Do not use `jj new @ {{BRANCH}}`; that creates a merge commit and breaks trunk-based history.",
-        "- Before finishing, inspect the graph and ensure the issue commits are ancestors of `@`, not a sibling head beside trunk.",
-        "- If there are conflicts, resolve them correctly by reading both sides, then run `jj resolve` as needed.",
-        `- Run relevant tests/build, usually ${buildCmd}.`,
-        "- If tests fail, fix them before finishing.",
-        "- Keep `@` at the rebased trunk head; do not move it back to the issue branch.",
-        "- Do not create a merge commit or separate integration commit.",
-        "- Verify `jj log -r 'heads(::@ & ::{{BRANCH}}) & merges()'` prints nothing for the integrated trunk stack.",
-        "- Verify `jj log -r '{{BRANCH}}..@'` includes the rebased trunk/reviewer commits above the issue head.",
-        "- Run `jj git export` after `@` points at the rebased trunk head so Git refs are synchronized.",
-        "- Do not modify `.sandcastle`.",
-        "- When complete, output {{COMPLETION_SIGNAL}}.",
-      ].join("\n")
-    : [
-        "- Run `git checkout {{BRANCH}}`.",
-        `- Rebase the issue branch onto trunk with \`git rebase ${target.branch}\`.`,
-        "- If there are conflicts, resolve them correctly by reading both sides.",
-        `- Run relevant tests/build, usually ${buildCmd}.`,
-        "- If tests fail, fix them before finishing.",
-        `- Advance trunk with \`git checkout ${target.branch}\` then \`git merge --ff-only {{BRANCH}}\`.`,
-        "- Do not run plain `git merge`; only fast-forward integration is allowed.",
-        "- Do not modify `.sandcastle`.",
-        "- When complete, output {{COMPLETION_SIGNAL}}.",
-      ].join("\n");
-
-// === DOCKER ===
-const dockerImageLabel = (label: string) =>
-  command("docker", [
-    "image",
-    "inspect",
-    "--format",
-    `{{ index .Config.Labels "${label}" }}`,
-    dockerImageName,
-  ]).pipe(
-    Effect.map((value) => (value.length > 0 && value !== "<no value>" ? value : undefined)),
-    Effect.catchTag("SandcastleError", () => Effect.succeed(undefined)),
-  );
-
-const ensureDockerImage = Effect.fn("ensureDockerImage")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const dockerfileExists = yield* pathExists(dockerfile);
-  if (!dockerfileExists) {
-    return yield* new SandcastleError({
-      message: `Missing ${dockerfile}; cannot build ${dockerImageName}`,
-    });
-  }
-
-  const dockerfileText = yield* fs
-    .readFileString(dockerfile)
-    .pipe(Effect.mapError(mapPlatformError("Failed to read Dockerfile")));
-  const dockerfileHash = createHash("sha256").update(dockerfileText).digest("hex");
-
-  const currentLabel = yield* dockerImageLabel(dockerfileHashLabel);
-  if (currentLabel === dockerfileHash) return;
-
-  yield* Console.log(`Building Docker image ${dockerImageName}...`);
-  yield* command("docker", [
-    "build",
-    "--label",
-    `${dockerfileHashLabel}=${dockerfileHash}`,
-    "-t",
-    dockerImageName,
-    "-f",
-    dockerfile,
-    process.cwd(),
-  ]).pipe(Effect.asVoid);
-});
-
-// === ISSUE LOADING ===
-const findIssueRoot = Effect.fn("findIssueRoot")(function* () {
-  for (const candidate of issueRootCandidates) {
-    const exists = yield* pathExists(candidate);
-    if (exists) return candidate;
-  }
-
-  return undefined;
-});
-
-const parseIssueFile = (file: string): IssueFile | undefined => {
-  const match = issueFilePattern.exec(file);
-  const id = match?.at(1);
-
-  return id === undefined ? undefined : { id, file };
-};
-
-const titleFromMarkdown = (file: string, body: string) => {
-  const heading = body.split("\n").find((line) => line.startsWith("# "));
-  const fallbackTitle = basename(file, ".md").replace(/^\d{2,3}-/, "");
-
-  return heading?.replace(/^#\s+(?:\d{2,3}:\s*)?/, "").trim() || fallbackTitle;
-};
-
-const prdContext = (prds: ReadonlyArray<Prd>) =>
-  prds.length === 0
-    ? ""
-    : [
-        "# LOCAL PRD CONTEXT",
-        "",
-        "Use these local PRDs as product context. Implement only the selected issue below.",
-        "",
-        ...prds.map((prd) => [`## ${prd.file}: ${prd.title}`, "", prd.body].join("\n")),
-        "",
-        "# SELECTED ISSUE",
-        "",
-      ].join("\n");
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const parseGitHubIssue = (value: unknown): GitHubIssue | undefined => {
-  if (!isRecord(value)) return undefined;
-
-  const number = value["number"];
-  const title = value["title"];
-  const body = value["body"];
-
-  if (typeof number !== "number") return undefined;
-  if (typeof title !== "string") return undefined;
-  if (typeof body !== "string") return undefined;
-
-  return { number, title, body };
-};
-
-const parseGitHubIssues = Effect.fn("parseGitHubIssues")(function* (text: string) {
-  const parsed = yield* Effect.try({
-    try: () => JSON.parse(text),
-    catch: (cause) => new SandcastleError({ message: "Failed to parse GitHub issues JSON", cause }),
-  });
-
-  if (!Array.isArray(parsed)) {
-    return yield* new SandcastleError({ message: "Expected GitHub issues JSON array" });
-  }
-
-  return parsed.flatMap((value) => {
-    const issue = parseGitHubIssue(value);
-    return issue === undefined ? [] : [issue];
-  });
-});
-
-const blockedByOpenIssue = (issue: GitHubIssue, openIssueNumbers: ReadonlySet<number>): boolean => {
-  const matches = issue.body.matchAll(/Blocked by #(\d+)/g);
-
-  for (const match of matches) {
-    const numberText = match.at(1);
-    if (numberText === undefined) continue;
-
-    const number = Number.parseInt(numberText, 10);
-    if (openIssueNumbers.has(number)) return true;
-  }
-
-  return false;
-};
-
-const loadCompletedIssueIds = Effect.fn("loadCompletedIssueIds")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const exists = yield* pathExists(completedDir);
-  if (!exists) return new Set<string>();
-
-  const files = yield* fs
-    .readDirectory(completedDir)
-    .pipe(Effect.mapError(mapPlatformError(`Failed to read ${completedDir}`)));
-
-  return new Set(files);
-});
-
-const loadGitHubIssues = Effect.fn("loadGitHubIssues")(function* () {
-  const text = yield* command("gh", [
-    "issue",
-    "list",
-    "--repo",
-    githubRepo,
-    "--state",
-    "open",
-    "--label",
-    "Sandcastle",
-    "--limit",
-    "100",
-    "--json",
-    "number,title,body",
-  ]);
-  const issues = yield* parseGitHubIssues(text);
-  const completedIssueIds = yield* loadCompletedIssueIds();
-  const blockingOpenIssueNumbers = new Set(
-    issues
-      .filter((issue) => !completedIssueIds.has(String(issue.number)))
-      .map((issue) => issue.number),
-  );
-
-  return issues
-    .filter((issue) => !blockedByOpenIssue(issue, blockingOpenIssueNumbers))
-    .toSorted((left, right) => left.number - right.number)
-    .map(
-      (issue) =>
-        ({
-          id: String(issue.number),
-          title: issue.title,
-          file: `#${issue.number}`,
-          body: issue.body,
-        }) satisfies Issue,
-    );
-});
-
-const loadLocalPrds = Effect.fn("loadLocalPrds")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const exists = yield* pathExists(localPrdRoot);
-  if (!exists) return [] satisfies ReadonlyArray<Prd>;
-
-  const files = yield* fs
-    .readDirectory(localPrdRoot)
-    .pipe(Effect.mapError(mapPlatformError(`Failed to read ${localPrdRoot}`)));
-
-  return yield* Effect.forEach(
-    files
-      .filter((file) => markdownFilePattern.test(file))
-      .toSorted((left, right) => left.localeCompare(right)),
-    (file) =>
-      Effect.gen(function* () {
-        const body = yield* fs
-          .readFileString(join(localPrdRoot, file))
-          .pipe(Effect.mapError(mapPlatformError(`Failed to read ${file}`)));
-
-        return { title: titleFromMarkdown(file, body), file, body } satisfies Prd;
-      }),
-  );
-});
-
-const loadLocalIssues = Effect.fn("loadLocalIssues")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const exists = yield* pathExists(localIssueRoot);
-  if (!exists) {
-    return yield* new SandcastleError({ message: `--local requires ${localIssueRoot}` });
-  }
-
-  const prds = yield* loadLocalPrds();
-  const context = prdContext(prds);
-  const files = yield* fs
-    .readDirectory(localIssueRoot)
-    .pipe(Effect.mapError(mapPlatformError(`Failed to read ${localIssueRoot}`)));
-
-  const issues = yield* Effect.forEach(
-    files
-      .flatMap((file) => {
-        const issueFile = parseIssueFile(file);
-        return issueFile === undefined ? [] : [issueFile];
-      })
-      .toSorted((left, right) => left.file.localeCompare(right.file)),
-    ({ id, file }) =>
-      Effect.gen(function* () {
-        const body = yield* fs
-          .readFileString(join(localIssueRoot, file))
-          .pipe(Effect.mapError(mapPlatformError(`Failed to read ${file}`)));
-
-        return {
-          id,
-          title: titleFromMarkdown(file, body),
-          file,
-          body: `${context}${body}`,
-        } satisfies Issue;
-      }),
-  );
-
-  if (issues.length === 0) {
-    return yield* new SandcastleError({ message: `No issue files found in ${localIssueRoot}` });
-  }
-
-  return issues;
-});
-
-const loadIssues = Effect.fn("loadIssues")(function* () {
-  if (useLocalSources) return yield* loadLocalIssues();
-
-  const fs = yield* FileSystem.FileSystem;
-  const issueRoot = yield* findIssueRoot();
-  if (issueRoot === undefined) return yield* loadGitHubIssues();
-
-  const files = yield* fs
-    .readDirectory(issueRoot)
-    .pipe(Effect.mapError(mapPlatformError(`Failed to read ${issueRoot}`)));
-
-  return yield* Effect.forEach(
-    files
-      .flatMap((file) => {
-        const issueFile = parseIssueFile(file);
-        return issueFile === undefined ? [] : [issueFile];
-      })
-      .toSorted((left, right) => left.file.localeCompare(right.file)),
-    ({ id, file }) =>
-      Effect.gen(function* () {
-        const body = yield* fs
-          .readFileString(join(issueRoot, file))
-          .pipe(Effect.mapError(mapPlatformError(`Failed to read ${file}`)));
-
-        return { id, title: titleFromMarkdown(file, body), file, body } satisfies Issue;
-      }),
-  );
-});
-
-// === COMPLETION TRACKING ===
-const completionMarker = (issue: Issue) => join(completedDir, issue.id);
-
-const isIssueComplete = (issue: Issue) => pathExists(completionMarker(issue));
-
-const markIssueComplete = (issue: Issue) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs
-      .makeDirectory(completedDir, { recursive: true })
-      .pipe(Effect.mapError(mapPlatformError(`Failed to create ${completedDir}`)));
-    yield* fs
-      .writeFileString(completionMarker(issue), `${issue.file}\n`)
-      .pipe(Effect.mapError(mapPlatformError(`Failed to mark issue ${issue.id} complete`)));
-  });
-
-const closeGitHubIssue = (issue: Issue, branch: string) => {
-  if (useLocalSources || issue.file !== `#${issue.id}`) return Effect.void;
-
-  return command("gh", [
-    "issue",
-    "close",
-    issue.id,
-    "--repo",
-    githubRepo,
-    "--comment",
-    `Completed by Sandcastle after merging ${branch}.`,
-  ]).pipe(Effect.asVoid);
-};
-
-// === MERGE CHECK ===
-const isMergedIntoHead = (branch: string, vcs: Vcs) =>
-  vcs.type === "jj"
-    ? syncJjFromGit(vcs).pipe(
-        Effect.andThen(() =>
-          jj(["log", "-r", `heads(::@ & ::${branch})`, "--no-graph", "-T", "change_id.short()"]),
-        ),
-        Effect.map((output) => output.trim().length > 0),
-        Effect.catchTag("SandcastleError", () => Effect.succeed(false)),
-      )
-    : git(["merge-base", "--is-ancestor", branch, "HEAD"]).pipe(
-        Effect.as(true),
-        Effect.catchTag("SandcastleError", () => Effect.succeed(false)),
-      );
-
-// === OPENCODE STATE ===
-const createOpenCodeState = Effect.fn("createOpenCodeState")(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const root = yield* fs
-    .makeTempDirectory({ directory: tmpdir(), prefix: tempPrefix })
-    .pipe(Effect.mapError(mapPlatformError("Failed to create OpenCode sandbox state")));
+const createOpenCodeState = () => {
+  const root = mkdtempSync(join(tmpdir(), "trygg-opencode-"));
   const shareDir = join(root, "share", "opencode");
   const configDir = join(root, "config", "opencode");
 
-  yield* fs
-    .makeDirectory(shareDir, { recursive: true })
-    .pipe(Effect.mapError(mapPlatformError(`Failed to create ${shareDir}`)));
-  yield* fs
-    .makeDirectory(configDir, { recursive: true })
-    .pipe(Effect.mapError(mapPlatformError(`Failed to create ${configDir}`)));
+  mkdirSync(shareDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+
+  const hostShareDir = join(process.env.HOME ?? "", ".local", "share", "opencode");
+  const hostConfigDir = join(process.env.HOME ?? "", ".config", "opencode");
 
   for (const file of ["auth.json", "mcp-auth.json"]) {
-    const source = join(hostOpenCodeShareDir, file);
-    const exists = yield* pathExists(source);
-    if (exists) {
-      yield* fs
-        .copyFile(source, join(shareDir, file))
-        .pipe(Effect.mapError(mapPlatformError(`Failed to copy ${source}`)));
+    const source = join(hostShareDir, file);
+    if (existsSync(source)) {
+      copyFileSync(source, join(shareDir, file));
     }
   }
 
-  const configExists = yield* pathExists(hostOpenCodeConfigDir);
-  if (configExists) yield* copyOpenCodeConfig(hostOpenCodeConfigDir, configDir);
+  if (existsSync(hostConfigDir)) {
+    cpSync(hostConfigDir, configDir, {
+      recursive: true,
+      filter: (src) => !src.includes("node_modules"),
+    });
+  }
 
-  return { root, shareDir, configDir } satisfies OpenCodeState;
-});
+  return { root, shareDir, configDir };
+};
 
-const cleanupOpenCodeState = (state: OpenCodeState) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs
-      .remove(state.root, { recursive: true, force: true })
-      .pipe(Effect.orElseSucceed(() => undefined));
+const cleanupOpenCodeState = (state: { readonly root: string }) => {
+  try {
+    rmSync(state.root, { recursive: true, force: true });
+  } catch {
+    // ignore cleanup errors
+  }
+};
+
+const parseIssue = (value: unknown): Issue | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+
+  const number = Reflect.get(value, "number");
+  const title = Reflect.get(value, "title");
+  const body = Reflect.get(value, "body");
+
+  if (typeof number !== "number" || typeof title !== "string") {
+    return undefined;
+  }
+
+  return {
+    number,
+    title,
+    body: typeof body === "string" ? body : "",
+  };
+};
+
+const parseIssues = (json: string): readonly Issue[] => {
+  const value: unknown = JSON.parse(json);
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    const issue = parseIssue(item);
+    return issue === undefined ? [] : [issue];
   });
+};
 
-const copyOpenCodeConfig: (
-  sourceDir: string,
-  targetDir: string,
-) => Effect.Effect<void, SandcastleError, FileSystem.FileSystem> = Effect.fn("copyOpenCodeConfig")(
-  function* (sourceDir: string, targetDir: string) {
-    const fs = yield* FileSystem.FileSystem;
-    const entries = yield* fs
-      .readDirectory(sourceDir)
-      .pipe(Effect.mapError(mapPlatformError(`Failed to read ${sourceDir}`)));
-
-    for (const entry of entries) {
-      if (entry === "node_modules") continue;
-
-      const source = join(sourceDir, entry);
-      const target = join(targetDir, entry);
-      const stat = yield* fs
-        .stat(source)
-        .pipe(Effect.mapError(mapPlatformError(`Failed to stat ${source}`)));
-      if (stat.type === "Directory") {
-        yield* fs
-          .makeDirectory(target, { recursive: true })
-          .pipe(Effect.mapError(mapPlatformError(`Failed to create ${target}`)));
-        yield* copyOpenCodeConfig(source, target);
-      } else if (stat.type === "File") {
-        yield* fs
-          .makeDirectory(dirname(target), { recursive: true })
-          .pipe(Effect.mapError(mapPlatformError(`Failed to create ${dirname(target)}`)));
-        yield* fs
-          .copyFile(source, target)
-          .pipe(Effect.mapError(mapPlatformError(`Failed to copy ${source}`)));
-      }
+const blockedBy = (body: string): readonly number[] => {
+  const blockers: number[] = [];
+  for (const match of body.matchAll(/Blocked by #(\d+)/g)) {
+    const number = Number(match[1]);
+    if (Number.isInteger(number)) {
+      blockers.push(number);
     }
-  },
-);
+  }
+  return blockers;
+};
 
-// === UTILS ===
-const slugFor = (issue: Issue) =>
-  issue.title
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+const parsePlannedIssue = (value: unknown): PlannedIssue | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
 
-const nextIssue = Effect.fn("nextIssue")(function* () {
-  const issues = yield* loadIssues();
+  const id = Reflect.get(value, "id");
+  const title = Reflect.get(value, "title");
+  const branch = Reflect.get(value, "branch");
 
+  if (
+    typeof id !== "string" ||
+    typeof title !== "string" ||
+    typeof branch !== "string"
+  ) {
+    return undefined;
+  }
+
+  return { id, title, branch };
+};
+
+const parsePlan = (stdout: string): readonly PlannedIssue[] | undefined => {
+  const match = stdout.match(/<plan>\s*([\s\S]*?)\s*<\/plan>/);
+  const json = match?.[1];
+  if (json === undefined) {
+    return undefined;
+  }
+
+  const value: unknown = JSON.parse(json);
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+
+  const issues = Reflect.get(value, "issues");
+  if (!Array.isArray(issues)) {
+    return undefined;
+  }
+
+  return issues.flatMap((item) => {
+    const issue = parsePlannedIssue(item);
+    return issue === undefined ? [] : [issue];
+  });
+};
+
+const loadDeterministicPlan = async (): Promise<readonly PlannedIssue[]> => {
+  const issueJson =
+    await $`gh issue list --state open --label Sandcastle --limit 100 --json number,title,body`.text();
+  const issues = parseIssues(issueJson);
+  const openIssueNumbers = new Set(issues.map((issue) => issue.number));
+
+  const unblocked = issues.filter((issue) =>
+    blockedBy(issue.body).every((blocker) => !openIssueNumbers.has(blocker)),
+  );
+
+  const selected = unblocked.length > 0 ? unblocked : issues.slice(0, 1);
+  return selected.map((issue) => ({
+    id: String(issue.number),
+    title: issue.title,
+    branch: `sandcastle/issue-${issue.number}-${slugify(issue.title)}`,
+  }));
+};
+
+const loadPlan = async (): Promise<readonly PlannedIssue[]> => {
+  const { provider, cleanup } = createSandboxProvider();
+  try {
+    const plan = await sandcastle.run({
+      hooks,
+      sandbox: provider,
+      name: "planner",
+      maxIterations: 4,
+      agent: plannerAgent,
+      promptFile: "./.sandcastle/plan-prompt.md",
+      completionSignal: "</plan>",
+      copyToWorktree,
+    });
+    const issues = parsePlan(plan.stdout);
+    if (issues !== undefined) {
+      return issues;
+    }
+    throw new Error("Planner returned no valid <plan> block.");
+  } catch (error) {
+    if (Bun.env.SANDCASTLE_DETERMINISTIC_PLAN_FALLBACK === "1") {
+      console.warn(`Planner failed: ${String(error)}. Falling back.`);
+      return loadDeterministicPlan();
+    }
+    throw error;
+  } finally {
+    cleanup();
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+// Maximum number of plan→execute→merge cycles before stopping.
+// Raise this if your backlog is large; lower it for a quick smoke-test run.
+const MAX_ITERATIONS = 100;
+
+// Hooks run inside the sandbox before the agent starts each iteration.
+// bun install ensures the sandbox always has fresh dependencies.
+const hooks = {
+  sandbox: { onSandboxReady: [{ command: "bun install" }] },
+};
+
+// Do not copy node_modules into every worktree. Copying it in parallel is slow
+// enough to trip Sandcastle's 60s copy timeout; the hook above runs bun install
+// inside each sandbox instead.
+const copyToWorktree: string[] = [];
+
+const createSandboxProvider = () => {
+  const state = createOpenCodeState();
+  const provider = docker({
+    mounts: [
+      {
+        hostPath: state.shareDir,
+        sandboxPath: "/home/agent/.local/share/opencode",
+      },
+      {
+        hostPath: state.configDir,
+        sandboxPath: "/home/agent/.config/opencode",
+      },
+    ],
+  });
+  return { provider, cleanup: () => cleanupOpenCodeState(state) };
+};
+
+const plannerModel = "openai/gpt-5.5";
+const implementerModel = "openai/gpt-5.5";
+const reviewerModel = "deepseek/deepseek-v4-pro";
+const mergerModel = "openai/gpt-5.5";
+
+const plannerAgent = sandboxedOpenCode(plannerModel, "medium");
+const implementerAgent = sandboxedOpenCode(implementerModel);
+const reviewerAgent = sandboxedOpenCode(reviewerModel);
+const mergerAgent = sandboxedOpenCode(mergerModel);
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // -------------------------------------------------------------------------
+  // Phase 1: Plan
+  //
+  // Prefer the prompt-based planner so dependency analysis lives in
+  // .sandcastle/plan-prompt.md. Deterministic planning is opt-in fallback only.
+  // -------------------------------------------------------------------------
+  const issues = await loadPlan();
+
+  if (issues.length === 0) {
+    // No unblocked work — either everything is done or everything is blocked.
+    console.log("No unblocked issues to work on. Exiting.");
+    break;
+  }
+
+  console.log(
+    `Planning complete. ${issues.length} issue(s) to work in parallel:`,
+  );
   for (const issue of issues) {
-    const complete = yield* isIssueComplete(issue);
-    if (!complete) return issue;
+    console.log(`  ${issue.id}: ${issue.title} → ${issue.branch}`);
   }
 
-  return undefined;
-});
+  if (Bun.env.SANDCASTLE_PLAN_ONLY === "1") {
+    console.log("Plan-only mode enabled. Exiting before execution.");
+    break;
+  }
 
-// === AGENT RUNNER ===
-const runAgent = (options: Parameters<typeof sandcastle.run>[0]) =>
-  Effect.tryPromise({
-    try: () =>
-      sandcastle.run({
-        ...options,
-        idleTimeoutSeconds: options.idleTimeoutSeconds ?? agentIdleTimeoutSeconds,
-      }),
-    catch: (cause) =>
-      new SandcastleError({ message: `Sandcastle run failed: ${options.name ?? "agent"}`, cause }),
-  });
+  // -------------------------------------------------------------------------
+  // Phase 2: Execute + Review
+  //
+  // For each issue, create a sandbox via createSandbox() so the implementer
+  // and reviewer share the same sandbox instance per branch. The implementer
+  // runs first; if it produces commits, the reviewer runs in the same sandbox.
+  //
+  // Promise.allSettled means one failing pipeline doesn't cancel the others.
+  // -------------------------------------------------------------------------
 
-const commitPreservedWorktreeChanges = Effect.fn("commitPreservedWorktreeChanges")(function* (
-  agentName: string,
-  result: { readonly preservedWorktreePath?: string },
-) {
-  const worktreePath = result.preservedWorktreePath;
-  if (worktreePath === undefined) return false;
+  await $`jj git export`.quiet();
+  const sourceRevision = (await $`git rev-parse main`.text()).trim();
 
-  const status = yield* gitIn(worktreePath, ["status", "--porcelain"]);
-  if (status.trim().length === 0) return false;
+  const settled = await Promise.allSettled(
+    issues.map(async (issue) => {
+      const { provider: issueSandbox, cleanup: cleanupIssueSandbox } =
+        createSandboxProvider();
+      const sandbox = await sandcastle.createSandbox({
+        branch: issue.branch,
+        sandbox: issueSandbox,
+        hooks,
+        copyToWorktree,
+      });
 
-  yield* Console.log(`[${agentName}] Committing uncommitted verification changes.`);
-  yield* gitIn(worktreePath, ["add", "--all"]);
-
-  const stagedFiles = yield* gitIn(worktreePath, ["diff", "--cached", "--name-only"]);
-  if (stagedFiles.trim().length === 0) return false;
-
-  yield* gitIn(worktreePath, ["commit", "-m", `chore: include ${agentName} verification changes`]);
-  return true;
-});
-
-// === PROGRAM ===
-const program = Effect.gen(function* () {
-  const plannerAgent = sandboxedOpenCode("openai/gpt-5.5", "medium");
-  const implementerAgent = sandboxedOpenCode("kimi-for-coding/k2p6");
-  const reviewerAgent = sandboxedOpenCode("deepseek/deepseek-v4-pro", "max");
-  const mergerAgent = sandboxedOpenCode("openai/gpt-5.5", "medium");
-  const vcs = yield* detectVcs();
-  const mergeTarget = yield* currentMergeTarget(vcs);
-
-  yield* Effect.acquireUseRelease(
-    createOpenCodeState(),
-    (state) =>
-      Effect.gen(function* () {
-        const sandbox = docker({
-          imageName: dockerImageName,
-          mounts: [
-            {
-              hostPath: state.shareDir,
-              sandboxPath: "/home/agent/.local/share/opencode",
-            },
-            {
-              hostPath: state.configDir,
-              sandboxPath: "/home/agent/.config/opencode",
-            },
-          ],
+      try {
+        // Run the implementer
+        const implement = await sandbox.run({
+          name: "implementer",
+          maxIterations: 100,
+          agent: implementerAgent,
+          promptFile: "./.sandcastle/implement-prompt.md",
+          promptArgs: {
+            TASK_ID: issue.id,
+            ISSUE_TITLE: issue.title,
+            BRANCH: issue.branch,
+          },
         });
 
-        for (let iteration = 1; iteration <= outerIterations; iteration += 1) {
-          yield* Console.log(`\n=== Sandcastle iteration ${iteration}/${outerIterations} ===\n`);
-
-          const issue = yield* nextIssue();
-          if (issue === undefined) {
-            yield* Console.log("No remaining issues.");
-            return;
-          }
-
-          yield* ensureDockerImage();
-
-          const branch = `sandcastle/issue-${issue.id}-${slugFor(issue)}`;
-
-          yield* syncJjToGit(vcs);
-
-          const basePromptArgs = {
-            ISSUE_FILE: issue.file,
-            ISSUE_BODY: issue.body,
-            ISSUE_TITLE: issue.title,
-            BRANCH: branch,
-            SOURCE_INSTRUCTIONS: sourceInstructions(),
-            VCS_INSTRUCTIONS: vcsInstructions(vcs).replaceAll("{{BRANCH}}", branch),
-            COMPLETION_SIGNAL: completionSignal,
-            ...repoPromptArgs,
-          };
-
-          // Planner
-          const plan = yield* runAgent({
-            agent: plannerAgent,
-            sandbox,
-            name: "planner",
-            branchStrategy: { type: "branch", branch },
-            promptFile: planPromptFile,
-            promptArgs: basePromptArgs,
-            maxIterations: 4,
-            completionSignal,
-          });
-
-          yield* Console.log(`${issue.id}: ${issue.title} -> ${branch}`);
-
-          // Implementer
-          const implementation = yield* runAgent({
-            agent: implementerAgent,
-            sandbox,
-            name: "implementer",
-            branchStrategy: { type: "branch", branch },
-            promptFile: implementPromptFile,
-            promptArgs: { ...basePromptArgs, PLAN: plan.stdout },
-            maxIterations: agentIterations,
-            completionSignal,
-          });
-
-          const implementationVerificationCommit = yield* commitPreservedWorktreeChanges(
-            "implementer",
-            implementation,
-          );
-
-          // Reviewer
-          if (implementation.commits.length > 0 || implementationVerificationCommit) {
-            const review = yield* runAgent({
-              agent: reviewerAgent,
-              sandbox,
-              name: "reviewer",
-              branchStrategy: { type: "branch", branch },
-              promptFile: reviewPromptFile,
-              promptArgs: { ...basePromptArgs, REVIEW_COMMANDS: reviewCommands(vcs) },
-              maxIterations: agentIterations,
-              completionSignal,
-            });
-
-            yield* commitPreservedWorktreeChanges("reviewer", review);
-          }
-
-          // Merger
-          yield* runAgent({
-            agent: mergerAgent,
-            sandbox,
-            name: "merger",
-            promptFile: mergePromptFile,
+        // Only review if the implementer produced commits
+        if (implement.commits.length > 0) {
+          const review = await sandbox.run({
+            name: "reviewer",
+            maxIterations: 1,
+            agent: reviewerAgent,
+            promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
-              ...basePromptArgs,
-              MERGE_STEPS: mergeSteps(mergeTarget)
-                .replaceAll("{{BRANCH}}", branch)
-                .replaceAll("{{COMPLETION_SIGNAL}}", completionSignal),
+              BRANCH: issue.branch,
+              BASE_REVISION: sourceRevision,
             },
-            maxIterations: agentIterations,
-            completionSignal,
           });
 
-          const merged = yield* isMergedIntoHead(branch, vcs);
-          if (!merged) {
-            return yield* new SandcastleError({
-              message: `Merger did not merge ${branch} into HEAD.`,
-            });
-          }
-
-          yield* closeGitHubIssue(issue, branch);
-          yield* markIssueComplete(issue);
-          yield* Console.log("Merged completed branches.");
+          // Merge commits from both runs so the merge phase sees all of them.
+          // Each sandbox.run() only returns commits from its own run.
+          return {
+            ...review,
+            commits: [...implement.commits, ...review.commits],
+          };
         }
-      }),
-    cleanupOpenCodeState,
-  );
-}).pipe(Effect.provide(NodeServices.layer));
 
-NodeRuntime.runMain(program);
+        return implement;
+      } finally {
+        await sandbox.close();
+        cleanupIssueSandbox();
+      }
+    }),
+  );
+
+  // Log any agents that threw (network error, sandbox crash, etc.).
+  for (const [i, outcome] of settled.entries()) {
+    if (outcome.status === "rejected") {
+      console.error(
+        `  ✗ ${issues[i]!.id} (${issues[i]!.branch}) failed: ${outcome.reason}`,
+      );
+    }
+  }
+
+  // Only pass branches that actually produced commits to the merge phase.
+  // An agent that ran successfully but made no commits has nothing to merge.
+  const completedIssues = settled
+    .map((outcome, i) => ({ outcome, issue: issues[i]! }))
+    .filter(
+      (entry) =>
+        entry.outcome.status === "fulfilled" &&
+        entry.outcome.value.commits.length > 0,
+    )
+    .map((entry) => entry.issue);
+
+  const completedBranches = completedIssues.map((i) => i.branch);
+
+  console.log(
+    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
+  );
+  for (const branch of completedBranches) {
+    console.log(`  ${branch}`);
+  }
+
+  if (completedBranches.length === 0) {
+    // All agents ran but none made commits — nothing to merge this cycle.
+    console.log("No commits produced. Nothing to merge.");
+    continue;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 3: Merge
+  //
+  // One agent merges all completed branches into the current branch,
+  // resolving any conflicts and running tests to confirm everything works.
+  //
+  // The {{BRANCHES}} and {{ISSUES}} prompt arguments are lists that the agent
+  // uses to know which branches to merge and which issues to close.
+  // -------------------------------------------------------------------------
+  const { provider: mergerSandbox, cleanup: cleanupMergerSandbox } =
+    createSandboxProvider();
+  try {
+    await sandcastle.run({
+      hooks,
+      sandbox: mergerSandbox,
+      name: "merger",
+      maxIterations: 1,
+      agent: mergerAgent,
+      promptFile: "./.sandcastle/merge-prompt.md",
+      promptArgs: {
+        // A markdown list of branch names, one per line.
+        BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
+        // A markdown list of issue IDs and titles, one per line.
+        ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
+      },
+    });
+  } finally {
+    cleanupMergerSandbox();
+  }
+
+  console.log("\nBranches merged.");
+}
+
+console.log("\nAll done.");
