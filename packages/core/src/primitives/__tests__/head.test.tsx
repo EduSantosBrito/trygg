@@ -13,10 +13,12 @@
 import { assert, describe, effect } from "@effect/vitest";
 import { Effect, Exit, Option, Scope } from "effect";
 import {
+  CurrentHead,
   deriveKey,
   HOISTABLE_TAGS,
   IsDocumentMount,
   isHoistable,
+  makeHeadHoist,
   makeBrowserHead,
   makeTestHead,
 } from "../head.js";
@@ -131,6 +133,53 @@ describe("deriveKey", () => {
     Effect.gen(function* () {
       assert.deepStrictEqual(yield* deriveKey("div", {}), Option.none());
       assert.deepStrictEqual(yield* deriveKey("span", { name: "x" }), Option.none());
+    }),
+  );
+});
+
+// =============================================================================
+// HeadHoist — Renderer seam
+// =============================================================================
+
+describe("HeadHoist", () => {
+  effect("should derive action and mount through test Head service", () =>
+    Effect.gen(function* () {
+      const head = yield* makeTestHead();
+      const hoist = makeHeadHoist();
+
+      const action = yield* hoist
+        .maybeHoist("title", {})
+        .pipe(Effect.provideService(CurrentHead, head));
+
+      assert.isTrue(Option.isSome(action));
+      if (Option.isNone(action)) return;
+      assert.strictEqual(action.value._tag, "head");
+      if (action.value._tag !== "head") return;
+
+      const node = document.createElement("title");
+      node.textContent = "Mock Renderer";
+      const mountScope = yield* Scope.make();
+      yield* action.value.mount(node).pipe(Scope.provide(mountScope));
+
+      const entries = yield* head.entries;
+      assert.strictEqual(entries.length, 1);
+      assert.strictEqual(entries[0]?.tagName, "title");
+      assert.deepStrictEqual(entries[0]?.key, Option.some("title"));
+
+      yield* Scope.close(mountScope, Exit.void);
+    }),
+  );
+
+  effect("should keep static hoistable tags inline", () =>
+    Effect.gen(function* () {
+      const head = yield* makeTestHead();
+      const hoist = makeHeadHoist();
+
+      const action = yield* hoist
+        .maybeHoist("style", { mode: "static" })
+        .pipe(Effect.provideService(CurrentHead, head));
+
+      assert.deepStrictEqual(action, Option.none());
     }),
   );
 });

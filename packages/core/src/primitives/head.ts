@@ -12,6 +12,8 @@
  */
 import { Data, Effect, Option, Ref, Scope } from "effect";
 import * as Context from "effect/Context";
+import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
+import type { ElementProps } from "./element.js";
 
 // =============================================================================
 // Constants
@@ -180,7 +182,7 @@ export interface HeadEntry {
  */
 export const deriveKey = (
   tag: string,
-  props: Record<string, unknown>,
+  props: ElementProps | Record<string, unknown>,
 ): Effect.Effect<Option.Option<string>> =>
   Effect.sync(() => {
     switch (tag) {
@@ -202,6 +204,83 @@ export const deriveKey = (
         return Option.none();
     }
   });
+
+// =============================================================================
+// HeadHoist — Renderer seam
+// =============================================================================
+
+/**
+ * Renderer action for intrinsic elements whose mount location is owned by Head.
+ *
+ * @remarks
+ * The renderer applies this action without knowing whether a tag is hoistable,
+ * which key it uses, or which document node receives it.
+ *
+ * @internal
+ */
+export type HoistAction =
+  | {
+      readonly _tag: "head";
+      readonly props: ElementProps;
+      readonly mount: (node: HTMLElement) => Effect.Effect<void, never, Scope.Scope>;
+    }
+  | {
+      readonly _tag: "document";
+      readonly props: ElementProps;
+    };
+
+/**
+ * Head-owned hoisting seam consumed by the renderer.
+ *
+ * @remarks
+ * Implementations decide whether an intrinsic element needs special mounting and
+ * return the action the renderer should apply.
+ *
+ * @internal
+ */
+export interface HeadHoist {
+  readonly maybeHoist: (
+    tag: string,
+    props: ElementProps,
+  ) => Effect.Effect<Option.Option<HoistAction>>;
+}
+
+const stripHeadMode = (props: ElementProps): ElementProps => {
+  const { mode: _mode, ...domProps } = props;
+  return domProps;
+};
+
+/**
+ * Build the default Head hoisting policy.
+ *
+ * @remarks
+ * The default policy owns document mount detection, head tag detection, mode
+ * handling, key derivation, and dispatch to the active Head service.
+ *
+ * @internal
+ */
+export const makeHeadHoist = (): HeadHoist => ({
+  maybeHoist: (tag, props) =>
+    Effect.gen(function* () {
+      const domProps = props.mode === undefined ? props : stripHeadMode(props);
+      const isDocumentMount = yield* getFiberRef(IsDocumentMount);
+      if (isDocumentMount && DOCUMENT_TAGS.has(tag)) {
+        return Option.some({ _tag: "document", props: domProps });
+      }
+
+      const headService = yield* getFiberRef(CurrentHead);
+      if (headService === null || !HOISTABLE_TAGS.has(tag) || props.mode === "static") {
+        return Option.none();
+      }
+
+      const key = yield* deriveKey(tag, domProps);
+      return Option.some({
+        _tag: "head",
+        props: domProps,
+        mount: (node) => headService.mount(tag, node, key),
+      });
+    }),
+});
 
 // =============================================================================
 // Head Service
@@ -502,6 +581,17 @@ export const CurrentHead = Context.Reference<HeadService | null>("trygg/Head/Cur
 export const IsDocumentMount = Context.Reference<boolean>("trygg/Head/IsDocumentMount", {
   defaultValue: () => false,
 });
+
+/**
+ * Enable document-level mount mapping for the current render fiber.
+ *
+ * @remarks
+ * This keeps the document-mode flag inside Head while allowing document render
+ * entrypoints to opt into mapping html, head, and body to existing nodes.
+ *
+ * @internal
+ */
+export const enableDocumentMount: Effect.Effect<void> = setFiberRef(IsDocumentMount, true);
 
 /**
  * Tags that map to existing document nodes in document-mount mode.

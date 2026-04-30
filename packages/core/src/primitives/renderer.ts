@@ -16,7 +16,7 @@ import { Element, getKey, isElement, type ElementProps, type EventHandler } from
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
-import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
+import { setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
 import { ResourceRegistryLive } from "./resource.js";
 import * as Head from "./head.js";
@@ -734,12 +734,12 @@ const renderElement = (
 
     Match.tag("Intrinsic", ({ tag, props, children, key }) =>
       Effect.gen(function* () {
-        // Document-level elements: map to existing DOM nodes (only in mountDocument mode)
-        const isDocumentMount = yield* getFiberRef(Head.IsDocumentMount);
-        if (isDocumentMount && Head.DOCUMENT_TAGS.has(tag)) {
+        const hoist = Head.makeHeadHoist();
+        const hoistAction = yield* hoist.maybeHoist(tag, props);
+        if (Option.isSome(hoistAction) && hoistAction.value._tag === "document") {
           return yield* renderDocumentElement(
             tag,
-            props,
+            hoistAction.value.props,
             children,
             parent,
             runtime,
@@ -756,18 +756,15 @@ const renderElement = (
           element: node,
         });
 
-        // Check for head element hoisting
-        const headService = yield* getFiberRef(Head.CurrentHead);
-        const rawProps = props as Record<string, unknown>;
-        const mode = rawProps["mode"];
-        const isHoistableTag = yield* Head.isHoistable(tag);
-        const shouldHoist = headService !== null && isHoistableTag && mode !== "static";
-
         // Strip framework-specific 'mode' prop before applying to DOM
-        const domProps = mode !== undefined ? omitKey(props, "mode") : props;
+        const domProps = props.mode !== undefined ? omitKey(props, "mode") : props;
+        const appliedProps =
+          Option.isSome(hoistAction) && hoistAction.value._tag === "head"
+            ? hoistAction.value.props
+            : domProps;
 
         // Apply props and get cleanup functions
-        let currentProps = domProps;
+        let currentProps = appliedProps;
         let propCleanups = yield* applyProps(node, currentProps, runtime, context);
 
         type ChildSlot = {
@@ -826,10 +823,9 @@ const renderElement = (
           }
         }
 
-        if (shouldHoist) {
+        if (Option.isSome(hoistAction) && hoistAction.value._tag === "head") {
           // Hoisted element — mount to document.head via Head service
-          const key = yield* Head.deriveKey(tag, domProps as unknown as Record<string, unknown>);
-          yield* headService.mount(tag, node, key);
+          yield* hoistAction.value.mount(node);
 
           // Use a comment placeholder as the RenderResult node.
           // The actual element lives in document.head — we must not expose it
@@ -2535,8 +2531,7 @@ export const renderDocument = <E>(
   Effect.gen(function* () {
     const renderer = yield* Renderer;
 
-    // Enable document-level element mapping
-    yield* setFiberRef(Head.IsDocumentMount, true);
+    yield* Head.enableDocumentMount;
 
     // Set routes manifest if provided (enables <Router.Outlet /> without props)
     if (options?.manifest !== undefined) {
