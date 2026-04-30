@@ -14,7 +14,7 @@
  * @since 1.0.0
  * @module trygg/primitives/signal
  */
-import { Cause, Data, Effect, Equal, Exit, Pipeable, Ref, Scope, SubscriptionRef } from "effect";
+import { Cause, Data, Effect, Equal, Exit, Ref, Scope, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -25,6 +25,7 @@ import {
   unsafeRunComponent,
   unsafeTagCallable,
 } from "../internal/unsafe.js";
+import * as ReactiveMatcher from "./reactive-matcher.js";
 
 /**
  * Error raised when Signal module is not properly initialized.
@@ -921,6 +922,7 @@ type FailureRenderHandler = ((
 };
 
 type FailureHandler<R> = FailureComponentHandler<R> | FailureRenderHandler;
+type SuspendHandler = PendingHandler<unknown> | FailureHandler<unknown>;
 
 type HandlerRequirements<State extends SuspendState, Handler> = State extends "Pending"
   ? Handler extends PendingComponentHandler<infer RHandler>
@@ -985,9 +987,15 @@ export interface SuspendedComponent<Props = never, E = never, R = never> extends
  * @since 1.0.0
  */
 export interface SuspendMatcher<Props, E, R, HasPending extends boolean, HasFailure extends boolean>
-  extends Pipeable.Pipeable {
+  extends ReactiveMatcher.ReactiveMatcher<
+    "SuspendMatcher",
+    Component.Type<Props, E, R>,
+    ReadonlyMap<SuspendState, SuspendHandler>
+  > {
   readonly _tag: "SuspendMatcher";
+  readonly source: Component.Type<Props, E, R>;
   readonly component: Component.Type<Props, E, R>;
+  readonly handlers: ReadonlyMap<SuspendState, SuspendHandler>;
   readonly pending?: PendingHandler<unknown>;
   readonly failure?: FailureHandler<unknown>;
   readonly _hasPending?: HasPending;
@@ -998,15 +1006,19 @@ const makeSuspendMatcher = <Props, E, R, HasPending extends boolean, HasFailure 
   component: Component.Type<Props, E, R>,
   pending?: PendingHandler<unknown>,
   failure?: FailureHandler<unknown>,
-): SuspendMatcher<Props, E, R, HasPending, HasFailure> => ({
-  _tag: "SuspendMatcher",
-  component,
-  ...(pending === undefined ? {} : { pending }),
-  ...(failure === undefined ? {} : { failure }),
-  pipe() {
-    return Pipeable.pipeArguments(this, arguments);
-  },
-});
+): SuspendMatcher<Props, E, R, HasPending, HasFailure> => {
+  const handlers = new Map<SuspendState, SuspendHandler>();
+  if (pending !== undefined) handlers.set("Pending", pending);
+  if (failure !== undefined) handlers.set("Failure", failure);
+
+  return {
+    ...ReactiveMatcher.make("SuspendMatcher", component, handlers),
+    source: component,
+    component,
+    ...(pending === undefined ? {} : { pending }),
+    ...(failure === undefined ? {} : { failure }),
+  };
+};
 
 const makeTextElement = (content: string): SuspendElement =>
   ({ _tag: "Text", content }) satisfies Extract<SuspendElement, { readonly _tag: "Text" }>;

@@ -9,6 +9,7 @@
  * - This is the ONLY file where `as` casts are permitted
  */
 import { Effect, Layer, Context } from "effect";
+import * as Match from "effect/Match";
 import * as Debug from "../debug/debug.js";
 import type { Component } from "../primitives/component.js";
 import type { Element } from "../primitives/element.js";
@@ -209,6 +210,23 @@ export const unsafeWidenContext = <R>(ctx: Context.Context<R>): Context.Context<
  * type is erased.
  */
 export const unsafeAsOverload = <T>(fn: Function): T => fn as T;
+
+/**
+ * Build a typed exhaustive `_tag` dispatcher from Effect Match.
+ *
+ * SAFETY: Callers provide one handler per tag through mapped types. Effect's
+ * Match.tagsExhaustive performs the runtime dispatch; this helper only bridges
+ * its highly generic return type back to the caller-selected result type.
+ */
+export const unsafeTagsExhaustive = <State extends { readonly _tag: string }, Result>(
+  handlers: {
+    readonly [Tag in State["_tag"] & string]: (
+      state: Extract<State, { readonly _tag: Tag }>,
+    ) => Result;
+  },
+): ((state: State) => Result) => Match.type<State>().pipe(Match.tagsExhaustive(handlers as any)) as (
+  state: State,
+) => Result;
 
 // =============================================================================
 // Effect Requirements Erasure

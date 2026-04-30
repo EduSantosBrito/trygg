@@ -10,9 +10,10 @@
  * @since 1.0.0
  * @module trygg/primitives/error-boundary
  */
-import { Cause, Data, Effect, Pipeable } from "effect";
+import { Cause, Data, Effect } from "effect";
 import { Component, tagComponent } from "./component.js";
 import { Element, type Element as ElementType } from "./element.js";
+import * as ReactiveMatcher from "./reactive-matcher.js";
 
 type ErrorTags<E> = E extends { readonly _tag: infer Tag }
   ? Tag extends string
@@ -65,8 +66,13 @@ export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError
  * @since 1.0.0
  */
 export interface ErrorBoundaryMatcher<Props, E, R, HandledTags extends string>
-  extends Pipeable.Pipeable {
+  extends ReactiveMatcher.ReactiveMatcher<
+    "ErrorBoundaryMatcher",
+    Component.Type<Props, E, R>,
+    ReadonlyMap<string, ErrorHandler>
+  > {
   readonly _tag: "ErrorBoundaryMatcher";
+  readonly source: Component.Type<Props, E, R>;
   readonly component: Component.Type<Props, E, R>;
   readonly handlers: ReadonlyMap<string, ErrorHandler>;
   readonly _handledTags?: HandledTags;
@@ -99,12 +105,10 @@ const makeMatcher = <Props, E, R, HandledTags extends string>(
   component: Component.Type<Props, E, R>,
   handlers: ReadonlyMap<string, ErrorHandler>,
 ): ErrorBoundaryMatcher<Props, E, R, HandledTags> => ({
-  _tag: "ErrorBoundaryMatcher",
+  ...ReactiveMatcher.make("ErrorBoundaryMatcher", component, handlers),
+  source: component,
   component,
   handlers,
-  pipe() {
-    return Pipeable.pipeArguments(this, arguments);
-  },
 });
 
 const resolveFallback = (
@@ -182,8 +186,7 @@ export const on =
     R | RHandler,
     HandledTags | Tag
   > => {
-    const handlers = new Map(self.handlers);
-    handlers.set(tag, {
+    const handlers = ReactiveMatcher.addHandler(self.handlers, tag, {
       render: (error, cause) =>
         isErrorTag<E, Tag>(tag, error) ? component({ error }) : unhandledErrorElement(cause),
     });

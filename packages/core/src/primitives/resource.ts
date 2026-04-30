@@ -25,7 +25,6 @@ import {
   Hash,
   Layer,
   Option,
-  Pipeable,
   pipe,
   Ref,
   Scope,
@@ -35,6 +34,7 @@ import * as Context from "effect/Context";
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import { type Component } from "./component.js";
+import * as ReactiveMatcher from "./reactive-matcher.js";
 import * as Debug from "../debug/debug.js";
 import {
   unsafeEntrySignal,
@@ -962,6 +962,7 @@ type FailureFunctionHandler = (payload: FailurePayload<any, any>) => ElementType
 type PendingHandler<R> = PendingComponentHandler<R> | PendingFunctionHandler | ElementType;
 type SuccessHandler<R> = SuccessComponentHandler<R> | SuccessFunctionHandler;
 type FailureHandler<R> = FailureComponentHandler<R> | FailureFunctionHandler;
+type ResourceHandler = PendingHandler<unknown> | SuccessHandler<unknown> | FailureHandler<unknown>;
 
 const isEffectComponentLike = (value: unknown): value is Component.Type<any, unknown, unknown> =>
   typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
@@ -1046,9 +1047,18 @@ export interface ResourceMatcher<
   HasSuccess extends boolean,
   HasFailure extends boolean,
 >
-  extends Pipeable.Pipeable {
+  extends ReactiveMatcher.ReactiveMatcher<
+    "ResourceMatcher",
+    Signal.Signal<ResourceState<A, E>>,
+    ReadonlyMap<MatchState, ResourceHandler>
+  > {
   readonly _tag: "ResourceMatcher";
+  readonly source: Signal.Signal<ResourceState<A, E>>;
   readonly state: Signal.Signal<ResourceState<A, E>>;
+  readonly handlers: ReadonlyMap<
+    MatchState,
+    ResourceHandler
+  >;
   readonly pending?: PendingHandler<unknown>;
   readonly success?: SuccessHandler<unknown>;
   readonly failure?: FailureHandler<unknown>;
@@ -1070,16 +1080,21 @@ const makeMatcher = <
   pending?: PendingHandler<unknown>,
   success?: SuccessHandler<unknown>,
   failure?: FailureHandler<unknown>,
-): ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure> => ({
-  _tag: "ResourceMatcher",
-  state,
-  ...(pending === undefined ? {} : { pending }),
-  ...(success === undefined ? {} : { success }),
-  ...(failure === undefined ? {} : { failure }),
-  pipe() {
-    return Pipeable.pipeArguments(this, arguments);
-  },
-});
+): ResourceMatcher<A, E, R, HasPending, HasSuccess, HasFailure> => {
+  const handlers = new Map<MatchState, ResourceHandler>();
+  if (pending !== undefined) handlers.set("Pending", pending);
+  if (success !== undefined) handlers.set("Success", success);
+  if (failure !== undefined) handlers.set("Failure", failure);
+
+  return {
+    ...ReactiveMatcher.make("ResourceMatcher", state, handlers),
+    source: state,
+    state,
+    ...(pending === undefined ? {} : { pending }),
+    ...(success === undefined ? {} : { success }),
+    ...(failure === undefined ? {} : { failure }),
+  };
+};
 
 /**
  * Start Resource state matching.
@@ -1223,22 +1238,31 @@ export const exhaustive = <A, E, R>(
 
     let staleForPending: Option.Option<A> = Option.none();
 
-    const elementSignal = yield* Signal.derive(self.state, (s): ElementType => {
-      switch (s._tag) {
-        case "Pending":
-          return renderPending(pending, { stale: staleForPending });
-        case "Success": {
-          staleForPending = Option.some(s.value);
-          return renderSuccess(success, { value: s.value, stale: s.stale });
-        }
-        case "Failure": {
-          staleForPending = s.staleValue;
-          return renderFailure(failure, { error: s.error, stale: s.staleValue });
-        }
-      }
+    const render = ReactiveMatcher.tagsExhaustive<ResourceState<A, E>, ElementType>({
+      Pending: () => renderPending(pending, { stale: staleForPending }),
+      Success: (s) => {
+        staleForPending = Option.some(s.value);
+        return renderSuccess(success, { value: s.value, stale: s.stale });
+      },
+      Failure: (s) => {
+        staleForPending = s.staleValue;
+        return renderFailure(failure, { error: s.error, stale: s.staleValue });
+      },
     });
 
-    return Element.SignalElement({ signal: elementSignal, onSwap: undefined });
+    return yield* ReactiveMatcher.toReactiveElement<
+      Signal.Signal<ResourceState<A, E>>,
+      ResourceState<A, E>,
+      Signal.Signal<ElementType>,
+      ElementType,
+      never,
+      Scope.Scope | R
+    >(
+      self.state,
+      Signal.derive,
+      (signal) => Element.SignalElement({ signal, onSwap: undefined }),
+      render,
+    );
   }).pipe(Effect.withSpan("Resource.match"));
 
 /**
