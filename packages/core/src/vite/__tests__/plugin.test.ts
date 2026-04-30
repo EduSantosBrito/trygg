@@ -350,6 +350,7 @@ export const routes = { manifest: [] }
           generatedDir,
           config: { command: "build", root },
           output: "static",
+          platform: "node",
         });
 
         const indexExists = yield* fs.exists(path.join(generatedDir, "index.html"));
@@ -358,6 +359,44 @@ export const routes = { manifest: [] }
         assert.isTrue(indexExists);
         assert.isFalse(serverEntryExists);
         assert.deepStrictEqual(warnings, [STATIC_API_WARNING]);
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+    );
+
+    scoped("should promote Cloudflare static shell to public dist index", () =>
+      Effect.gen(function* () {
+        // Test: should promote Cloudflare static shell to public dist index
+        // Scope: covers the public Cloudflare Static SPA shell output path.
+        // Assertion: closeBundle moves Vite's nested HTML artifact to dist/index.html.
+        const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "dist/.trygg/index.html": "<html><body>shell</body></html>",
+        });
+        const appDir = path.join(root, "app");
+        const generatedDir = path.join(root, ".trygg");
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
+
+        yield* buildOutput.closeBundle({
+          appDir,
+          generatedDir,
+          config: { command: "build", root },
+          output: "static",
+          platform: "cloudflare",
+        });
+
+        const publicShell = yield* fs.readFileString(path.join(root, "dist", "index.html"));
+        const internalShellExists = yield* fs.exists(path.join(root, "dist", ".trygg"));
+
+        assert.strictEqual(publicShell, "<html><body>shell</body></html>");
+        assert.isFalse(internalShellExists);
       }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
@@ -613,6 +652,7 @@ export const routes = { manifest: [] }
           generatedDir,
           config: { command: "build", root },
           output: "server",
+          platform: "node",
         });
 
         const serverEntryPath = path.join(generatedDir, "server-entry.ts");
@@ -1849,7 +1889,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         Schema.Struct({
           rollupOptions: Schema.optional(
             Schema.Struct({
-              input: Schema.optional(Schema.String),
+              input: Schema.optional(Schema.Unknown),
             }),
           ),
         }),
@@ -1861,7 +1901,7 @@ mountDocument(<App />, { manifest: routes.manifest })
       const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
       const result = hook("client", {}, { command: "build" });
       const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
-      assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/index.html");
+      assert.deepStrictEqual(config.build?.rollupOptions?.input, { index: ".trygg/index.html" });
     });
 
     it("should not set rollupOptions.input for client in dev mode", () => {

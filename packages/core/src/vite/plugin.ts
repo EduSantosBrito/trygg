@@ -2071,6 +2071,7 @@ interface BuildOutputCloseInput {
   readonly generatedDir: string;
   readonly config: BuildOutputConfig;
   readonly output: Output;
+  readonly platform: Platform;
 }
 
 interface BuildOutputService {
@@ -2148,9 +2149,51 @@ export const makeBuildOutput = ({
         );
       }
     }),
-  closeBundle: ({ appDir, generatedDir, config, output }) =>
-    config.command !== "build" || output !== "server"
+  closeBundle: ({ appDir, generatedDir, config, output, platform }) =>
+    config.command !== "build"
       ? Effect.void
+      : output === "static" && platform === "cloudflare"
+        ? Effect.gen(function* () {
+            const internalShellDir = nodePath.join(config.root, "dist", GENERATED_DIR);
+            const internalShellPath = nodePath.join(internalShellDir, "index.html");
+            const publicShellPath = nodePath.join(config.root, "dist", "index.html");
+            const shell = yield* fileSystem.readFileString(internalShellPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PluginFileSystemError({
+                    operation: "read",
+                    path: internalShellPath,
+                    cause,
+                  }),
+              ),
+            );
+
+            yield* fileSystem.writeFileString(publicShellPath, shell).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PluginFileSystemError({
+                    operation: "write",
+                    path: publicShellPath,
+                    cause,
+                  }),
+              ),
+            );
+            yield* removeFileIfExists(internalShellPath).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+            );
+            yield* fileSystem.remove(internalShellDir, { recursive: true }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PluginFileSystemError({
+                    operation: "remove",
+                    path: internalShellDir,
+                    cause,
+                  }),
+              ),
+            );
+          })
+        : output !== "server"
+          ? Effect.void
       : Effect.gen(function* () {
           const paths = { appDir, generatedDir };
           const serverEntryPath = yield* files
@@ -2865,7 +2908,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       if (name === "client") {
         return {
           build: {
-            rollupOptions: { input: `${GENERATED_DIR}/index.html` },
+            rollupOptions: { input: { index: `${GENERATED_DIR}/index.html` } },
           },
         };
       }
@@ -3089,7 +3132,13 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         const { config, appDir, generatedDir } = yield* bootstrap.awaitReady;
         const buildOutput = yield* BuildOutput;
 
-        yield* buildOutput.closeBundle({ appDir, generatedDir, config, output });
+        yield* buildOutput.closeBundle({
+          appDir,
+          generatedDir,
+          config,
+          output,
+          platform: configPlatform,
+        });
       });
 
       await pluginRuntime.runPromise(effect);
