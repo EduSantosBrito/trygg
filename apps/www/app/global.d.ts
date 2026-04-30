@@ -2,10 +2,6 @@
  * Global type declarations for apps/www
  */
 
-interface Window {
-  datafast?: (...args: unknown[]) => void;
-}
-
 declare module "*.md?raw" {
   const content: string;
   export default content;

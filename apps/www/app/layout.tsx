@@ -86,19 +86,6 @@ export default Component.gen(function* () {
         {/* JSON-LD */}
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
 
-        {/* DataFast Analytics */}
-        <script id="datafast-queue">
-          {`window.datafast = window.datafast || function() {
-            window.datafast.q = window.datafast.q || [];
-            window.datafast.q.push(arguments);
-          };`}
-        </script>
-        <script
-          defer
-          data-website-id="dfid_BbESRIMl3PZCy5JAfLnWQ"
-          data-domain="trygg.dev"
-          src="https://datafa.st/js/script.js"
-        />
       </head>
       <body>
         <Router.Outlet />

@@ -72,7 +72,6 @@ const Hero = Component.gen(function* () {
           <a
             href={copy.primaryCtaHref}
             className="inline-flex items-center gap-2 px-5 lg:px-7 py-3 lg:py-3.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] text-white text-sm lg:text-base font-semibold rounded-lg transition-colors"
-            data-fast-goal="hero_try_click"
           >
             {copy.primaryCtaLabel}
             <span aria-hidden="true">&darr;</span>
@@ -160,7 +159,6 @@ const Install = Component.gen(function* () {
   const handleCopy = () =>
     Effect.gen(function* () {
       yield* Effect.tryPromise(() => navigator.clipboard.writeText(sections.install.command));
-      yield* Effect.sync(() => window.datafast?.("install_copy_click"));
       yield* Signal.set(copied, true);
       yield* Effect.sleep("2 seconds");
       yield* Signal.set(copied, false);
