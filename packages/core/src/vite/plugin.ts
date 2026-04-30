@@ -2125,6 +2125,13 @@ export const makeBuildOutput = ({
         return;
       }
 
+      if (output === "server" && platform === "cloudflare") {
+        return yield* PluginValidationError.invalidStructure(
+          'Cloudflare server output is not supported yet. Use platform: "node" or platform: "bun" for output: "server".',
+          appDir,
+        );
+      }
+
       yield* files.writeBuildEntryFiles(paths, { output, platform });
 
       const hasApi = yield* files.appApiExists(paths);

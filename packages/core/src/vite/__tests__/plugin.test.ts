@@ -541,6 +541,47 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
+    scoped("should reject Cloudflare server output", () =>
+      Effect.gen(function* () {
+        // Test: should reject Cloudflare server output
+        // Scope: makes unsupported Cloudflare server builds explicit for this Static SPA slice.
+        // Assertion: buildStart fails before any Node/Bun server artifact can be produced.
+        const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
+
+        const exit = yield* Effect.exit(
+          buildOutput.buildStart({
+            appDir: path.join(root, "app"),
+            generatedDir: path.join(root, ".trygg"),
+            config: { command: "build", root },
+            output: "server",
+            platform: "cloudflare",
+          }),
+        );
+
+        if (Exit.isSuccess(exit)) {
+          throw new Error("Expected Cloudflare server build to fail");
+        }
+
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof PluginValidationError)) {
+          throw new Error(`Expected PluginValidationError but got ${error}`);
+        }
+        assert.include(error.message, "Cloudflare server output is not supported");
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+    );
+
     scoped("should build output write server entry and invoke server build", () =>
       Effect.gen(function* () {
         // Test: should build output write server entry and invoke server build
