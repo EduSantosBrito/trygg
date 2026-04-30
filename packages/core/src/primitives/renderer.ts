@@ -18,11 +18,12 @@ import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
+import * as SafeUrl from "../security/safe-url.js";
 import { ResourceRegistryLive } from "./resource.js";
 import * as Head from "./head.js";
 import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
-import { applyPropValue, moveRange } from "./render-utils.js";
+import { applyPropValue, type BlockedSafeUrlAttribute, moveRange } from "./render-utils.js";
 
 /**
  * Type guard to check if a value is an EventHandler function
@@ -109,6 +110,7 @@ export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHand
 export interface RenderContext {
   readonly services: Context.Context<unknown>;
   readonly scope: Scope.Scope;
+  readonly safeUrlConfig: SafeUrl.SafeUrlConfigService;
 }
 
 const mergeRenderServices = (
@@ -270,6 +272,18 @@ export interface RendererService {
  */
 export class Renderer extends Context.Service<Renderer, RendererService>()("@trygg/Renderer") {}
 
+const logBlockedSafeUrlAttribute = ({
+  key,
+  url,
+  allowedSchemes,
+}: BlockedSafeUrlAttribute): Effect.Effect<void> =>
+  Debug.log({
+    event: "render.safeurl.blocked",
+    attribute: key,
+    url,
+    allowed_schemes: allowedSchemes,
+  });
+
 /**
  * Apply props to a DOM element, with fine-grained Signal support
  * @internal
@@ -300,7 +314,10 @@ const applyProps = Effect.fn("applyProps")(function* (
       // Signal prop: fine-grained reactivity!
       // Read initial value and subscribe for updates
       const initialValue = yield* Signal.get(value);
-      applyPropValue(node, key, initialValue);
+      const blocked = applyPropValue(node, key, initialValue, renderContext.safeUrlConfig);
+      if (Option.isSome(blocked)) {
+        yield* logBlockedSafeUrlAttribute(blocked.value);
+      }
 
       yield* Debug.log({
         event: "render.signaltext.initial",
@@ -322,7 +339,10 @@ const applyProps = Effect.fn("applyProps")(function* (
             element_tag: node.tagName.toLowerCase(),
             trigger: `prop:${key}`,
           });
-          applyPropValue(node, key, newValue);
+          const blocked = applyPropValue(node, key, newValue, renderContext.safeUrlConfig);
+          if (Option.isSome(blocked)) {
+            yield* logBlockedSafeUrlAttribute(blocked.value);
+          }
         }),
       );
       cleanups.push(unsubscribe);
@@ -336,22 +356,34 @@ const applyProps = Effect.fn("applyProps")(function* (
       if (Signal.isSignal(resolved)) {
         // Resolved to a Signal — subscribe for reactive updates
         const initialValue = yield* Signal.get(resolved);
-        applyPropValue(node, key, initialValue);
+        const blocked = applyPropValue(node, key, initialValue, renderContext.safeUrlConfig);
+        if (Option.isSome(blocked)) {
+          yield* logBlockedSafeUrlAttribute(blocked.value);
+        }
 
         const unsubscribe = yield* Signal.subscribe(resolved, () =>
           Effect.gen(function* () {
             const newValue = yield* Signal.get(resolved);
-            applyPropValue(node, key, newValue);
+            const blocked = applyPropValue(node, key, newValue, renderContext.safeUrlConfig);
+            if (Option.isSome(blocked)) {
+              yield* logBlockedSafeUrlAttribute(blocked.value);
+            }
           }),
         );
         cleanups.push(unsubscribe);
       } else {
         // Resolved to a static value
-        applyPropValue(node, key, resolved);
+        const blocked = applyPropValue(node, key, resolved, renderContext.safeUrlConfig);
+        if (Option.isSome(blocked)) {
+          yield* logBlockedSafeUrlAttribute(blocked.value);
+        }
       }
     } else {
       // Static prop value
-      applyPropValue(node, key, value);
+      const blocked = applyPropValue(node, key, value, renderContext.safeUrlConfig);
+      if (Option.isSome(blocked)) {
+        yield* logBlockedSafeUrlAttribute(blocked.value);
+      }
     }
   }
 
@@ -405,7 +437,10 @@ const renderDocumentElement = (
           // Signal-valued attribute: fine-grained reactivity on document elements
           const prev = targetNode.getAttribute(attrName);
           const initialValue = yield* Signal.get(value);
-          applyPropValue(targetNode, key, initialValue);
+          const blocked = applyPropValue(targetNode, key, initialValue, renderContext.safeUrlConfig);
+          if (Option.isSome(blocked)) {
+            yield* logBlockedSafeUrlAttribute(blocked.value);
+          }
           appliedAttrs.push({ key: attrName, prev });
 
           yield* Debug.log({
@@ -426,7 +461,15 @@ const renderDocumentElement = (
                 element_tag: tag,
                 trigger: `prop:${key}`,
               });
-              applyPropValue(targetNode, key, newValue);
+              const blocked = applyPropValue(
+                targetNode,
+                key,
+                newValue,
+                renderContext.safeUrlConfig,
+              );
+              if (Option.isSome(blocked)) {
+                yield* logBlockedSafeUrlAttribute(blocked.value);
+              }
             }),
           );
           signalCleanups.push(unsubscribe);
@@ -2327,8 +2370,13 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
 
       const methodServices = unsafeWidenContext(yield* Effect.context<never>());
       const renderServices = Context.merge(services, methodServices);
+      const safeUrlConfig = Context.getOrElse(
+        renderServices,
+        SafeUrl.SafeUrlConfig,
+        () => SafeUrl.defaultConfig,
+      );
 
-      const renderContext: RenderContext = { services: renderServices, scope };
+      const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
 
       // Set up render context after renderer-local FiberRefs are installed
       yield* setFiberRef(CurrentRenderContext, renderContext);
@@ -2368,7 +2416,12 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
       const scope = yield* Effect.scope;
       const methodServices = unsafeWidenContext(yield* Effect.context<never>());
       const renderServices = Context.merge(services, methodServices);
-      const renderContext: RenderContext = { services: renderServices, scope };
+      const safeUrlConfig = Context.getOrElse(
+        renderServices,
+        SafeUrl.SafeUrlConfig,
+        () => SafeUrl.defaultConfig,
+      );
+      const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
       return yield* Effect.provide(
         renderElement(element, parent, renderContext, null),
         renderServices,

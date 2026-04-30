@@ -255,6 +255,13 @@ type RenderIntrinsicCleanupRemoveEvent = BaseEvent & {
   readonly in_dom: boolean;
 };
 
+type RenderSafeUrlBlockedEvent = BaseEvent & {
+  readonly event: "render.safeurl.blocked";
+  readonly attribute: string;
+  readonly url: string;
+  readonly allowed_schemes: ReadonlyArray<string>;
+};
+
 type RenderDocumentEvent = BaseEvent & {
   readonly event: "render.document";
   readonly element_tag: string;
@@ -820,6 +827,7 @@ export type DebugEvent =
   | RenderIntrinsicEvent
   | RenderIntrinsicCleanupStartEvent
   | RenderIntrinsicCleanupRemoveEvent
+  | RenderSafeUrlBlockedEvent
   | RenderDocumentEvent
   | RenderDocumentSignalInitialEvent
   | RenderDocumentSignalUpdateEvent

@@ -33,6 +33,8 @@ import { Renderer, browserLayer } from "../renderer.js";
 import * as Router from "../../router/index.js";
 import { Element, Fragment } from "../../index.js";
 import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
+import * as Debug from "../../debug/debug.js";
+import * as SafeUrl from "../../security/safe-url.js";
 
 // =============================================================================
 // mount - App entry point
@@ -108,6 +110,64 @@ describe("mount", () => {
         }).pipe(Effect.provide(browserLayer.pipe(Layer.provideMerge(labelLayer)))),
       );
     })(),
+  );
+});
+
+describe("SafeUrl attribute handling", () => {
+  scoped("emits unsafe href failures through Debug without console.warn", () =>
+    Effect.gen(function* () {
+      const events: Array<Debug.DebugEvent> = [];
+      const originalWarn = console.warn;
+      let warned = false;
+
+      console.warn = () => {
+        warned = true;
+      };
+      Debug.disable();
+      for (const name of Debug.getPlugins()) {
+        Debug.unregisterPlugin(name);
+      }
+      Debug.registerPlugin(Debug.createCollectorPlugin("safe-url-test", events));
+      Debug.enable("render.safeurl");
+
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          console.warn = originalWarn;
+          Debug.disable();
+          Debug.unregisterPlugin("safe-url-test");
+        }),
+      );
+
+      const { getByTestId } = yield* render(
+        <a data-testid="unsafe-link" href="javascript:alert(1)">
+          unsafe
+        </a>,
+      );
+
+      const link = yield* getByTestId("unsafe-link");
+      const safeUrlEvents = events.filter((event) => event.event === "render.safeurl.blocked");
+
+      assert.isFalse(warned);
+      assert.isNull(link.getAttribute("href"));
+      assert.strictEqual(safeUrlEvents.length, 1);
+    }),
+  );
+
+  scoped("uses custom SafeUrlConfig layers for URL attributes", () =>
+    Effect.gen(function* () {
+      const customLayer = Layer.succeed(SafeUrl.SafeUrlConfig, {
+        allowedSchemes: ["myapp"],
+      });
+
+      const { getByTestId } = yield* render(
+        <a data-testid="custom-link" href="myapp://settings">
+          custom
+        </a>,
+      ).pipe(Effect.provide(customLayer));
+
+      const link = yield* getByTestId("custom-link");
+      assert.strictEqual(link.getAttribute("href"), "myapp://settings");
+    }),
   );
 });
 

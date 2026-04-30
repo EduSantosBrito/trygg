@@ -1,11 +1,22 @@
 import { Option } from "effect";
 import * as SafeUrl from "../security/safe-url.js";
 
+export interface BlockedSafeUrlAttribute {
+  readonly key: string;
+  readonly url: string;
+  readonly allowedSchemes: ReadonlyArray<string>;
+}
+
 /**
  * Apply a single prop value to a DOM element.
  * @internal
  */
-export const applyPropValue = (node: HTMLElement, key: string, value: unknown): void => {
+export const applyPropValue = (
+  node: HTMLElement,
+  key: string,
+  value: unknown,
+  safeUrlConfig: SafeUrl.SafeUrlConfigService,
+): Option.Option<BlockedSafeUrlAttribute> => {
   if (key === "style" && typeof value === "object" && value !== null) {
     Object.assign(node.style, value);
   } else if (key === "className") {
@@ -41,16 +52,11 @@ export const applyPropValue = (node: HTMLElement, key: string, value: unknown): 
     node.setAttribute(key, String(value));
   } else if (key === "href" || key === "src") {
     const url = String(value);
-    const validated = SafeUrl.validateSync(url);
+    const validated = SafeUrl.validateSyncWithConfig(url, safeUrlConfig);
     if (Option.isSome(validated)) {
       node.setAttribute(key, validated.value);
     } else {
-      const config = SafeUrl.getConfig();
-      console.warn(
-        `[trygg] Blocked unsafe ${key}="${url}". ` +
-          `Allowed schemes: ${config.allowedSchemes.join(", ")}. ` +
-          `See SafeUrl.allowSchemes() to add custom schemes.`,
-      );
+      return Option.some({ key, url, allowedSchemes: safeUrlConfig.allowedSchemes });
     }
   } else if (key !== "children" && key !== "key" && typeof value !== "function") {
     if (typeof value === "boolean") {
@@ -63,6 +69,8 @@ export const applyPropValue = (node: HTMLElement, key: string, value: unknown): 
       node.setAttribute(key, String(value));
     }
   }
+
+  return Option.none();
 };
 
 /**

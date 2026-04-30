@@ -21,10 +21,12 @@
 ## Build output modes
 
 - **Static SPA** — A deploy-target neutral client build. Serves the SPA shell for app routes and static assets directly. Does not imply SSR, API routes, or a Worker-specific runtime.
+- **SPA shell** — The public HTML entry for Static SPA output. Canonical build path: `dist/index.html`.
 - **Runtime platform** — The environment trygg targets when generating runtime-specific integration code. Known platforms include Bun, Node, and Cloudflare.
 - **Cloudflare Static SPA** — `output: "static"` on the Cloudflare runtime platform. trygg generates a minimal Worker that serves static assets directly and falls back app routes to the SPA shell.
 - **Cloudflare server output** — `output: "server"` on the Cloudflare runtime platform. Intended to preserve the same app and API semantics as Bun and Node server output, with Cloudflare-specific runtime plumbing.
 - **Cloudflare Worker artifact** — The deployment contract for the Cloudflare runtime platform. Deploy tools such as alchemy may consume it, but trygg does not define Cloudflare behavior in terms of a specific deployment tool.
 - **Worker entry** — The generated entrypoint for a Cloudflare Worker artifact. Canonical generated path: `.trygg/worker-entry.js`.
 - **Cloudflare assets binding** — The Worker binding named `ASSETS` used by Cloudflare Static SPA output to serve generated static files.
+- **Generated workspace** — `.trygg` is an internal generated source/cache directory. It must not be part of the public `dist` contract.
 - **SPA fallback** — In Static SPA output, the runtime tries static assets first. If no asset exists and the request is a `GET` or `HEAD` document-like request, it returns the SPA shell. Detection uses request semantics such as `Accept` and `Sec-Fetch-Dest`, with a small denylist for missing generated asset extensions. Route-level not-found behavior belongs to the client router.

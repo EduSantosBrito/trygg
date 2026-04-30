@@ -13,7 +13,8 @@
  * @since 1.0.0
  * @module trygg/security/safe-url
  */
-import { Data, Effect, Option } from "effect";
+import { Data, Effect, Exit, Layer, Option } from "effect";
+import * as Context from "effect/Context";
 
 /**
  * Error produced when a URL fails validation.
@@ -45,7 +46,7 @@ export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
         return (
           `Unsafe URL scheme "${this.scheme}" in "${this.url}". ` +
           `Allowed schemes: ${this.allowedSchemes.join(", ")}. ` +
-          `Use SafeUrl.allowSchemes([...]) to add custom schemes.`
+          `Provide SafeUrl.SafeUrlConfig.layer or a custom SafeUrlConfig layer to add custom schemes.`
         );
       case "empty_url":
         return `Empty URL is not allowed.`;
@@ -64,8 +65,7 @@ export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
  * - data: Data URLs (for embedded content)
  *
  * @remarks
- * This list seeds the global SafeUrl configuration. Custom schemes extend this
- * baseline instead of replacing it.
+ * This list seeds the default SafeUrl service configuration.
  *
  * @example
  * ```ts
@@ -91,94 +91,70 @@ export const DEFAULT_ALLOWED_SCHEMES: ReadonlyArray<string> = [
  * Configuration for SafeUrl validation.
  *
  * @remarks
- * `SafeUrlConfig` captures the allowlist used by `validate`, `validateSync`,
- * and the renderer's attribute sanitization path.
+ * `SafeUrlConfig` captures the allowlist used by `validate` and the
+ * renderer's attribute sanitization path.
  *
  * @example
  * ```ts
- * const config: SafeUrl.SafeUrlConfig = {
+ * const layer = Layer.succeed(SafeUrl.SafeUrlConfig, {
  *   allowedSchemes: ["https", "mailto"],
- * }
+ * })
  * ```
  *
  * @category Security
  * @public
  * @since 1.0.0
  */
-export interface SafeUrlConfig {
+export interface SafeUrlConfigService {
   readonly allowedSchemes: ReadonlyArray<string>;
 }
 
 /**
- * Current SafeUrl configuration
- * Module-level state to allow global configuration
+ * SafeUrl configuration service.
+ *
+ * @remarks
+ * Provide this service to scope URL scheme allowlists to the current Effect
+ * fiber. Use `SafeUrlConfig.layer` for framework defaults, or `Layer.succeed`
+ * with a custom `allowedSchemes` list for tests and applications that need
+ * additional schemes.
+ *
+ * @example
+ * ```ts
+ * const layer = Layer.succeed(SafeUrl.SafeUrlConfig, {
+ *   allowedSchemes: ["https", "myapp"],
+ * })
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
  */
-let _config: SafeUrlConfig = {
+export class SafeUrlConfig extends Context.Service<SafeUrlConfig, SafeUrlConfigService>()(
+  "@trygg/SafeUrlConfig",
+) {
+  static readonly layer: Layer.Layer<SafeUrlConfig> = Layer.succeed(SafeUrlConfig, {
+    allowedSchemes: DEFAULT_ALLOWED_SCHEMES,
+  });
+}
+
+/**
+ * Default SafeUrl configuration value.
+ *
+ * @remarks
+ * Used by sync validation and renderer fallback paths when no `SafeUrlConfig`
+ * service is present. Prefer `SafeUrlConfig.layer` for Effect-scoped code.
+ *
+ * @example
+ * ```ts
+ * const schemes = SafeUrl.defaultConfig.allowedSchemes
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
+ */
+export const defaultConfig: SafeUrlConfigService = {
   allowedSchemes: DEFAULT_ALLOWED_SCHEMES,
-};
-
-// =============================================================================
-// Config (sync — trivial state read/write, no failure modes)
-// =============================================================================
-
-/**
- * Get the current SafeUrl configuration.
- *
- * @remarks
- * Use this to inspect the active allowlist before validating or extending it.
- *
- * @example
- * ```ts
- * const config = SafeUrl.getConfig()
- * ```
- *
- * @category Security
- * @public
- * @since 1.0.0
- */
-export const getConfig = (): SafeUrlConfig => _config;
-
-/**
- * Add custom schemes to the allowlist.
- *
- * @remarks
- * Added schemes are normalized to lowercase, deduplicated, and appended to the
- * default allowlist.
- *
- * @example
- * ```ts
- * SafeUrl.allowSchemes(["myapp", "web+myapp"])
- * ```
- *
- * @category Security
- * @public
- * @since 1.0.0
- */
-export const allowSchemes = (schemes: ReadonlyArray<string>): void => {
-  const normalized = schemes.map((s) => s.toLowerCase().replace(/:$/, ""));
-  _config = {
-    allowedSchemes: [...new Set([..._config.allowedSchemes, ...normalized])],
-  };
-};
-
-/**
- * Reset configuration to defaults.
- *
- * @remarks
- * Useful for test isolation and for restoring the default allowlist after local
- * customization.
- *
- * @example
- * ```ts
- * SafeUrl.resetConfig()
- * ```
- *
- * @category Security
- * @public
- * @since 1.0.0
- */
-export const resetConfig = (): void => {
-  _config = { allowedSchemes: DEFAULT_ALLOWED_SCHEMES };
 };
 
 // =============================================================================
@@ -228,7 +204,10 @@ const extractScheme = (url: string): Option.Option<string> => {
  *
  * @since 1.0.0
  */
-export const validateSync = (url: string): Option.Option<string> => {
+export const validateSyncWithConfig = (
+  url: string,
+  config: SafeUrlConfigService,
+): Option.Option<string> => {
   if (url.trim() === "") {
     return Option.none();
   }
@@ -241,12 +220,31 @@ export const validateSync = (url: string): Option.Option<string> => {
   }
 
   const scheme = schemeOption.value;
-  if (_config.allowedSchemes.includes(scheme.toLowerCase())) {
+  if (config.allowedSchemes.includes(scheme.toLowerCase())) {
     return Option.some(url);
   }
 
   return Option.none();
 };
+
+/**
+ * Validate a URL synchronously with the default allowlist.
+ *
+ * @remarks
+ * This helper is for sync call sites that cannot read Effect context. Use
+ * `validateSyncWithConfig` when a cached service config is already available.
+ *
+ * @example
+ * ```ts
+ * const safe = SafeUrl.validateSync("https://example.com")
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
+ */
+export const validateSync = (url: string): Option.Option<string> =>
+  validateSyncWithConfig(url, defaultConfig);
 
 // =============================================================================
 // Effect-based validation (for Effect pipelines)
@@ -276,10 +274,12 @@ export const validateSync = (url: string): Option.Option<string> => {
  * @public
  * @since 1.0.0
  */
-export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = Effect.fn(
+export const validate: (
+  url: string,
+) => Effect.Effect<string, UnsafeUrlError, SafeUrlConfig> = Effect.fn(
   "SafeUrl.validate",
 )(function* (url: string) {
-  const config = getConfig();
+  const config = yield* SafeUrlConfig;
 
   // Empty URL check
   if (url.trim() === "") {
@@ -329,8 +329,11 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError> = 
  * @public
  * @since 1.0.0
  */
-export const validateOption = (url: string): Effect.Effect<Option.Option<string>> =>
-  Effect.sync(() => validateSync(url));
+export const validateOption = (url: string): Effect.Effect<Option.Option<string>, never, SafeUrlConfig> =>
+  Effect.gen(function* () {
+    const exit = yield* Effect.exit(validate(url));
+    return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();
+  });
 
 /**
  * Check if a URL is safe.
@@ -349,5 +352,8 @@ export const validateOption = (url: string): Effect.Effect<Option.Option<string>
  * @public
  * @since 1.0.0
  */
-export const isSafe = (url: string): Effect.Effect<boolean> =>
-  Effect.sync(() => Option.isSome(validateSync(url)));
+export const isSafe = (url: string): Effect.Effect<boolean, never, SafeUrlConfig> =>
+  Effect.gen(function* () {
+    const result = yield* validateOption(url);
+    return Option.isSome(result);
+  });
