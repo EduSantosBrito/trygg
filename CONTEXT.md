@@ -27,4 +27,4 @@
 - **Cloudflare Worker artifact** — The deployment contract for the Cloudflare runtime platform. Deploy tools such as alchemy may consume it, but trygg does not define Cloudflare behavior in terms of a specific deployment tool.
 - **Worker entry** — The generated entrypoint for a Cloudflare Worker artifact. Canonical generated path: `.trygg/worker-entry.js`.
 - **Cloudflare assets binding** — The Worker binding named `ASSETS` used by Cloudflare Static SPA output to serve generated static files.
-- **SPA fallback** — In Static SPA output, the runtime tries static assets first. If no asset exists and the request is a `GET` or `HEAD` HTML navigation, it returns the SPA shell. Missing generated asset-like URLs remain 404s. Route-level not-found behavior belongs to the client router.
+- **SPA fallback** — In Static SPA output, the runtime tries static assets first. If no asset exists and the request is a `GET` or `HEAD` document-like request, it returns the SPA shell. Detection uses request semantics such as `Accept` and `Sec-Fetch-Dest`, with a small denylist for missing generated asset extensions. Route-level not-found behavior belongs to the client router.
