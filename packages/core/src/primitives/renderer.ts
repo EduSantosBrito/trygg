@@ -15,7 +15,6 @@ import * as Context from "effect/Context";
 import { Element, isElement, type ElementProps } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
-import * as Metrics from "../debug/metrics.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
 import * as SafeUrl from "../security/safe-url.js";
@@ -25,12 +24,14 @@ import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
 import {
   applyPropValue,
-  equalOrChanged,
   logBlockedSafeUrlAttribute,
   moveRange,
   resolveReconcileTarget,
 } from "./render-utils.js";
 import { renderIntrinsic } from "./render-intrinsic.js";
+import { renderComponent } from "./render-component.js";
+
+export { ComponentAnchorError } from "./render-component.js";
 
 const emptyContext = unsafeWidenContext(Context.empty());
 
@@ -51,14 +52,6 @@ export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNot
     return `Portal target not found: ${this.target}`;
   }
 }
-
-/**
- * Error thrown when a component anchor has no parent element
- * @since 1.0.0
- */
-export class ComponentAnchorError extends Data.TaggedError("ComponentAnchorError")<{
-  readonly message: string;
-}> {}
 
 export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHandlerError")<{
   readonly prop: string;
@@ -629,371 +622,13 @@ const renderElement = (
       }),
     ),
 
-    Match.tag("Component", ({ run, key, identity, inputs }) =>
-      Effect.gen(function* () {
-        // Create a placeholder comment as anchor for this component
-        const anchor = document.createComment("component");
-        parent.appendChild(anchor);
-
-        // State for reactive re-rendering
-        let currentResult: RenderResult | null = null;
-        let currentRenderScope: Scope.Closeable | null = null;
-        let isRerendering = false;
-        let isUnmounted = false;
-        let pendingRerender = false; // Track if signal changed during re-render
-        let renderCount = 0;
-        let currentRun = run;
-        let currentInputs = inputs;
-        let currentContext = context;
-
-        // Component lifetime scope (persists across re-renders)
-        const componentScope = yield* Scope.fork(yield* Effect.scope);
-
-        // Create render phase for this component (persists across re-renders)
-        const renderPhase = yield* Signal.makeRenderPhase;
-
-        const rendererScope = yield* Effect.scope;
-
-        // Track active subscription cleanups (each is an Effect that unsubscribes)
-        let subscriptionCleanups: Array<Effect.Effect<void, unknown, unknown>> = [];
-
-        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
-          if (currentResult !== null) {
-            yield* currentResult.cleanup;
-            currentResult = null;
-          }
-          yield* closeCurrentRenderScope;
-        });
-
-        const closeCurrentRenderScope: Effect.Effect<void, unknown, unknown> = Effect.gen(
-          function* () {
-            if (currentRenderScope !== null) {
-              const scope = currentRenderScope;
-              currentRenderScope = null;
-              yield* Scope.close(scope, Exit.void);
-            }
-          },
-        );
-
-        const runComponentEffect: () => Effect.Effect<
-          { element: Element; scope: Scope.Closeable },
-          unknown,
-          unknown
-        > = Effect.fnUntraced(function* () {
-          const effectWithContext = provideRenderContext(
-            currentRun(),
-            renderContext,
-            currentContext,
-          );
-          const renderScope = yield* Scope.fork(componentScope);
-          const element = yield* Effect.provideService(
-            Effect.provideService(
-              Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
-              Signal.CurrentComponentScope,
-              componentScope,
-            ),
-            Signal.CurrentRenderScope,
-            renderScope,
-          ).pipe(
-            Scope.provide(componentScope),
-            Effect.onError(() => Scope.close(renderScope, Exit.void)),
-          );
-          return { element, scope: renderScope };
-        });
-
-        // Helper to render and position content before the anchor
-        // IMPORTANT: Use anchor.parentNode instead of captured parent because
-        // when Component is inside a Fragment, the initial parent is a DocumentFragment
-        // which becomes empty after appendChild. The anchor moves to the real parent.
-        const renderAndPosition = Effect.fnUntraced(function* (childElement: Element) {
-          // Get the actual parent from the anchor's current location
-          const actualParent = anchor.parentNode;
-          if (actualParent === null) {
-            return yield* new ComponentAnchorError({
-              message: "Component anchor has no parent - component may have been unmounted",
-            });
-          }
-          const result = yield* renderElement(
-            childElement,
-            actualParent,
-            renderContext,
-            currentContext,
-            options,
-          ).pipe(Effect.provideService(Signal.CurrentRenderPhase, null));
-
-          // Move rendered content before the anchor.
-          // Anchor parent can change while render is in-flight (e.g. fragment reparent).
-          // Retry once using the current anchor parent before giving up.
-          const inserted = yield* Effect.sync(() => {
-            const tryInsert = (parentNode: Node | null): boolean => {
-              if (parentNode === null) {
-                return false;
-              }
-              try {
-                parentNode.insertBefore(result.node, anchor);
-                return true;
-              } catch {
-                return false;
-              }
-            };
-
-            const firstParent = anchor.parentNode;
-            if (tryInsert(firstParent)) {
-              return true;
-            }
-
-            const secondParent = anchor.parentNode;
-            if (tryInsert(secondParent)) {
-              return true;
-            }
-
-            return false;
-          });
-
-          if (!inserted) {
-            yield* result.cleanup;
-            return {
-              node: anchor,
-              cleanup: Effect.void,
-            };
-          }
-
-          return result;
-        });
-
-        const onRerenderFailure = (cause: Cause.Cause<unknown>) =>
-          Effect.gen(function* () {
-            yield* Debug.log({
-              event: "render.component.rerender",
-              trigger: "error",
-              reason: String(cause),
-            });
-
-            // Check for parent error boundary handler
-            if (options.errorHandler !== null) {
-              // Propagate error to error boundary - it will render fallback
-              options.errorHandler(cause);
-            }
-            // No error boundary - keep old content. Subscriptions from the last
-            // successful render are still active (not cleared because cleanupCurrent
-            // wasn't called on failure), so they will trigger retry on signal changes.
-
-            isRerendering = false;
-            pendingRerender = false;
-          });
-
-        type RerenderFailureMode = "preserve" | "defect";
-
-        const rerenderEffect = (failureMode: RerenderFailureMode) =>
-          Effect.gen(function* () {
-            if (isUnmounted) {
-              isRerendering = false;
-              pendingRerender = false;
-              return;
-            }
-
-            // Track re-render duration
-            const rerenderStart = performance.now();
-
-            // Reset render phase for re-render
-            yield* Signal.resetRenderPhase(renderPhase);
-
-            // Re-execute the component effect with render phase context
-            // NOTE: Render BEFORE cleanup so we can keep old content on error
-            const nextRender = yield* runComponentEffect();
-            const nextElement = yield* Element.fromUnknown(nextRender.element);
-            const reused =
-              currentResult !== null && currentResult.reconcile !== undefined
-                ? yield* currentResult.reconcile(nextElement, currentContext)
-                : false;
-
-            if (reused) {
-              yield* closeCurrentRenderScope;
-              currentRenderScope = nextRender.scope;
-            } else {
-              const nextResult = yield* renderAndPosition(nextElement).pipe(
-                Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
-              );
-
-              // Clean up old render + scope AFTER successful render
-              yield* cleanupCurrent;
-
-              currentRenderScope = nextRender.scope;
-              currentResult = nextResult;
-            }
-            const rerenderDuration = performance.now() - rerenderStart;
-
-            // Record render metrics for re-render
-            yield* Metrics.recordComponentRender;
-            yield* Metrics.recordRenderDuration(rerenderDuration);
-
-            // Check if another re-render was requested during this render
-            const needsAnotherRender = pendingRerender;
-            isRerendering = false;
-            pendingRerender = false;
-
-            // Re-subscribe to signals (may be different set after re-render)
-            yield* subscribeToSignals(renderPhase.accessed);
-
-            // If a signal changed during re-render, schedule another re-render
-            if (needsAnotherRender) {
-              scheduleRerender();
-            }
-          }).pipe(
-            Effect.catchCause((cause) =>
-              failureMode === "defect" && options.errorHandler === null
-                ? Effect.ensuring(
-                    Effect.die(Cause.squash(cause)),
-                    Effect.gen(function* () {
-                      isRerendering = false;
-                      pendingRerender = false;
-                      yield* cleanupCurrent.pipe(Effect.catchCause(() => Effect.void));
-                    }),
-                  )
-                : onRerenderFailure(cause),
-            ),
-            Scope.provide(rendererScope),
-          );
-
-        // Forward declaration for recursive scheduling
-        let scheduleRerender: () => void;
-
-        // Function to perform the actual re-render
-        const doRerender = (): void => {
-          renderCount++;
-          // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
-          // The Debug.log below is triggered from within the Effect.gen that follows
-
-          runForkInRenderContext(rerenderEffect("preserve"), renderContext, currentContext);
-        };
-
-        // Schedule a re-render via microtask
-        // Note: scheduleRerender is sync because it's called from signal listeners
-        // and must complete synchronously. Logging happens in the rerender Effect.
-        scheduleRerender = () => {
-          if (isUnmounted) return;
-
-          if (isRerendering) {
-            // Mark that we need another re-render after the current one completes
-            pendingRerender = true;
-            return;
-          }
-
-          isRerendering = true;
-          queueMicrotask(doRerender);
-        };
-
-        // Function to subscribe to accessed signals
-        // Returns Effects for unsubscribing
-        const subscribeToSignals: (
-          signals: Set<Signal.Signal<unknown>>,
-        ) => Effect.Effect<void, unknown, unknown> = Effect.fnUntraced(function* (
-          signals: Set<Signal.Signal<unknown>>,
-        ) {
-          // Clear old subscriptions
-          const oldCleanups = subscriptionCleanups;
-          for (const cleanup of oldCleanups) {
-            yield* cleanup;
-          }
-          subscriptionCleanups = [];
-
-          if (signals.size === 0) return;
-
-          for (const signal of signals) {
-            // Subscribe with Effect-based listener that triggers sync rerender
-            const unsubscribe = yield* Signal.subscribe(signal, () =>
-              Effect.sync(scheduleRerender),
-            );
-            subscriptionCleanups.push(unsubscribe);
-          }
-        });
-
-        // Execute the component effect with render phase context and track duration
-        const renderStart = performance.now();
-        const initialRender = yield* runComponentEffect();
-
-        // Render and position the content
-        const initialElement = yield* Element.fromUnknown(initialRender.element);
-        const initialResult = yield* renderAndPosition(initialElement).pipe(
-          Effect.onError(() => Scope.close(initialRender.scope, Exit.void)),
-        );
-        currentRenderScope = initialRender.scope;
-        currentResult = initialResult;
-        const renderDuration = performance.now() - renderStart;
-        renderCount++;
-
-        yield* Debug.log({
-          event: "render.component.initial",
-          accessed_signals: renderPhase.accessed.size,
-          duration_ms: renderDuration,
-        });
-
-        // Record render metrics
-        yield* Metrics.recordComponentRender;
-        yield* Metrics.recordRenderDuration(renderDuration);
-
-        // Subscribe to accessed signals for reactivity
-        yield* subscribeToSignals(renderPhase.accessed);
-
-        return {
-          node: anchor,
-          cleanup: Effect.gen(function* () {
-            isUnmounted = true;
-            // Clean up signal subscriptions
-            for (const cleanup of subscriptionCleanups) {
-              yield* cleanup;
-            }
-            subscriptionCleanups = [];
-            // Clean up rendered content + render scope
-            yield* cleanupCurrent;
-            yield* Scope.close(componentScope, Exit.void);
-            anchor.remove();
-          }),
-          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
-            Effect.gen(function* () {
-              const resolved = resolveReconcileTarget(nextElement, nextContext);
-              const resolvedNextElement = resolved.element;
-              const resolvedNextContext = resolved.context;
-
-              if (resolvedNextElement._tag !== "Component" || resolvedNextElement.key !== key) {
-                return false;
-              }
-
-              const sameIdentity =
-                identity !== undefined
-                  ? resolvedNextElement.identity === identity
-                  : resolvedNextElement.identity === identity &&
-                    resolvedNextElement.run === currentRun;
-
-              if (!sameIdentity) {
-                return false;
-              }
-
-              const inputsChanged = !equalOrChanged(currentInputs, resolvedNextElement.inputs);
-              const contextChanged = !equalOrChanged(
-                normalizeContext(currentContext),
-                normalizeContext(resolvedNextContext),
-              );
-
-              currentRun = resolvedNextElement.run;
-              currentInputs = resolvedNextElement.inputs;
-              currentContext = resolvedNextContext;
-
-              if (!inputsChanged && !contextChanged) {
-                return true;
-              }
-
-              if (isRerendering) {
-                pendingRerender = true;
-                return true;
-              }
-
-              isRerendering = true;
-              renderCount++;
-              yield* rerenderEffect("defect");
-              return true;
-            }),
-        };
+    Match.tag("Component", (component) =>
+      renderComponent(component, parent, renderContext, context, options, {
+        renderElement,
+        provideRenderContext,
+        runForkInRenderContext,
+        resolveReconcileTarget,
+        normalizeContext,
       }),
     ),
 
