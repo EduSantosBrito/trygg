@@ -35,7 +35,6 @@ import * as Component from "../primitives/component.js";
 import type { ComponentProps } from "../primitives/component.js";
 import { type RoutesManifest, CurrentRoutesManifest } from "./routes.js";
 import {
-  buildTrieMatcher,
   resolveRoutes,
   resolveScrollStrategy,
   runRouteMiddleware,
@@ -43,6 +42,7 @@ import {
   decodeRouteQuery,
   type RouteMatch,
   type RouteMatcherShape,
+  type ResolvedRoute,
 } from "./matching.js";
 import { get as getRouter, CurrentOutletChild } from "./service.js";
 import { runPrefetch } from "./prefetch.js";
@@ -58,12 +58,230 @@ import {
 } from "./outlet-services.js";
 import { RenderLoadError } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
-import { type ComponentInput, type ComponentLoader, type RouteComponent } from "./types.js";
+import {
+  type ComponentInput,
+  type ComponentLoader,
+  type RouteComponent,
+  type RouteParams,
+} from "./types.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
 
 const outletRuntimeIdentity = Symbol("trygg/router/Outlet.runtime");
 const outletErrorBoundaryIdentity = Symbol("trygg/router/Outlet.error-boundary");
+
+// =============================================================================
+// Trie-Based Matching
+// =============================================================================
+
+/** @internal */
+interface PathSegment {
+  readonly type: "static" | "param" | "wildcard" | "catchAllRequired";
+  readonly value: string;
+}
+
+/** @internal */
+interface CompiledRoute {
+  readonly resolved: ResolvedRoute;
+  readonly segments: ReadonlyArray<PathSegment>;
+  readonly score: number;
+}
+
+/** @internal */
+interface TrieNode {
+  readonly staticChildren: Map<string, TrieNode>;
+  paramChild: { node: TrieNode; name: string } | undefined;
+  wildcardChild: { node: TrieNode; name: string } | undefined;
+  routes: CompiledRoute[];
+}
+
+/** @internal */
+interface TrieMatchResult {
+  readonly route: CompiledRoute;
+  readonly params: RouteParams;
+}
+
+/** @internal */
+const parsePattern = (pattern: string): ReadonlyArray<PathSegment> => {
+  const segments: Array<PathSegment> = [];
+  const parts = pattern
+    .replace(/^\/|\/$/g, "")
+    .split("/")
+    .filter(Boolean);
+
+  for (const part of parts) {
+    if (part.startsWith(":") && part.endsWith("*")) {
+      segments.push({ type: "wildcard", value: part.slice(1, -1) });
+    } else if (part.startsWith(":") && part.endsWith("+")) {
+      segments.push({ type: "catchAllRequired", value: part.slice(1, -1) });
+    } else if (part.startsWith(":")) {
+      segments.push({ type: "param", value: part.slice(1) });
+    } else {
+      segments.push({ type: "static", value: part });
+    }
+  }
+
+  return segments;
+};
+
+/** @internal */
+const createTrieNode = (): TrieNode => ({
+  staticChildren: new Map(),
+  paramChild: undefined,
+  wildcardChild: undefined,
+  routes: [],
+});
+
+/** @internal */
+const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
+  let score = 0;
+  for (const segment of segments) {
+    if (segment.type === "static") {
+      score += 3;
+    } else if (segment.type === "param") {
+      score += 2;
+    } else if (segment.type === "catchAllRequired") {
+      score += 1.5;
+    } else if (segment.type === "wildcard") {
+      score += 1;
+    }
+  }
+  score += segments.length * 0.1;
+  return score;
+};
+
+/** @internal */
+const insertIntoTrie = (root: TrieNode, route: CompiledRoute): void => {
+  let current = root;
+
+  for (const segment of route.segments) {
+    if (segment.type === "static") {
+      let child = current.staticChildren.get(segment.value);
+      if (child === undefined) {
+        child = createTrieNode();
+        current.staticChildren.set(segment.value, child);
+      }
+      current = child;
+    } else if (segment.type === "param") {
+      if (current.paramChild === undefined) {
+        current.paramChild = { node: createTrieNode(), name: segment.value };
+      }
+      current = current.paramChild.node;
+    } else if (segment.type === "wildcard" || segment.type === "catchAllRequired") {
+      if (current.wildcardChild === undefined) {
+        current.wildcardChild = { node: createTrieNode(), name: segment.value };
+      }
+      current = current.wildcardChild.node;
+      break;
+    }
+  }
+
+  current.routes.push(route);
+};
+
+/** @internal */
+const walkTrie = (
+  node: TrieNode,
+  pathParts: ReadonlyArray<string>,
+  pathIndex: number,
+  params: RouteParams,
+): ReadonlyArray<TrieMatchResult> => {
+  const results: Array<TrieMatchResult> = [];
+
+  if (pathIndex >= pathParts.length) {
+    for (const route of node.routes) {
+      const lastSegment = route.segments[route.segments.length - 1];
+      if (
+        lastSegment?.type !== "wildcard" &&
+        lastSegment?.type !== "catchAllRequired" &&
+        route.segments.length === pathIndex
+      ) {
+        results.push({ route, params: { ...params } });
+      }
+    }
+    if (node.wildcardChild !== undefined) {
+      const newParams = { ...params, [node.wildcardChild.name]: "" };
+      for (const route of node.wildcardChild.node.routes) {
+        const lastSeg = route.segments[route.segments.length - 1];
+        if (lastSeg?.type === "wildcard") {
+          results.push({ route, params: { ...newParams } });
+        }
+      }
+    }
+    return results;
+  }
+
+  const currentPart = pathParts[pathIndex];
+  if (currentPart === undefined) return results;
+
+  const staticChild = node.staticChildren.get(currentPart);
+  if (staticChild !== undefined) {
+    results.push(...walkTrie(staticChild, pathParts, pathIndex + 1, params));
+  }
+
+  if (node.paramChild !== undefined) {
+    const newParams = { ...params, [node.paramChild.name]: currentPart };
+    results.push(...walkTrie(node.paramChild.node, pathParts, pathIndex + 1, newParams));
+  }
+
+  if (node.wildcardChild !== undefined) {
+    const rest = pathParts.slice(pathIndex).join("/");
+    const newParams = { ...params, [node.wildcardChild.name]: rest };
+    for (const route of node.wildcardChild.node.routes) {
+      const lastSeg = route.segments[route.segments.length - 1];
+      if (lastSeg?.type !== "catchAllRequired" || rest !== "") {
+        results.push({ route, params: { ...newParams } });
+      }
+    }
+  }
+
+  return results;
+};
+
+/** @internal */
+export const buildTrieMatcher = (
+  resolved: ReadonlyArray<ResolvedRoute>,
+): ((path: string) => Option.Option<RouteMatch>) => {
+  const compiled = resolved.map((route): CompiledRoute => {
+    const segments = parsePattern(route.path);
+    return { resolved: route, segments, score: scoreRoute(segments) };
+  });
+
+  const sorted = [...compiled].sort((a, b) => {
+    if (a.segments.length !== b.segments.length) {
+      return b.segments.length - a.segments.length;
+    }
+    return b.score - a.score;
+  });
+
+  const root = createTrieNode();
+  for (const route of sorted) {
+    insertIntoTrie(root, route);
+  }
+
+  return (path: string): Option.Option<RouteMatch> => {
+    const normalizedPath = path.split("?")[0] ?? path;
+    const pathParts = normalizedPath
+      .replace(/^\/|\/$/g, "")
+      .split("/")
+      .filter(Boolean);
+
+    const matches = walkTrie(root, pathParts, 0, {});
+    if (matches.length === 0) return Option.none();
+
+    const sortedMatches = [...matches].sort((a, b) => {
+      if (a.route.segments.length !== b.route.segments.length) {
+        return b.route.segments.length - a.route.segments.length;
+      }
+      return b.route.score - a.route.score;
+    });
+
+    const best = sortedMatches[0];
+    if (best === undefined) return Option.none();
+
+    return Option.some({ route: best.route.resolved, params: best.params });
+  };
+};
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -382,7 +600,9 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Register prefetch resolver so router.prefetch() can warm lazy modules
     const currentMatcher = yield* Ref.get(cachedMatcherRef);
     if (Option.isSome(currentMatcher)) {
-      yield* Ref.set(router._prefetchRef, buildPrefetchResolver(currentMatcher.value));
+      yield* router.outletCoordination.activatePrefetch(
+        buildPrefetchResolver(currentMatcher.value),
+      );
     }
 
     const componentScope = yield* Signal.CurrentComponentScope;
@@ -400,7 +620,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         const strategy = yield* Effect.service(ScrollStrategy).pipe(
           Effect.provide(strategyLayer ?? ScrollStrategy.Auto),
         );
-        yield* router._applyScroll({ strategy });
+        yield* router.outletCoordination.applyScroll({ strategy });
       }).pipe(Effect.ignore);
 
     // -----------------------------------------------------------------------

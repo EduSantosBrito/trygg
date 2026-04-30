@@ -20,10 +20,11 @@
  * @since 1.0.0
  * @module trygg/router/types
  */
-import { Data, Effect, type Cause, type Ref, type Scope } from "effect";
+import { Data, Effect, type Cause, type Scope } from "effect";
 import { Component } from "../primitives/component.js";
 import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
+import type { ScrollStrategyType } from "./scroll-strategy.js";
 
 // ==========================================
 // Errors
@@ -562,34 +563,48 @@ export interface RouterService {
   readonly prefetch: (path: string) => Effect.Effect<void>;
 
   /**
-   * Navigation context Ref — set before each route signal update.
-   * Read by the outlet to determine scroll behavior.
-   * @internal
+   * Public seam used by Outlet to coordinate prefetch and scroll effects.
+   * Keeps route rendering decoupled from router service internals.
    */
-  readonly _navigationContext: Ref.Ref<NavigationContext>;
-
-  /**
-   * Apply scroll behavior using captured platform services.
-   * Called by the outlet after matching a route and determining the strategy.
-   * @internal
-   */
-  readonly _applyScroll: (options: {
-    readonly strategy: import("./scroll-strategy.js").ScrollStrategyType;
-  }) => Effect.Effect<void>;
+  readonly outletCoordination: OutletCoordination;
 
   /**
    * Save current scroll position (best-effort, errors ignored).
-   * Called by the outlet before route transitions if needed.
    * @internal
    */
   readonly _saveScroll: Effect.Effect<void>;
+}
+
+/**
+ * Outlet prefetch lifecycle state.
+ *
+ * Idle is the pre-mount state where router.prefetch is a no-op. Active starts
+ * after Outlet mounts and registers a resolver built from its route matcher.
+ *
+ * @public
+ * @since 1.0.0
+ */
+export type OutletPrefetchState =
+  | { readonly _tag: "Idle" }
+  | { readonly _tag: "Active"; readonly prefetch: (path: string) => Effect.Effect<void> };
+
+/**
+ * Public coordination seam from Router service to Outlet.
+ *
+ * @public
+ * @since 1.0.0
+ */
+export interface OutletCoordination {
+  /** Current prefetch lifecycle state. */
+  readonly prefetchState: Effect.Effect<OutletPrefetchState>;
 
   /**
-   * Prefetch resolver function registered by the Outlet.
-   * Takes a path, matches it against the route trie, and triggers lazy
-   * module loading for all ComponentLoader values (component + layouts).
-   * Starts as a no-op; replaced when the Outlet mounts and builds its matcher.
-   * @internal
+   * Activate prefetch once the Outlet has mounted and built its matcher.
    */
-  readonly _prefetchRef: Ref.Ref<(path: string) => Effect.Effect<void>>;
+  readonly activatePrefetch: (prefetch: (path: string) => Effect.Effect<void>) => Effect.Effect<void>;
+
+  /**
+   * Apply scroll behavior using router-captured platform services.
+   */
+  readonly applyScroll: (options: { readonly strategy: ScrollStrategyType }) => Effect.Effect<void>;
 }

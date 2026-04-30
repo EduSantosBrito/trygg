@@ -137,9 +137,9 @@ export class RouteMatcher extends Context.Service<RouteMatcher, RouteMatcherShap
       RouteMatcher,
       Effect.gen(function* () {
         const resolved = yield* resolveRoutes(manifest);
-        const matcher = buildTrieMatcher(resolved);
+        const sorted = sortRoutesForMatching(resolved);
         return {
-          match: (path: string) => Effect.succeed(matcher(path)),
+          match: (path: string) => Effect.succeed(linearMatch(sorted, path)),
           routes: Effect.succeed(resolved),
         };
       }),
@@ -274,33 +274,6 @@ const parsePattern = (pattern: string): { segments: PathSegment[]; paramNames: s
   return { segments, paramNames };
 };
 
-// =============================================================================
-// Trie-Based Matching
-// =============================================================================
-
-/** @internal */
-interface CompiledRoute {
-  readonly resolved: ResolvedRoute;
-  readonly segments: ReadonlyArray<PathSegment>;
-  readonly score: number;
-}
-
-/** @internal */
-interface TrieNode {
-  readonly staticChildren: Map<string, TrieNode>;
-  paramChild: { node: TrieNode; name: string } | undefined;
-  wildcardChild: { node: TrieNode; name: string } | undefined;
-  routes: CompiledRoute[];
-}
-
-/** @internal */
-const createTrieNode = (): TrieNode => ({
-  staticChildren: new Map(),
-  paramChild: undefined,
-  wildcardChild: undefined,
-  routes: [],
-});
-
 /** @internal */
 const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
   let score = 0;
@@ -320,167 +293,17 @@ const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
 };
 
 /** @internal */
-const insertIntoTrie = (root: TrieNode, route: CompiledRoute): void => {
-  let current = root;
-
-  for (const segment of route.segments) {
-    if (segment.type === "static") {
-      let child = current.staticChildren.get(segment.value);
-      if (child === undefined) {
-        child = createTrieNode();
-        current.staticChildren.set(segment.value, child);
-      }
-      current = child;
-    } else if (segment.type === "param") {
-      if (current.paramChild === undefined) {
-        current.paramChild = { node: createTrieNode(), name: segment.value };
-      }
-      current = current.paramChild.node;
-    } else if (segment.type === "wildcard" || segment.type === "catchAllRequired") {
-      if (current.wildcardChild === undefined) {
-        current.wildcardChild = { node: createTrieNode(), name: segment.value };
-      }
-      current = current.wildcardChild.node;
-      break; // Wildcard terminates
+const sortRoutesForMatching = (
+  routes: ReadonlyArray<ResolvedRoute>,
+): ReadonlyArray<ResolvedRoute> =>
+  [...routes].sort((a, b) => {
+    const aSegments = parsePattern(a.path).segments;
+    const bSegments = parsePattern(b.path).segments;
+    if (aSegments.length !== bSegments.length) {
+      return bSegments.length - aSegments.length;
     }
-  }
-
-  current.routes.push(route);
-};
-
-/** @internal */
-interface TrieMatchResult {
-  readonly route: CompiledRoute;
-  readonly params: RouteParams;
-}
-
-/** @internal */
-const walkTrie = (
-  node: TrieNode,
-  pathParts: ReadonlyArray<string>,
-  pathIndex: number,
-  params: RouteParams,
-): TrieMatchResult[] => {
-  const results: TrieMatchResult[] = [];
-
-  if (pathIndex >= pathParts.length) {
-    for (const route of node.routes) {
-      const lastSegment = route.segments[route.segments.length - 1];
-      if (
-        lastSegment?.type !== "wildcard" &&
-        lastSegment?.type !== "catchAllRequired" &&
-        route.segments.length === pathIndex
-      ) {
-        results.push({ route, params: { ...params } });
-      }
-    }
-    // Check wildcard child for zero-segment matches
-    if (node.wildcardChild !== undefined) {
-      const newParams = { ...params, [node.wildcardChild.name]: "" };
-      for (const route of node.wildcardChild.node.routes) {
-        const lastSeg = route.segments[route.segments.length - 1];
-        if (lastSeg?.type === "wildcard") {
-          results.push({ route, params: { ...newParams } });
-        }
-      }
-    }
-    return results;
-  }
-
-  const currentPart = pathParts[pathIndex];
-  if (currentPart === undefined) return results;
-
-  // Priority 1: Static match
-  const staticChild = node.staticChildren.get(currentPart);
-  if (staticChild !== undefined) {
-    results.push(...walkTrie(staticChild, pathParts, pathIndex + 1, params));
-  }
-
-  // Priority 2: Param match
-  if (node.paramChild !== undefined) {
-    const newParams = { ...params, [node.paramChild.name]: currentPart };
-    results.push(...walkTrie(node.paramChild.node, pathParts, pathIndex + 1, newParams));
-  }
-
-  // Priority 3: Wildcard match
-  if (node.wildcardChild !== undefined) {
-    const rest = pathParts.slice(pathIndex).join("/");
-    const newParams = { ...params, [node.wildcardChild.name]: rest };
-    for (const route of node.wildcardChild.node.routes) {
-      const lastSeg = route.segments[route.segments.length - 1];
-      if (lastSeg?.type === "catchAllRequired" && rest === "") {
-        continue;
-      }
-      results.push({ route, params: { ...newParams } });
-    }
-  }
-
-  return results;
-};
-
-/**
- * Build a trie-based match function from resolved routes.
- * @internal
- */
-export const buildTrieMatcher = (
-  resolved: ReadonlyArray<ResolvedRoute>,
-): ((path: string) => Option.Option<RouteMatch>) => {
-  const compiled: CompiledRoute[] = [];
-  for (const route of resolved) {
-    const { segments } = parsePattern(route.path);
-    compiled.push({
-      resolved: route,
-      segments,
-      score: scoreRoute(segments),
-    });
-  }
-
-  const sorted = [...compiled].sort((a, b) => {
-    if (a.segments.length !== b.segments.length) {
-      return b.segments.length - a.segments.length;
-    }
-    return b.score - a.score;
+    return scoreRoute(bSegments) - scoreRoute(aSegments);
   });
-
-  const root = createTrieNode();
-  for (const route of sorted) {
-    insertIntoTrie(root, route);
-  }
-
-  return (path: string): Option.Option<RouteMatch> => {
-    const normalizedPath = path.split("?")[0] ?? path;
-    const pathParts = normalizedPath
-      .replace(/^\/|\/$/g, "")
-      .split("/")
-      .filter(Boolean);
-
-    if (pathParts.length === 0) {
-      const rootMatches = walkTrie(root, [], 0, {});
-      if (rootMatches.length > 0) {
-        const best = rootMatches[0];
-        if (best !== undefined) {
-          return Option.some({ route: best.route.resolved, params: best.params });
-        }
-      }
-      return Option.none();
-    }
-
-    const matches = walkTrie(root, pathParts, 0, {});
-    if (matches.length === 0) return Option.none();
-
-    const sortedMatches = matches.sort((a, b) => {
-      if (a.route.segments.length !== b.route.segments.length) {
-        return b.route.segments.length - a.route.segments.length;
-      }
-      return b.route.score - a.route.score;
-    });
-
-    const best = sortedMatches[0];
-    if (best === undefined) return Option.none();
-
-    return Option.some({ route: best.route.resolved, params: best.params });
-  };
-};
 
 /**
  * Linear scan match function for testing.
@@ -873,7 +696,7 @@ export interface SyncMatcher {
 }
 
 /**
- * Create a trie-based matcher from a manifest.
+ * Create a matcher from a manifest.
  * Resolves the route tree and builds a sync match function.
  * Intended for unit tests that don't need the RouteMatcher service Layer.
  *
@@ -891,7 +714,10 @@ export interface SyncMatcher {
  * @since 1.0.0
  */
 export const createMatcher = (manifest: RoutesManifest): Effect.Effect<SyncMatcher> =>
-  Effect.map(resolveRoutes(manifest), (resolved) => ({
-    match: buildTrieMatcher(resolved),
-    routes: resolved,
-  }));
+  Effect.map(resolveRoutes(manifest), (resolved) => {
+    const sorted = sortRoutesForMatching(resolved);
+    return {
+      match: (path) => linearMatch(sorted, path),
+      routes: resolved,
+    };
+  });

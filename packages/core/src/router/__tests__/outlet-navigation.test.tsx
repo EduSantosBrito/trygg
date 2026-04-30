@@ -174,7 +174,7 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
     Effect.gen(function* () {
       // Test: should apply scroll once after fast ready navigation behind a loading boundary.
       // Scope: regression for the deferred-scroll window where AsyncLoader can reach Ready before Outlet finishes post-track handling.
-      // Assertion: navigating to a loading-boundary route with synchronous content still increments router._applyScroll exactly once.
+      // Assertion: navigating to a loading-boundary route with synchronous content still increments outlet scroll exactly once.
       const DashComp = identifiableComp("dashboard", "Dashboard Page");
       const UsersComp = identifiableComp("users", "Users Page");
       const LoadingComp = loadingComp();
@@ -187,10 +187,13 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
       const scrollCalls = yield* Ref.make(0);
       const wrappedRouter = Router.Router.of({
         ...baseRouter,
-        _applyScroll: (options) =>
-          Ref.update(scrollCalls, (count) => count + 1).pipe(
-            Effect.flatMap(() => baseRouter._applyScroll(options)),
-          ),
+        outletCoordination: {
+          ...baseRouter.outletCoordination,
+          applyScroll: (options) =>
+            Ref.update(scrollCalls, (count) => count + 1).pipe(
+              Effect.flatMap(() => baseRouter.outletCoordination.applyScroll(options)),
+            ),
+        },
       });
 
       const outlet = Outlet({ routes: manifest });

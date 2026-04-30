@@ -24,6 +24,7 @@ import type {
   RouterService,
   NavigateOptions,
   NavigationContext,
+  OutletPrefetchState,
   IsActiveOptions,
   RouteErrorInfo,
   RoutePath,
@@ -651,8 +652,7 @@ export const browserLayer: Layer.Layer<
       scrollKey: currentNavKey,
     });
 
-    // Prefetch resolver — starts as no-op, outlet registers real resolver
-    const prefetchRef = yield* Ref.make<(path: string) => Effect.Effect<void>>(() => Effect.void);
+    const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
 
     // Update signals from a path
     const updateFromPath = (fullPath: string) =>
@@ -863,25 +863,27 @@ export const browserLayer: Layer.Layer<
           event: "router.prefetch.start",
           path: targetPath,
         });
-        const resolver = yield* Ref.get(prefetchRef);
-        yield* resolver(targetPath);
+        const prefetchState = yield* Ref.get(prefetchStateRef);
+        if (prefetchState._tag === "Active") {
+          yield* prefetchState.prefetch(targetPath);
+        }
       }),
 
-      _navigationContext: navContextRef,
-
-      _applyScroll: (opts) =>
-        Effect.gen(function* () {
-          const navCtx = yield* Ref.get(navContextRef);
-          yield* doApplyScroll({
-            strategy: opts.strategy,
-            hash: navCtx.hash,
-            isPopstate: navCtx.isPopstate,
-          });
-        }),
+      outletCoordination: {
+        prefetchState: Ref.get(prefetchStateRef),
+        activatePrefetch: (prefetch) => Ref.set(prefetchStateRef, { _tag: "Active", prefetch }),
+        applyScroll: (opts) =>
+          Effect.gen(function* () {
+            const navCtx = yield* Ref.get(navContextRef);
+            yield* doApplyScroll({
+              strategy: opts.strategy,
+              hash: navCtx.hash,
+              isPopstate: navCtx.isPopstate,
+            });
+          }),
+      },
 
       _saveScroll: doSaveScroll(),
-
-      _prefetchRef: prefetchRef,
     };
 
     // Store router in FiberRef during layer building.
@@ -932,15 +934,7 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
 
       const querySignal = yield* Signal.make<URLSearchParams>(initialQuery);
 
-      // Navigation context for outlet scroll handling (no-op in tests)
-      const navContextRef = yield* Ref.make<NavigationContext>({
-        isPopstate: false,
-        hash: "",
-        scrollKey: "",
-      });
-
-      // Prefetch resolver — starts as no-op, outlet registers real resolver
-      const prefetchRef = yield* Ref.make<(path: string) => Effect.Effect<void>>(() => Effect.void);
+      const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
 
       // History stack for back/forward (in-memory)
       const historyStack: Array<string> = [initialPath];
@@ -1052,14 +1046,18 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
             event: "router.prefetch.start",
             path: targetPath,
           });
-          const resolver = yield* Ref.get(prefetchRef);
-          yield* resolver(targetPath);
+          const prefetchState = yield* Ref.get(prefetchStateRef);
+          if (prefetchState._tag === "Active") {
+            yield* prefetchState.prefetch(targetPath);
+          }
         }),
 
-        _navigationContext: navContextRef,
-        _applyScroll: () => Effect.void,
+        outletCoordination: {
+          prefetchState: Ref.get(prefetchStateRef),
+          activatePrefetch: (prefetch) => Ref.set(prefetchStateRef, { _tag: "Active", prefetch }),
+          applyScroll: () => Effect.void,
+        },
         _saveScroll: Effect.void,
-        _prefetchRef: prefetchRef,
       };
 
       // Store router in FiberRef

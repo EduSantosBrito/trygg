@@ -12,7 +12,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Effect, Exit, Option, Schema, Scope } from "effect";
+import { Cause, Effect, Exit, Option, Ref, Schema, Scope } from "effect";
 import type * as LayerTypes from "effect/Layer";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
@@ -109,6 +109,50 @@ const runOutletEffect = (
 
     return first;
   });
+
+// =============================================================================
+// Outlet Coordination Tests
+// =============================================================================
+
+describe("Outlet - Coordination", () => {
+  scoped("activates prefetch through public outlet coordination seam", () =>
+    Effect.gen(function* () {
+      const loaderCalls = yield* Ref.make(0);
+      const activations = yield* Ref.make(0);
+      const PageComp = textComp("Lazy Page");
+      const prefetch = () => Ref.update(loaderCalls, (count) => count + 1);
+
+      const manifest = Routes.make()
+        .add(Route.make("/lazy").component(PageComp).prefetch(prefetch))
+        .manifest;
+      const baseRouter = yield* Router.Router;
+
+      yield* baseRouter.prefetch("/lazy");
+      assert.strictEqual(yield* Ref.get(loaderCalls), 0);
+
+      const wrappedRouter = Router.Router.of({
+        ...baseRouter,
+        outletCoordination: {
+          ...baseRouter.outletCoordination,
+          activatePrefetch: (prefetch) =>
+            Ref.update(activations, (count) => count + 1).pipe(
+              Effect.flatMap(() => baseRouter.outletCoordination.activatePrefetch(prefetch)),
+            ),
+        },
+      });
+
+      const outlet = Outlet({ routes: manifest });
+      yield* runOutletEffect(outlet).pipe(Effect.provideService(Router.Router, wrappedRouter));
+
+      const state = yield* wrappedRouter.outletCoordination.prefetchState;
+      assert.strictEqual(state._tag, "Active");
+      assert.strictEqual(yield* Ref.get(activations), 1);
+
+      yield* wrappedRouter.prefetch("/lazy");
+      assert.strictEqual(yield* Ref.get(loaderCalls), 1);
+    }).pipe(Effect.provide(Router.testLayer("/lazy"))),
+  );
+});
 
 // =============================================================================
 // Rendering Tests

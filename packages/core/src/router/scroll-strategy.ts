@@ -96,7 +96,7 @@ const noneStrategy: ScrollNone = { _tag: "None" };
  * ScrollStrategy service key — controls scroll position management per route.
  *
  * Consumed by the outlet after route matching. The resolved strategy type is
- * passed to the router's `_applyScroll`, which dispatches on `_tag`:
+ * passed to the router's outlet coordination seam, which dispatches on `_tag`:
  *   - `Auto` → save/restore via sessionStorage
  *   - `None` → no-op
  *
