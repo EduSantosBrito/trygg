@@ -1624,6 +1624,70 @@ mountDocument(<App />, { manifest: routes.manifest })
       assert.deepStrictEqual(requestedPaths, ["/", "/index.html"]);
     });
 
+    it("should render Cloudflare worker deep route fallback through ASSETS", async () => {
+      // Test: should render Cloudflare worker deep route fallback through ASSETS
+      // Scope: covers client route refresh behavior after an asset miss.
+      // Assertion: document-like deep routes fall back to the public SPA shell.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            const url = new URL(request.url);
+            requestedPaths.push(url.pathname);
+            if (url.pathname === "/index.html") {
+              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+            }
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/changelog/example", {
+          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+        }),
+        env,
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(await response.text(), "<html>shell</html>");
+      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/index.html"]);
+    });
+
+    it("should render Cloudflare worker preserving successful ASSETS responses", async () => {
+      // Test: should render Cloudflare worker preserving successful ASSETS responses
+      // Scope: covers the assets-first contract.
+      // Assertion: successful ASSETS responses return unchanged and skip shell fallback.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const assetResponse = new Response("asset", { status: 201, headers: { "X-Asset": "yes" } });
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            requestedPaths.push(new URL(request.url).pathname);
+            return Promise.resolve(assetResponse);
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
+        env,
+      );
+
+      assert.strictEqual(response, assetResponse);
+      assert.strictEqual(response.status, 201);
+      assert.strictEqual(response.headers.get("X-Asset"), "yes");
+      assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
+    });
+
     it("should render Cloudflare worker preserving asset 404s", async () => {
       // Test: should render Cloudflare worker preserving asset 404s
       // Scope: covers generated asset-like miss behavior.
@@ -1649,6 +1713,77 @@ mountDocument(<App />, { manifest: routes.manifest })
 
       assert.strictEqual(response.status, 404);
       assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
+    });
+
+    it("should render Cloudflare worker preserving non-document and non-GET 404s", async () => {
+      // Test: should render Cloudflare worker preserving non-document and non-GET 404s
+      // Scope: covers request semantic gating for SPA fallback.
+      // Assertion: script destinations and POST requests do not receive the SPA shell.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            requestedPaths.push(new URL(request.url).pathname);
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const scriptResponse = await worker.default.fetch(
+        new Request("https://example.com/changelog/example", {
+          headers: { Accept: "application/javascript" },
+        }),
+        env,
+      );
+      const postResponse = await worker.default.fetch(
+        new Request("https://example.com/changelog/example", {
+          method: "POST",
+          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+        }),
+        env,
+      );
+
+      assert.strictEqual(scriptResponse.status, 404);
+      assert.strictEqual(postResponse.status, 404);
+      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/changelog/example"]);
+    });
+
+    it("should render Cloudflare worker allowing /assets as an app route", async () => {
+      // Test: should render Cloudflare worker allowing /assets as an app route
+      // Scope: prevents generated asset routing from reserving user route space.
+      // Assertion: extensionless /assets document requests fall back to the SPA shell.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            const url = new URL(request.url);
+            requestedPaths.push(url.pathname);
+            if (url.pathname === "/index.html") {
+              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+            }
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/assets", {
+          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+        }),
+        env,
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(await response.text(), "<html>shell</html>");
+      assert.deepStrictEqual(requestedPaths, ["/assets", "/index.html"]);
     });
   });
 
