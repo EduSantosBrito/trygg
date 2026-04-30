@@ -19,10 +19,10 @@ import * as Metrics from "../debug/metrics.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
 import { ResourceRegistryLive } from "./resource.js";
-import * as SafeUrl from "../security/safe-url.js";
 import * as Head from "./head.js";
 import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
+import { applyPropValue, moveRange } from "./render-utils.js";
 
 /**
  * Type guard to check if a value is an EventHandler function
@@ -269,77 +269,6 @@ export interface RendererService {
  * @since 1.0.0
  */
 export class Renderer extends Context.Service<Renderer, RendererService>()("@trygg/Renderer") {}
-
-/**
- * Apply a single prop value to a DOM element
- * @internal
- */
-const applyPropValue = (node: HTMLElement, key: string, value: unknown): void => {
-  if (key === "style" && typeof value === "object" && value !== null) {
-    Object.assign(node.style, value);
-  } else if (key === "className") {
-    node.className = String(value);
-  } else if (key === "htmlFor") {
-    node.setAttribute("for", String(value));
-  } else if (key === "checked" && node instanceof HTMLInputElement) {
-    node.checked = Boolean(value);
-  } else if (
-    key === "value" &&
-    (node instanceof HTMLInputElement ||
-      node instanceof HTMLTextAreaElement ||
-      node instanceof HTMLSelectElement)
-  ) {
-    // Skip updating value on focused inputs to prevent overwriting user input
-    // during fast typing. The DOM input already has the correct value from
-    // user keystrokes; setting value would reset it to a stale signal state.
-    const isFocused = document.activeElement === node;
-    if (!isFocused) {
-      node.value = String(value);
-    }
-  } else if (key === "disabled") {
-    if (value) {
-      node.setAttribute("disabled", "");
-    } else {
-      node.removeAttribute("disabled");
-    }
-  } else if (key === "hidden") {
-    if (value) {
-      node.setAttribute("hidden", "");
-    } else {
-      node.removeAttribute("hidden");
-    }
-  } else if (key.startsWith("data-") || key.startsWith("aria-")) {
-    node.setAttribute(key, String(value));
-  } else if (key === "href" || key === "src") {
-    // Validate href/src for security - only allow safe URL schemes
-    const url = String(value);
-    const validated = SafeUrl.validateSync(url);
-    if (Option.isSome(validated)) {
-      node.setAttribute(key, validated.value);
-    } else {
-      // Unsafe URL - emit warning and skip attribute
-      // Note: This is sync path, so we use console.warn directly
-      // Debug.log is Effect-based and would need runtime context
-      const config = SafeUrl.getConfig();
-      console.warn(
-        `[trygg] Blocked unsafe ${key}="${url}". ` +
-          `Allowed schemes: ${config.allowedSchemes.join(", ")}. ` +
-          `See SafeUrl.allowSchemes() to add custom schemes.`,
-      );
-    }
-  } else if (key !== "children" && key !== "key" && typeof value !== "function") {
-    // Generic attribute
-    if (typeof value === "boolean") {
-      if (value) {
-        node.setAttribute(key, "");
-      } else {
-        node.removeAttribute(key);
-      }
-    } else {
-      node.setAttribute(key, String(value));
-    }
-  }
-};
 
 /**
  * Apply props to a DOM element, with fine-grained Signal support
@@ -854,18 +783,6 @@ const renderElement = (
           node.appendChild(childrenAnchor);
         }
 
-        const moveRangeBefore = (startNode: Node, endNode: Node, beforeRef: Node): void => {
-          let current: Node | null = startNode;
-          while (current !== null && beforeRef.parentNode === node) {
-            const next: Node | null = current.nextSibling;
-            node.insertBefore(current, beforeRef);
-            if (current === endNode) {
-              return;
-            }
-            current = next;
-          }
-        };
-
         const cleanupChildSlot = (slot: ChildSlot) =>
           Effect.gen(function* () {
             yield* slot.result.cleanup;
@@ -1081,7 +998,7 @@ const renderElement = (
                   continue;
                 }
 
-                moveRangeBefore(slot.startMarker, slot.endMarker, beforeRef);
+                moveRange(slot.startMarker, slot.endMarker, beforeRef);
                 beforeRef = slot.startMarker;
               }
 
@@ -1615,29 +1532,6 @@ const renderElement = (
           }
           lisIndices.reverse();
           return lisIndices;
-        };
-
-        /**
-         * Move all DOM nodes in the range [startMarker, endNode] (inclusive)
-         * before the given reference node. Used for reordering keyed items.
-         * @internal
-         */
-        const moveRange = (startMarker: Node, endNode: Node, beforeRef: Node): void => {
-          const parentNode = beforeRef.parentNode;
-          if (parentNode === null) {
-            return;
-          }
-
-          let current: Node | null = startMarker;
-          while (current !== null) {
-            const next: Node | null = current.nextSibling;
-            if (current.parentNode === null || beforeRef.parentNode !== parentNode) {
-              return;
-            }
-            parentNode.insertBefore(current, beforeRef);
-            if (current === endNode) break;
-            current = next;
-          }
         };
 
         // Helper to render a single item with a stable render phase
