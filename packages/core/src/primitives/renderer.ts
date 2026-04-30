@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Data, Effect, Equal, Exit, Layer, Match, Option, Scope } from "effect";
+import { Cause, Data, Effect, Exit, Layer, Match, Option, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, isElement, type ElementProps } from "./element.js";
 import * as Signal from "./signal.js";
@@ -23,7 +23,13 @@ import { ResourceRegistryLive } from "./resource.js";
 import * as Head from "./head.js";
 import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
-import { applyPropValue, type BlockedSafeUrlAttribute, moveRange } from "./render-utils.js";
+import {
+  applyPropValue,
+  equalOrChanged,
+  logBlockedSafeUrlAttribute,
+  moveRange,
+  resolveReconcileTarget,
+} from "./render-utils.js";
 import { renderIntrinsic } from "./render-intrinsic.js";
 
 const emptyContext = unsafeWidenContext(Context.empty());
@@ -33,21 +39,6 @@ const provideRenderContext = <A, E, R>(
   _renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): Effect.Effect<A, E, unknown> => (context === null ? effect : Effect.provide(effect, context));
-
-/**
- * Omit a single key from a props object.
- * Used to strip framework-specific props (like 'mode') before DOM application.
- * @internal
- */
-const omitKey = (props: ElementProps, key: string): ElementProps => {
-  const result: Record<string, unknown> = {};
-  for (const k in props) {
-    if (k !== key) {
-      result[k] = (props as Record<string, unknown>)[k];
-    }
-  }
-  return result as ElementProps;
-};
 
 /**
  * Error thrown when a Portal target cannot be found
@@ -160,34 +151,6 @@ export interface RenderResult {
 const normalizeContext = (context: Context.Context<unknown> | null): Context.Context<unknown> =>
   context ?? emptyContext;
 
-const equalOrChanged = (left: unknown, right: unknown): boolean => {
-  try {
-    return Equal.equals(left, right);
-  } catch {
-    return false;
-  }
-};
-
-const resolveReconcileTarget = (
-  element: Element,
-  context: Context.Context<unknown> | null,
-): { readonly element: Element; readonly context: Context.Context<unknown> | null } => {
-  let currentElement: Element = element;
-  let currentContext = context;
-
-  while (currentElement._tag === "Provide") {
-    currentContext =
-      currentContext !== null
-        ? Context.merge(currentContext, currentElement.context)
-        : currentElement.context;
-    currentElement = currentElement.child;
-  }
-
-  return {
-    element: currentElement,
-    context: currentContext,
-  };
-};
 /**
  * Error boundary handler type.
  * Called when a component or signal element encounters an error during re-render.
@@ -258,18 +221,6 @@ export interface RendererService {
  */
 export class Renderer extends Context.Service<Renderer, RendererService>()("@trygg/Renderer") {}
 
-const logBlockedSafeUrlAttribute = ({
-  key,
-  url,
-  allowedSchemes,
-}: BlockedSafeUrlAttribute): Effect.Effect<void> =>
-  Debug.log({
-    event: "render.safeurl.blocked",
-    attribute: key,
-    url,
-    allowed_schemes: allowedSchemes,
-  });
-
 /**
  * Render a document-level element (html, head, body).
  * Maps to existing DOM nodes instead of creating new ones.
@@ -300,10 +251,8 @@ const renderDocumentElement = (
       target: targetNode.tagName,
     });
 
-    // Strip framework-specific props before applying
-    const rawProps = props as Record<string, unknown>;
-    const mode = rawProps["mode"];
-    const domProps = mode !== undefined ? omitKey(props, "mode") : props;
+    // Strip framework-specific 'mode' prop before applying
+    const { mode: _mode, ...domProps } = props;
 
     // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
     const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
@@ -317,7 +266,12 @@ const renderDocumentElement = (
           // Signal-valued attribute: fine-grained reactivity on document elements
           const prev = targetNode.getAttribute(attrName);
           const initialValue = yield* Signal.get(value);
-          const blocked = applyPropValue(targetNode, key, initialValue, renderContext.safeUrlConfig);
+          const blocked = applyPropValue(
+            targetNode,
+            key,
+            initialValue,
+            renderContext.safeUrlConfig,
+          );
           if (Option.isSome(blocked)) {
             yield* logBlockedSafeUrlAttribute(blocked.value);
           }
@@ -401,7 +355,7 @@ const renderDocumentElement = (
 const renderElement = (
   element: Element,
   parent: Node,
-  runtime: RenderContext,
+  renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
@@ -513,7 +467,13 @@ const renderElement = (
           Effect.fnUntraced(function* (value: unknown) {
             const scope = yield* Scope.fork(yield* Effect.scope);
             const element = renderValue(value);
-            const result = yield* renderElement(element, parent, runtime, context, options).pipe(
+            const result = yield* renderElement(
+              element,
+              parent,
+              renderContext,
+              context,
+              options,
+            ).pipe(
               Scope.provide(scope),
               Effect.onError(() => Scope.close(scope, Exit.void)),
             );
@@ -554,7 +514,7 @@ const renderElement = (
                 const result = yield* renderElement(
                   element,
                   tempFragment,
-                  runtime,
+                  renderContext,
                   context,
                   options,
                 ).pipe(
@@ -609,7 +569,7 @@ const renderElement = (
                   }),
                 ),
               ),
-              runtime,
+              renderContext,
               context,
             );
           }),
@@ -631,7 +591,13 @@ const renderElement = (
       Effect.gen(function* () {
         const mergedContext =
           context !== null ? Context.merge(context, providedContext) : providedContext;
-        const childResult = yield* renderElement(child, parent, runtime, mergedContext, options);
+        const childResult = yield* renderElement(
+          child,
+          parent,
+          renderContext,
+          mergedContext,
+          options,
+        );
 
         return {
           get node() {
@@ -656,7 +622,7 @@ const renderElement = (
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children, key }) =>
-      renderIntrinsic(tag, props, children, key, parent, runtime, context, options, {
+      renderIntrinsic(tag, props, children, key, parent, renderContext, context, options, {
         renderElement,
         renderDocumentElement,
         runForkInRenderContext,
@@ -714,7 +680,11 @@ const renderElement = (
           unknown,
           unknown
         > = Effect.fnUntraced(function* () {
-          const effectWithContext = provideRenderContext(currentRun(), runtime, currentContext);
+          const effectWithContext = provideRenderContext(
+            currentRun(),
+            renderContext,
+            currentContext,
+          );
           const renderScope = yield* Scope.fork(componentScope);
           const element = yield* Effect.provideService(
             Effect.provideService(
@@ -746,7 +716,7 @@ const renderElement = (
           const result = yield* renderElement(
             childElement,
             actualParent,
-            runtime,
+            renderContext,
             currentContext,
             options,
           ).pipe(Effect.provideService(Signal.CurrentRenderPhase, null));
@@ -894,7 +864,7 @@ const renderElement = (
           // Note: This is in a sync context (queueMicrotask), so we log inside the runFork effect
           // The Debug.log below is triggered from within the Effect.gen that follows
 
-          runForkInRenderContext(rerenderEffect("preserve"), runtime, currentContext);
+          runForkInRenderContext(rerenderEffect("preserve"), renderContext, currentContext);
         };
 
         // Schedule a re-render via microtask
@@ -1033,7 +1003,7 @@ const renderElement = (
         const childResults: Array<RenderResult> = [];
 
         for (const child of children) {
-          const result = yield* renderElement(child, fragment, runtime, context, options);
+          const result = yield* renderElement(child, fragment, renderContext, context, options);
           childResults.push(result);
         }
 
@@ -1078,7 +1048,13 @@ const renderElement = (
         // Render children into target
         const childResults: Array<RenderResult> = [];
         for (const child of normalizedChildren) {
-          const result = yield* renderElement(child, targetElement, runtime, context, options);
+          const result = yield* renderElement(
+            child,
+            targetElement,
+            renderContext,
+            context,
+            options,
+          );
           childResults.push(result);
         }
 
@@ -1196,7 +1172,7 @@ const renderElement = (
           }
 
           // Execute render function with render phase context and parent context
-          const renderEffect = provideRenderContext(renderFn(item, index), runtime, context);
+          const renderEffect = provideRenderContext(renderFn(item, index), renderContext, context);
 
           const element = yield* Effect.provideService(
             renderEffect,
@@ -1215,7 +1191,7 @@ const renderElement = (
           const result = yield* renderElement(
             normalizedElement,
             listParent,
-            runtime,
+            renderContext,
             context,
             options,
           );
@@ -1523,7 +1499,7 @@ const renderElement = (
                               );
                             }),
                           ),
-                          runtime,
+                          renderContext,
                           context,
                         );
                       });
@@ -1679,7 +1655,7 @@ const renderElement = (
                 }),
               ),
             ),
-            runtime,
+            renderContext,
             context,
           );
         }
@@ -1790,7 +1766,7 @@ const renderElement = (
             const fallbackResult = yield* renderElement(
               fallbackElement,
               renderParent,
-              runtime,
+              renderContext,
               context,
               defaultRenderOptions,
             ).pipe(
@@ -1853,7 +1829,7 @@ const renderElement = (
                 }),
               ),
             ),
-            runtime,
+            renderContext,
             context,
           );
         };
@@ -1898,7 +1874,7 @@ const renderElement = (
         const childRenderResult = yield* renderElement(
           child,
           parent,
-          runtime,
+          renderContext,
           context,
           childOptions,
         ).pipe(

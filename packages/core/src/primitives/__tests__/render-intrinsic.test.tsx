@@ -48,7 +48,9 @@ describe("renderIntrinsic", () => {
         </button>,
       );
 
-      (yield* getByTestId("event-target")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      (yield* getByTestId("event-target")).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
       yield* TestClock.adjust(10);
 
       assert.strictEqual(yield* Signal.get(clicks), 1);

@@ -434,9 +434,9 @@ export const routes = { manifest: [] }
           platform: "cloudflare",
         });
         yield* fs.makeDirectory(path.join(root, "dist"), { recursive: true }).pipe(Effect.orDie);
-        yield* fs.writeFileString(path.join(root, "dist", "index.html"), generateHtmlTemplate()).pipe(
-          Effect.orDie,
-        );
+        yield* fs
+          .writeFileString(path.join(root, "dist", "index.html"), generateHtmlTemplate())
+          .pipe(Effect.orDie);
 
         const workerEntryExists = yield* fs.exists(path.join(generatedDir, "worker-entry.js"));
         const oldSsrEntryExists = yield* fs.exists(path.join(generatedDir, "ssr-entry.js"));
@@ -459,7 +459,8 @@ export const routes = { manifest: [] }
         const files = yield* PluginFiles;
         const serverPlatform = yield* ServerPlatform;
         const root = yield* makeTempDir({
-          "node/app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "node/app/layout.tsx":
+            "export default function Layout() { return <html><body /></html> }",
           "node/app/routes.ts": "export const routes = { manifest: [] }",
           "bun/app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "bun/app/routes.ts": "export const routes = { manifest: [] }",
@@ -486,8 +487,12 @@ export const routes = { manifest: [] }
           platform: "bun",
         });
 
-        const nodeWorkerExists = yield* fs.exists(path.join(root, "node", ".trygg", "worker-entry.js"));
-        const bunWorkerExists = yield* fs.exists(path.join(root, "bun", ".trygg", "worker-entry.js"));
+        const nodeWorkerExists = yield* fs.exists(
+          path.join(root, "node", ".trygg", "worker-entry.js"),
+        );
+        const bunWorkerExists = yield* fs.exists(
+          path.join(root, "bun", ".trygg", "worker-entry.js"),
+        );
 
         assert.isFalse(nodeWorkerExists);
         assert.isFalse(bunWorkerExists);

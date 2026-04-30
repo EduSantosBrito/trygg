@@ -75,9 +75,7 @@ describe("SafeUrl.validate", () => {
 
       assert.strictEqual(allowed, "myapp://settings");
 
-      const isolated = yield* Effect.exit(
-        withDefaultConfig(SafeUrl.validate("myapp://settings")),
-      );
+      const isolated = yield* Effect.exit(withDefaultConfig(SafeUrl.validate("myapp://settings")));
       assert.isTrue(Exit.isFailure(isolated));
     }),
   );

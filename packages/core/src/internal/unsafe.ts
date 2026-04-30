@@ -218,15 +218,12 @@ export const unsafeAsOverload = <T>(fn: Function): T => fn as T;
  * Match.tagsExhaustive performs the runtime dispatch; this helper only bridges
  * its highly generic return type back to the caller-selected result type.
  */
-export const unsafeTagsExhaustive = <State extends { readonly _tag: string }, Result>(
-  handlers: {
-    readonly [Tag in State["_tag"] & string]: (
-      state: Extract<State, { readonly _tag: Tag }>,
-    ) => Result;
-  },
-): ((state: State) => Result) => Match.type<State>().pipe(Match.tagsExhaustive(handlers as any)) as (
-  state: State,
-) => Result;
+export const unsafeTagsExhaustive = <State extends { readonly _tag: string }, Result>(handlers: {
+  readonly [Tag in State["_tag"] & string]: (
+    state: Extract<State, { readonly _tag: Tag }>,
+  ) => Result;
+}): ((state: State) => Result) =>
+  Match.type<State>().pipe(Match.tagsExhaustive(handlers as any)) as (state: State) => Result;
 
 // =============================================================================
 // Effect Requirements Erasure

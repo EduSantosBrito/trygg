@@ -65,12 +65,16 @@ export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError
  * @public
  * @since 1.0.0
  */
-export interface ErrorBoundaryMatcher<Props, E, R, HandledTags extends string>
-  extends ReactiveMatcher.ReactiveMatcher<
-    "ErrorBoundaryMatcher",
-    Component.Type<Props, E, R>,
-    ReadonlyMap<string, ErrorHandler>
-  > {
+export interface ErrorBoundaryMatcher<
+  Props,
+  E,
+  R,
+  HandledTags extends string,
+> extends ReactiveMatcher.ReactiveMatcher<
+  "ErrorBoundaryMatcher",
+  Component.Type<Props, E, R>,
+  ReadonlyMap<string, ErrorHandler>
+> {
   readonly _tag: "ErrorBoundaryMatcher";
   readonly source: Component.Type<Props, E, R>;
   readonly component: Component.Type<Props, E, R>;

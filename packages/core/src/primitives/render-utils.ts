@@ -1,11 +1,52 @@
-import { Option } from "effect";
+import { Effect, Equal, Option } from "effect";
+import * as Context from "effect/Context";
 import * as SafeUrl from "../security/safe-url.js";
+import * as Debug from "../debug/debug.js";
+import type { Element } from "./element.js";
 
 export interface BlockedSafeUrlAttribute {
   readonly key: string;
   readonly url: string;
   readonly allowedSchemes: ReadonlyArray<string>;
 }
+
+export const logBlockedSafeUrlAttribute = ({
+  key,
+  url,
+  allowedSchemes,
+}: BlockedSafeUrlAttribute): Effect.Effect<void> =>
+  Debug.log({
+    event: "render.safeurl.blocked",
+    attribute: key,
+    url,
+    allowed_schemes: allowedSchemes,
+  });
+
+export const equalOrChanged = (left: unknown, right: unknown): boolean => {
+  try {
+    return Equal.equals(left, right);
+  } catch {
+    return false;
+  }
+};
+
+export const resolveReconcileTarget = (
+  element: Element,
+  context: Context.Context<unknown> | null,
+): { readonly element: Element; readonly context: Context.Context<unknown> | null } => {
+  let currentElement: Element = element;
+  let currentContext = context;
+
+  while (currentElement._tag === "Provide") {
+    currentContext =
+      currentContext !== null
+        ? Context.merge(currentContext, currentElement.context)
+        : currentElement.context;
+    currentElement = currentElement.child;
+  }
+
+  return { element: currentElement, context: currentContext };
+};
 
 /**
  * Apply a single prop value to a DOM element.

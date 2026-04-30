@@ -1046,19 +1046,15 @@ export interface ResourceMatcher<
   HasPending extends boolean,
   HasSuccess extends boolean,
   HasFailure extends boolean,
->
-  extends ReactiveMatcher.ReactiveMatcher<
-    "ResourceMatcher",
-    Signal.Signal<ResourceState<A, E>>,
-    ReadonlyMap<MatchState, ResourceHandler>
-  > {
+> extends ReactiveMatcher.ReactiveMatcher<
+  "ResourceMatcher",
+  Signal.Signal<ResourceState<A, E>>,
+  ReadonlyMap<MatchState, ResourceHandler>
+> {
   readonly _tag: "ResourceMatcher";
   readonly source: Signal.Signal<ResourceState<A, E>>;
   readonly state: Signal.Signal<ResourceState<A, E>>;
-  readonly handlers: ReadonlyMap<
-    MatchState,
-    ResourceHandler
-  >;
+  readonly handlers: ReadonlyMap<MatchState, ResourceHandler>;
   readonly pending?: PendingHandler<unknown>;
   readonly success?: SuccessHandler<unknown>;
   readonly failure?: FailureHandler<unknown>;

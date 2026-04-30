@@ -986,12 +986,17 @@ export interface SuspendedComponent<Props = never, E = never, R = never> extends
  * @public
  * @since 1.0.0
  */
-export interface SuspendMatcher<Props, E, R, HasPending extends boolean, HasFailure extends boolean>
-  extends ReactiveMatcher.ReactiveMatcher<
-    "SuspendMatcher",
-    Component.Type<Props, E, R>,
-    ReadonlyMap<SuspendState, SuspendHandler>
-  > {
+export interface SuspendMatcher<
+  Props,
+  E,
+  R,
+  HasPending extends boolean,
+  HasFailure extends boolean,
+> extends ReactiveMatcher.ReactiveMatcher<
+  "SuspendMatcher",
+  Component.Type<Props, E, R>,
+  ReadonlyMap<SuspendState, SuspendHandler>
+> {
   readonly _tag: "SuspendMatcher";
   readonly source: Component.Type<Props, E, R>;
   readonly component: Component.Type<Props, E, R>;

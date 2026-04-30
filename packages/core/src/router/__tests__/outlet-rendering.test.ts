@@ -122,9 +122,9 @@ describe("Outlet - Coordination", () => {
       const PageComp = textComp("Lazy Page");
       const prefetch = () => Ref.update(loaderCalls, (count) => count + 1);
 
-      const manifest = Routes.make()
-        .add(Route.make("/lazy").component(PageComp).prefetch(prefetch))
-        .manifest;
+      const manifest = Routes.make().add(
+        Route.make("/lazy").component(PageComp).prefetch(prefetch),
+      ).manifest;
       const baseRouter = yield* Router.Router;
 
       yield* baseRouter.prefetch("/lazy");

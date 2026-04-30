@@ -1,9 +1,15 @@
-import { Effect, Equal, Option } from "effect";
+import { Effect, Option } from "effect";
 import * as Context from "effect/Context";
 import { Element, getKey, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
-import { applyPropValue, type BlockedSafeUrlAttribute, moveRange } from "./render-utils.js";
+import {
+  applyPropValue,
+  equalOrChanged,
+  logBlockedSafeUrlAttribute,
+  moveRange,
+  resolveReconcileTarget,
+} from "./render-utils.js";
 import * as Head from "./head.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { InvalidEventHandlerError } from "./renderer.js";
@@ -43,44 +49,6 @@ const isEffectProp = (value: unknown): value is Effect.Effect<unknown> => Effect
 const omitMode = (props: ElementProps): ElementProps => {
   const { mode: _mode, ...domProps } = props;
   return domProps;
-};
-
-const equalOrChanged = (left: unknown, right: unknown): boolean => {
-  try {
-    return Equal.equals(left, right);
-  } catch {
-    return false;
-  }
-};
-
-const logBlockedSafeUrlAttribute = ({
-  key,
-  url,
-  allowedSchemes,
-}: BlockedSafeUrlAttribute): Effect.Effect<void> =>
-  Debug.log({
-    event: "render.safeurl.blocked",
-    attribute: key,
-    url,
-    allowed_schemes: allowedSchemes,
-  });
-
-const resolveReconcileTarget = (
-  element: Element,
-  context: Context.Context<unknown> | null,
-): { readonly element: Element; readonly context: Context.Context<unknown> | null } => {
-  let currentElement: Element = element;
-  let currentContext = context;
-
-  while (currentElement._tag === "Provide") {
-    currentContext =
-      currentContext !== null
-        ? Context.merge(currentContext, currentElement.context)
-        : currentElement.context;
-    currentElement = currentElement.child;
-  }
-
-  return { element: currentElement, context: currentContext };
 };
 
 const applyProps = Effect.fn("applyProps")(function* (
@@ -235,7 +203,13 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
       const fragment = document.createDocumentFragment();
       const startMarker = document.createComment("child-start");
       fragment.appendChild(startMarker);
-      const result = yield* deps.renderElement(child, fragment, renderContext, childContext, options);
+      const result = yield* deps.renderElement(
+        child,
+        fragment,
+        renderContext,
+        childContext,
+        options,
+      );
       const endMarker = document.createComment("child-end");
       fragment.appendChild(endMarker);
       if (childrenAnchor === null) {
@@ -305,7 +279,13 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
         if (!equalOrChanged(currentProps, nextProps)) {
           for (const cleanup of propCleanups) yield* cleanup;
-          propCleanups = yield* applyProps(node, nextProps, renderContext, resolvedNextContext, deps);
+          propCleanups = yield* applyProps(
+            node,
+            nextProps,
+            renderContext,
+            resolvedNextContext,
+            deps,
+          );
           currentProps = nextProps;
         }
 
@@ -315,7 +295,11 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
           for (let index = 0; index < childResults.length; index++) {
             const childResult = childResults[index];
             const nextChild = resolvedNextElement.children[index];
-            if (childResult === undefined || nextChild === undefined || childResult.reconcile === undefined) {
+            if (
+              childResult === undefined ||
+              nextChild === undefined ||
+              childResult.reconcile === undefined
+            ) {
               return false;
             }
             const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);

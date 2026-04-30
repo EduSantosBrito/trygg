@@ -274,42 +274,39 @@ export const validateSync = (url: string): Option.Option<string> =>
  * @public
  * @since 1.0.0
  */
-export const validate: (
-  url: string,
-) => Effect.Effect<string, UnsafeUrlError, SafeUrlConfig> = Effect.fn(
-  "SafeUrl.validate",
-)(function* (url: string) {
-  const config = yield* SafeUrlConfig;
+export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError, SafeUrlConfig> =
+  Effect.fn("SafeUrl.validate")(function* (url: string) {
+    const config = yield* SafeUrlConfig;
 
-  // Empty URL check
-  if (url.trim() === "") {
-    return yield* new UnsafeUrlError({
-      url,
-      reason: "empty_url",
-      allowedSchemes: config.allowedSchemes,
-    });
-  }
+    // Empty URL check
+    if (url.trim() === "") {
+      return yield* new UnsafeUrlError({
+        url,
+        reason: "empty_url",
+        allowedSchemes: config.allowedSchemes,
+      });
+    }
 
-  // Parse and check scheme
-  const schemeOption = extractScheme(url);
+    // Parse and check scheme
+    const schemeOption = extractScheme(url);
 
-  if (Option.isNone(schemeOption)) {
-    // Relative URL - always allowed
+    if (Option.isNone(schemeOption)) {
+      // Relative URL - always allowed
+      return url;
+    }
+
+    const scheme = schemeOption.value;
+    if (!config.allowedSchemes.includes(scheme.toLowerCase())) {
+      return yield* new UnsafeUrlError({
+        url,
+        reason: "unsafe_scheme",
+        scheme,
+        allowedSchemes: config.allowedSchemes,
+      });
+    }
+
     return url;
-  }
-
-  const scheme = schemeOption.value;
-  if (!config.allowedSchemes.includes(scheme.toLowerCase())) {
-    return yield* new UnsafeUrlError({
-      url,
-      reason: "unsafe_scheme",
-      scheme,
-      allowedSchemes: config.allowedSchemes,
-    });
-  }
-
-  return url;
-});
+  });
 
 /**
  * Validate a URL, returning Option.some(url) for valid or Option.none() for invalid.
@@ -329,7 +326,9 @@ export const validate: (
  * @public
  * @since 1.0.0
  */
-export const validateOption = (url: string): Effect.Effect<Option.Option<string>, never, SafeUrlConfig> =>
+export const validateOption = (
+  url: string,
+): Effect.Effect<Option.Option<string>, never, SafeUrlConfig> =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit(validate(url));
     return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();

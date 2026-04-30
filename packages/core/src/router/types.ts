@@ -601,7 +601,9 @@ export interface OutletCoordination {
   /**
    * Activate prefetch once the Outlet has mounted and built its matcher.
    */
-  readonly activatePrefetch: (prefetch: (path: string) => Effect.Effect<void>) => Effect.Effect<void>;
+  readonly activatePrefetch: (
+    prefetch: (path: string) => Effect.Effect<void>,
+  ) => Effect.Effect<void>;
 
   /**
    * Apply scroll behavior using router-captured platform services.
