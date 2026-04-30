@@ -23,7 +23,9 @@
 - **Static SPA** — A deploy-target neutral client build. Serves the SPA shell for app routes and static assets directly. Does not imply SSR, API routes, or a Worker-specific runtime.
 - **SPA shell** — The public HTML entry for Static SPA output. Canonical build path: `dist/index.html`.
 - **Runtime platform** — The environment trygg targets when generating runtime-specific integration code. Known platforms include Bun, Node, and Cloudflare.
+- **Cloudflare platform selection** — Cloudflare Worker artifacts are generated only when the runtime platform is explicitly `cloudflare`; deploy-tool detection is not part of the contract.
 - **Cloudflare Static SPA** — `output: "static"` on the Cloudflare runtime platform. trygg generates a minimal Worker that serves static assets directly and falls back app routes to the SPA shell.
+- **Static API exclusion** — Static SPA output does not include `app/api.ts`. On Cloudflare, API routes with Static SPA output are invalid rather than silently ignored.
 - **Cloudflare server output** — `output: "server"` on the Cloudflare runtime platform. Intended to preserve the same app and API semantics as Bun and Node server output, with Cloudflare-specific runtime plumbing.
 - **Cloudflare Worker artifact** — The deployment contract for the Cloudflare runtime platform. Deploy tools such as alchemy may consume it, but trygg does not define Cloudflare behavior in terms of a specific deployment tool.
 - **Worker entry** — The generated entrypoint for a Cloudflare Worker artifact. Canonical generated path: `.trygg/worker-entry.js`.
