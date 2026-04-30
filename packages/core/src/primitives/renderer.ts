@@ -10,9 +10,9 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Data, Effect, Exit, Layer, Match, Option, Scope } from "effect";
+import { Cause, Data, Effect, Layer, Match, Option, Scope } from "effect";
 import * as Context from "effect/Context";
-import { Element, isElement, type ElementProps } from "./element.js";
+import { Element, type ElementProps } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
@@ -30,8 +30,14 @@ import {
 import { renderIntrinsic } from "./render-intrinsic.js";
 import { renderComponent } from "./render-component.js";
 import { renderKeyedList } from "./render-keyed-list.js";
+import { renderSignalElement } from "./render-signal-element.js";
+import { renderProvide } from "./render-provide.js";
+import { renderFragment } from "./render-fragment.js";
+import { renderPortal } from "./render-portal.js";
+import { renderErrorBoundary } from "./render-error-boundary.js";
 
 export { ComponentAnchorError } from "./render-component.js";
+export { PortalTargetNotFoundError } from "./render-portal.js";
 
 const emptyContext = unsafeWidenContext(Context.empty());
 
@@ -40,18 +46,6 @@ const provideRenderContext = <A, E, R>(
   _renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): Effect.Effect<A, E, unknown> => (context === null ? effect : Effect.provide(effect, context));
-
-/**
- * Error thrown when a Portal target cannot be found
- * @since 1.0.0
- */
-export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNotFoundError")<{
-  readonly target: HTMLElement | string;
-}> {
-  override get message() {
-    return `Portal target not found: ${this.target}`;
-  }
-}
 
 export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHandlerError")<{
   readonly prop: string;
@@ -427,191 +421,14 @@ const renderElement = (
     ),
 
     Match.tag("SignalElement", ({ signal, onSwap }) =>
-      Effect.gen(function* () {
-        // Create anchor comment for positioning
-        const anchor = document.createComment("signal-element");
-        parent.appendChild(anchor);
-
-        // State to track current rendered content
-        let currentResult: RenderResult | null = null;
-        let currentScope: Scope.Closeable | null = null;
-        let isUnmounted = false;
-        let swapVersion = 0; // Discard stale renders when multiple swaps race
-
-        // Helper to render Element or convert primitive to Text
-        const renderValue = (value: unknown): Element =>
-          isElement(value) ? value : Element.Text({ content: String(value) });
-
-        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
-          if (currentResult !== null) {
-            yield* currentResult.cleanup;
-            currentResult = null;
-          }
-          if (currentScope !== null) {
-            const scope = currentScope;
-            currentScope = null;
-            yield* Scope.close(scope, Exit.void);
-          }
-        });
-
-        const renderWithScope: (
-          value: unknown,
-        ) => Effect.Effect<{ result: RenderResult; scope: Scope.Closeable }, unknown, unknown> =
-          Effect.fnUntraced(function* (value: unknown) {
-            const scope = yield* Scope.fork(yield* Effect.scope);
-            const element = renderValue(value);
-            const result = yield* renderElement(
-              element,
-              parent,
-              renderContext,
-              context,
-              options,
-            ).pipe(
-              Scope.provide(scope),
-              Effect.onError(() => Scope.close(scope, Exit.void)),
-            );
-            return { result, scope };
-          });
-
-        // Render initial value
-        const initialValue = yield* Signal.get(signal);
-        const initialRender = yield* renderWithScope(initialValue);
-        currentResult = initialRender.result;
-        currentScope = initialRender.scope;
-        // Move rendered content before anchor
-        parent.insertBefore(currentResult.node, anchor);
-
-        yield* Debug.log({
-          event: "render.signalelement.initial",
-          signal_id: signal._debugId,
-        });
-
-        // Subscribe to signal changes
-        // Use sync Effect that forks scoped work (same pattern as Component re-render)
-        const unsubscribe = yield* Signal.subscribe(signal, () =>
-          Effect.sync(() => {
-            if (isUnmounted) return;
-
-            // Increment version to invalidate any in-flight renders
-            const myVersion = ++swapVersion;
-
-            runForkInRenderContext(
-              Effect.gen(function* () {
-                const newValue = yield* Signal.get(signal);
-
-                // Render into a temporary off-DOM fragment to prevent
-                // content from becoming visible before version check
-                const tempFragment = document.createDocumentFragment();
-                const scope = yield* Scope.fork(yield* Effect.scope);
-                const element = renderValue(newValue);
-                const result = yield* renderElement(
-                  element,
-                  tempFragment,
-                  renderContext,
-                  context,
-                  options,
-                ).pipe(
-                  Scope.provide(scope),
-                  Effect.onError(() => Scope.close(scope, Exit.void)),
-                );
-
-                // Discard if a newer swap started while we were rendering
-                if (myVersion !== swapVersion) {
-                  yield* result.cleanup;
-                  yield* Scope.close(scope, Exit.void);
-                  return;
-                }
-
-                // Cleanup old content + scope AFTER successful render
-                yield* cleanupCurrent;
-
-                currentResult = result;
-                currentScope = scope;
-                // insertBefore(fragment, ref) moves ALL fragment children
-                // before ref in one atomic DOM operation
-                const actualParent = anchor.parentNode;
-                if (actualParent !== null) {
-                  actualParent.insertBefore(tempFragment, anchor);
-                }
-
-                // Notify post-swap listeners (e.g. router scroll synchronization)
-                if (onSwap !== undefined) {
-                  yield* onSwap;
-                }
-
-                yield* Debug.log({
-                  event: "render.signalelement.swap",
-                  signal_id: signal._debugId,
-                });
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.gen(function* () {
-                    yield* Debug.log({
-                      event: "render.signalelement.swap",
-                      trigger: "error",
-                      signal_id: signal._debugId,
-                      reason: String(cause),
-                    });
-
-                    // Check for parent error boundary handler
-                    if (options.errorHandler !== null) {
-                      // Propagate error to error boundary
-                      options.errorHandler(cause);
-                    }
-                    // Keep old content if no error boundary
-                  }),
-                ),
-              ),
-              renderContext,
-              context,
-            );
-          }),
-        );
-
-        return {
-          node: anchor,
-          cleanup: Effect.gen(function* () {
-            isUnmounted = true;
-            yield* unsubscribe;
-            yield* cleanupCurrent;
-            anchor.remove();
-          }),
-        };
+      renderSignalElement(signal, onSwap, parent, renderContext, context, options, {
+        renderElement,
+        runForkInRenderContext,
       }),
     ),
 
     Match.tag("Provide", ({ context: providedContext, child }) =>
-      Effect.gen(function* () {
-        const mergedContext =
-          context !== null ? Context.merge(context, providedContext) : providedContext;
-        const childResult = yield* renderElement(
-          child,
-          parent,
-          renderContext,
-          mergedContext,
-          options,
-        );
-
-        return {
-          get node() {
-            return childResult.node;
-          },
-          cleanup: childResult.cleanup,
-          reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
-            Effect.gen(function* () {
-              if (nextElement._tag !== "Provide" || childResult.reconcile === undefined) {
-                return false;
-              }
-
-              const nextMergedContext =
-                nextContext !== null
-                  ? Context.merge(nextContext, nextElement.context)
-                  : nextElement.context;
-
-              return yield* childResult.reconcile(nextElement.child, nextMergedContext);
-            }),
-        } satisfies RenderResult;
-      }),
+      renderProvide(providedContext, child, parent, renderContext, context, options, { renderElement }),
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children, key }) =>
@@ -633,80 +450,11 @@ const renderElement = (
     ),
 
     Match.tag("Fragment", ({ children }) =>
-      Effect.gen(function* () {
-        const fragment = document.createDocumentFragment();
-        const childResults: Array<RenderResult> = [];
-
-        for (const child of children) {
-          const result = yield* renderElement(child, fragment, renderContext, context, options);
-          childResults.push(result);
-        }
-
-        parent.appendChild(fragment);
-
-        // Get first child result if available
-        const maybeFirstChild = childResults[0];
-
-        if (maybeFirstChild === undefined) {
-          // Empty fragment: use a comment as anchor
-          const emptyAnchor = document.createComment("fragment");
-          parent.appendChild(emptyAnchor);
-          return {
-            node: emptyAnchor,
-            cleanup: Effect.sync(() => emptyAnchor.remove()),
-          };
-        }
-
-        // Non-empty fragment: use first child's node as anchor
-        return {
-          node: maybeFirstChild.node,
-          cleanup: Effect.gen(function* () {
-            for (const child of childResults) {
-              yield* child.cleanup;
-            }
-          }),
-        };
-      }),
+      renderFragment(children, parent, renderContext, context, options, { renderElement }),
     ),
 
     Match.tag("Portal", ({ target, children }) =>
-      Effect.gen(function* () {
-        // Resolve target
-        const targetElement = typeof target === "string" ? document.querySelector(target) : target;
-
-        if (!targetElement) {
-          return yield* new PortalTargetNotFoundError({ target });
-        }
-
-        const normalizedChildren = yield* Element.fromChildren(children);
-
-        // Render children into target
-        const childResults: Array<RenderResult> = [];
-        for (const child of normalizedChildren) {
-          const result = yield* renderElement(
-            child,
-            targetElement,
-            renderContext,
-            context,
-            options,
-          );
-          childResults.push(result);
-        }
-
-        // Return a comment as anchor in original location
-        const portalAnchor = document.createComment("portal");
-        parent.appendChild(portalAnchor);
-
-        return {
-          node: portalAnchor,
-          cleanup: Effect.gen(function* () {
-            for (const child of childResults) {
-              yield* child.cleanup;
-            }
-            portalAnchor.remove();
-          }),
-        };
-      }),
+      renderPortal(target, children, parent, renderContext, context, options, { renderElement }),
     ),
 
     Match.tag("KeyedList", ({ source, renderFn, keyFn }) =>
@@ -718,224 +466,11 @@ const renderElement = (
     ),
 
     Match.tag("ErrorBoundaryElement", ({ child, fallback, onError }) =>
-      Effect.gen(function* () {
-        // Create anchor comment for positioning
-        const anchor = document.createComment("error-boundary");
-        parent.appendChild(anchor);
-
-        // State to track current rendered content
-        let currentResult: RenderResult | null = null;
-        let currentScope: Scope.Closeable | null = null;
-        let isUnmounted = false;
-        let hasErrored = false;
-
-        const cleanupRendered = (
-          result: RenderResult | null,
-          scope: Scope.Closeable | null,
-        ): Effect.Effect<void, unknown, unknown> =>
-          Effect.gen(function* () {
-            if (result !== null) {
-              yield* result.cleanup;
-            }
-            if (scope !== null) {
-              yield* Scope.close(scope, Exit.void);
-            }
-          });
-
-        const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
-          const result = currentResult;
-          const scope = currentScope;
-          currentResult = null;
-          currentScope = null;
-          yield* cleanupRendered(result, scope);
-        });
-
-        const insertBeforeAnchor = (node: Node): Effect.Effect<boolean> =>
-          Effect.sync(() => {
-            const tryInsert = (parentNode: Node | null): boolean => {
-              if (parentNode === null) {
-                return false;
-              }
-              try {
-                parentNode.insertBefore(node, anchor);
-                return true;
-              } catch {
-                return false;
-              }
-            };
-
-            const firstParent = anchor.parentNode;
-            if (tryInsert(firstParent)) {
-              return true;
-            }
-
-            const secondParent = anchor.parentNode;
-            if (tryInsert(secondParent)) {
-              return true;
-            }
-
-            return false;
-          });
-
-        const mountFallback = (
-          fallbackElement: Element,
-        ): Effect.Effect<
-          { result: RenderResult; scope: Scope.Closeable } | null,
-          unknown,
-          unknown
-        > =>
-          Effect.gen(function* () {
-            const renderParent = anchor.parentNode;
-            if (renderParent === null) {
-              return null;
-            }
-
-            const fallbackScope = yield* Scope.fork(yield* Effect.scope);
-            const fallbackResult = yield* renderElement(
-              fallbackElement,
-              renderParent,
-              renderContext,
-              context,
-              defaultRenderOptions,
-            ).pipe(
-              Scope.provide(fallbackScope),
-              Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
-            );
-
-            const inserted = yield* insertBeforeAnchor(fallbackResult.node);
-            if (!inserted) {
-              yield* cleanupRendered(fallbackResult, fallbackScope);
-              return null;
-            }
-
-            return { result: fallbackResult, scope: fallbackScope };
-          });
-
-        // Error handler that swaps to fallback
-        const errorHandler: ErrorBoundaryHandler = (cause) => {
-          if (isUnmounted || hasErrored) return;
-          hasErrored = true;
-
-          runForkInRenderContext(
-            Effect.gen(function* () {
-              yield* Debug.log({
-                event: "render.errorboundary.caught",
-                reason: String(cause),
-              });
-
-              // Call onError callback if provided
-              if (onError !== null) {
-                yield* Effect.provide(onError(cause), context ?? emptyContext);
-              }
-
-              // Compute fallback element
-              const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
-
-              // Render + mount fallback before tearing down prior content.
-              const mounted = yield* mountFallback(fallbackElement);
-              if (mounted === null) {
-                return;
-              }
-
-              const previousResult = currentResult;
-              const previousScope = currentScope;
-              currentResult = mounted.result;
-              currentScope = mounted.scope;
-              yield* cleanupRendered(previousResult, previousScope);
-
-              yield* Debug.log({
-                event: "render.errorboundary.fallback",
-              });
-            }).pipe(
-              // Log any errors during fallback rendering
-              Effect.tapCause((fallbackCause) =>
-                Effect.sync(() => {
-                  console.error(
-                    "[trygg] ErrorBoundary fallback rendering failed:",
-                    Cause.pretty(fallbackCause),
-                  );
-                }),
-              ),
-            ),
-            renderContext,
-            context,
-          );
-        };
-
-        // Create options with our error handler
-        const childOptions: RenderOptions = { errorHandler };
-
-        // Helper to render fallback (for initial render errors)
-        // Returns Effect<void, unknown> because fallback rendering could theoretically fail
-        const renderFallbackForError = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-          hasErrored = true;
-
-          yield* Debug.log({
-            event: "render.errorboundary.caught",
-            reason: String(cause),
-          });
-
-          // Call onError callback if provided
-          if (onError !== null) {
-            yield* Effect.provide(onError(cause), context ?? emptyContext);
-          }
-
-          // Compute fallback element
-          const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
-
-          // Render + mount fallback.
-          const mounted = yield* mountFallback(fallbackElement);
-          if (mounted === null) {
-            return;
-          }
-
-          currentResult = mounted.result;
-          currentScope = mounted.scope;
-
-          yield* Debug.log({
-            event: "render.errorboundary.fallback",
-          });
-        });
-
-        // Render child with error handler in options - catch BOTH initial and re-render errors
-        const childScope = yield* Scope.fork(yield* Effect.scope);
-        const childRenderResult = yield* renderElement(
-          child,
-          parent,
-          renderContext,
-          context,
-          childOptions,
-        ).pipe(
-          Scope.provide(childScope),
-          Effect.onError(() => Scope.close(childScope, Exit.void)),
-          Effect.map((result) => ({ success: true as const, result, scope: childScope })),
-          Effect.catchCause((cause) =>
-            renderFallbackForError(cause).pipe(Effect.map(() => ({ success: false as const }))),
-          ),
-        );
-
-        if (childRenderResult.success) {
-          currentResult = childRenderResult.result;
-          currentScope = childRenderResult.scope;
-          const inserted = yield* insertBeforeAnchor(currentResult.node);
-          if (!inserted) {
-            yield* cleanupCurrent;
-          }
-
-          yield* Debug.log({
-            event: "render.errorboundary.initial",
-          });
-        }
-        // If not success, fallback was already rendered by renderFallbackSync
-
-        return {
-          node: anchor,
-          cleanup: Effect.gen(function* () {
-            isUnmounted = true;
-            yield* cleanupCurrent;
-            anchor.remove();
-          }),
-        };
+      renderErrorBoundary(child, fallback, onError, parent, renderContext, context, {
+        defaultRenderOptions,
+        emptyContext,
+        renderElement,
+        runForkInRenderContext,
       }),
     ),
 
