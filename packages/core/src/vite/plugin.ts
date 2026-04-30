@@ -1498,6 +1498,7 @@ interface PluginFilesService {
   ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeBuildEntryFiles: (
     paths: PluginFilePaths,
+    options: { readonly output: Output; readonly platform: Platform },
   ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeProductionServerEntry: (
     paths: PluginFilePaths,
@@ -1668,7 +1669,7 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
         writeGeneratedRouteTypes,
         regenerateGeneratedRouteTypes: (paths) =>
           writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
-        writeBuildEntryFiles: (paths) =>
+        writeBuildEntryFiles: (paths, options) =>
           Effect.gen(function* () {
             const entryPath = generatedEntryPath(paths);
             const hasEntry = yield* pathExists(entryPath);
@@ -1685,29 +1686,12 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
               generateHtmlTemplate(),
             );
 
-            // SSR entry for Cloudflare Workers static-site deployment.
-            // Proxies all non-asset requests to the SPA entry point.
-            yield* writeFileSafe(
-              nodePath.join(paths.generatedDir, "ssr-entry.js"),
-              [
-                `export default {`,
-                `  async fetch(request, env) {`,
-                `    const url = new URL(request.url);`,
-                `    const pathname = url.pathname;`,
-                ``,
-                `    // Let asset requests (JS, CSS, wasm, etc.) pass through to ASSETS directly.`,
-                `    if (pathname.startsWith("/assets/") || pathname.startsWith("/.trygg/")) {`,
-                `      return env.ASSETS.fetch(request);`,
-                `    }`,
-                ``,
-                `    // Serve the SPA shell for every other path.`,
-                `    const spa = new URL(request.url);`,
-                `    spa.pathname = "/.trygg/index.html";`,
-                `    return env.ASSETS.fetch(spa);`,
-                `  },`,
-                `};`,
-              ].join("\n"),
-            );
+            if (options.platform === "cloudflare" && options.output === "static") {
+              yield* writeFileSafe(
+                nodePath.join(paths.generatedDir, "worker-entry.js"),
+                renderCloudflareStaticWorkerEntryModule(),
+              );
+            }
           }),
         writeProductionServerEntry: (paths) =>
           Effect.gen(function* () {
@@ -1773,6 +1757,84 @@ const writeGeneratedApiClientTypes = (
     const typesPath = generatedApiClientTypesPath(generatedDir);
     yield* removeFileIfExists(typesPath);
   });
+
+/**
+ * Render the generated Cloudflare Static SPA Worker entry.
+ *
+ * @remarks
+ * The Worker is a generated build artifact for `platform: "cloudflare"` with
+ * `output: "static"`. It asks the Cloudflare `ASSETS` binding first and falls
+ * back eligible document requests to public `/index.html`.
+ *
+ * @category Vite Plugin
+ * @internal
+ * @since 1.0.0
+ */
+export const renderCloudflareStaticWorkerEntryModule = (): string =>
+  [
+    `const GENERATED_ASSET_EXTENSIONS = new Set([`,
+    `  ".avif",`,
+    `  ".css",`,
+    `  ".gif",`,
+    `  ".ico",`,
+    `  ".jpeg",`,
+    `  ".jpg",`,
+    `  ".js",`,
+    `  ".json",`,
+    `  ".map",`,
+    `  ".mjs",`,
+    `  ".png",`,
+    `  ".svg",`,
+    `  ".wasm",`,
+    `  ".webp",`,
+    `  ".woff",`,
+    `  ".woff2",`,
+    `]);`,
+    ``,
+    `const isDocumentRequest = (request) => {`,
+    `  if (request.method !== "GET" && request.method !== "HEAD") {`,
+    `    return false;`,
+    `  }`,
+    ``,
+    `  const destination = request.headers.get("Sec-Fetch-Dest");`,
+    `  if (destination === "document") {`,
+    `    return true;`,
+    `  }`,
+    `  if (destination !== null && destination !== "") {`,
+    `    return false;`,
+    `  }`,
+    ``,
+    `  const accept = request.headers.get("Accept") ?? "";`,
+    `  return accept.includes("text/html") || accept.includes("*/*");`,
+    `};`,
+    ``,
+    `const isGeneratedAssetLike = (pathname) => {`,
+    `  const dot = pathname.lastIndexOf(".");`,
+    `  if (dot === -1) {`,
+    `    return false;`,
+    `  }`,
+    `  return GENERATED_ASSET_EXTENSIONS.has(pathname.slice(dot).toLowerCase());`,
+    `};`,
+    ``,
+    `export default {`,
+    `  async fetch(request, env) {`,
+    `    const assetResponse = await env.ASSETS.fetch(request);`,
+    `    if (assetResponse.status !== 404) {`,
+    `      return assetResponse;`,
+    `    }`,
+    ``,
+    `    const url = new URL(request.url);`,
+    `    if (!isDocumentRequest(request) || isGeneratedAssetLike(url.pathname)) {`,
+    `      return assetResponse;`,
+    `    }`,
+    ``,
+    `    const shell = new URL(request.url);`,
+    `    shell.pathname = "/index.html";`,
+    `    shell.search = "";`,
+    `    return env.ASSETS.fetch(new Request(shell, request));`,
+    `  },`,
+    `};`,
+  ].join("\n");
 
 /**
  * Render the generated API client runtime module.
@@ -2063,9 +2125,16 @@ export const makeBuildOutput = ({
         return;
       }
 
-      yield* files.writeBuildEntryFiles(paths);
+      yield* files.writeBuildEntryFiles(paths, { output, platform });
 
       const hasApi = yield* files.appApiExists(paths);
+      if (hasApi && output === "static" && platform === "cloudflare") {
+        return yield* PluginValidationError.invalidStructure(
+          'app/api.ts is not supported with platform: "cloudflare" and output: "static". Use output: "server" for API routes.',
+          apiPath,
+        );
+      }
+
       if (hasApi && output === "static") {
         yield* Effect.logWarning(
           '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
@@ -2793,12 +2862,14 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           },
         };
       }
+      if (configPlatform !== "cloudflare" || output !== "static") {
+        return;
+      }
       // For the SSR environment, provide a non-HTML file as input so Vite's
-      // SSR guard does not trigger.  The real Worker entry is handled by the
-      // Cloudflare Vite plugin; this file simply satisfies Vite's input check.
+      // SSR guard does not trigger when Cloudflare runs a Worker build.
       return {
         build: {
-          rollupOptions: { input: `${GENERATED_DIR}/ssr-entry.js` },
+          rollupOptions: { input: `${GENERATED_DIR}/worker-entry.js` },
         },
       };
     },

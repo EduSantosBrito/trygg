@@ -52,6 +52,7 @@ import {
   makeStableHandlerFactoryLoader,
   generateHtmlTemplate,
   makeBuildOutput,
+  renderCloudflareStaticWorkerEntryModule,
   type ParsedRoute,
   type ViteServerSource,
 } from "../plugin.js";
@@ -111,6 +112,24 @@ interface HttpResult {
   readonly bridgeHeader: string | undefined;
   readonly body: string;
 }
+
+interface CloudflareStaticWorkerModule {
+  readonly default: {
+    readonly fetch: (
+      request: Request,
+      env: { readonly ASSETS: { readonly fetch: (request: Request) => Promise<Response> } },
+    ) => Promise<Response>;
+  };
+}
+
+const CloudflareStaticWorkerModuleSchema = Schema.Struct({
+  default: Schema.Struct({
+    fetch: Schema.declare(
+      (u: unknown): u is CloudflareStaticWorkerModule["default"]["fetch"] =>
+        typeof u === "function",
+    ),
+  }),
+});
 
 const HandlerFactoryBoundaryModuleSchema = Schema.Struct({
   makeApiLayer: Schema.declare(
@@ -383,6 +402,137 @@ export const routes = { manifest: [] }
 
         assert.isTrue(indexExists);
         assert.deepStrictEqual(warnings, []);
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+    );
+
+    scoped("should build Cloudflare static worker entry and no public trygg contract", () =>
+      Effect.gen(function* () {
+        // Test: should build Cloudflare static worker entry and no public trygg contract
+        // Scope: covers explicit Cloudflare Static SPA artifact generation.
+        // Assertion: Worker entry exists under .trygg, public shell exists, and dist/.trygg is absent.
+        const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const appDir = path.join(root, "app");
+        const generatedDir = path.join(root, ".trygg");
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
+
+        yield* buildOutput.buildStart({
+          appDir,
+          generatedDir,
+          config: { command: "build", root },
+          output: "static",
+          platform: "cloudflare",
+        });
+        yield* fs.makeDirectory(path.join(root, "dist"), { recursive: true }).pipe(Effect.orDie);
+        yield* fs.writeFileString(path.join(root, "dist", "index.html"), generateHtmlTemplate()).pipe(
+          Effect.orDie,
+        );
+
+        const workerEntryExists = yield* fs.exists(path.join(generatedDir, "worker-entry.js"));
+        const oldSsrEntryExists = yield* fs.exists(path.join(generatedDir, "ssr-entry.js"));
+        const publicIndexExists = yield* fs.exists(path.join(root, "dist", "index.html"));
+        const publicTryggExists = yield* fs.exists(path.join(root, "dist", ".trygg"));
+
+        assert.isTrue(workerEntryExists);
+        assert.isFalse(oldSsrEntryExists);
+        assert.isTrue(publicIndexExists);
+        assert.isFalse(publicTryggExists);
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+    );
+
+    scoped("should not generate Cloudflare worker for Node or Bun static", () =>
+      Effect.gen(function* () {
+        // Test: should not generate Cloudflare worker for Node or Bun static
+        // Scope: prevents explicit Cloudflare platform behavior leaking into other runtimes.
+        // Assertion: static builds for Node and Bun do not write worker-entry.js.
+        const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
+        const root = yield* makeTempDir({
+          "node/app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "node/app/routes.ts": "export const routes = { manifest: [] }",
+          "bun/app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "bun/app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
+
+        yield* buildOutput.buildStart({
+          appDir: path.join(root, "node", "app"),
+          generatedDir: path.join(root, "node", ".trygg"),
+          config: { command: "build", root: path.join(root, "node") },
+          output: "static",
+          platform: "node",
+        });
+        yield* buildOutput.buildStart({
+          appDir: path.join(root, "bun", "app"),
+          generatedDir: path.join(root, "bun", ".trygg"),
+          config: { command: "build", root: path.join(root, "bun") },
+          output: "static",
+          platform: "bun",
+        });
+
+        const nodeWorkerExists = yield* fs.exists(path.join(root, "node", ".trygg", "worker-entry.js"));
+        const bunWorkerExists = yield* fs.exists(path.join(root, "bun", ".trygg", "worker-entry.js"));
+
+        assert.isFalse(nodeWorkerExists);
+        assert.isFalse(bunWorkerExists);
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+    );
+
+    scoped("should reject Cloudflare static API routes", () =>
+      Effect.gen(function* () {
+        // Test: should reject Cloudflare static API routes
+        // Scope: covers early validation for unsupported Cloudflare Static SPA API files.
+        // Assertion: buildStart fails with guidance toward server output.
+        const fs = yield* FileSystem.FileSystem;
+        const files = yield* PluginFiles;
+        const serverPlatform = yield* ServerPlatform;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+          "app/api.ts": "export const Api = {}",
+        });
+        const buildOutput = makeBuildOutput({
+          buildServer: () => Effect.void,
+          fileSystem: fs,
+          files,
+          serverPlatform,
+        });
+
+        const exit = yield* Effect.exit(
+          buildOutput.buildStart({
+            appDir: path.join(root, "app"),
+            generatedDir: path.join(root, ".trygg"),
+            config: { command: "build", root },
+            output: "static",
+            platform: "cloudflare",
+          }),
+        );
+
+        if (Exit.isSuccess(exit)) {
+          throw new Error("Expected Cloudflare static API build to fail");
+        }
+
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof PluginValidationError)) {
+          throw new Error(`Expected PluginValidationError but got ${error}`);
+        }
+        assert.include(error.message, 'output: "server"');
       }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
@@ -1395,6 +1545,65 @@ mountDocument(<App />, { manifest: routes.manifest })
       );
       assert.include(output, "NodeRuntime.runMain(");
     });
+
+    it("should render Cloudflare worker root fallback through ASSETS", async () => {
+      // Test: should render Cloudflare worker root fallback through ASSETS
+      // Scope: covers generated Worker request behavior without Cloudflare runtime internals.
+      // Assertion: / asks ASSETS first, then falls back to public /index.html shell.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            const url = new URL(request.url);
+            requestedPaths.push(url.pathname);
+            if (url.pathname === "/index.html") {
+              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+            }
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/", { headers: { Accept: "text/html" } }),
+        env,
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(await response.text(), "<html>shell</html>");
+      assert.deepStrictEqual(requestedPaths, ["/", "/index.html"]);
+    });
+
+    it("should render Cloudflare worker preserving asset 404s", async () => {
+      // Test: should render Cloudflare worker preserving asset 404s
+      // Scope: covers generated asset-like miss behavior.
+      // Assertion: missing generated assets are not hidden behind the SPA shell.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            requestedPaths.push(new URL(request.url).pathname);
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
+        env,
+      );
+
+      assert.strictEqual(response.status, 404);
+      assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1481,12 +1690,19 @@ mountDocument(<App />, { manifest: routes.manifest })
       assert.strictEqual(result, undefined);
     });
 
-    it("should set rollupOptions.input for SSR to non-HTML file", () => {
+    it("should not set SSR input for non-Cloudflare static builds", () => {
       const plugin = trygg();
       const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
       const result = hook("ssr", {}, { command: "build" });
+      assert.strictEqual(result, undefined);
+    });
+
+    it("should set Cloudflare static SSR input to worker entry", () => {
+      const plugin = trygg({ platform: "cloudflare", output: "static" });
+      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const result = hook("ssr", {}, { command: "build" });
       const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
-      assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/ssr-entry.js");
+      assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/worker-entry.js");
     });
   });
 

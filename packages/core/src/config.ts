@@ -27,7 +27,7 @@
  * @public
  * @since 1.0.0
  */
-export type Platform = "bun" | "node";
+export type Platform = "bun" | "cloudflare" | "node";
 
 /**
  * Supported build output modes.
