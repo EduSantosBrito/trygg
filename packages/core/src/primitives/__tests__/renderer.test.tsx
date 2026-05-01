@@ -501,6 +501,35 @@ describe("Component element rendering", () => {
     }),
   );
 
+  scoped("should remove undefined attributes during component re-render", () =>
+    Effect.gen(function* () {
+      const active = Signal.makeSync(true);
+
+      const Link = Component.gen(function* () {
+        const isActive = yield* Signal.get(active);
+        return (
+          <a
+            data-testid="link"
+            href="/docs/elements"
+            className={isActive ? "active" : ""}
+            aria-current={isActive ? "page" : undefined}
+          >
+            Elements
+          </a>
+        );
+      });
+
+      const { getByTestId } = yield* render(<Link />);
+      const link = yield* getByTestId("link");
+      assert.strictEqual(link.getAttribute("aria-current"), "page");
+
+      yield* Signal.set(active, false);
+      yield* TestClock.adjust(20);
+
+      assert.isFalse(link.hasAttribute("aria-current"));
+    }),
+  );
+
   scoped("should preserve signal identity on re-render", () =>
     Effect.gen(function* () {
       const trigger = Signal.makeSync(0);
@@ -1870,6 +1899,66 @@ describe("Re-render behavior", () => {
         2,
         "Should only have outlet + current route",
       );
+    }),
+  );
+
+  scoped("should ignore child rerenders that finish after parent SignalElement swap", () =>
+    Effect.gen(function* () {
+      // Models a router shell where navigation both swaps the route frame and
+      // notifies components inside the old frame. If an old child rerender
+      // finishes after its parent has been unmounted, its DOM must be discarded.
+      const route = Signal.makeSync("a");
+      let sidebarRuns = 0;
+
+      const Sidebar = Component.gen(function* () {
+        const current = yield* Signal.get(route);
+        sidebarRuns++;
+        if (sidebarRuns > 1) {
+          yield* Effect.yieldNow;
+        }
+
+        return (
+          <nav data-testid="side">
+            {Array.from({ length: 40 }, (_, index) => (
+              <a key={index} href={`/${current}/${index}`}>
+                {current}-{index}
+              </a>
+            ))}
+          </nav>
+        );
+      });
+
+      const Shell = Component.gen(function* () {
+        const current = yield* Signal.get(route);
+        return (
+          <section data-testid="shell">
+            <Sidebar />
+            <article>{current}</article>
+          </section>
+        );
+      });
+
+      const shell = yield* Signal.make<Element>(<Shell />);
+
+      const App = Component.gen(function* () {
+        const scope = yield* Scope.Scope;
+        const unsubscribe = yield* Signal.subscribe(route, () => Signal.set(shell, <Shell />));
+        yield* Scope.addFinalizer(scope, unsubscribe);
+        return <div>{shell}</div>;
+      });
+
+      const { container } = yield* render(<App />);
+      assert.strictEqual(container.querySelectorAll("[data-testid='shell']").length, 1);
+
+      yield* Signal.set(route, "b");
+      yield* TestClock.adjust(100);
+
+      assert.strictEqual(
+        container.querySelectorAll("[data-testid='shell']").length,
+        1,
+        `Should keep exactly one shell after navigation-like swap. DOM: ${container.innerHTML}`,
+      );
+      assert.strictEqual(container.querySelectorAll("[data-testid='side']").length, 1);
     }),
   );
 

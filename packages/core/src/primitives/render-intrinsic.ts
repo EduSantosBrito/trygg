@@ -5,6 +5,7 @@ import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import {
   applyPropValue,
+  clearPropValue,
   equalOrChanged,
   logBlockedSafeUrlAttribute,
   moveRange,
@@ -81,6 +82,21 @@ const createElement = (tag: string): globalThis.Element =>
   SVG_TAGS.has(tag)
     ? document.createElementNS("http://www.w3.org/2000/svg", tag)
     : document.createElement(tag);
+
+const clearRemovedProps = (
+  node: globalThis.Element,
+  currentProps: ElementProps,
+  nextProps: ElementProps,
+): void => {
+  const nextEntries = Object.entries(nextProps);
+
+  for (const [key] of Object.entries(currentProps)) {
+    const hasDefinedNextValue = nextEntries.some(
+      ([nextKey, nextValue]) => nextKey === key && nextValue !== undefined,
+    );
+    if (!hasDefinedNextValue) clearPropValue(node, key);
+  }
+};
 
 const applyProps = Effect.fn("applyProps")(function* (
   node: globalThis.Element,
@@ -210,6 +226,8 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
   let currentProps = appliedProps;
   let propCleanups = yield* applyProps(node, currentProps, renderContext, context, deps);
+  const isHeadHoist = Option.isSome(hoistAction) && hoistAction.value._tag === "head";
+  if (!isHeadHoist) parent.appendChild(node);
 
   type ChildSlot = {
     readonly key: ReturnType<typeof getKey>;
@@ -254,11 +272,30 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
   const childResults: Array<RenderResult> = [];
   let childSlots: Array<ChildSlot> = [];
+
+  const cleanupProgressiveNode = Effect.gen(function* () {
+    if (hasKeyedChildren) {
+      for (const childSlot of childSlots) yield* cleanupChildSlot(childSlot);
+    } else {
+      for (const child of childResults) yield* child.cleanup;
+    }
+    for (const cleanup of propCleanups) yield* cleanup;
+    node.remove();
+  }).pipe(Effect.catchCause(() => Effect.void));
+
   if (hasKeyedChildren) {
-    for (const child of children) childSlots.push(yield* renderChildSlot(child, context));
+    for (const child of children) {
+      childSlots.push(
+        yield* renderChildSlot(child, context).pipe(Effect.onError(() => cleanupProgressiveNode)),
+      );
+    }
   } else {
     for (const child of children) {
-      childResults.push(yield* deps.renderElement(child, node, renderContext, context, options));
+      childResults.push(
+        yield* deps
+          .renderElement(child, node, renderContext, context, options)
+          .pipe(Effect.onError(() => cleanupProgressiveNode)),
+      );
     }
   }
 
@@ -282,8 +319,6 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
       }),
     } satisfies RenderResult;
   }
-
-  parent.appendChild(node);
 
   return {
     node,
@@ -312,6 +347,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
         if (!equalOrChanged(currentProps, nextProps)) {
           for (const cleanup of propCleanups) yield* cleanup;
+          clearRemovedProps(node, currentProps, nextProps);
           propCleanups = yield* applyProps(
             node,
             nextProps,

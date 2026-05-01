@@ -47,7 +47,7 @@ const UserPanel = Component.gen(function* (
         <h2>{value.name}</h2>
         <button
           onClick={() =>
-            Signal.get(userId).pipe(
+            Signal.peek(userId).pipe(
               Effect.flatMap((id) => Resource.invalidate(userResource({ id }))),
             )
           }
@@ -111,7 +111,7 @@ const AsyncUserPanel = Component.gen(function* (
         <h2>{value.name}</h2>
         <button
           onClick={() =>
-            Signal.get(userId).pipe(
+            Signal.peek(userId).pipe(
               Effect.flatMap((id) => Resource.invalidate(userResource({ id }))),
             )
           }
@@ -125,7 +125,7 @@ const AsyncUserPanel = Component.gen(function* (
         <p>{String(error)}</p>
         <button
           onClick={() =>
-            Signal.get(userId).pipe(Effect.flatMap((id) => Resource.refresh(userResource({ id }))))
+            Signal.peek(userId).pipe(Effect.flatMap((id) => Resource.refresh(userResource({ id }))))
           }
         >
           Retry
@@ -140,9 +140,10 @@ const AsyncUserPanel = Component.gen(function* (
 When deciding between `Signal.get` and passing signals directly to JSX:
 
 - **Pass signals directly to JSX** for fine-grained DOM updates. The renderer subscribes individual nodes to the signal; when it changes, only those nodes update. The component does not re-run. Use this for text content, attributes, and list items.
-- **Call `Signal.get`** when the component must re-run to make a structural decision — conditional rendering, branching logic, or reading a signal value inside an event handler or Effect pipeline.
+- **Call `Signal.get`** when the component must re-run to make a structural decision — conditional rendering or branching logic.
+- **Call `Signal.peek`** for an imperative snapshot that should not subscribe the current render, such as event handlers, service methods, middleware, or framework internals that manage their own subscriptions.
 
-In the example above, `userId` is passed directly to `Resource.fetch` so reactive param changes trigger new fetches automatically, while `Signal.get(userId)` is used inside event handlers to read the current value for imperative operations like `invalidate` or `refresh`.
+In the example above, `userId` is passed directly to `Resource.fetch` so reactive param changes trigger new fetches automatically, while `Signal.peek(userId)` is used inside event handlers to read the current value for imperative operations like `invalidate` or `refresh`.
 
 ## Related exports
 
@@ -154,3 +155,4 @@ In the example above, `userId` is passed directly to `Resource.fetch` so reactiv
 - `Resource.invalidate`
 - `Resource.refresh`
 - `Resource.clear`
+- `Signal.peek`

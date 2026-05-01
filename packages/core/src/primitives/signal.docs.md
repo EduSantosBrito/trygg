@@ -6,7 +6,7 @@ Use `Signal` for local or module-level reactive state, derived values, condition
 
 ## Behavior
 
-`Signal` defaults to fine-grained DOM updates when you pass a signal directly to JSX. Call `Signal.get` only when the component itself must re-run. `Signal.makeSync` is for stable module-lifetime state; `Signal.make` is for scoped state created inside Effects and components.
+`Signal` defaults to fine-grained DOM updates when you pass a signal directly to JSX. Call `Signal.get` only when the component itself must re-run. Call `Signal.peek` when you need an imperative snapshot without subscribing the current render. `Signal.makeSync` is for stable module-lifetime state; `Signal.make` is for scoped state created inside Effects and components.
 
 Under the hood, each signal is backed by a `SubscriptionRef`. When you pass a signal to JSX, the renderer subscribes individual DOM nodes to that ref. When the signal changes, only the subscribed text nodes or attributes update — the component's `gen` function does not re-run. This is why structural branching requires `Signal.get`: it forces the component to re-execute so the conditional tree can be rebuilt, while leaf updates stay surgical and skip component re-execution entirely.
 
@@ -128,7 +128,7 @@ const CounterStoreLive = Layer.succeed(CounterStore, {
   count: rawCount,
   increment: () =>
     Effect.gen(function* () {
-      const current = yield* Signal.get(rawCount);
+      const current = yield* Signal.peek(rawCount);
       if (current >= 100) {
         yield* Effect.log("max reached");
         return;
@@ -138,7 +138,7 @@ const CounterStoreLive = Layer.succeed(CounterStore, {
     }),
   decrement: () =>
     Effect.gen(function* () {
-      const current = yield* Signal.get(rawCount);
+      const current = yield* Signal.peek(rawCount);
       if (current <= 0) {
         yield* Effect.log("min reached");
         return;
@@ -163,13 +163,14 @@ const DebouncedSearchStoreLive = Layer.succeed(SearchStore, {
 });
 ```
 
-Because the raw signal is never exported, all mutations flow through the service boundary. Components read the signal directly for fine-grained updates, but write only through typed Effect methods. This makes interception, transformation, and cross-component coordination predictable and testable.
+Because the raw signal is never exported, all mutations flow through the service boundary. Components read the signal directly for fine-grained updates, use `Signal.get` for structural rerenders, and use `Signal.peek` inside service methods or event handlers for imperative snapshots. This makes interception, transformation, and cross-component coordination predictable and testable.
 
 ## Related exports
 
 - `Signal.make`
 - `Signal.makeSync`
 - `Signal.get`
+- `Signal.peek`
 - `Signal.modify`
 - `Signal.derive`
 - `Signal.suspend`

@@ -99,13 +99,17 @@ const subscribeToSystemTheme = (
 
       const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
       const onChange = () => {
-        const currentPreference = Signal.peekSync(preference);
-        if (currentPreference !== "system") {
-          return;
-        }
+        Effect.runFork(
+          Effect.gen(function* () {
+            const currentPreference = yield* Signal.peek(preference);
+            if (currentPreference !== "system") {
+              return;
+            }
 
-        const nextMode: ThemeMode = mediaQuery.matches ? "dark" : "light";
-        Effect.runSync(Signal.set(mode, nextMode));
+            const nextMode: ThemeMode = mediaQuery.matches ? "dark" : "light";
+            yield* Signal.set(mode, nextMode);
+          }),
+        );
       };
 
       mediaQuery.addEventListener("change", onChange);
@@ -144,7 +148,7 @@ const make = (fallback: ThemeMode): Layer.Layer<AppTheme> =>
         preference,
         setPreference,
         toggle: Effect.gen(function* () {
-          const next: ThemeMode = (yield* Signal.get(mode)) === "dark" ? "light" : "dark";
+          const next: ThemeMode = (yield* Signal.peek(mode)) === "dark" ? "light" : "dark";
           yield* setPreference(next);
         }),
       };

@@ -1,259 +1,607 @@
 /**
- * Home Page — trygg.dev
+ * Home Page: trygg.dev — Variant A (The Workbench)
  */
-import { Effect } from "effect";
-import { Component, Signal } from "trygg";
-import { copy, sections } from "../content/copy";
+import { Effect, Result, Scope } from "effect";
+import { Component, Signal, type ComponentProps } from "trygg";
+import * as Router from "trygg/router";
+
+import {
+  createRenderTracker,
+  hastChildToJsx,
+  highlightCode,
+  type HighlightedLine,
+  type IdentifierTooltipMap,
+} from "../components/code-block";
 import { Footer } from "../components/footer";
-import { CodeBlock, highlightCode } from "../components/code-block";
+import { Header } from "../components/header";
+import { copy, sections } from "../content/copy";
+import { getTheme, THEME_CHANGE_EVENT, type Theme } from "../lib/theme";
 
-// =============================================================================
-// Code Example
-// =============================================================================
+type WorkbenchView = "step-0" | "step-1" | "step-2";
 
-const codeExample = `import { Component, type ComponentProps } from "trygg";
-import { Theme } from "./theme";
+const sidebarFiles: ReadonlyArray<{ readonly id: WorkbenchView; readonly label: string }> = [
+  { id: "step-0", label: "app/api/users.ts" },
+  { id: "step-1", label: "app/components/user-list.tsx" },
+  { id: "step-2", label: "app/pages/users.tsx" },
+];
 
-type ThemeTitleProps = { title: string };
-
-/**
- * Type definition is:
- * Component.Type<
- *   ThemeTitleProps,  - component props
- *   never,  - error type
- *   Theme   - requirements
- * >
- */
-export const ThemedTitle = Component.gen(
-  function* (Props: ComponentProps<ThemeTitleProps>) {
-    const { title } = yield* Props;
-    const theme = yield* Theme;
-
-    return <h3
-      style={{ color: theme.primary }}
-    >
-      {title}
-    </h3>;
-  }
-);`;
-
-const highlightedCode = await highlightCode(codeExample, "tsx");
-
-// =============================================================================
-// Hero
-// =============================================================================
-
-const Hero = Component.gen(function* () {
+const Arrow = Component.gen(function* () {
   return (
-    <section
-      aria-labelledby="hero-title"
-      className="min-h-screen grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center px-6 py-16 lg:py-24 max-w-6xl mx-auto"
-    >
-      <div className="flex flex-col items-center lg:items-start text-center lg:text-left">
-        <span
-          role="status"
-          className="inline-flex px-3 py-1.5 rounded-full text-xs font-medium mb-4 lg:mb-6 bg-[var(--color-warning-bg)] text-[var(--color-warning)] border border-[rgba(250,204,21,0.15)]"
-        >
-          {copy.canaryWarning}
-        </span>
-
-        <h1
-          id="hero-title"
-          className="text-3xl lg:text-5xl font-semibold tracking-tight leading-tight mb-4 lg:mb-6 text-[var(--color-text)]"
-        >
-          {copy.heroTitle}
-        </h1>
-
-        <p className="text-base lg:text-lg text-[var(--color-text-muted)] leading-relaxed mb-6 lg:mb-8 max-w-md">
-          {copy.heroSubtitle}
-        </p>
-
-        <div className="flex gap-3">
-          <a
-            href={copy.primaryCtaHref}
-            className="inline-flex items-center gap-2 px-5 lg:px-7 py-3 lg:py-3.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] text-white text-sm lg:text-base font-semibold rounded-lg transition-colors"
-          >
-            {copy.primaryCtaLabel}
-            <span aria-hidden="true">&darr;</span>
-          </a>
-        </div>
-      </div>
-
-      <div className="relative w-full lg:w-[140%] lg:-mr-[40%]">
-        <CodeBlock lines={highlightedCode} header="bunx create-trygg@canary" fileType="TSX" />
-      </div>
-    </section>
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="home-arrow">
+      <path d="M4 10h10.5" />
+      <path d="m10.5 5 5 5-5 5" />
+    </svg>
   );
 });
 
-// =============================================================================
-// Built on Effect
-// =============================================================================
-
-const BuiltOnEffect = Component.gen(function* () {
-  return (
-    <div className="py-6 border-y border-[var(--color-border)] bg-gradient-to-r from-transparent via-[rgba(139,92,246,0.03)] to-transparent">
-      <div className="max-w-6xl mx-auto px-6">
-        <p className="text-center text-[var(--color-text-muted)] text-sm">
-          {sections.builtOnEffect.statement}{" "}
-          <a
-            href={sections.builtOnEffect.linkHref}
-            className="text-[var(--color-accent)] font-medium hover:underline"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {sections.builtOnEffect.linkText} &rarr;
-          </a>
-        </p>
-      </div>
-    </div>
-  );
-});
-
-// =============================================================================
-// Features
-// =============================================================================
-
-const Features = Component.gen(function* () {
-  return (
-    <section aria-labelledby="features-title" className="py-16 lg:py-24 px-6">
-      <div className="max-w-6xl mx-auto">
-        <h2
-          id="features-title"
-          className="text-xs font-medium uppercase tracking-widest text-[var(--color-text-muted)] mb-12"
-        >
-          {sections.features.heading}
-        </h2>
-
-        <ul
-          role="list"
-          className="grid grid-cols-1 md:grid-cols-3 gap-px bg-[var(--color-border)] border border-[var(--color-border)] rounded-xl overflow-hidden"
-        >
-          {sections.features.cards.map((card, i) => (
-            <li
-              key={i}
-              className="bg-[var(--color-bg)] p-8 hover:bg-[var(--color-bg-subtle)] transition-colors"
-            >
-              <h3 className="font-mono text-sm font-medium text-[var(--color-accent)] mb-3">
-                {card.title}
-              </h3>
-              <p className="text-sm text-[var(--color-text-muted)] leading-relaxed">
-                {card.description}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  );
-});
-
-// =============================================================================
-// Install
-// =============================================================================
-
-const Install = Component.gen(function* () {
-  const copied = yield* Signal.make(false);
-  const buttonLabel = yield* Signal.derive(copied, (c) => (c ? "Copied!" : "Copy"));
+const InstallCommand = Component.gen(function* () {
+  const state = yield* Signal.make<"idle" | "copied" | "failed">("idle");
+  const buttonLabel = yield* Signal.derive(state, (s) => {
+    if (s === "copied") return "Command copied";
+    if (s === "failed") return "Copy failed, select the command manually";
+    return "Copy command to clipboard";
+  });
+  const buttonText = yield* Signal.derive(state, (s) => {
+    if (s === "copied") return "Copied";
+    if (s === "failed") return "Failed";
+    return "Copy";
+  });
 
   const handleCopy = () =>
     Effect.gen(function* () {
-      yield* Effect.tryPromise(() => navigator.clipboard.writeText(sections.install.command));
-      yield* Signal.set(copied, true);
+      const result = yield* Effect.tryPromise(() =>
+        navigator.clipboard.writeText(sections.install.command),
+      ).pipe(Effect.result);
+
+      if (Result.isSuccess(result)) {
+        yield* Signal.set(state, "copied");
+      } else {
+        yield* Signal.set(state, "failed");
+      }
       yield* Effect.sleep("2 seconds");
-      yield* Signal.set(copied, false);
+      yield* Signal.set(state, "idle");
     }).pipe(Effect.ignore);
 
   return (
-    <section id="install" aria-labelledby="install-title" className="py-16 lg:py-24 px-6">
-      <div className="max-w-6xl mx-auto">
-        <h2
-          id="install-title"
-          className="text-xs font-medium uppercase tracking-widest text-[var(--color-text-muted)] mb-12"
-        >
-          {sections.install.heading}
-        </h2>
+    <div className="home-command" role="group" aria-label="Installation command">
+      <span aria-hidden="true">$</span>
+      <code>{sections.install.command}</code>
+      <button type="button" onClick={handleCopy} aria-label={buttonLabel}>
+        {buttonText}
+      </button>
+    </div>
+  );
+});
 
-        <div className="max-w-lg mx-auto">
-          <div
-            className="flex items-center gap-3 px-5 py-4 bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl font-mono text-sm"
-            role="group"
-            aria-label="Installation command"
-          >
-            <span className="text-[var(--color-accent)] select-none" aria-hidden="true">
-              $
-            </span>
-            <code className="flex-1 text-[var(--color-text)]">{sections.install.command}</code>
-            <button
-              type="button"
-              className="px-3 py-1.5 text-xs bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] rounded transition-colors cursor-pointer"
-              onClick={handleCopy}
-              aria-label="Copy installation command to clipboard"
-            >
-              {buttonLabel}
-            </button>
+const identifierTooltips: IdentifierTooltipMap = {
+  Resource: {
+    kind: "primitive",
+    description:
+      "Descriptor for an Effect-typed async value. Pending, Success, and Failure states bubble through JSX.",
+    signature: "Resource<A, E, R>",
+  },
+  Component: {
+    kind: "primitive",
+    description:
+      "A trygg component. Props, typed errors, and Effect service requirements live in the type.",
+    signature: "Component<Props, Error, Services>",
+  },
+  users: {
+    kind: "resource",
+    description:
+      "Resource descriptor for the users list. The factory Effect runs once per cache key.",
+    signature: "Resource<User[], ApiError, ApiClient>",
+    asProperty: {
+      kind: "api",
+      description:
+        "The users resource group on the ApiClient service. Exposes endpoints like list().",
+      signature: "{ list: () => Effect<User[], ApiError> }",
+    },
+  },
+  client: {
+    kind: "service",
+    description: "The ApiClient service, extracted from Effect's context via yield*.",
+    signature: "ApiClient",
+  },
+  list: {
+    kind: "endpoint",
+    description:
+      "The list endpoint on the users resource. Returns an Effect that resolves with the users array or fails with ApiError.",
+    signature: "() => Effect<User[], ApiError>",
+  },
+  state: {
+    kind: "signal",
+    description:
+      "Reactive resource state. Updates as the fetch moves between Pending, Success, and Failure.",
+    signature: "Signal<Resource.ResourceState<User[], ApiError>>",
+  },
+  UserList: {
+    kind: "component",
+    description: "Renders the users list. Uses Resource.match to treat each state.",
+    signature:
+      "Component<{ state: Signal<Resource.ResourceState<User[], ApiError>> }, never, Scope.Scope>",
+  },
+};
+
+const UsersPageEditor = Component.gen(function* (
+  Props: ComponentProps<{
+    readonly lines: Signal.Signal<ReadonlyArray<HighlightedLine>>;
+  }>,
+) {
+  const { lines } = yield* Props;
+  return <CodeEditor file="app/pages/users.tsx" lines={lines} />;
+});
+
+const CodeEditor = Component.gen(function* (
+  Props: ComponentProps<{
+    readonly file: string;
+    readonly lines: Signal.Signal<ReadonlyArray<HighlightedLine>>;
+  }>,
+) {
+  const { lines: linesSignal } = yield* Props;
+
+  return (
+    <pre className="home-workbench__editor-code" tabIndex={0}>
+      <code>
+        {
+          yield* Signal.derive(linesSignal, (lines) => {
+            const tracker = createRenderTracker();
+            return (
+              <>
+                {lines.map((line) => (
+                  <span key={line.lineNumber} className="home-workbench__line">
+                    {line.nodes.map((node, j) =>
+                      hastChildToJsx(node, j, {
+                        tooltips: identifierTooltips,
+                        tracker,
+                      }),
+                    )}
+                    {"\n"}
+                  </span>
+                ))}
+              </>
+            );
+          })
+        }
+      </code>
+    </pre>
+  );
+});
+
+const EditorPanel = Component.gen(function* (
+  Props: ComponentProps<{
+    readonly id: WorkbenchView;
+    readonly active: Signal.Signal<WorkbenchView>;
+    readonly children: JSX.Element;
+  }>,
+) {
+  const { id, active, children } = yield* Props;
+  const className = yield* Signal.derive(active, (view) =>
+    view === id ? "home-workbench__panel home-workbench__panel--active" : "home-workbench__panel",
+  );
+
+  return (
+    <div className={className} role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`}>
+      {children}
+    </div>
+  );
+});
+
+const SidebarFile = Component.gen(function* (
+  Props: ComponentProps<{
+    readonly id: WorkbenchView;
+    readonly label: string;
+    readonly active: Signal.Signal<WorkbenchView>;
+    readonly onSelect: (view: WorkbenchView) => Effect.Effect<void>;
+  }>,
+) {
+  const { id, label, active, onSelect } = yield* Props;
+  const className = yield* Signal.derive(active, (view) => {
+    const isActive = view === id;
+    return isActive ? "home-workbench__file home-workbench__file--active" : "home-workbench__file";
+  });
+  const ariaSelected = yield* Signal.derive(active, (view) => (view === id ? "true" : "false"));
+
+  const onKeyDown = (event: Event) =>
+    Effect.gen(function* () {
+      const e = event as KeyboardEvent;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const current = event.currentTarget as HTMLElement | null;
+      if (current === null) return;
+      const tablist = current.closest('[role="tablist"]');
+      if (tablist === null) return;
+      const tabs = Array.from(tablist.querySelectorAll<HTMLElement>('[role="tab"]'));
+      const index = tabs.indexOf(current);
+      if (index === -1) return;
+
+      let nextIndex: number | null = null;
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        nextIndex = (index + 1) % tabs.length;
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      } else if (e.key === "Home") {
+        nextIndex = 0;
+      } else if (e.key === "End") {
+        nextIndex = tabs.length - 1;
+      }
+
+      if (nextIndex === null) return;
+      e.preventDefault();
+      const nextTab = tabs[nextIndex];
+      if (nextTab === undefined) return;
+      const nextId = nextTab.getAttribute("data-tab-id") as WorkbenchView | null;
+      if (nextId === null) return;
+      nextTab.focus();
+      yield* onSelect(nextId);
+    });
+
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={`tab-${id}`}
+      data-tab-id={id}
+      aria-controls={`panel-${id}`}
+      aria-selected={ariaSelected}
+      className={className}
+      onClick={() => onSelect(id)}
+      onKeyDown={onKeyDown}
+    >
+      {label}
+    </button>
+  );
+});
+
+const StepEditor = Component.gen(function* (
+  Props: ComponentProps<{
+    readonly stepIndex: number;
+    readonly highlights: Signal.Signal<ReadonlyArray<ReadonlyArray<HighlightedLine>>>;
+    readonly active: Signal.Signal<WorkbenchView>;
+  }>,
+) {
+  const { stepIndex, highlights, active } = yield* Props;
+  const step = sections.seam.steps[stepIndex];
+  if (!step) return <></>;
+
+  const lines = yield* Signal.derive(highlights, (entries) => entries[stepIndex] ?? []);
+  const id = `step-${stepIndex}` as WorkbenchView;
+
+  return (
+    <EditorPanel id={id} active={active}>
+      {stepIndex === 2 ? (
+        <UsersPageEditor lines={lines} />
+      ) : (
+        <CodeEditor file={step.file} lines={lines} />
+      )}
+    </EditorPanel>
+  );
+});
+
+const SIDEBAR_HORIZONTAL_MQ = "(max-width: 900px)";
+
+const Workbench = Component.gen(function* () {
+  const activeView = yield* Signal.make<WorkbenchView>("step-2");
+  const theme = yield* Signal.make<Theme>(getTheme());
+  const isSidebarHorizontal = yield* Signal.make<boolean>(
+    typeof window !== "undefined" && window.matchMedia(SIDEBAR_HORIZONTAL_MQ).matches,
+  );
+  const tablistOrientation = yield* Signal.derive(isSidebarHorizontal, (horizontal) =>
+    horizontal ? "horizontal" : "vertical",
+  );
+
+  if (typeof window !== "undefined") {
+    const syncTheme = (event: Event) => {
+      const detail = (event as CustomEvent<Theme>).detail;
+      Effect.runFork(Signal.set(theme, detail ?? getTheme()));
+    };
+
+    window.addEventListener(THEME_CHANGE_EVENT, syncTheme);
+
+    const orientationMql = window.matchMedia(SIDEBAR_HORIZONTAL_MQ);
+    const onOrientationChange = (event: MediaQueryListEvent) => {
+      Effect.runFork(Signal.set(isSidebarHorizontal, event.matches));
+    };
+    orientationMql.addEventListener("change", onOrientationChange);
+
+    let pendingHeightFrame: number | null = null;
+    const measureEditorHeight = () => {
+      pendingHeightFrame = null;
+      const editor = document.querySelector<HTMLElement>(".home-workbench__editor");
+      if (editor === null) return;
+      const active = editor.querySelector<HTMLElement>(".home-workbench__panel--active");
+      if (active === null) return;
+      const styles = window.getComputedStyle(editor);
+      const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const target = active.getBoundingClientRect().height + paddingY;
+      editor.style.setProperty("--workbench-editor-height", `${target}px`);
+    };
+    const scheduleEditorMeasure = () => {
+      if (pendingHeightFrame !== null) cancelAnimationFrame(pendingHeightFrame);
+      pendingHeightFrame = requestAnimationFrame(measureEditorHeight);
+    };
+
+    scheduleEditorMeasure();
+
+    const syncTabsAndPanels = (view: WorkbenchView) => {
+      const tabs = document.querySelectorAll<HTMLElement>('[role="tab"][data-tab-id]');
+      tabs.forEach((tab) => {
+        const tabId = tab.getAttribute("data-tab-id");
+        tab.tabIndex = tabId === view ? 0 : -1;
+      });
+      const panels = document.querySelectorAll<HTMLElement>('[role="tabpanel"]');
+      panels.forEach((panel) => {
+        panel.inert = panel.id !== `panel-${view}`;
+      });
+    };
+
+    // Defer initial sync to next frame: the JSX hasn't been mounted yet
+    // when this setup code runs, so querySelectorAll would find no panels.
+    const initialSyncFrame = requestAnimationFrame(() => {
+      Effect.runFork(
+        Signal.peek(activeView).pipe(
+          Effect.tap((view) => Effect.sync(() => syncTabsAndPanels(view))),
+        ),
+      );
+    });
+
+    const unsubscribeActiveView = yield* Signal.subscribe(activeView, () =>
+      Effect.gen(function* () {
+        scheduleEditorMeasure();
+        const view = yield* Signal.peek(activeView);
+        syncTabsAndPanels(view);
+      }),
+    );
+
+    const onWorkbenchResize = () => scheduleEditorMeasure();
+    window.addEventListener("resize", onWorkbenchResize, { passive: true });
+
+    const renderScope = yield* Signal.CurrentRenderScope;
+    const cleanup = Effect.sync(() => {
+      window.removeEventListener(THEME_CHANGE_EVENT, syncTheme);
+      window.removeEventListener("resize", onWorkbenchResize);
+      orientationMql.removeEventListener("change", onOrientationChange);
+      if (pendingHeightFrame !== null) cancelAnimationFrame(pendingHeightFrame);
+      cancelAnimationFrame(initialSyncFrame);
+    });
+    if (renderScope === null) {
+      yield* Effect.addFinalizer(() => cleanup);
+      yield* Effect.addFinalizer(() => unsubscribeActiveView);
+    } else {
+      yield* Scope.addFinalizer(renderScope, cleanup);
+      yield* Scope.addFinalizer(renderScope, unsubscribeActiveView);
+    }
+  }
+
+  const highlightedByTheme = yield* Effect.promise(
+    async (): Promise<Record<Theme, ReadonlyArray<ReadonlyArray<HighlightedLine>>>> => {
+      const themes: ReadonlyArray<Theme> = ["dark", "light"];
+      const entries = await Promise.all(
+        themes.map(async (entryTheme) => {
+          const steps = await Promise.all(
+            sections.seam.steps.map((step) => highlightCode(step.code, "tsx", entryTheme)),
+          );
+          return [entryTheme, steps] as const;
+        }),
+      );
+
+      return Object.fromEntries(entries) as Record<
+        Theme,
+        ReadonlyArray<ReadonlyArray<HighlightedLine>>
+      >;
+    },
+  );
+
+  const highlightedSteps = yield* Signal.derive(
+    theme,
+    (entryTheme) => highlightedByTheme[entryTheme],
+  );
+
+  const titlebarFile = yield* Signal.derive(activeView, (view) => {
+    if (view === "step-0") return "app/api/users.ts";
+    if (view === "step-1") return "app/components/user-list.tsx";
+    return "app/pages/users.tsx";
+  });
+
+  const setView = (view: WorkbenchView) =>
+    Effect.gen(function* () {
+      if (typeof window !== "undefined") {
+        const editor = document.querySelector<HTMLElement>(".home-workbench__editor");
+        if (editor !== null && editor.style.getPropertyValue("--workbench-editor-height") === "") {
+          // First swap: pin the editor's current natural height so the upcoming
+          // CSS transition has an explicit starting point (auto → px doesn't interpolate).
+          const currentHeight = editor.getBoundingClientRect().height;
+          editor.style.setProperty("--workbench-editor-height", `${currentHeight}px`);
+          void editor.offsetHeight;
+        }
+      }
+      yield* Signal.set(activeView, view);
+    });
+
+  return (
+    <section className="home-workbench-section" aria-labelledby="hero-title">
+      <div className="home-workbench-intro">
+        <div className="home-workbench-intro__text">
+          <h1 id="hero-title" className="home-workbench-intro__title">
+            <span>{copy.heroTitle.lead}</span>{" "}
+            <span className="home-workbench-intro__accent">{copy.heroTitle.trail}</span>
+          </h1>
+
+          <p className="home-workbench-intro__lede">{copy.heroSubtitle}</p>
+
+          <div className="home-workbench-intro__actions">
+            <InstallCommand />
+
+            <div className="home-actions" role="group" aria-label="Primary actions">
+              <Router.Link to={copy.primaryCtaHref} className="home-button home-button--primary">
+                {copy.primaryCtaLabel}
+                <Arrow />
+              </Router.Link>
+              <Router.Link
+                to={copy.secondaryCtaHref}
+                className="home-button home-button--secondary"
+              >
+                {copy.secondaryCtaLabel}
+              </Router.Link>
+            </div>
           </div>
         </div>
+
+        <aside className="home-anchor" aria-label="A trygg component's type">
+          <span className="home-anchor__label">A component's type</span>
+          <pre className="home-anchor__signature">
+            <code>
+              <span className="home-anchor__type">Component</span>
+              <span className="home-anchor__punct">{"<"}</span>
+              {"\n  "}
+              <span className="home-anchor__slot" data-slot="props">
+                {sections.signature.slots.props}
+              </span>
+              <span className="home-anchor__punct">,</span>
+              {"\n  "}
+              <span className="home-anchor__slot" data-slot="error">
+                {sections.signature.slots.error}
+              </span>
+              <span className="home-anchor__punct">,</span>
+              {"\n  "}
+              <span className="home-anchor__slot" data-slot="services">
+                {sections.signature.slots.services}
+              </span>
+              {"\n"}
+              <span className="home-anchor__punct">{">"}</span>
+            </code>
+          </pre>
+
+          <ol className="home-anchor__legend" role="list">
+            {sections.signature.legend.map((entry) => (
+              <li key={entry.slot} data-slot={entry.slot}>
+                <span className="home-anchor__legend-label">{entry.label}</span>
+                <span className="home-anchor__legend-body">{entry.body}</span>
+              </li>
+            ))}
+          </ol>
+        </aside>
       </div>
-    </section>
-  );
-});
 
-// =============================================================================
-// FAQ
-// =============================================================================
+      <div className="home-workbench-bridge" aria-hidden="true">
+        <span className="home-workbench-bridge__num">01</span>
+        <span className="home-workbench-bridge__rule" />
+        <span className="home-workbench-bridge__label">A real project, three files</span>
+      </div>
 
-const FAQ = Component.gen(function* () {
-  return (
-    <section
-      aria-labelledby="faq-title"
-      className="py-16 lg:py-24 px-6 bg-[var(--color-bg-subtle)]"
-    >
-      <div className="max-w-2xl mx-auto">
-        <h2
-          id="faq-title"
-          className="text-xs font-medium uppercase tracking-widest text-[var(--color-text-muted)] mb-12"
-        >
-          {sections.faq.heading}
-        </h2>
+      <div className="home-workbench" aria-label="trygg workbench preview">
+        <div className="home-workbench__titlebar">
+          <span className="home-workbench__traffic" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="home-workbench__title">{titlebarFile}</span>
+        </div>
 
-        <dl className="divide-y divide-[var(--color-border)]">
-          {sections.faq.questions.map((item, i) => (
-            <div key={i} className="py-6 first:pt-0 last:pb-0">
-              <dt className="font-semibold text-[var(--color-text)] mb-2">{item.q}</dt>
-              <dd className="text-sm text-[var(--color-text-muted)] leading-relaxed">{item.a}</dd>
-            </div>
+        <div className="home-workbench__body">
+          <div
+            className="home-workbench__sidebar"
+            role="tablist"
+            aria-orientation={tablistOrientation}
+            aria-label="Project files"
+          >
+            {sidebarFiles.map((file) => (
+              <SidebarFile
+                key={file.label}
+                id={file.id}
+                label={file.label}
+                active={activeView}
+                onSelect={setView}
+              />
+            ))}
+          </div>
+
+          <div className="home-workbench__editor">
+            {sections.seam.steps.map((step, index) => (
+              <StepEditor
+                key={step.label}
+                stepIndex={index}
+                highlights={highlightedSteps}
+                active={activeView}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="home-workbench__terminal" aria-label="Terminal">
+          <span className="home-workbench__prompt" aria-hidden="true">
+            $
+          </span>
+          <code>{sections.install.command}</code>
+        </div>
+      </div>
+
+      <div className="home-workbench-seam" aria-labelledby="seam-title">
+        <header className="home-workbench-seam__head">
+          <p className="home-kicker">{sections.seam.eyebrow}</p>
+          <h2 id="seam-title">{sections.seam.heading}</h2>
+          <p>{sections.seam.body}</p>
+        </header>
+
+        <ol className="home-workbench-seam__steps" role="list">
+          {sections.seam.steps.map((step) => (
+            <li key={step.label}>
+              <span className="home-workbench-seam__step-num">{step.label}</span>
+              <span className="home-workbench-seam__step-body">
+                <strong>{step.title}</strong>
+                <p>{step.body}</p>
+                <code>{step.file}</code>
+              </span>
+            </li>
           ))}
-        </dl>
+        </ol>
+
+        <Router.Link to={sections.seam.continueHref} className="home-seam__continue">
+          {sections.seam.continueLabel}
+          <Arrow />
+        </Router.Link>
       </div>
+
+      <section className="home-final" aria-labelledby="final-title">
+        <p className="home-kicker">{sections.finalCta.eyebrow}</p>
+        <h2 id="final-title">{sections.finalCta.heading}</h2>
+        <div className="home-actions" role="group" aria-label="Final actions">
+          <Router.Link to={copy.primaryCtaHref} className="home-button home-button--primary">
+            {copy.primaryCtaLabel}
+            <Arrow />
+          </Router.Link>
+          <a
+            href={sections.community.github.href}
+            className="home-button home-button--secondary"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View source
+            <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
     </section>
   );
 });
-
-// =============================================================================
-// Home Page
-// =============================================================================
 
 export default Component.gen(function* () {
   return (
-    <div className="bg-grid overflow-x-clip">
-      {/* Skip link for keyboard navigation */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-[var(--color-accent)] focus:text-white focus:rounded-lg focus:outline-none"
-      >
-        Skip to main content
-      </a>
+    <>
+      <title>trygg — Effect-native UI framework</title>
+      <div className="landing-page home-page">
+        <a href="#main-content" className="sr-only focus:not-sr-only landing-skip-link">
+          Skip to main content
+        </a>
 
-      <main id="main-content">
-        <Hero />
-        <BuiltOnEffect />
-        <Features />
-        <Install />
-        <FAQ />
-      </main>
+        <Header />
 
-      <Footer />
-    </div>
+        <main id="main-content">
+          <Workbench />
+        </main>
+
+        <Footer />
+      </div>
+    </>
   );
 });

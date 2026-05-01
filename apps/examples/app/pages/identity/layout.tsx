@@ -25,7 +25,7 @@ const IdentityLayout = Component.gen(function* () {
 
   const compareLinkNode = () =>
     Effect.gen(function* () {
-      const remembered = yield* Signal.get(rememberedLink);
+      const remembered = yield* Signal.peek(rememberedLink);
       const current = document.querySelector('[data-testid="identity-link-probe"]');
       const currentAnchor = current instanceof HTMLAnchorElement ? current : null;
 

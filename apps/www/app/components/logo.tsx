@@ -6,5 +6,5 @@
 import { Component } from "trygg";
 
 export const Logo = Component.gen(function* () {
-  return <img src="/mark.svg" alt="trygg" width={28} height={28} />;
+  return <img src="/mark.svg" alt="" width={28} height={28} aria-hidden="true" />;
 });

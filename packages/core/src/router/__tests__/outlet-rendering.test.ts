@@ -920,11 +920,8 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
 
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
-      // No error boundary → catchAllCause absorbs; view stays at initial empty text
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "");
-      }
+      // No error boundary → catchAllCause absorbs inside the route view component.
+      assert.strictEqual(result._tag, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -942,11 +939,8 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
 
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
-      // No error boundary → catchAllCause absorbs; view stays at initial empty text
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "");
-      }
+      // No error boundary → catchAllCause absorbs inside the route view component.
+      assert.strictEqual(result._tag, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 

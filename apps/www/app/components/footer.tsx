@@ -6,45 +6,37 @@ import { Logo } from "./logo";
 
 export const Footer = Component.gen(function* () {
   return (
-    <footer
-      role="contentinfo"
-      className="py-16 px-6 border-t border-[var(--color-border)] bg-[var(--color-bg-subtle)]"
-    >
-      <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between gap-8 mb-12">
-          <div className="max-w-xs">
-            <span className="flex items-center gap-2">
+    <footer role="contentinfo" className="footer-stack">
+      <div className="footer-stack__inner">
+        <div className="footer-stack__top">
+          <div className="footer-stack__brand">
+            <Router.Link to="/" className="footer-stack__mark" aria-label="trygg home">
               <Logo />
-              <span
-                className="text-xl font-bold text-[var(--color-text)]"
-                style={{ fontFamily: "var(--font-brand)" }}
-              >
-                trygg
-              </span>
-            </span>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Effect-native UI framework
+              <span className="footer-stack__name">trygg</span>
+            </Router.Link>
+            <p className="footer-stack__tagline">
+              Effect-native UI framework. Typed components, signals, generated clients.
             </p>
           </div>
 
-          <div className="flex gap-16">
-            <nav aria-label="Resources">
-              <h4 className="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-subtle)] mb-4">
-                Resources
-              </h4>
-              <ul role="list" className="flex flex-col gap-3">
+          <div className="footer-stack__nav-group">
+            <nav aria-label="Resources" className="footer-stack__nav">
+              <h2 className="footer-stack__heading">Resources</h2>
+              <ul role="list" className="footer-stack__links">
                 <li>
-                  <Router.Link
-                    to="/changelog"
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
-                  >
+                  <Router.Link to="/docs" className="footer-stack__link">
+                    Docs
+                  </Router.Link>
+                </li>
+                <li>
+                  <Router.Link to="/changelog" className="footer-stack__link">
                     Changelog
                   </Router.Link>
                 </li>
                 <li>
                   <a
                     href={sections.community.github.href}
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
+                    className="footer-stack__link"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -54,7 +46,7 @@ export const Footer = Component.gen(function* () {
                 <li>
                   <a
                     href="https://www.npmjs.com/package/trygg"
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
+                    className="footer-stack__link"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -64,7 +56,7 @@ export const Footer = Component.gen(function* () {
                 <li>
                   <a
                     href="https://npmx.dev/package/trygg"
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
+                    className="footer-stack__link"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -74,15 +66,13 @@ export const Footer = Component.gen(function* () {
               </ul>
             </nav>
 
-            <nav aria-label="Community">
-              <h4 className="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-subtle)] mb-4">
-                Community
-              </h4>
-              <ul role="list" className="flex flex-col gap-3">
+            <nav aria-label="Community" className="footer-stack__nav">
+              <h2 className="footer-stack__heading">Community</h2>
+              <ul role="list" className="footer-stack__links">
                 <li>
                   <a
                     href="https://effect.website"
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
+                    className="footer-stack__link"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -92,7 +82,7 @@ export const Footer = Component.gen(function* () {
                 <li>
                   <a
                     href="https://discord.gg/BRDc7xGb5D"
-                    className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
+                    className="footer-stack__link"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -104,9 +94,16 @@ export const Footer = Component.gen(function* () {
           </div>
         </div>
 
-        <div className="pt-8 border-t border-[var(--color-border)] flex items-center justify-between gap-4">
-          <small className="text-xs text-[var(--color-text-subtle)]">MIT License</small>
-          <small className="text-xs text-[var(--color-text-subtle)]">Made with trygg</small>
+        <div className="footer-stack__base">
+          <a
+            href="https://github.com/EduSantosBrito/trygg/blob/main/LICENSE"
+            className="footer-stack__small footer-stack__small--link"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            MIT License
+          </a>
+          <small className="footer-stack__small">Made with trygg</small>
         </div>
       </div>
     </footer>

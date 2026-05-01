@@ -46,8 +46,8 @@ const SignupForm = Component.gen(function* () {
       event.preventDefault();
 
       const payload = yield* Schema.decodeUnknownEffect(Signup)({
-        email: yield* Signal.get(email),
-        password: yield* Signal.get(password),
+        email: yield* Signal.peek(email),
+        password: yield* Signal.peek(password),
       });
 
       yield* api.save(payload);
@@ -115,14 +115,14 @@ const ValidatedForm = Component.gen(function* () {
 
   const onBlurEmail = () =>
     Effect.gen(function* () {
-      const raw = yield* Signal.get(email);
+      const raw = yield* Signal.peek(email);
       yield* validateField(raw, validateEmail, emailError);
     });
 
   const onSubmit = (event: Event) =>
     Effect.gen(function* () {
       event.preventDefault();
-      const [e, p] = yield* Effect.all([Signal.get(email), Signal.get(password)]);
+      const [e, p] = yield* Effect.all([Signal.peek(email), Signal.peek(password)]);
       yield* Effect.all(
         [
           validateField(e, validateEmail, emailError),

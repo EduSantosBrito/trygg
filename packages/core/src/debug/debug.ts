@@ -46,6 +46,11 @@ type SignalGetPhaseEvent = BaseEvent & {
   readonly has_phase: boolean;
 };
 
+type SignalPeekEvent = BaseEvent & {
+  readonly event: "signal.peek";
+  readonly signal_id: string;
+};
+
 type SignalSetEvent = BaseEvent & {
   readonly event: "signal.set";
   readonly signal_id: string;
@@ -185,6 +190,11 @@ type RenderSignalElementInitialEvent = BaseEvent & {
 
 type RenderSignalElementSwapEvent = BaseEvent & {
   readonly event: "render.signalelement.swap";
+  readonly signal_id: string;
+};
+
+type RenderSignalElementReconcileEvent = BaseEvent & {
+  readonly event: "render.signalelement.reconcile";
   readonly signal_id: string;
 };
 
@@ -793,6 +803,7 @@ export type DebugEvent =
   | SignalCreateEvent
   | SignalGetEvent
   | SignalGetPhaseEvent
+  | SignalPeekEvent
   | SignalSetEvent
   | SignalSetSkippedEvent
   | SignalUpdateEvent
@@ -815,6 +826,7 @@ export type DebugEvent =
   | RenderSignalTextUpdateEvent
   | RenderSignalElementInitialEvent
   | RenderSignalElementSwapEvent
+  | RenderSignalElementReconcileEvent
   | RenderSignalElementSwapStartEvent
   | RenderSignalElementSwapCleanupEvent
   | RenderSignalElementSwapRenderEvent

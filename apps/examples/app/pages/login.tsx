@@ -12,7 +12,7 @@ const LoginPage = Component.gen(function* () {
   const handleLogin = (e: Event) =>
     Effect.gen(function* () {
       e.preventDefault();
-      const name = yield* Signal.get(username);
+      const name = yield* Signal.peek(username);
 
       if (name.trim().length === 0) {
         yield* Signal.set(error, Option.some("Please enter a username"));

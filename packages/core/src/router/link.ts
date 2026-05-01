@@ -54,6 +54,7 @@ import {
 } from "../primitives/element.js";
 
 import * as Debug from "../debug/debug.js";
+import * as ContractTrace from "../contract/trace.js";
 import { unsafeWidenContext } from "../internal/unsafe.js";
 import { get as getRouter, Router } from "./service.js";
 import { buildPath } from "./utils.js";
@@ -319,13 +320,30 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         });
 
         event.preventDefault();
+        yield* ContractTrace.emit({
+          event: "event.preventDefault",
+          level: "semantic",
+          payload: { eventType: event.type, target: resolvedPath },
+        });
         const options = {
           ...(replace !== undefined ? { replace } : {}),
           ...(queryParams !== undefined ? { query: queryParams } : {}),
         };
         yield* router
           .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
-          .pipe(Effect.ignore);
+          .pipe(
+            Effect.catchCause((cause) =>
+              ContractTrace.emit({
+                event: "effect.error.ignored",
+                level: "semantic",
+                payload: {
+                  owner: "router.link",
+                  operation: "navigate",
+                  cause: String(cause),
+                },
+              }),
+            ),
+          );
       });
 
       // F-001: Trigger prefetch immediately for "render" strategy

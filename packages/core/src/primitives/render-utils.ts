@@ -52,6 +52,29 @@ export const resolveReconcileTarget = (
  * Apply a single prop value to a DOM element.
  * @internal
  */
+export const clearPropValue = (node: globalThis.Element, key: string): void => {
+  if (key === "children" || key === "key" || key.startsWith("on")) return;
+
+  if (key === "style") {
+    node.removeAttribute("style");
+  } else if (key === "className") {
+    node.removeAttribute("class");
+  } else if (key === "htmlFor") {
+    node.removeAttribute("for");
+  } else if (key === "checked" && node instanceof HTMLInputElement) {
+    node.checked = false;
+  } else if (
+    key === "value" &&
+    (node instanceof HTMLInputElement ||
+      node instanceof HTMLTextAreaElement ||
+      node instanceof HTMLSelectElement)
+  ) {
+    node.value = "";
+  } else {
+    node.removeAttribute(key);
+  }
+};
+
 export const applyPropValue = (
   node: globalThis.Element,
   key: string,

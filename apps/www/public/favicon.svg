@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 48" fill="none">
   <style>
-    :root { --brand: #8b5cf6; }
+    :root { --brand: #892122; }
     @media (prefers-color-scheme: dark) { :root { --brand: #ffffff; } }
     rect { fill: var(--brand); }
   </style>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -171,6 +171,31 @@ const makeDocsFixture = ({
 };
 
 describe("docs contract", () => {
+  it("documents the platform and output contract", async () => {
+    const docs = await readFile(join(packageRoot, "src/config.docs.md"), "utf8");
+
+    expect(docs).toContain("public config remains `platform`, not `adapter`");
+    expect(docs).toContain('`output: "static"`');
+    expect(docs).toContain('`output: "server"`');
+    expect(docs).toContain("requires `app/api.ts`");
+    expect(docs).toContain("Cloudflare server MVP");
+    expect(docs).toContain("full SSR route rendering");
+    expect(docs).toContain("`.trygg/worker-entry.js`");
+    expect(docs).toContain("fixed `ASSETS` binding");
+    expect(docs).toContain("Public Cloudflare preview UX is deferred");
+  });
+
+  it("documents layout-owned static SEO tags", async () => {
+    const docs = await readFile(join(packageRoot, "src/primitives/head.docs.md"), "utf8");
+
+    expect(docs).toContain("layout-rendered `<head>`");
+    expect(docs).toContain('<script type="application/ld+json">');
+    expect(docs).toContain(
+      "Do not duplicate static SEO injection through Vite `transformIndexHtml`",
+    );
+    expect(docs).toContain("hoists these tags to `document.head`");
+  });
+
   it.effect("validates current migrated public surface", () =>
     Effect.gen(function* () {
       const report = yield* checkDocsContract({ packageRoot });

@@ -114,7 +114,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
       }
 
       const dialog = node;
-      const isOpen = yield* Signal.get(open);
+      const isOpen = yield* Signal.peek(open);
 
       if (isOpen && !dialog.open) {
         yield* Signal.set(query, "");
@@ -145,10 +145,10 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
         return;
       }
 
-      const total = yield* Signal.get(totalResults);
-      const current = yield* Signal.get(activeIndex);
-      const cmds = yield* Signal.get(filteredCommands);
-      const incs = yield* Signal.get(filteredIncidents);
+      const total = yield* Signal.peek(totalResults);
+      const current = yield* Signal.peek(activeIndex);
+      const cmds = yield* Signal.peek(filteredCommands);
+      const incs = yield* Signal.peek(filteredIncidents);
 
       switch (event.key) {
         case "ArrowDown":

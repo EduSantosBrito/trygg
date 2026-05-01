@@ -14,7 +14,7 @@
  * @since 1.0.0
  * @module trygg/primitives/signal
  */
-import { Cause, Data, Effect, Equal, Exit, Ref, Scope, SubscriptionRef } from "effect";
+import { Cause, Data, Effect, Equal, Exit, Hash, Ref, Scope, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -57,7 +57,8 @@ export type SignalListener = () => Effect.Effect<void>;
  *
  * @remarks
  * Signals are first-class values that can be:
- * - Read with `Signal.get(signal)`
+ * - Read reactively with `Signal.get(signal)`
+ * - Read without tracking with `Signal.peek(signal)`
  * - Written with `Signal.set(signal, value)`
  * - Updated with `Signal.update(signal, fn)`
  * - Passed to JSX for fine-grained DOM updates
@@ -348,7 +349,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>> = Effect.fn("Sign
  * const authSignal = Signal.makeSync<Option.Option<User>>(Option.none())
  *
  * // Expose via service contract; components depend on Tag, not raw signal
- * const user = yield* Signal.get(authSignal)
+ * const user = yield* Signal.peek(authSignal)
  * yield* Signal.set(authSignal, Option.some(newUser))
  * ```
  *
@@ -411,21 +412,37 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
 });
 
 /**
- * Peek at the current value of a signal synchronously without subscribing.
- *
- * WARNING: This is for internal use only (e.g., `Element.fromUnknown`
- * detecting `Signal<Element>` vs `Signal<primitive>`). Do not use in
- * components - use
- * Signal.get instead which properly tracks dependencies.
+ * Peek at the current value of a signal without subscribing the current render.
  *
  * @remarks
- * Internal escape hatch for sync code paths that cannot yield Effects.
+ * `Signal.peek` is for imperative snapshots in event handlers, services,
+ * middleware, and framework internals that manage their own subscriptions. In a
+ * component body, prefer `Signal.get` when the component must re-run after the
+ * signal changes, or pass the signal directly to JSX for fine-grained DOM
+ * updates.
  *
- * @internal
+ * @example
+ * ```tsx
+ * const onSubmit = () =>
+ *   Effect.gen(function* () {
+ *     const currentEmail = yield* Signal.peek(email)
+ *     yield* submit(currentEmail)
+ *   })
+ * ```
+ *
+ * @category Reactivity
+ * @public
  * @since 1.0.0
  */
-export const peekSync = <A>(signal: Signal<A>): A =>
-  Effect.runSync(SubscriptionRef.get(signal._ref));
+export const peek: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal.peek")(function* <
+  A,
+>(signal: Signal<A>) {
+  yield* Debug.log({
+    event: "signal.peek",
+    signal_id: signal._debugId,
+  });
+  return yield* SubscriptionRef.get(signal._ref);
+});
 
 /**
  * Set the value of a signal and notify listeners.
@@ -776,7 +793,7 @@ export function deriveAll(
  * ```ts
  * const value: unknown = maybeSignal
  * if (Signal.isSignal(value)) {
- *   return Signal.peekSync(value)
+ *   return yield* Signal.peek(value)
  * }
  * ```
  *
@@ -1212,15 +1229,16 @@ export const exhaustive = <Props, E, R>(
         let isRunning = false;
         let subscriptionCleanups: Array<Effect.Effect<void>> = [];
 
-        const computeDepKey = (accessed: Set<AnySignal>): string => {
-          if (accessed.size === 0) return "";
-          const entries: Array<[string, unknown]> = [];
-          for (const signal of accessed) {
-            entries.push([signal._debugId, peekSync(signal)]);
-          }
-          entries.sort((a, b) => a[0].localeCompare(b[0]));
-          return JSON.stringify(entries.map(([, value]) => value));
-        };
+        const computeDepKey = (accessed: Set<AnySignal>): Effect.Effect<string> =>
+          Effect.gen(function* () {
+            if (accessed.size === 0) return "";
+            const entries: Array<[string, number]> = [];
+            for (const signal of accessed) {
+              entries.push([signal._debugId, Hash.hash(yield* peek(signal))]);
+            }
+            entries.sort((a, b) => a[0].localeCompare(b[0]));
+            return entries.map(([id, valueHash]) => `${id}:${valueHash}`).join("|");
+          });
 
         const cleanupSubscriptions = Effect.fn("Signal.suspend.cleanup")(function* () {
           const oldCleanups = subscriptionCleanups;
@@ -1268,7 +1286,7 @@ export const exhaustive = <Props, E, R>(
               return;
             }
 
-            const depKey = computeDepKey(renderPhase.accessed);
+            const depKey = yield* computeDepKey(renderPhase.accessed);
             if (Exit.isSuccess(exit)) {
               cache.set(depKey, exit.value);
               yield* setView(exit.value);
@@ -1288,7 +1306,7 @@ export const exhaustive = <Props, E, R>(
         const refresh: Effect.Effect<void> = Effect.gen(function* () {
           requestId += 1;
           const runId = requestId;
-          const peekDepKey = computeDepKey(renderPhase.accessed);
+          const peekDepKey = yield* computeDepKey(renderPhase.accessed);
           const stale = cache.get(peekDepKey) ?? null;
           yield* setView(renderPending(pending, stale));
 

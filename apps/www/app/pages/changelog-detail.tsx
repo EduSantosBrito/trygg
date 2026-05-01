@@ -12,6 +12,7 @@ import {
 } from "../lib/changelog";
 import { CodeBlock, highlightCode } from "../components/code-block";
 import { Footer } from "../components/footer";
+import { Header } from "../components/header";
 import type { HighlightedLine } from "../components/code-block";
 
 // =============================================================================
@@ -30,6 +31,7 @@ type RenderedBlock =
 
 type RenderedEntry = {
   readonly name: string;
+  readonly date: string;
   readonly meta: { readonly title: string; readonly version: string; readonly summary: string };
   readonly renderedBlocks: ReadonlyArray<RenderedBlock>;
 };
@@ -48,6 +50,7 @@ const renderBlock = async (block: ChangelogBlock): Promise<RenderedBlock> => {
 const renderedEntries: ReadonlyArray<RenderedEntry> = await Promise.all(
   changelogEntries.map(async (entry) => ({
     name: entry.name,
+    date: entry.date,
     meta: entry.meta,
     renderedBlocks: await Promise.all(entry.blocks.map(renderBlock)),
   })),
@@ -69,20 +72,12 @@ const InlineRenderer = Component.gen(function* (Props: ComponentProps<{ readonly
       {segments.map((seg, i) => {
         switch (seg._tag) {
           case "InlineCode":
-            return (
-              <code
-                key={i}
-                className="font-mono text-xs bg-[rgba(255,255,255,0.06)] rounded px-1 py-0.5 text-[var(--color-text)]"
-              >
-                {seg.code}
-              </code>
-            );
+            return <code key={i}>{seg.code}</code>;
           case "Link":
             return (
               <a
                 key={i}
                 href={resolveChangelogLink(seg.href)}
-                className="text-[var(--color-accent)] hover:underline"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -116,7 +111,7 @@ const ChangelogListItem = Component.gen(function* (
 
   return (
     <li>
-      <strong className="font-bold text-red-400 text-xs">Breaking:</strong>{" "}
+      <strong className="changelog-detail__breaking">Breaking</strong>{" "}
       <InlineRenderer text={detail} />
     </li>
   );
@@ -134,21 +129,17 @@ const BlockRenderer = Component.gen(function* (
   switch (block._tag) {
     case "Heading": {
       const Tag = `h${block.level}` as const;
-      return (
-        <Tag className="text-[var(--color-text)] font-semibold tracking-tight mt-8 mb-4 first:mt-0">
-          {block.text}
-        </Tag>
-      );
+      return <Tag>{block.text}</Tag>;
     }
     case "Paragraph":
       return (
-        <p className="text-[var(--color-text-muted)] leading-relaxed mb-4">
+        <p>
           <InlineRenderer text={block.text} />
         </p>
       );
     case "BulletList":
       return (
-        <ul className="list-disc list-inside text-[var(--color-text-muted)] leading-relaxed mb-4 space-y-1">
+        <ul>
           {block.items.map((item, i) => (
             <ChangelogListItem key={i} item={item} />
           ))}
@@ -156,7 +147,7 @@ const BlockRenderer = Component.gen(function* (
       );
     case "CodeBlock":
       return (
-        <div className="mb-6">
+        <div className="changelog-detail__code">
           <CodeBlock lines={block.lines} fileType={block.language.toUpperCase()} />
         </div>
       );
@@ -178,37 +169,41 @@ export default Component.gen(function* () {
         <title>Changelog entry not found | trygg</title>
         <meta name="robots" content="noindex" />
 
-        <div className="bg-grid min-h-screen flex flex-col">
-          <main id="main-content" className="flex-1 px-6 py-16">
-            <div className="max-w-3xl mx-auto">
-              <Router.Link
-                to="/changelog"
-                className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
-              >
-                <span aria-hidden="true">&larr;</span>
-                Back to changelog
-              </Router.Link>
+        <div className="min-h-screen flex flex-col">
+          <Header />
 
-              <section
-                aria-labelledby="not-found-title"
-                className="rounded-2xl border border-[var(--color-border)] bg-[rgba(5,5,8,0.86)] backdrop-blur-sm p-8 sm:p-12"
-              >
-                <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)]">
-                  Error 404
-                </p>
+          <main id="main-content" className="flex-1">
+            <section aria-labelledby="not-found-title" className="not-found">
+              <p className="not-found__kicker">404 / changelog</p>
+              <h1 id="not-found-title" className="not-found__title">
+                That release is not in the log.
+              </h1>
+              <p className="not-found__lede">
+                The entry you are looking for has either been renamed or never existed. The full
+                timeline is the fastest way to find what you wanted.
+              </p>
 
-                <h1
-                  id="not-found-title"
-                  className="mt-3 text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]"
-                >
-                  Changelog entry not found
-                </h1>
-
-                <p className="mt-4 text-[var(--color-text-muted)] leading-relaxed">
-                  The changelog entry you are looking for does not exist.
-                </p>
-              </section>
-            </div>
+              <ul className="not-found__directions" role="list">
+                <li>
+                  <Router.Link to="/changelog" className="not-found__link">
+                    <span className="not-found__link-num">01</span>
+                    <span className="not-found__link-body">
+                      <span className="not-found__link-title">Open the full timeline</span>
+                      <span className="not-found__link-meta">/changelog</span>
+                    </span>
+                  </Router.Link>
+                </li>
+                <li>
+                  <Router.Link to="/" className="not-found__link">
+                    <span className="not-found__link-num">02</span>
+                    <span className="not-found__link-body">
+                      <span className="not-found__link-title">Return home</span>
+                      <span className="not-found__link-meta">/</span>
+                    </span>
+                  </Router.Link>
+                </li>
+              </ul>
+            </section>
           </main>
 
           <Footer />
@@ -222,27 +217,29 @@ export default Component.gen(function* () {
       <title>{entry.meta.title} — Changelog | trygg</title>
       <meta name="description" content={entry.meta.summary} />
 
-      <div className="bg-grid min-h-screen flex flex-col">
-        <main id="main-content" className="flex-1 px-6 py-16">
-          <article className="max-w-3xl mx-auto">
-            <Router.Link
-              to="/changelog"
-              className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-8"
-            >
+      <div className="min-h-screen flex flex-col">
+        <Header />
+
+        <main id="main-content" className="flex-1">
+          <article className="changelog-detail">
+            <Router.Link to="/changelog" className="changelog-detail__back">
               <span aria-hidden="true">&larr;</span>
               Back to changelog
             </Router.Link>
 
-            <header className="mb-10">
-              <p className="font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-text-subtle)] mb-3">
-                {entry.meta.version}
-              </p>
-              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[var(--color-text)]">
-                {entry.meta.title}
-              </h1>
+            <header className="changelog-detail__header">
+              <div className="changelog-detail__chrono">
+                <time className="changelog-detail__date" dateTime={entry.date}>
+                  {entry.date}
+                </time>
+                <span className="changelog-detail__sep" aria-hidden="true" />
+                <span className="changelog-detail__version">{entry.meta.version}</span>
+              </div>
+              <h1 className="changelog-detail__title">{entry.meta.title}</h1>
+              <p className="changelog-detail__lede">{entry.meta.summary}</p>
             </header>
 
-            <div>
+            <div className="changelog-detail__prose docs-prose">
               {entry.renderedBlocks.map((block, i) => (
                 <BlockRenderer key={i} block={block} />
               ))}

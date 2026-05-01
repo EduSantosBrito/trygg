@@ -17,6 +17,7 @@ import { CurrentRouteQuery } from "./route.js";
 import * as Signal from "../primitives/signal.js";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
+import * as ContractTrace from "../contract/trace.js";
 import { unsafeNarrowParams } from "../internal/unsafe.js";
 import type {
   Route,
@@ -783,6 +784,15 @@ export const browserLayer: Layer.Layer<
           : targetPath;
 
         const current = yield* Signal.get(currentSignal);
+        yield* ContractTrace.emit({
+          event: "router.navigate.request",
+          level: "semantic",
+          payload: {
+            fromPath: current.path,
+            toPath: resolvedPath,
+            replace: options?.replace === true,
+          },
+        });
         yield* Debug.log({
           event: "router.navigate",
           from_path: current.path,
@@ -808,12 +818,22 @@ export const browserLayer: Layer.Layer<
             .pipe(
               Effect.mapError((cause) => new NavigationError({ operation: "replaceState", cause })),
             );
+          yield* ContractTrace.emit({
+            event: "history.replace",
+            level: "semantic",
+            payload: { path: fullPath },
+          });
         } else {
           yield* history
             .pushState(historyState, fullPath)
             .pipe(
               Effect.mapError((cause) => new NavigationError({ operation: "pushState", cause })),
             );
+          yield* ContractTrace.emit({
+            event: "history.push",
+            level: "semantic",
+            payload: { path: fullPath },
+          });
         }
 
         currentNavKey = newKey;
@@ -832,17 +852,57 @@ export const browserLayer: Layer.Layer<
           params: {},
           query: newQuery,
         });
+        yield* ContractTrace.emit({
+          event: "router.current.set",
+          level: "semantic",
+          payload: { fromPath: current.path, toPath: newPath },
+        });
         yield* Signal.set(querySignal, newQuery);
+        yield* ContractTrace.emit({
+          event: "router.query.set",
+          level: "semantic",
+          payload: {
+            fromQuery: current.query.toString(),
+            toQuery: newQuery.toString(),
+            changed: current.query.toString() !== newQuery.toString(),
+            notified: current.query.toString() !== newQuery.toString(),
+          },
+        });
 
+        yield* ContractTrace.emit({
+          event: "router.navigate.commit",
+          level: "semantic",
+          payload: { path: fullPath, query: newQuery.toString() },
+        });
         yield* Debug.log({
           event: "router.navigate.complete",
           path: fullPath,
         });
       }),
 
-      back: () => Effect.ignore(history.back),
+      back: () =>
+        Effect.gen(function* () {
+          const before = yield* Signal.get(currentSignal);
+          yield* history.back.pipe(Effect.ignore);
+          const after = yield* Signal.get(currentSignal);
+          yield* ContractTrace.emit({
+            event: "history.back",
+            level: "semantic",
+            payload: { fromPath: before.path, toPath: after.path },
+          });
+        }),
 
-      forward: () => Effect.ignore(history.forward),
+      forward: () =>
+        Effect.gen(function* () {
+          const before = yield* Signal.get(currentSignal);
+          yield* history.forward.pipe(Effect.ignore);
+          const after = yield* Signal.get(currentSignal);
+          yield* ContractTrace.emit({
+            event: "history.forward",
+            level: "semantic",
+            payload: { fromPath: before.path, toPath: after.path },
+          });
+        }),
 
       params: <Path extends RoutePath>(_path: Path) =>
         unsafeNarrowParams<RouteParamsFor<Path>>(getFiberRef(CurrentRouteParams)),
@@ -942,13 +1002,29 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
 
       const updateFromPath = (fullPath: string) =>
         Effect.gen(function* () {
+          const current = yield* Signal.get(currentSignal);
           const { path: newPath, query: newQuery } = yield* parsePath(fullPath);
           yield* Signal.set(currentSignal, {
             path: newPath,
             params: {},
             query: newQuery,
           });
+          yield* ContractTrace.emit({
+            event: "router.current.set",
+            level: "semantic",
+            payload: { fromPath: current.path, toPath: newPath },
+          });
           yield* Signal.set(querySignal, newQuery);
+          yield* ContractTrace.emit({
+            event: "router.query.set",
+            level: "semantic",
+            payload: {
+              fromQuery: current.query.toString(),
+              toQuery: newQuery.toString(),
+              changed: current.query.toString() !== newQuery.toString(),
+              notified: current.query.toString() !== newQuery.toString(),
+            },
+          });
         });
 
       const routerService: RouterService = {
@@ -969,6 +1045,15 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
             : targetPath;
 
           const current = yield* Signal.get(currentSignal);
+          yield* ContractTrace.emit({
+            event: "router.navigate.request",
+            level: "semantic",
+            payload: {
+              fromPath: current.path,
+              toPath: resolvedPath,
+              replace: options?.replace === true,
+            },
+          });
           yield* Debug.log({
             event: "router.navigate",
             from_path: current.path,
@@ -985,11 +1070,21 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
           if (options?.replace) {
             // Replace current entry
             historyStack[historyIndex] = fullPath;
+            yield* ContractTrace.emit({
+              event: "history.replace",
+              level: "semantic",
+              payload: { path: fullPath },
+            });
           } else {
             // Push new entry, removing any forward history
             historyStack.splice(historyIndex + 1);
             historyStack.push(fullPath);
             historyIndex = historyStack.length - 1;
+            yield* ContractTrace.emit({
+              event: "history.push",
+              level: "semantic",
+              payload: { path: fullPath },
+            });
           }
 
           yield* Signal.set(currentSignal, {
@@ -997,8 +1092,28 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
             params: {},
             query: newQuery,
           });
+          yield* ContractTrace.emit({
+            event: "router.current.set",
+            level: "semantic",
+            payload: { fromPath: current.path, toPath: newPath },
+          });
           yield* Signal.set(querySignal, newQuery);
+          yield* ContractTrace.emit({
+            event: "router.query.set",
+            level: "semantic",
+            payload: {
+              fromQuery: current.query.toString(),
+              toQuery: newQuery.toString(),
+              changed: current.query.toString() !== newQuery.toString(),
+              notified: current.query.toString() !== newQuery.toString(),
+            },
+          });
 
+          yield* ContractTrace.emit({
+            event: "router.navigate.commit",
+            level: "semantic",
+            payload: { path: fullPath, query: newQuery.toString() },
+          });
           yield* Debug.log({
             event: "router.navigate.complete",
             path: fullPath,
@@ -1007,6 +1122,7 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
 
         back: () =>
           Effect.gen(function* () {
+            const before = yield* Signal.get(currentSignal);
             if (historyIndex > 0) {
               historyIndex--;
               const path = historyStack[historyIndex];
@@ -1014,10 +1130,17 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
                 yield* updateFromPath(path);
               }
             }
+            const after = yield* Signal.get(currentSignal);
+            yield* ContractTrace.emit({
+              event: "history.back",
+              level: "semantic",
+              payload: { fromPath: before.path, toPath: after.path },
+            });
           }),
 
         forward: () =>
           Effect.gen(function* () {
+            const before = yield* Signal.get(currentSignal);
             if (historyIndex < historyStack.length - 1) {
               historyIndex++;
               const path = historyStack[historyIndex];
@@ -1025,6 +1148,12 @@ export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
                 yield* updateFromPath(path);
               }
             }
+            const after = yield* Signal.get(currentSignal);
+            yield* ContractTrace.emit({
+              event: "history.forward",
+              level: "semantic",
+              payload: { fromPath: before.path, toPath: after.path },
+            });
           }),
 
         params: <Path extends RoutePath>(_path: Path) =>

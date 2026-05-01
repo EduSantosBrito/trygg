@@ -1,101 +1,149 @@
 /**
  * Landing page copy tokens.
  *
- * All user-facing copy is centralized here for:
- * - Type safety (literal types prevent copy drift)
- * - CI validation against banned claims
- * - Single source of truth for marketing copy
- *
- * @see specs/landing-page-trygg.md Section 4.4
+ * User-facing landing copy is centralized here for type-safe reuse and tests.
  */
 
 export interface LandingCopy {
-  readonly heroTitle: string;
+  readonly heroTitle: {
+    readonly lead: string;
+    readonly trail: string;
+  };
   readonly heroSubtitle: string;
   readonly canaryWarning: string;
-  readonly primaryCtaLabel: "Try it";
+  readonly primaryCtaLabel: string;
   readonly primaryCtaHref: string;
+  readonly secondaryCtaLabel: string;
+  readonly secondaryCtaHref: string;
 }
 
 export const copy: LandingCopy = {
-  heroTitle: "Effect-native UI, type-safe by design.",
+  heroTitle: {
+    lead: "Props, errors, services.",
+    trail: "All in the type.",
+  },
   heroSubtitle:
-    "Fine-grained reactivity without a virtual DOM. Dependency injection built in. Components that compose like Effects.",
-  canaryWarning: "Canary — breaking changes expected",
-  primaryCtaLabel: "Try it",
-  primaryCtaHref: "#install",
+    "A trygg component declares its props, typed errors, and Effect service dependencies in one type. If something is missing, the compiler tells you.",
+  canaryWarning: "Canary",
+  primaryCtaLabel: "Get started",
+  primaryCtaHref: "/docs/getting-started",
+  secondaryCtaLabel: "Read the docs",
+  secondaryCtaHref: "/docs",
 } as const;
 
-/**
- * Section-specific copy tokens.
- */
 export const sections = {
-  builtOnEffect: {
-    statement: "Built on Effect — the type-safe platform for TypeScript.",
-    linkText: "Learn about Effect",
-    linkHref: "https://effect.website",
-  },
-
-  features: {
-    heading: "Built for Effect developers",
-    cards: [
+  signature: {
+    file: "app/pages/users.tsx",
+    badge: "Component",
+    constName: "Users",
+    type: "Component",
+    slots: {
+      props: "UsersProps",
+      error: "ApiError",
+      services: "ApiClient | Logger",
+    },
+    legend: [
       {
-        title: "Component.gen",
-        description:
-          "Generator-based components with full type inference. Yield services, handle errors, compose naturally.",
+        slot: "props",
+        label: "props",
+        body: "The component's input type.",
       },
       {
-        title: "Signal Primitives",
-        description:
-          "Fine-grained reactivity with automatic dependency tracking. No virtual DOM diffing overhead.",
+        slot: "error",
+        label: "typed failures",
+        body: "Errors tracked in the type until a handler resolves them.",
       },
       {
-        title: "Layer & Context",
-        description:
-          "Dependency injection via Effect's Layer system. Services are provided, never imported.",
-      },
-      {
-        title: "Typed Router",
-        description:
-          "Type-safe routing with params, search, and layouts. Navigation errors caught at compile time.",
-      },
-      {
-        title: "Resource Management",
-        description:
-          "Scoped resources with automatic cleanup. Async data fetching with loading and error states.",
-      },
-      {
-        title: "Error Boundaries",
-        description: "Typed error handling with recovery. Observable spans and metrics built in.",
+        slot: "services",
+        label: "service requirements",
+        body: "Effect services the component needs. Tracked until a layer provides them.",
       },
     ],
+  },
+
+  seam: {
+    eyebrow: "End to end",
+    heading: "Define an API. Use it in JSX.",
+    body: "Plain Effect on the API side. Resource turns Effect into reactive state. Component fetches it, treats each state, and a layer provides the service.",
+    steps: [
+      {
+        label: "01",
+        title: "Plain Effect API",
+        body: "Endpoints, schemas, and error types in one Effect definition.",
+        file: "app/api/users.ts",
+        code: `export const UsersApi = HttpApi.make("users").add(
+  HttpApiGroup.make("users").add(
+    HttpApiEndpoint.get("list", "/users")
+      .addSuccess(Schema.Array(User))
+      .addError(ApiError),
+  ),
+);`,
+      },
+      {
+        label: "02",
+        title: "State handling",
+        body: "Resource.match treats Pending, Success, and Failure as data.",
+        file: "app/components/user-list.tsx",
+        code: `export const UserList = Component.gen(function* (props) {
+  const { state } = yield* props;
+  return yield* Resource.match(state).pipe(
+    Resource.on("Pending", () => <p>Loading users…</p>),
+    Resource.on("Success", ({ value }) => (
+      <ul>{value.map((u) => <li>{u.name}</li>)}</ul>
+    )),
+    Resource.on("Failure", ({ error }) => <p>{error.message}</p>),
+    Resource.exhaustive,
+  );
+});`,
+      },
+      {
+        label: "03",
+        title: "Component + DI",
+        body: "Resource is built from ApiClient, fetched in JSX, and the service is provided through a layer.",
+        file: "app/pages/users.tsx",
+        code: `const users = Resource.make(
+  () =>
+    Effect.gen(function* () {
+      const client = yield* ApiClient;
+      return yield* client.users.list();
+    }),
+  { key: "users.list" },
+);
+
+export default Component.gen(function* () {
+  const state = yield* Resource.fetch(users);
+  return <UserList state={state} />;
+}).provide(ApiClientLive);`,
+      },
+    ],
+    continueHref: "/docs/getting-started",
+    continueLabel: "Continue in the getting-started guide",
+  },
+
+  finalCta: {
+    eyebrow: "Next step",
+    heading: "Build something and read the types.",
+  },
+
+  canary: {
+    eyebrow: "Status",
+    heading: "This is a canary release.",
+    body: "APIs will change. Start small, read the generated code, and decide for yourself before using it in anything that matters.",
+    notes: [
+      "Pin your version. APIs change between canary releases.",
+      "Server features need app/api.ts. Static apps can skip it.",
+      "No SSR yet. Start with client-rendered pages.",
+    ],
+    reassurance:
+      "The core patterns (components, signals, resources) are stable and unlikely to change.",
   },
 
   install: {
-    heading: "Start building",
     command: "bunx create-trygg@canary my-app",
   },
 
-  faq: {
-    heading: "Common questions",
-    questions: [
-      {
-        q: "Is this production-ready?",
-        a: "No. Trygg is in canary. APIs will change. Use it to explore and contribute, not for production workloads.",
-      },
-      {
-        q: "Do I need to know Effect?",
-        a: "Basic familiarity helps. You'll use Effect.gen, Layer, and Context. The docs cover what you need.",
-      },
-      {
-        q: "Does this replace React?",
-        a: "It's an alternative, not a replacement. Trygg targets teams already using Effect who want UI that fits the same patterns.",
-      },
-    ],
-  },
-
   community: {
-    heading: "Join the community",
+    heading: "Get involved",
     github: {
       label: "GitHub",
       href: "https://github.com/EduSantosBrito/trygg",
@@ -104,7 +152,7 @@ export const sections = {
 
   footer: {
     links: [
-      { label: "Docs", href: "https://docs.trygg.dev" },
+      { label: "Docs", href: "/docs" },
       { label: "GitHub", href: "https://github.com/EduSantosBrito/trygg" },
       { label: "npm", href: "https://www.npmjs.com/package/trygg" },
       {
