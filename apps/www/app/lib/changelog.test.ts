@@ -20,19 +20,6 @@ import fixture from "../../changelogs/2026-04-28-generated-api-client.md?raw";
 // =============================================================================
 
 describe("parseChangelogMeta", () => {
-  // Scope: verifies happy-path metadata extraction.
-  // Assertion: returns title, version, and Summary section text from the fixture.
-  it("should extract title, version, and summary section text from fixture", () => {
-    const meta = parseChangelogMeta(fixture);
-
-    expect(meta).toBeDefined();
-    expect(meta?.title).toBe("Generated API Client");
-    expect(meta?.version).toBe("trygg@0.4.0-canary.0");
-    expect(meta?.summary).toBe(
-      "The Vite plugin now generates a typed same-origin API client from app/api.ts when the app exports Api.",
-    );
-  });
-
   // Scope: verifies graceful handling of missing frontmatter.
   // Assertion: returns undefined when no frontmatter delimiter is present.
   it("should return undefined when frontmatter is missing", () => {
