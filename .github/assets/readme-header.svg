@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" fill="none" role="img" aria-label="trygg — Type-safe UI, from the ground up">
+  <defs>
+    <style><![CDATA[
+      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@700&display=swap');
+    ]]></style>
+    
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#9d6dfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+
+    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e4e4e7" />
+    </linearGradient>
+
+    <pattern id="grid" x="0" y="0" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M 64 0 L 0 0 L 0 64" fill="none" stroke="#ffffff" stroke-width="1" stroke-opacity="0.025" />
+    </pattern>
+    
+    <radialGradient id="topGlow" cx="0.5" cy="0.05" r="0.62" fx="0.5" fy="0.05">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.30" />
+      <stop offset="48%" stop-color="#7c3aed" stop-opacity="0.11" />
+      <stop offset="100%" stop-color="#050508" stop-opacity="0" />
+    </radialGradient>
+
+    <radialGradient id="bottomGlow" cx="0.5" cy="1" r="0.75" fx="0.5" fy="1">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.16" />
+      <stop offset="56%" stop-color="#5b21b6" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#050508" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="#050508" />
+  <rect width="1200" height="300" fill="url(#topGlow)" />
+  <rect width="1200" height="300" fill="url(#bottomGlow)" />
+  <rect width="1200" height="300" fill="url(#accentGrad)" opacity="0.04" />
+  <rect width="1200" height="300" fill="url(#grid)" />
+
+  <!-- Brand lockup: mark + wordmark, centered as a unit -->
+  <g transform="translate(600, 50)">
+    <!-- 40px mark + 24px gap + ~116px wordmark, centered as one 180px lockup. -->
+    <g transform="translate(-90, 0)">
+      <g fill="#8b5cf6">
+        <rect y="37" width="7" height="7" />
+        <rect opacity=".6" x="7" y="37" width="7" height="7" />
+        <rect opacity=".32" x="14" y="37" width="7" height="7" />
+        <rect opacity=".07" x="21" y="37" width="7" height="7" />
+        <rect opacity=".6" y="30" width="7" height="7" />
+        <rect opacity=".32" x="7" y="30" width="7" height="7" />
+        <rect opacity=".07" x="7" y="23" width="7" height="7" />
+        <rect opacity=".07" x="14" y="30" width="7" height="7" />
+        <rect opacity=".32" y="23" width="7" height="7" />
+        <rect opacity=".07" y="16" width="7" height="7" />
+        <rect x="33" y="4" width="7" height="7" />
+        <rect opacity=".6" x="33" y="11" width="7" height="7" />
+        <rect opacity=".32" x="26" y="11" width="7" height="7" />
+        <rect opacity=".07" x="19" y="11" width="7" height="7" />
+        <rect opacity=".32" x="33" y="18" width="7" height="7" />
+        <rect opacity=".07" x="26" y="18" width="7" height="7" />
+        <rect opacity=".07" x="33" y="25" width="7" height="7" />
+        <rect opacity=".6" x="26" y="4" width="7" height="7" />
+        <rect opacity=".32" x="19" y="4" width="7" height="7" />
+        <rect opacity=".07" x="12" y="4" width="7" height="7" />
+      </g>
+      <text
+        x="64"
+        y="38"
+        font-family="'Space Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif"
+        font-weight="700"
+        font-size="34"
+        fill="#f4f4f5"
+        letter-spacing="-0.02em"
+      >trygg</text>
+    </g>
+  </g>
+
+  <!-- Headline centered -->
+  <g transform="translate(600, 154)" text-anchor="middle">
+    <text
+      font-family="'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif"
+      font-weight="600"
+      font-size="48"
+      letter-spacing="-0.03em"
+      fill="url(#textGrad)"
+    >
+      <tspan x="0" y="0">Type-safe UI.</tspan>
+      <tspan x="0" y="62">From the ground up.</tspan>
+    </text>
+  </g>
+</svg>

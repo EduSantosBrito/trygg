@@ -48,7 +48,10 @@ export default Component.gen(function* () {
           content="Effect, TypeScript, UI framework, fine-grained reactivity, dependency injection, type-safe, JSX, signals"
         />
         <meta name="author" content="Eduardo Santos Brito" />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta name="googlebot" content="index, follow, max-image-preview:large" />
         <link rel="canonical" href={seo.url} />
+        <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
 
         {/* Open Graph */}
         <meta property="og:type" content="website" />

@@ -48,6 +48,11 @@ type PlannedIssue = {
   readonly branch: string;
 };
 
+type VcsIdentity = {
+  readonly name: string;
+  readonly email: string;
+};
+
 const slugify = (title: string): string =>
   title
     .toLowerCase()
@@ -56,6 +61,148 @@ const slugify = (title: string): string =>
     .slice(0, 48);
 
 const shellEscape = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+const parsePositiveInteger = (name: string, fallback: number): number => {
+  const raw = Bun.env[name];
+  if (raw === undefined || raw.trim().length === 0) {
+    return fallback;
+  }
+
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 1 || String(value) !== raw.trim()) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return value;
+};
+
+const parseOptionalPositiveInteger = (name: string): number | undefined => {
+  const raw = Bun.env[name];
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 1 || String(value) !== raw.trim()) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return value;
+};
+
+const readJjConfig = async (key: string): Promise<string | undefined> => {
+  try {
+    const value = (await $`jj config get ${key}`.quiet().text()).trim();
+    return value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const loadVcsIdentity = async (): Promise<VcsIdentity> => {
+  const name =
+    Bun.env.SANDCASTLE_VCS_NAME ??
+    Bun.env.JJ_USER ??
+    Bun.env.GIT_AUTHOR_NAME ??
+    (await readJjConfig("user.name"));
+  const email =
+    Bun.env.SANDCASTLE_VCS_EMAIL ??
+    Bun.env.JJ_EMAIL ??
+    Bun.env.GIT_AUTHOR_EMAIL ??
+    (await readJjConfig("user.email"));
+
+  if (name === undefined || email === undefined) {
+    throw new Error(
+      "Sandcastle needs VCS identity. Set SANDCASTLE_VCS_NAME and SANDCASTLE_VCS_EMAIL, or configure git user.name/user.email.",
+    );
+  }
+
+  return { name, email };
+};
+
+const vcsEnv = (identity: VcsIdentity): Record<string, string> => ({
+  JJ_USER: identity.name,
+  JJ_EMAIL: identity.email,
+  GIT_AUTHOR_NAME: identity.name,
+  GIT_AUTHOR_EMAIL: identity.email,
+  GIT_COMMITTER_NAME: identity.name,
+  GIT_COMMITTER_EMAIL: identity.email,
+});
+
+const requireNoEmptyOutgoingCommits = async () => {
+  const revset = "empty() & (main@origin..@)";
+  const output = await $`jj log -r ${revset} --no-graph -T ${"change_id.short() ++ \"\\n\""}`
+    .quiet()
+    .text();
+
+  if (output.trim().length > 0) {
+    await $`jj abandon ${revset}`.quiet();
+  }
+};
+
+const outgoingRevisionsWithMissingIdentity = async (): Promise<readonly string[]> => {
+  const output = await $`jj log -r ${"main@origin..@"} --no-graph -T ${
+    'if(author.name() == "" || author.email() == "" || committer.name() == "" || committer.email() == "", change_id.short() ++ "\\n")'
+  }`
+    .quiet()
+    .text();
+
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+};
+
+const repairMissingVcsIdentity = async (identity: VcsIdentity) => {
+  const revisions = await outgoingRevisionsWithMissingIdentity();
+  for (const revision of revisions) {
+    await $`env JJ_USER=${identity.name} JJ_EMAIL=${identity.email} jj metaedit --update-author --force-rewrite ${revision}`.quiet();
+  }
+};
+
+const assertNoUndescribedOutgoingCommits = async () => {
+  const output = await $`jj log -r ${"main@origin..@ & description(exact:\"\")"} --no-graph -T ${
+    'change_id.short() ++ " " ++ commit_id.short() ++ "\\n"'
+  }`
+    .quiet()
+    .text();
+
+  if (output.trim().length > 0) {
+    throw new Error(`Outgoing commits without descriptions:\n${output}`);
+  }
+};
+
+const isBookmarkMergedIntoWorkingCopy = async (bookmark: string): Promise<boolean> => {
+  const output = await $`jj log -r ${`${bookmark} ~ ancestors(@)`} --no-graph -T ${"commit_id.short()"}`
+    .quiet()
+    .text();
+  return output.trim().length === 0;
+};
+
+const deleteMergedBookmark = async (bookmark: string) => {
+  if (await isBookmarkMergedIntoWorkingCopy(bookmark)) {
+    await $`jj bookmark delete ${bookmark}`.quiet();
+    return;
+  }
+
+  console.warn(`Refusing to delete unmerged bookmark: ${bookmark}`);
+};
+
+const finalizeLinearMain = async (
+  completedBranches: readonly string[],
+  identity: VcsIdentity,
+) => {
+  await requireNoEmptyOutgoingCommits();
+  await repairMissingVcsIdentity(identity);
+  await assertNoUndescribedOutgoingCommits();
+
+  for (const branch of completedBranches) {
+    await deleteMergedBookmark(branch);
+  }
+
+  await $`jj bookmark set main -r @`.quiet();
+  await $`jj git export`.quiet();
+};
 
 const sandboxedOpenCode = (model: string, variant?: string): AgentProvider => ({
   name: "opencode",
@@ -272,9 +419,12 @@ const loadPlan = async (): Promise<readonly PlannedIssue[]> => {
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Maximum number of plan→execute→merge cycles before stopping.
-// Raise this if your backlog is large; lower it for a quick smoke-test run.
-const MAX_ITERATIONS = 100;
+// Keep Sandcastle high-throughput by default. Set SANDCASTLE_MAX_PARALLEL_ISSUES
+// only when a temporary throttle is needed for a risky batch.
+const MAX_ITERATIONS = parsePositiveInteger("SANDCASTLE_MAX_ITERATIONS", 100);
+const MAX_PARALLEL_ISSUES = parseOptionalPositiveInteger(
+  "SANDCASTLE_MAX_PARALLEL_ISSUES",
+);
 
 // Hooks run inside the sandbox before the agent starts each iteration.
 // bun install ensures the sandbox always has fresh dependencies.
@@ -287,9 +437,12 @@ const hooks = {
 // inside each sandbox instead.
 const copyToWorktree: string[] = [];
 
+const vcsIdentity = await loadVcsIdentity();
+
 const createSandboxProvider = () => {
   const state = createOpenCodeState();
   const provider = docker({
+    env: vcsEnv(vcsIdentity),
     mounts: [
       {
         hostPath: state.shareDir,
@@ -327,7 +480,17 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // Prefer the prompt-based planner so dependency analysis lives in
   // .sandcastle/plan-prompt.md. Deterministic planning is opt-in fallback only.
   // -------------------------------------------------------------------------
-  const issues = await loadPlan();
+  const plannedIssues = await loadPlan();
+  const issues =
+    MAX_PARALLEL_ISSUES === undefined
+      ? plannedIssues
+      : plannedIssues.slice(0, MAX_PARALLEL_ISSUES);
+
+  if (MAX_PARALLEL_ISSUES !== undefined && plannedIssues.length > issues.length) {
+    console.log(
+      `Safety cap: running ${issues.length}/${plannedIssues.length} planned issue(s). Set SANDCASTLE_MAX_PARALLEL_ISSUES to raise.`,
+    );
+  }
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.
@@ -358,7 +521,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
 
   await $`jj git export`.quiet();
-  const sourceRevision = (await $`git rev-parse main`.text()).trim();
+  const sourceRevision = (await $`jj log -r main --no-graph -T ${"commit_id"}`.text()).trim();
 
   const settled = await Promise.allSettled(
     issues.map(async (issue) => {
@@ -473,8 +636,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
         // A markdown list of issue IDs and titles, one per line.
         ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
+        VCS_USER: vcsIdentity.name,
+        VCS_EMAIL: vcsIdentity.email,
       },
     });
+
+    await finalizeLinearMain(completedBranches, vcsIdentity);
   } finally {
     cleanupMergerSandbox();
   }

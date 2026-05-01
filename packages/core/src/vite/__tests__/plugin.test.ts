@@ -51,6 +51,7 @@ import {
   makeViteServer,
   makeStableHandlerFactoryLoader,
   generateHtmlTemplate,
+  isTryggMixedDynamicImportWarning,
   makeBuildOutput,
   renderCloudflareStaticWorkerEntryModule,
   type ParsedRoute,
@@ -1854,6 +1855,17 @@ mountDocument(<App />, { manifest: routes.manifest })
       }),
     });
 
+    const BuildOnwarnConfigSchema = Schema.Struct({
+      build: Schema.Struct({
+        rollupOptions: Schema.Struct({
+          onwarn: Schema.declare(
+            (u: unknown): u is (warning: { readonly message?: string }, handler: () => void) => void =>
+              typeof u === "function",
+          ),
+        }),
+      }),
+    });
+
     it("should set esbuild jsx to automatic mode", () => {
       const plugin = trygg();
       const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
@@ -1870,6 +1882,50 @@ mountDocument(<App />, { manifest: routes.manifest })
       const config = Schema.decodeUnknownSync(OptimizeDepsConfigSchema)(result);
       assert.strictEqual(config.optimizeDeps.esbuildOptions.jsx, "automatic");
       assert.strictEqual(config.optimizeDeps.esbuildOptions.jsxImportSource, "trygg");
+    });
+
+    it("should filter trygg-owned mixed dynamic import warnings", () => {
+      const warning = {
+        message:
+          "(!) /repo/packages/core/dist/component.js is dynamically imported by /repo/packages/core/dist/observer.js but also statically imported by /repo/packages/core/dist/index.js, dynamic import will not move module into another chunk.",
+      };
+
+      assert.strictEqual(isTryggMixedDynamicImportWarning(warning), true);
+      assert.strictEqual(
+        isTryggMixedDynamicImportWarning({
+          message:
+            "(!) /repo/app/page.js is dynamically imported by /repo/app/routes.js but also statically imported by /repo/app/index.js, dynamic import will not move module into another chunk.",
+        }),
+        false,
+      );
+    });
+
+    it("should preserve user onwarn for non-trygg warnings", () => {
+      const plugin = trygg();
+      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      let userWarnings = 0;
+      let defaultWarnings = 0;
+      const result = configHook(
+        {
+          build: {
+            rollupOptions: {
+              onwarn: (_warning: { readonly message?: string }, defaultHandler: () => void) => {
+                userWarnings += 1;
+                defaultHandler();
+              },
+            },
+          },
+        },
+        { command: "build", mode: "production" },
+      );
+      const config = Schema.decodeUnknownSync(BuildOnwarnConfigSchema)(result);
+
+      config.build.rollupOptions.onwarn({ message: "user warning" }, () => {
+        defaultWarnings += 1;
+      });
+
+      assert.strictEqual(userWarnings, 1);
+      assert.strictEqual(defaultWarnings, 1);
     });
   });
 

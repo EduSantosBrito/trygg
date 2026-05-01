@@ -91,12 +91,12 @@ export const Footer = Component.gen(function* () {
                 </li>
                 <li>
                   <a
-                    href="https://discord.gg/effect-ts"
+                    href="https://discord.gg/BRDc7xGb5D"
                     className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] transition-colors"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Effect Discord
+                    Discord
                   </a>
                 </li>
               </ul>

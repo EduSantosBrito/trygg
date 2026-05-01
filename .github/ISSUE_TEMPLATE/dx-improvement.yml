@@ -1,0 +1,42 @@
+name: DX improvement
+description: Improve developer experience, tooling, docs, examples, or diagnostics.
+title: "[dx] "
+body:
+  - type: textarea
+    id: friction
+    attributes:
+      label: Friction
+      description: What is awkward, unclear, slow, noisy, or hard to debug?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Affected workflow
+      description: Which developer workflow is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Proposed improvement
+      description: What would make this better?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete checks that prove this is done.
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Logs, screenshots, examples, or related issues.
+    validations:
+      required: false

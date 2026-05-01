@@ -71,6 +71,51 @@ const RESOLVED_API_ID = "\0" + VIRTUAL_API_ID;
 const API_EXPORT_MESSAGE =
   "app/api.ts must export Api for imports from trygg/api. Add `export const Api = ...` to app/api.ts.";
 
+type RollupWarning = {
+  readonly message?: string;
+};
+
+type RollupWarningHandler = (
+  warning: RollupWarning,
+  defaultHandler: (warning: RollupWarning) => void,
+) => void;
+
+const isRecord = (value: unknown): value is { readonly [key: string]: unknown } =>
+  typeof value === "object" && value !== null;
+
+const isRollupWarningHandler = (value: unknown): value is RollupWarningHandler =>
+  typeof value === "function";
+
+const getUserRollupOnwarn = (config: unknown): RollupWarningHandler | undefined => {
+  if (!isRecord(config)) return undefined;
+  const build = config.build;
+  if (!isRecord(build)) return undefined;
+  const rollupOptions = build.rollupOptions;
+  if (!isRecord(rollupOptions)) return undefined;
+  const onwarn = rollupOptions.onwarn;
+  if (!isRollupWarningHandler(onwarn)) return undefined;
+  return onwarn;
+};
+
+export const isTryggMixedDynamicImportWarning = (warning: RollupWarning): boolean => {
+  const message = warning.message?.replace(/\\/g, "/");
+  if (message === undefined) return false;
+  if (!message.includes("is dynamically imported by")) return false;
+  if (!message.includes("but also statically imported by")) return false;
+  if (!message.includes("dynamic import will not move module into another chunk")) return false;
+  return message.includes("/packages/core/dist/") || message.includes("/node_modules/trygg/dist/");
+};
+
+const makeRollupOnwarn = (userOnwarn: RollupWarningHandler | undefined): RollupWarningHandler =>
+  (warning, defaultHandler) => {
+    if (isTryggMixedDynamicImportWarning(warning)) return;
+    if (userOnwarn !== undefined) {
+      userOnwarn(warning, defaultHandler);
+      return;
+    }
+    defaultHandler(warning);
+  };
+
 /**
  * Source paths that own generated browser entry imports.
  *
@@ -2857,7 +2902,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       return true;
     },
 
-    config(_userConfig: unknown, env: { readonly command: string }) {
+    config(userConfig: unknown, env: { readonly command: string }) {
       /*
        * The SSR build environment receives this config from the plugin's config hook.
        * `applyToEnvironment` above prevents the plugin from running hooks in the SSR
@@ -2898,7 +2943,13 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         },
         build: {
           outDir: output === "server" ? "dist/client" : "dist",
-          rollupOptions: env.command === "build" ? { input: `${GENERATED_DIR}/index.html` } : {},
+          rollupOptions:
+            env.command === "build"
+              ? {
+                  input: `${GENERATED_DIR}/index.html`,
+                  onwarn: makeRollupOnwarn(getUserRollupOnwarn(userConfig)),
+                }
+              : {},
         },
       };
     },

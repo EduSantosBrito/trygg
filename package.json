@@ -22,6 +22,7 @@
     "effect:check": "bun run --cwd packages/core effect:check",
     "sandcastle": "bun .sandcastle/main.ts",
     "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check",
+    "readme:header": "bun run --cwd apps/www scripts/build-readme-header.mjs",
     "prepare": "effect-tsgo patch"
   },
   "devDependencies": {
