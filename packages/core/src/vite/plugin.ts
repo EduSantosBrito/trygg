@@ -97,6 +97,16 @@ const getUserRollupOnwarn = (config: unknown): RollupWarningHandler | undefined 
   return onwarn;
 };
 
+/**
+ * Detects Rollup mixed dynamic import warnings emitted by trygg's own build output.
+ *
+ * @remarks
+ * Used by plugin warning filtering and exported only so local Vite plugin tests can
+ * verify the exact warning predicate without constructing a full plugin instance.
+ *
+ * @internal
+ * @since 1.0.0
+ */
 export const isTryggMixedDynamicImportWarning = (warning: RollupWarning): boolean => {
   const message = warning.message?.replace(/\\/g, "/");
   if (message === undefined) return false;
