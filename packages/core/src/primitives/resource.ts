@@ -725,11 +725,7 @@ const fetchStatic = <A, E, R>(
     // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
     // If we tracked this read, the component would re-render when state changes,
     // causing keyed-list teardown/remount race that blanks rendered items.
-    const currentState = yield* Effect.provideService(
-      Signal.get(state),
-      Signal.CurrentRenderPhase,
-      null,
-    );
+    const currentState = yield* Signal.peek(state);
     if (currentState._tag !== "Pending") {
       yield* Debug.log({
         event: "resource.fetch.cached",
@@ -767,25 +763,20 @@ const fetchReactive = <P extends object, A, E, R>(
     const ctx = yield* Effect.context<ResourceRegistryTag | R>();
     const scope = yield* Effect.scope;
 
-    // Unwrap current values from reactive params.
-    // Wrapped in locally(CurrentRenderPhase, null) so Signal.get reads don't
-    // register as component dependencies — reactivity is handled by subscriptions.
+    // Unwrap current values from reactive params without registering component
+    // dependencies — reactivity is handled by explicit subscriptions below.
     const unwrapParams = (): Effect.Effect<P> =>
-      Effect.provideService(
-        Effect.gen(function* () {
-          const result: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(reactiveParams)) {
-            if (Signal.isSignal(value)) {
-              result[key] = yield* Signal.get(value);
-            } else {
-              result[key] = value;
-            }
+      Effect.gen(function* () {
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(reactiveParams)) {
+          if (Signal.isSignal(value)) {
+            result[key] = yield* Signal.peek(value);
+          } else {
+            result[key] = value;
           }
-          return unsafeAsParams<P>(result);
-        }),
-        Signal.CurrentRenderPhase,
-        null,
-      );
+        }
+        return unsafeAsParams<P>(result);
+      });
 
     // Collect signal fields for subscription
     const signalFields: Array<Signal.Signal<unknown>> = [];
@@ -843,11 +834,7 @@ const fetchReactive = <P extends object, A, E, R>(
               const entryState = unsafeEntrySignal<A, E>(entry.state);
 
               // Check if already cached
-              const cached = yield* Effect.provideService(
-                Signal.get(entryState),
-                Signal.CurrentRenderPhase,
-                null,
-              );
+              const cached = yield* Signal.peek(entryState);
               if (cached._tag !== "Pending") {
                 yield* setOutputIfActive(cached);
               } else {
@@ -866,22 +853,14 @@ const fetchReactive = <P extends object, A, E, R>(
                   yield* Fiber.join(fiber);
                 }
                 // Sync resolved state to output
-                const finalState = yield* Effect.provideService(
-                  Signal.get(entryState),
-                  Signal.CurrentRenderPhase,
-                  null,
-                );
+                const finalState = yield* Signal.peek(entryState);
                 yield* setOutputIfActive(finalState);
               }
 
               // Subscribe to entry state so invalidate/refresh propagates to outputState.
               // The daemon stays alive until interrupted by the next doFetch call.
               const unsubscribe = yield* Signal.subscribe(entryState, () =>
-                Effect.provideService(
-                  Signal.get(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
-                  Signal.CurrentRenderPhase,
-                  null,
-                ),
+                Signal.peek(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
               );
               return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
             }).pipe(

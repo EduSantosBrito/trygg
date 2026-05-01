@@ -5,13 +5,25 @@
  * Testable services used internally by the Outlet. Each has a service key
  * with Layer factories for production and testing.
  */
-import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
+import {
+  Cause,
+  Data,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Scope,
+  SubscriptionRef,
+} from "effect";
 import * as Context from "effect/Context";
 import { Element, type Element as ElementType, provideElement } from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
-import { locallyFiberRef } from "../internal/fiber-ref.js";
+import * as ContractTrace from "../contract/trace.js";
+import { getFiberRef, locallyFiberRef } from "../internal/fiber-ref.js";
 import type { RoutesManifest } from "./routes.js";
 import {
   InvalidRouteComponent,
@@ -27,13 +39,27 @@ import {
   resolveLoadingBoundary,
   resolveNotFoundBoundary,
 } from "./matching.js";
-import { CurrentRouteParams, CurrentRouteError, CurrentOutletChild } from "./service.js";
+import {
+  CurrentRouteParams,
+  CurrentRouteError,
+  CurrentOutletChild,
+  CurrentRouter,
+  Router as RouterTag,
+} from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
 
 const routeComponentWrapperIdentity = Symbol("trygg/router/OutletRenderer.component");
 const routeLayoutWrapperIdentity = Symbol("trygg/router/OutletRenderer.layout");
 const routeErrorWrapperIdentity = Symbol("trygg/router/OutletRenderer.error");
+
+export interface RouteRenderIdentity {
+  readonly path: string;
+}
+
+class StaleRouteRender extends Data.TaggedError("StaleRouteRender")<{
+  readonly expectedPath: string;
+}> {}
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
@@ -87,6 +113,20 @@ const mapChildInputElements = (
       ? f(child)
       : child;
 };
+
+const isStaleRouteRender = (routeIdentity: RouteRenderIdentity | undefined) =>
+  Effect.gen(function* () {
+    if (routeIdentity === undefined) return false;
+
+    const routerFromContext = yield* Effect.serviceOption(RouterTag);
+    const router = Option.isSome(routerFromContext)
+      ? routerFromContext
+      : yield* getFiberRef(CurrentRouter);
+    if (Option.isNone(router)) return false;
+
+    const current = yield* SubscriptionRef.get(router.value.current._ref);
+    return current.path !== routeIdentity.path;
+  });
 
 const wrapElementWithFiberRefs = (
   element: ElementType,
@@ -166,12 +206,14 @@ export interface OutletRendererShape {
     component: RouteComponent,
     params: Record<string, unknown>,
     query?: Record<string, unknown>,
+    routeIdentity?: RouteRenderIdentity,
   ) => Effect.Effect<ElementType, unknown, never>;
   readonly renderLayout: (
     layout: RouteComponent,
     child: ElementType,
     params: Record<string, unknown>,
     query?: Record<string, unknown>,
+    routeIdentity?: RouteRenderIdentity,
   ) => Effect.Effect<ElementType, unknown, never>;
   readonly renderError: (
     errorComp: RouteComponent,
@@ -252,6 +294,7 @@ export interface AsyncLoaderShape {
   readonly track: (
     matchKey: string,
     loadEffect: Effect.Effect<Element, unknown, never>,
+    trace?: { readonly epoch?: number },
   ) => Effect.Effect<void>;
   /** Signal reflecting the current rendered element (loading/refreshing/ready). */
   readonly view: Signal.Signal<Element>;
@@ -280,7 +323,7 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
         (s) =>
           AsyncLoadState.$match(s, {
             Loading: () => loadingElement,
-            Refreshing: ({ previous }) => previous,
+            Refreshing: () => loadingElement,
             Ready: ({ element }) => element,
           }),
         { scope },
@@ -295,11 +338,28 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
       const track = (
         matchKey: string,
         loadEffect: Effect.Effect<Element, unknown, never>,
+        trace?: { readonly epoch?: number },
       ): Effect.Effect<void> =>
         Effect.gen(function* () {
           // Dedup: skip if matchKey unchanged
           const currentKey = yield* Ref.get(matchKeyRef);
-          if (Option.isSome(currentKey) && currentKey.value === matchKey) return;
+          if (Option.isSome(currentKey) && currentKey.value === matchKey) {
+            yield* ContractTrace.emit({
+              event: "asyncLoader.dedup",
+              level: "semantic",
+              payload: { matchKey, epoch: trace?.epoch },
+            });
+            return;
+          }
+          yield* ContractTrace.emit({
+            event: "asyncLoader.track",
+            level: "semantic",
+            payload: {
+              matchKey,
+              previousMatchKey: Option.getOrUndefined(currentKey),
+              epoch: trace?.epoch,
+            },
+          });
           yield* Ref.set(matchKeyRef, Option.some(matchKey));
 
           // Interrupt previous load fiber
@@ -308,7 +368,21 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
             onNone: () => Effect.void,
             onSome: (fiber) =>
               Effect.gen(function* () {
+                yield* ContractTrace.emit({
+                  event: "asyncLoader.interrupt",
+                  level: "semantic",
+                  payload: {
+                    fromMatchKey: Option.getOrUndefined(currentKey),
+                    toMatchKey: matchKey,
+                    epoch: trace?.epoch,
+                  },
+                });
                 yield* Fiber.interrupt(fiber);
+                yield* ContractTrace.emit({
+                  event: "effect.fiber.interrupt",
+                  level: "semantic",
+                  payload: { owner: "router.asyncLoader", reason: "new-match" },
+                });
                 yield* Ref.set(currentFiberRef, Option.none());
               }),
           });
@@ -316,18 +390,45 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
           // Set loading/refreshing state
           const lastEl = yield* Ref.get(lastElementRef);
           yield* Option.match(lastEl, {
-            onNone: () => Signal.set(state, AsyncLoadState.Loading()),
-            onSome: (previous) => Signal.set(state, AsyncLoadState.Refreshing({ previous })),
+            onNone: () =>
+              ContractTrace.emit({
+                event: "asyncLoader.loading",
+                level: "semantic",
+                payload: { matchKey, epoch: trace?.epoch },
+              }).pipe(Effect.flatMap(() => Signal.set(state, AsyncLoadState.Loading()))),
+            onSome: (previous) =>
+              ContractTrace.emit({
+                event: "asyncLoader.refreshing",
+                level: "semantic",
+                payload: { matchKey, hasPrevious: true, epoch: trace?.epoch },
+              }).pipe(
+                Effect.flatMap(() => Signal.set(state, AsyncLoadState.Refreshing({ previous }))),
+              ),
           });
 
           // Fork the load effect
+          yield* ContractTrace.emit({
+            event: "effect.fork.scoped",
+            level: "semantic",
+            payload: { owner: "router.asyncLoader", scopeKind: "outlet" },
+          });
           const fiber = yield* Effect.forkIn(
             Effect.gen(function* () {
               const exit = yield* Effect.exit(loadEffect);
               if (Exit.isSuccess(exit)) {
                 yield* Ref.set(lastElementRef, Option.some(exit.value));
+                yield* ContractTrace.emit({
+                  event: "asyncLoader.ready",
+                  level: "semantic",
+                  payload: { matchKey, epoch: trace?.epoch },
+                });
                 yield* Signal.set(state, AsyncLoadState.Ready({ element: exit.value }));
               } else {
+                yield* ContractTrace.emit({
+                  event: "asyncLoader.error",
+                  level: "semantic",
+                  payload: { matchKey, epoch: trace?.epoch, cause: Cause.pretty(exit.cause) },
+                });
                 yield* Signal.set(state, AsyncLoadState.Loading());
               }
             }),
@@ -376,6 +477,7 @@ export function renderComponent(
   component: RouteComponent,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
+  routeIdentity?: RouteRenderIdentity,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
   const withRouteContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -388,13 +490,22 @@ export function renderComponent(
   const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
     Element.fromEffect(
       Effect.gen(function* () {
+        if (yield* isStaleRouteRender(routeIdentity)) {
+          yield* ContractTrace.emit({
+            event: "route.render.skipStale",
+            level: "semantic",
+            payload: { expectedPath: routeIdentity?.path },
+          });
+          return yield* new StaleRouteRender({ expectedPath: routeIdentity?.path ?? "<unknown>" });
+        }
+
         const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
         return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
       }).pipe(unsafeEraseR),
       {
         identity: routeComponentWrapperIdentity,
-        inputs: { params, query: decodedQuery, wrappedIdentity: component },
+        inputs: { params, query: decodedQuery, routeIdentity, wrappedIdentity: component },
       },
     );
 
@@ -418,6 +529,7 @@ export function renderLayout(
   child: ElementType,
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
+  routeIdentity?: RouteRenderIdentity,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
   const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -434,6 +546,15 @@ export function renderLayout(
   const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
     Element.fromEffect(
       Effect.gen(function* () {
+        if (yield* isStaleRouteRender(routeIdentity)) {
+          yield* ContractTrace.emit({
+            event: "route.layout.skipStale",
+            level: "semantic",
+            payload: { expectedPath: routeIdentity?.path },
+          });
+          return yield* new StaleRouteRender({ expectedPath: routeIdentity?.path ?? "<unknown>" });
+        }
+
         const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
         return provideElement(
@@ -443,7 +564,7 @@ export function renderLayout(
       }).pipe(unsafeEraseR),
       {
         identity: routeLayoutWrapperIdentity,
-        inputs: { child, params, query: decodedQuery, wrappedIdentity: layout },
+        inputs: { child, params, query: decodedQuery, routeIdentity, wrappedIdentity: layout },
       },
     );
 

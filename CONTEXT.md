@@ -42,3 +42,41 @@
 - **Generated workspace** — `.trygg` is an internal generated source/cache directory. It must not be part of the public `dist` contract.
 - **SPA fallback** — In Static SPA output, the runtime tries static assets first and preserves successful asset responses unchanged. If no asset exists and the request is a `GET` or `HEAD` document-like request, it returns the SPA shell. Detection uses request semantics such as `Accept` and `Sec-Fetch-Dest`, with a small denylist for missing generated asset extensions. Extensionless routes such as `/assets` remain client routes. Route-level not-found behavior belongs to the client router.
 - **Framework-owned build noise** — Build warnings caused by Trygg generated/runtime internals that app authors cannot reasonably act on. Trygg should hide these from normal app build and deploy output without hiding user-owned warnings.
+
+## Component runtime
+
+- **Component lifecycle provision** — A dependency provision whose services live for the lifetime of each mounted provided component instance rather than for a single render pass.
+- **Provider scope** — The lifecycle boundary created by mounting a provided component; services acquired in that boundary are shared by that component's rendered subtree and finalized when the boundary unmounts.
+- **Provided component** — A component with attached layer metadata whose mount creates a provider scope before the component body renders.
+- **Stable provider** — A provider whose layer identity is not used as dynamic UI state; state changes occur inside the provided service instead of by swapping providers.
+- **Provider identity** — The component identity plus key that determines whether an existing provider scope is preserved or replaced during reconciliation.
+- **Provider shadowing** — The rule that a nested provider for the same service tag supplies that service to its subtree while outer provider scopes continue to serve their own subtrees.
+- **Element provider context** — The provider context captured for a rendered element and used to run its Effect event handlers.
+- **Store config service** — An explicit service that supplies construction parameters to a store layer; it is provided through normal Layer composition rather than inferred from component props.
+- **Construction-time store config** — Store configuration fixed for a provider scope; changing it replaces the provider scope rather than mutating the existing store.
+- **Scoped signal state** — Reactive state created with `Signal.make` whose lifetime belongs to the current Effect scope; inside component rendering it also participates in render-position identity.
+- **Scope-owned reactivity** — The rule that changing reactive state must belong to a component scope, provider scope, or explicit Effect scope rather than module lifetime.
+- **Route strategy provision** — Route-level provision used to select router strategies rather than to own application service dependencies.
+- **Boundary layer** — An Effect Layer provided at a component lifecycle boundary; Trygg does not invent alternate layer composition rules at provision call sites.
+- **Nested component provision** — Repeated component provision creates nested provider scopes with Effect-style provision semantics rather than merging layers in Trygg.
+- **Effect-owned layer semantics** — The rule that Effect, not Trygg, defines layer composition, provision ordering, requirements narrowing, dependency satisfaction, and shadowing.
+- **Pipeable component provision** — The canonical API shape for providing a boundary layer to a component, written through `Component.provide(layer)` in a `.pipe(...)` chain.
+- **Pipeable component** — A callable component value that also supports Effect-style `.pipe(...)` composition for component-level operators.
+- **Data-last component operator** — A curried component operator shaped only for `.pipe(...)`, where operator arguments are supplied before the component value.
+
+## Framework verification
+
+- **Behavior contract** — An executable statement of supported Trygg framework behavior. Behavior contracts verify Trygg itself, not user apps, and may fail against the current implementation when they expose an implementation bug or unresolved spec dispute.
+- **Contract trace** — The ordered verifier-facing record of meaningful side effects caused by a framework action, such as navigation, route mount/unmount, signal subscription, history writes, scroll application, prefetch, and cleanup. Contract traces are stable enough to act as test oracles and are more precise than ad-hoc debug logs.
+- **Semantic side effect** — A side effect that defines framework correctness and can be asserted strictly, for example exactly one history write for one client-side navigation.
+- **Cost side effect** — A side effect that affects efficiency or churn rather than direct semantics, such as DOM node creation count or component render count. Behavior contracts should normally enforce these with budgets rather than exact counts.
+- **Effect lifecycle side effect** — A contract trace event for framework-owned Effect ownership boundaries, such as scoped forks, fiber interruption, finalizer registration/run, swallowed errors, and scope closure. These events help verify that Trygg preserves resource ownership and cleanup semantics without tracing the entire Effect runtime.
+- **Contract suite location** — Trygg behavior contracts belong with the framework source they specify. Runner and exploration tooling may live outside the package, but contract definitions are part of Trygg's framework semantics and should be versioned with the implementation.
+- **Contract execution modes** — Behavior contracts run in deterministic CI mode for fast regression detection and exploratory mode for bounded trace generation, timing variation, shrinking, and current-bug discovery.
+- **Agent-friendly verification** — Contract tooling should produce machine-readable failures, minimal traces, stable event names, clear next-action hints, and concise summaries so LLM coding agents can explore failures and propose fixes without needing to infer intent from raw logs.
+- **Contract artifact format** — Contract execution artifacts use JSON or JSONL as the canonical machine-readable format. YAML may be offered only as optional human-facing rendering, not as the source of truth for replay traces or CI output.
+- **Contract runner first** — The first verification milestone is a deterministic runner that executes existing TypeScript contract modules, emits JSON/JSONL artifacts, and can replay traces. Bounded exploration and shrinking build on top of deterministic replay rather than replacing it.
+- **Framework-owned contract instrumentation** — Verifier-relevant contract trace events are emitted by Trygg framework code at semantic ownership boundaries and are no-op unless a contract runner enables collection. Tests may still wrap platform seams, but monkey-patching is not the source of truth for framework lifecycle semantics.
+- **Internal verifier API** — Contract tracing is an internal verifier API rather than a public app API. Trygg internals and behavior contracts may depend on its stable event vocabulary, but app authors should not treat it as supported application surface.
+- **Compare mode** — Comparing baseline and candidate implementations is useful for LLM-generated change review, but it is not the first milestone. The initial verifier uses absolute behavior contracts so it can also discover bugs in the current implementation.
+- **First verifier milestone** — The first proof-of-value milestone is one behavior contract that fails against current main with a stable failure code, minimal JSONL trace, semantic side-effect trace, replay command, and suspected source files. A strong target is rapid navigation across async loading boundaries where only the latest navigation may commit visible route content.

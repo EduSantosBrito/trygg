@@ -24,6 +24,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import * as Debug from "../debug/debug.js";
+import * as ContractTrace from "../contract/trace.js";
 import {
   Element,
   type Element as ElementType,
@@ -69,6 +70,7 @@ import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
 
 const outletRuntimeIdentity = Symbol("trygg/router/Outlet.runtime");
 const outletErrorBoundaryIdentity = Symbol("trygg/router/Outlet.error-boundary");
+const outletLazyLeafIdentity = Symbol("trygg/router/Outlet.lazy-leaf");
 
 // =============================================================================
 // Trie-Based Matching
@@ -621,7 +623,24 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           Effect.provide(strategyLayer ?? ScrollStrategy.Auto),
         );
         yield* router.outletCoordination.applyScroll({ strategy });
-      }).pipe(Effect.ignore);
+        yield* ContractTrace.emit({
+          event: "scroll.apply",
+          level: "semantic",
+          payload: { kind: strategy._tag },
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          ContractTrace.emit({
+            event: "effect.error.ignored",
+            level: "semantic",
+            payload: {
+              owner: "router.outlet",
+              operation: "applyScroll",
+              cause: Cause.pretty(cause),
+            },
+          }),
+        ),
+      );
 
     // -----------------------------------------------------------------------
     // Scroll ↔ DOM swap synchronization
@@ -671,6 +690,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // wait until the Ready state propagates and the DOM has been swapped.
     let pendingScroll: { readonly strategyLayer: Layer.Layer<ScrollStrategy> | undefined } | null =
       null;
+    let routeEpoch = 0;
 
     /**
      * Process a route: match, middleware, boundaries, render, update view.
@@ -686,13 +706,76 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       match: RouteMatch,
       decodedParams: Record<string, unknown>,
       decodedQuery: Record<string, unknown>,
+      routePath: string,
+      options: { readonly deferLazyLeaf: boolean },
     ): Effect.Effect<Element, unknown, never> => {
+      const renderLazyLeaf = (
+        loader: ComponentLoader,
+        routeIdentity: { readonly path: string },
+      ): Element =>
+        Element.fromEffect(
+          Effect.gen(function* () {
+            const childSignal = yield* Signal.make<Element>(text(""));
+
+            yield* Effect.forkScoped(
+              Effect.gen(function* () {
+                yield* ContractTrace.emit({
+                  event: "outlet.lazyLeaf.load.start",
+                  level: "semantic",
+                  payload: { path: routeIdentity.path },
+                });
+                const component = yield* resolveComponent(loader);
+                const leafElement = yield* renderComponent(
+                  component,
+                  decodedParams,
+                  decodedQuery,
+                  routeIdentity,
+                );
+                yield* ContractTrace.emit({
+                  event: "outlet.lazyLeaf.load.ready",
+                  level: "semantic",
+                  payload: { path: routeIdentity.path },
+                });
+                yield* Signal.set(childSignal, leafElement);
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.gen(function* () {
+                    yield* ContractTrace.emit({
+                      event: "outlet.lazyLeaf.load.error",
+                      level: "semantic",
+                      payload: { path: routeIdentity.path, cause: Cause.pretty(cause) },
+                    });
+                    yield* Signal.set(
+                      childSignal,
+                      Element.fail(Cause.squash(cause), {
+                        identity: outletLazyLeafIdentity,
+                        inputs: { routeIdentity, phase: "error" },
+                      }),
+                    );
+                  }),
+                ),
+              ),
+            );
+
+            return signalElement(childSignal);
+          }),
+          {
+            identity: outletLazyLeafIdentity,
+            inputs: { loader, params: decodedParams, query: decodedQuery, routeIdentity },
+          },
+        );
+
       const renderBase: Effect.Effect<Element, unknown, never> = Effect.gen(function* () {
         const rawComponent = match.route.definition.component;
         if (rawComponent === undefined) return text("");
 
-        const component = yield* resolveComponent(rawComponent);
-        const leafElement = yield* renderComponent(component, decodedParams, decodedQuery);
+        const routeIdentity = { path: routePath };
+        const leafElement =
+          options.deferLazyLeaf && isComponentLoader(rawComponent)
+            ? renderLazyLeaf(rawComponent, routeIdentity)
+            : yield* Effect.flatMap(resolveComponent(rawComponent), (component) =>
+                renderComponent(component, decodedParams, decodedQuery, routeIdentity),
+              );
 
         const ancestorRawLayouts = Arr.filterMap(match.route.ancestors, (a) =>
           a !== undefined && a.definition.layout !== undefined
@@ -711,7 +794,9 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
         const leafEffect: Effect.Effect<Element, unknown, never> = Effect.succeed(leafElement);
         return yield* Arr.reduceRight(allLayouts, leafEffect, (acc, layout) =>
-          Effect.flatMap(acc, (child) => renderLayout(layout, child, decodedParams, decodedQuery)),
+          Effect.flatMap(acc, (child) =>
+            renderLayout(layout, child, decodedParams, decodedQuery, routeIdentity),
+          ),
         );
       });
 
@@ -795,6 +880,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       renderEffect: Effect.Effect<ElementType, unknown, never>,
       match: RouteMatch,
       queryString: string,
+      epoch: number,
+      routePath: string,
     ) =>
       Effect.gen(function* () {
         const nearestLoadingComp = boundaries.resolveLoading(match.route);
@@ -807,18 +894,44 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           // render fiber, so fast loads can already be Ready by the time it
           // returns; handle that window explicitly after track.
           pendingScroll = { strategyLayer };
-          yield* loader.track(matchKey, renderEffect);
+          yield* loader.track(matchKey, renderEffect, { epoch });
           const currentState = yield* SubscriptionRef.get(loader.state._ref);
           const currentView = yield* SubscriptionRef.get(loader.view._ref);
           if (pendingScroll !== null && currentState._tag === "Ready") {
             pendingScroll = null;
             yield* setViewAndAwaitSwap(currentView);
+            yield* ContractTrace.emit({
+              event: "outlet.process.commit",
+              level: "semantic",
+              payload: {
+                path: routePath,
+                routePattern: match.route.path,
+                query: queryString,
+                epoch,
+              },
+            });
             yield* applyScroll(strategyLayer);
           } else {
             yield* Signal.set(viewSignal, currentView);
+            yield* ContractTrace.emit({
+              event: "outlet.process.commit",
+              level: "semantic",
+              payload: {
+                path: routePath,
+                routePattern: match.route.path,
+                query: queryString,
+                epoch,
+                state: currentState._tag,
+              },
+            });
           }
         } else {
           yield* setViewAndAwaitSwap(yield* renderEffect);
+          yield* ContractTrace.emit({
+            event: "outlet.process.commit",
+            level: "semantic",
+            payload: { path: routePath, routePattern: match.route.path, query: queryString, epoch },
+          });
           yield* applyScroll(resolveScrollStrategy(match.route));
         }
       });
@@ -831,11 +944,22 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       // Clear stale scroll intent from prior navigation
       pendingScroll = null;
 
+      const epoch = ++routeEpoch;
       const route = yield* SubscriptionRef.get(router.current._ref);
+      yield* ContractTrace.emit({
+        event: "outlet.process.start",
+        level: "semantic",
+        payload: { path: route.path, epoch },
+      });
       const matchOption = yield* matcher.match(route.path);
 
       // 404
       if (Option.isNone(matchOption)) {
+        yield* ContractTrace.emit({
+          event: "outlet.match.notFound",
+          level: "semantic",
+          payload: { path: route.path, epoch },
+        });
         const notFoundEl = yield* Option.match(boundaries.resolveNotFoundRoot(), {
           onNone: () => Effect.succeed(text("404 - Not Found")),
           onSome: (comp) =>
@@ -847,6 +971,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       }
 
       const match = matchOption.value;
+      yield* ContractTrace.emit({
+        event: "outlet.match.found",
+        level: "semantic",
+        payload: { path: route.path, routePattern: match.route.path, epoch },
+      });
 
       // Middleware
       const middlewareResult = yield* runRouteMiddleware(match.route);
@@ -928,13 +1057,26 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const decodedQuery = decodedQueryResult.success;
 
       // Build → wrap → commit
-      const routeElement = buildRouteElement(match, decodedParams, decodedQuery);
+      const hasLoadingBoundary = Option.isSome(boundaries.resolveLoading(match.route));
+      const routeElement = buildRouteElement(match, decodedParams, decodedQuery, route.path, {
+        deferLazyLeaf: !hasLoadingBoundary,
+      });
       const withError = wrapWithErrorBoundary(routeElement, match, route.path);
-      yield* commitView(withError, match, queryString);
+      yield* commitView(withError, match, queryString, epoch, route.path);
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const currentRoute = yield* SubscriptionRef.get(router.current._ref);
+          yield* ContractTrace.emit({
+            event: "effect.error.ignored",
+            level: "semantic",
+            payload: {
+              owner: "router.outlet",
+              operation: "processRoute",
+              path: currentRoute.path,
+              cause: Cause.pretty(cause),
+            },
+          });
           yield* Debug.log({
             event: "router.outlet.error",
             phase: "process_route",

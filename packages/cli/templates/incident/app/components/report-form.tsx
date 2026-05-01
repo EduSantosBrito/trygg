@@ -40,13 +40,13 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
   const handleSubmit = (event: Event) =>
     Effect.gen(function* () {
       event.preventDefault();
-      const titleValue = yield* Signal.get(title);
+      const titleValue = yield* Signal.peek(title);
       if (titleValue.trim() === "") return;
 
       yield* Signal.set(submitting, true);
 
       const client = yield* ApiClient;
-      const severityValue = yield* Signal.get(severity);
+      const severityValue = yield* Signal.peek(severity);
 
       yield* client.incidents.create({
         payload: { title: titleValue.trim(), severity: severityValue },

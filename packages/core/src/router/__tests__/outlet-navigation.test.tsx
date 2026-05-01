@@ -18,7 +18,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Effect, Layer, Ref } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import * as Components from "../../primitives/component.js";
 import * as Route from "../route.js";
@@ -93,11 +93,8 @@ const testLayerAt = (path: string): LayerType<Renderer | Router.Router> =>
 // =============================================================================
 
 describe("AsyncLoader - view signal during track", () => {
-  scoped("view signal is stale (Refreshing) immediately after track returns", () =>
+  scoped("view signal shows loading fallback while refreshing a new route", () =>
     Effect.gen(function* () {
-      // Proves the stale read window exists:
-      // After track() sets Refreshing, the view signal returns the PREVIOUS
-      // element. A new SignalElement created at this moment would show stale content.
       const loadingElement = text("Loading...");
       const scope = yield* Effect.scope;
       const loader = yield* AsyncLoader.make(loadingElement, scope);
@@ -106,34 +103,26 @@ describe("AsyncLoader - view signal during track", () => {
       yield* loader.track("dashboard", Effect.succeed(text("Dashboard")));
       yield* TestClock.adjust(10);
 
-      // Track users — sets Refreshing(previous: Dashboard) synchronously
-      yield* loader.track("users", Effect.succeed(text("Users")));
+      // Track users — sets Refreshing synchronously before Users is ready.
+      yield* loader.track("users", Effect.never);
 
-      // Peek synchronously (no yield = no scheduler opportunity for fiber B)
-      const staleRead = Signal.peekSync(loader.view);
+      const refreshingRead = yield* Signal.peek(loader.view);
 
-      // The view is stale — shows Dashboard (from Refreshing.previous)
-      assert.strictEqual(staleRead._tag, "Text");
-      if (staleRead._tag === "Text") {
+      assert.strictEqual(refreshingRead._tag, "Text");
+      if (refreshingRead._tag === "Text") {
         assert.strictEqual(
-          staleRead.content,
-          "Dashboard",
-          "View should be stale (Dashboard from Refreshing) immediately after track",
+          refreshingRead.content,
+          "Loading...",
+          "View should show the loading fallback, not the previous route, while refreshing",
         );
       }
-
-      // After fiber B completes, view transitions to Ready(Users)
-      yield* TestClock.adjust(10);
-      const finalRead = yield* Signal.get(loader.view);
-      assert.strictEqual(finalRead._tag, "Text");
-      if (finalRead._tag === "Text") assert.strictEqual(finalRead.content, "Users");
     }),
   );
 
-  scoped("SignalElement from stale view signal eventually shows correct value", () =>
+  scoped("SignalElement from refreshing view signal eventually shows correct value", () =>
     Effect.gen(function* () {
-      // Even though the initial read is stale, the swap should fix it
-      // (this passes in tests because the scheduler is favorable)
+      // The refreshing view may show a loading fallback before the route content
+      // is ready, but the final ready update should still swap to Users.
       const loadingElement = text("Loading...");
       const scope = yield* Effect.scope;
       const loader = yield* AsyncLoader.make(loadingElement, scope);
@@ -141,10 +130,10 @@ describe("AsyncLoader - view signal during track", () => {
       yield* loader.track("dashboard", Effect.succeed(text("Dashboard")));
       yield* TestClock.adjust(10);
 
-      // Set Refreshing → stale view
+      // Set Refreshing, then allow the next ready update to arrive.
       yield* loader.track("users", Effect.succeed(text("Users")));
 
-      // Render SignalElement from the stale view
+      // Render SignalElement from the refreshing view.
       const element = signalElement(loader.view as Signal.Signal<Element>);
       const { container } = yield* renderElement(element);
 
@@ -419,14 +408,416 @@ describe("Outlet - Navigation integration", () => {
           .children(Route.index(() => Promise.resolve({ default: Overview }))),
       );
 
-      const { container, getByText } = yield* render(<Outlet routes={routes.manifest} />).pipe(
+      const { container } = yield* render(<Outlet routes={routes.manifest} />).pipe(
         Effect.provide(Router.testLayer("/settings")),
       );
 
-      yield* getByText("Overview");
+      yield* Effect.promise<void>(() => new Promise((resolve) => setTimeout(resolve, 10)));
+
+      assert.include(container.textContent ?? "", "Overview");
       assert.strictEqual(container.querySelectorAll("h2").length, 1);
       assert.strictEqual(container.querySelectorAll("h1").length, 1);
     }),
+  );
+
+  scoped("should show loading fallback, not previous route, while next route is pending", () =>
+    Effect.gen(function* () {
+      const usersReady = yield* Deferred.make<void>();
+      const DashComp = identifiableComp("dashboard", "Dashboard Page");
+      const UsersComp: RouteComponent = Deferred.await(usersReady).pipe(
+        Effect.as(
+          Element.Intrinsic({
+            tag: "div",
+            props: { "data-testid": "users" },
+            children: [text("Users Page")],
+            key: null,
+          }),
+        ),
+      );
+      const LoadingComp = loadingComp();
+
+      const manifest = Routes.make()
+        .add(Route.make("/dashboard").component(DashComp).loading(LoadingComp))
+        .add(Route.make("/users").component(UsersComp).loading(LoadingComp)).manifest;
+
+      const outlet = Outlet({ routes: manifest });
+      const { container } = yield* renderElement(outlet);
+      yield* TestClock.adjust(100);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='dashboard']"),
+        `Dashboard should be visible initially. DOM: ${container.innerHTML}`,
+      );
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/users");
+      yield* TestClock.adjust(20);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='loading']"),
+        `Loading fallback should be visible while /users is pending. DOM: ${container.innerHTML}`,
+      );
+      assert.isNull(
+        container.querySelector("[data-testid='dashboard']"),
+        `Dashboard should not remain visible while /users is pending. DOM: ${container.innerHTML}`,
+      );
+      assert.isNull(
+        container.querySelector("[data-testid='users']"),
+        `Users should not be visible until its route effect completes. DOM: ${container.innerHTML}`,
+      );
+    }).pipe(Effect.provide(testLayerAt("/dashboard"))),
+  );
+
+  scoped(
+    "should not let a stale route rerender overwrite shared route chrome while the next route is pending",
+    () =>
+      Effect.gen(function* () {
+        const headings = Signal.makeSync<ReadonlyArray<string>>([]);
+        const oldRouteTick = Signal.makeSync(0);
+        const newRouteReady = yield* Deferred.make<void>();
+        const flushDom = Effect.promise<void>(
+          () => new Promise((resolve) => setTimeout(resolve, 10)),
+        );
+        const staleRouteRenders: Array<string> = [];
+
+        const currentPathSnapshot = Effect.gen(function* () {
+          const router = yield* Router.Router;
+          const route = yield* SubscriptionRef.get(router.current._ref);
+          return route.path;
+        });
+
+        const DocsLikeLayout = Components.gen(function* () {
+          const route = yield* Router.currentRoute;
+
+          return (
+            <section data-testid="docs-layout" data-path={route.path}>
+              <main>
+                <Outlet />
+              </main>
+              <aside data-testid="docs-rail">
+                {Signal.each(headings, (heading) => Effect.succeed(<span>{heading}</span>), {
+                  key: (heading) => heading,
+                })}
+              </aside>
+            </section>
+          );
+        });
+
+        const GettingStarted = Components.gen(function* () {
+          yield* Signal.get(oldRouteTick);
+          const path = yield* currentPathSnapshot;
+          if (path !== "/docs/getting-started") {
+            staleRouteRenders.push(`getting-started rendered while current=${path}`);
+          }
+          yield* Signal.set(headings, ["getting-started"]);
+          return <article data-testid="getting-started">Getting started</article>;
+        });
+
+        const ComponentsPage = Components.gen(function* () {
+          yield* Signal.set(headings, ["components"]);
+          yield* Deferred.await(newRouteReady);
+          return <article data-testid="components">Components</article>;
+        });
+
+        const manifest = Routes.make().add(
+          Route.make("/docs")
+            .layout(DocsLikeLayout)
+            .children(
+              Route.make("/getting-started").component(GettingStarted),
+              Route.make("/components").component(ComponentsPage),
+            ),
+        ).manifest;
+
+        const { container } = yield* render(<Outlet routes={manifest} />);
+        yield* TestClock.adjust(100);
+
+        assert.isNotNull(
+          container.querySelector("[data-testid='getting-started']"),
+          `Getting started should render initially. DOM: ${container.innerHTML}`,
+        );
+
+        const router = yield* Router.Router;
+        yield* router.navigate("/docs/components");
+        yield* flushDom;
+
+        yield* Signal.update(oldRouteTick, (n) => n + 1);
+        yield* TestClock.adjust(20);
+
+        yield* Deferred.succeed(newRouteReady, void 0);
+        yield* TestClock.adjust(100);
+
+        assert.isNotNull(
+          container.querySelector("[data-testid='components']"),
+          `Components should be visible after resolving. DOM: ${container.innerHTML}`,
+        );
+        assert.isNull(
+          container.querySelector("[data-testid='getting-started']"),
+          `Getting started should be gone after resolving. DOM: ${container.innerHTML}`,
+        );
+        assert.deepStrictEqual(
+          yield* Signal.peek(headings),
+          ["components"],
+          "Stale route work must not overwrite route-owned docs chrome after newer navigation wins",
+        );
+        assert.deepStrictEqual(staleRouteRenders, []);
+      }).pipe(Effect.provide(testLayerAt("/docs/getting-started"))),
+  );
+
+  scoped("commits docs layout chrome before a slow initial route child resolves", () =>
+    Effect.gen(function* () {
+      const articleStarted = yield* Deferred.make<void>();
+      const articleReady = yield* Deferred.make<void>();
+
+      const DocsLayout = Components.gen(function* () {
+        return (
+          <>
+            <header data-testid="docs-header">Docs header</header>
+            <section data-testid="docs-shell">
+              <aside data-testid="docs-sidebar">Docs sidebar</aside>
+              <main id="main-content">
+                <Outlet />
+              </main>
+            </section>
+          </>
+        );
+      });
+
+      const ResourcesPage = Components.gen(function* () {
+        yield* Deferred.succeed(articleStarted, void 0);
+        yield* Deferred.await(articleReady);
+        return <article data-testid="resources-page">Resources</article>;
+      });
+
+      const manifest = Routes.make().add(
+        Route.make("/docs")
+          .layout(DocsLayout)
+          .children(Route.make("/resources").component(ResourcesPage)),
+      ).manifest;
+
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+      const renderer = yield* Renderer;
+      const mountFiber = yield* Effect.forkScoped(
+        renderer.mount(container, <Outlet routes={manifest} />),
+      );
+      yield* Deferred.await(articleStarted);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-header']"),
+        `Docs header should be visible while the initial article is still rendering. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-shell']"),
+        `Docs shell should be visible while the initial article is still rendering. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-sidebar']"),
+        `Docs sidebar should be visible while the initial article is still rendering. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("#main-content"),
+        `Docs main region should be visible while the initial article is still rendering. DOM: ${container.innerHTML}`,
+      );
+      assert.isNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources article should not be visible until its component resolves. DOM: ${container.innerHTML}`,
+      );
+
+      yield* Deferred.succeed(articleReady, void 0);
+      yield* Fiber.join(mountFiber);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources article should render after it resolves. DOM: ${container.innerHTML}`,
+      );
+    }).pipe(Effect.provide(testLayerAt("/docs/resources"))),
+  );
+
+  scoped("commits docs layout chrome before a lazy initial route module resolves", () =>
+    Effect.gen(function* () {
+      const moduleRequested = yield* Deferred.make<void>();
+      const moduleReady = yield* Deferred.make<void>();
+
+      const DocsLayout = Components.gen(function* () {
+        return (
+          <>
+            <header data-testid="docs-header">Docs header</header>
+            <section data-testid="docs-shell">
+              <aside data-testid="docs-sidebar">Docs sidebar</aside>
+              <main id="main-content">
+                <Outlet />
+              </main>
+            </section>
+          </>
+        );
+      });
+
+      const ResourcesPage = Components.gen(function* () {
+        return <article data-testid="resources-page">Resources</article>;
+      });
+
+      const context = yield* Effect.context<never>();
+      const LazyResourcesPage = () =>
+        Effect.runPromiseWith(context)(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(moduleRequested, void 0);
+            yield* Deferred.await(moduleReady);
+            return { default: ResourcesPage };
+          }),
+        );
+
+      const manifest = Routes.make().add(
+        Route.make("/docs")
+          .layout(DocsLayout)
+          .children(Route.make("/resources").component(LazyResourcesPage)),
+      ).manifest;
+
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+      const renderer = yield* Renderer;
+      const mountFiber = yield* Effect.forkScoped(
+        renderer.mount(container, <Outlet routes={manifest} />),
+      );
+      yield* Deferred.await(moduleRequested);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-header']"),
+        `Docs header should be visible while the lazy route module is still loading. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-shell']"),
+        `Docs shell should be visible while the lazy route module is still loading. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-sidebar']"),
+        `Docs sidebar should be visible while the lazy route module is still loading. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("#main-content"),
+        `Docs main region should be visible while the lazy route module is still loading. DOM: ${container.innerHTML}`,
+      );
+      assert.isNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources article should not be visible until its lazy module resolves. DOM: ${container.innerHTML}`,
+      );
+
+      yield* Deferred.succeed(moduleReady, void 0);
+      yield* Fiber.join(mountFiber);
+      yield* Effect.promise<void>(() => new Promise((resolve) => setTimeout(resolve, 10)));
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources article should render after the lazy module resolves. DOM: ${container.innerHTML}`,
+      );
+    }).pipe(Effect.provide(testLayerAt("/docs/resources"))),
+  );
+
+  scoped("preserves docs layout chrome DOM when navigating between sibling route children", () =>
+    Effect.gen(function* () {
+      let nextLayoutInstance = 0;
+      let layoutCleanupCount = 0;
+
+      const DocsLayout = Components.gen(function* () {
+        const instance = `layout-${++nextLayoutInstance}`;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            layoutCleanupCount++;
+          }),
+        );
+
+        return (
+          <>
+            <header data-testid="docs-header" data-instance={instance}>
+              Docs header
+            </header>
+            <section data-testid="docs-shell" data-instance={instance}>
+              <aside data-testid="docs-sidebar" data-instance={instance}>
+                Docs sidebar
+              </aside>
+              <main>
+                <Outlet />
+              </main>
+            </section>
+            <footer data-testid="docs-footer" data-instance={instance}>
+              Docs footer
+            </footer>
+          </>
+        );
+      });
+
+      const SignalsPage = Components.gen(function* () {
+        return <article data-testid="signals-page">Signals</article>;
+      });
+
+      const ResourcesPage = Components.gen(function* () {
+        return <article data-testid="resources-page">Resources</article>;
+      });
+
+      const manifest = Routes.make().add(
+        Route.make("/docs")
+          .layout(DocsLayout)
+          .children(
+            Route.make("/signals").component(SignalsPage),
+            Route.make("/resources").component(ResourcesPage),
+          ),
+      ).manifest;
+
+      const { container } = yield* render(<Outlet routes={manifest} />);
+      yield* TestClock.adjust(100);
+
+      const initialShell = container.querySelector("[data-testid='docs-shell']");
+      const initialHeader = container.querySelector("[data-testid='docs-header']");
+      const initialSidebar = container.querySelector("[data-testid='docs-sidebar']");
+      assert.isNotNull(
+        initialShell,
+        `Docs shell should render initially. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        initialHeader,
+        `Docs header should render initially. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        initialSidebar,
+        `Docs sidebar should render initially. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='signals-page']"),
+        `Signals page should render initially. DOM: ${container.innerHTML}`,
+      );
+
+      const router = yield* Router.Router;
+      yield* router.navigate("/docs/resources");
+      yield* TestClock.adjust(100);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources page should render after navigation. DOM: ${container.innerHTML}`,
+      );
+      assert.strictEqual(
+        container.querySelector("[data-testid='docs-shell']"),
+        initialShell,
+        "Sibling docs topic navigation must preserve the mounted docs shell node",
+      );
+      assert.strictEqual(
+        container.querySelector("[data-testid='docs-header']"),
+        initialHeader,
+        "Sibling docs topic navigation must preserve the mounted docs header node",
+      );
+      assert.strictEqual(
+        container.querySelector("[data-testid='docs-sidebar']"),
+        initialSidebar,
+        "Sibling docs topic navigation must preserve the mounted docs sidebar node",
+      );
+      assert.strictEqual(
+        layoutCleanupCount,
+        0,
+        "Sibling docs topic navigation must not unmount the docs layout component",
+      );
+    }).pipe(Effect.provide(testLayerAt("/docs/signals"))),
   );
 
   scoped("should show new route content after navigation", () =>

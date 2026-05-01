@@ -1,29 +1,30 @@
 /**
- * Root Layout — trygg.dev
+ * Root Layout: trygg.dev
  *
  * Minimal document structure for landing page.
- * Dark theme, technical aesthetic.
+ * Supports light and dark themes with no flash on load.
  */
 import "../styles.css";
 
 import { Component } from "trygg";
 import * as Router from "trygg/router";
 
+import { themeColor, themeInitScript } from "./lib/theme";
+
 const seo = {
-  title: "trygg — Effect-native UI framework",
+  title: "trygg: Effect-native UI framework",
   description:
-    "Effect-native UI framework with fine-grained reactivity, type-safe routing, and dependency injection built in. Components that compose like Effects.",
+    "TypeScript UI framework built on Effect. Component types declare props, typed errors, and service dependencies. Signals, HttpApi contracts, generated clients.",
   url: "https://trygg.dev",
 } as const;
 
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "trygg",
-  applicationCategory: "DeveloperApplication",
-  operatingSystem: "Any",
+  "@type": "SoftwareSourceCode",
+  name: "trygg: Effect-native UI framework",
   description: seo.description,
   url: seo.url,
+  codeRepository: "https://github.com/EduSantosBrito/trygg",
   author: {
     "@type": "Person",
     name: "Eduardo Santos Brito",
@@ -35,17 +36,18 @@ const jsonLd = {
 
 export default Component.gen(function* () {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="light">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script>{themeInitScript}</script>
 
         {/* Primary Meta */}
         <title>{seo.title}</title>
         <meta name="description" content={seo.description} />
         <meta
           name="keywords"
-          content="Effect, TypeScript, UI framework, fine-grained reactivity, dependency injection, type-safe, JSX, signals"
+          content="Effect, TypeScript, full-stack UI framework, HttpApi, generated API client, fine-grained reactivity, dependency injection, type-safe, JSX, signals"
         />
         <meta name="author" content="Eduardo Santos Brito" />
         <meta name="robots" content="index, follow, max-image-preview:large" />
@@ -63,7 +65,7 @@ export default Component.gen(function* () {
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:image:type" content="image/png" />
-        <meta property="og:image:alt" content="trygg — Effect-native UI framework" />
+        <meta property="og:image:alt" content="trygg: Effect-native UI framework" />
 
         {/* Twitter */}
         <meta name="twitter:card" content="summary_large_image" />
@@ -72,12 +74,12 @@ export default Component.gen(function* () {
         <meta name="twitter:image" content={`${seo.url}/og/og-image.png`} />
 
         {/* Theme */}
-        <meta name="theme-color" content="#050508" />
-        <meta name="color-scheme" content="dark" />
+        <meta name="theme-color" content={themeColor("light")} />
+        <meta name="color-scheme" content="light dark" />
 
         {/* Fonts */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
         <link
           href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@700&display=swap"
           rel="stylesheet"

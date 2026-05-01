@@ -16,7 +16,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Data, Effect, Exit, Option } from "effect";
+import { Cause, Data, Effect, Exit, Option, Ref } from "effect";
 import { TestClock } from "effect/testing";
 import * as Router from "../service.js";
 import type { RouteErrorInfo } from "../types.js";
@@ -84,6 +84,23 @@ describe("Router.query", () => {
       assert.strictEqual(query.get("foo"), "bar");
       assert.strictEqual(query.get("baz"), "123");
     }).pipe(Effect.provide(Router.testLayer("/?foo=bar&baz=123"))),
+  );
+
+  scoped("should not notify query subscribers when serialized query is unchanged", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const notifications = yield* Ref.make(0);
+      const unsubscribe = yield* Signal.subscribe(router.query, () =>
+        Ref.update(notifications, (count) => count + 1),
+      );
+
+      yield* router.navigate("/users", { query: { tab: "main" } });
+
+      const count = yield* Ref.get(notifications);
+      yield* unsubscribe;
+
+      assert.strictEqual(count, 0);
+    }).pipe(Effect.provide(Router.testLayer("/dashboard?tab=main"))),
   );
 });
 

@@ -13,6 +13,9 @@
     "test": "bun run --cwd packages/core test && bun run --cwd apps/www test",
     "test:watch": "bun run --cwd packages/core test:watch",
     "examples": "bun run build && bun run --cwd apps/examples dev",
+    "www": "bun run --cwd apps/www dev",
+    "www:build": "bun run --cwd apps/www build",
+    "www:preview": "bun run --cwd apps/www preview",
     "examples:preview": "bun run build && bun run --cwd apps/examples build && bun run --cwd apps/examples preview",
     "examples:install": "bun install --cwd apps/examples",
     "lint": "oxlint packages apps",
@@ -20,13 +23,11 @@
     "format": "oxfmt packages apps '!**/dist/**' --check",
     "format:fix": "oxfmt packages apps '!**/dist/**' --write",
     "effect:check": "bun run --cwd packages/core effect:check",
-    "sandcastle": "bun .sandcastle/main.ts",
     "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check",
     "readme:header": "bun run --cwd apps/www scripts/build-readme-header.mjs",
     "prepare": "effect-tsgo patch"
   },
   "devDependencies": {
-    "@ai-hero/sandcastle": "0.5.4",
     "@effect/platform-node": "4.0.0-beta.58",
     "@effect/tsgo": "0.5.2",
     "@typescript/native-preview": "latest",
@@ -34,8 +35,5 @@
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
     "typescript": "^5.9.3"
-  },
-  "patchedDependencies": {
-    "@ai-hero/sandcastle@0.5.4": "patches/@ai-hero%2Fsandcastle@0.5.4.patch"
   }
 }

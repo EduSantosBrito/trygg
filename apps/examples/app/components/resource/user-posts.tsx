@@ -41,7 +41,7 @@ export const UserPosts = Component.gen(function* (
               <button
                 className="text-sm px-3 py-1.5 border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
                 onClick={() =>
-                  Signal.get(userId).pipe(
+                  Signal.peek(userId).pipe(
                     Effect.flatMap((id) => Resource.invalidate(userPostsResource({ id }))),
                   )
                 }
@@ -68,7 +68,7 @@ export const UserPosts = Component.gen(function* (
             <ErrorView
               error={error}
               onRetry={() =>
-                Signal.get(userId).pipe(
+                Signal.peek(userId).pipe(
                   Effect.flatMap((id) => Resource.refresh(userPostsResource({ id }))),
                 )
               }

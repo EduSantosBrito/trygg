@@ -98,8 +98,8 @@ const FormPage = Component.gen(function* () {
       yield* Signal.set(emailError, Option.none());
       yield* Signal.set(passwordError, Option.none());
 
-      const currentEmail = yield* Signal.get(email);
-      const currentPassword = yield* Signal.get(password);
+      const currentEmail = yield* Signal.peek(email);
+      const currentPassword = yield* Signal.peek(password);
 
       const emailResult = yield* validateEmail(currentEmail).pipe(Effect.result);
       if (Result.isFailure(emailResult)) {

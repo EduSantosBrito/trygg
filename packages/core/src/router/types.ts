@@ -191,6 +191,12 @@ export type RoutePath = keyof RouteMap | (string & Record<never, never>);
 // Type-Safe Routing Utilities
 // ==========================================
 
+type CleanParamName<P extends string> = P extends `${infer Name}*`
+  ? Name
+  : P extends `${infer Name}+`
+    ? Name
+    : P;
+
 /**
  * Extract route params from a path pattern.
  * Uses template literal types to parse :param segments.
@@ -218,10 +224,10 @@ export type RoutePath = keyof RouteMap | (string & Record<never, never>);
 export type ExtractRouteParams<T extends string> =
   // Handle :param/rest pattern
   T extends `${infer _Start}:${infer Param}/${infer Rest}`
-    ? { readonly [K in Param]: string } & ExtractRouteParams<`/${Rest}`>
+    ? { readonly [K in CleanParamName<Param>]: string } & ExtractRouteParams<`/${Rest}`>
     : // Handle trailing :param pattern
       T extends `${infer _Start}:${infer Param}`
-      ? { readonly [K in Param]: string }
+      ? { readonly [K in CleanParamName<Param>]: string }
       : // No params found
         {};
 

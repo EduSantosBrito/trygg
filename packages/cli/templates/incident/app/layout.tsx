@@ -20,8 +20,12 @@ export default Component.gen(function* () {
       const handler = (event: KeyboardEvent) => {
         if ((event.metaKey || event.ctrlKey) && event.key === "k") {
           event.preventDefault();
-          const isOpen = Signal.peekSync(cmdkOpen);
-          Effect.runSync(Signal.set(cmdkOpen, !isOpen));
+          Effect.runFork(
+            Effect.gen(function* () {
+              const isOpen = yield* Signal.peek(cmdkOpen);
+              yield* Signal.set(cmdkOpen, !isOpen);
+            }),
+          );
         }
       };
 

@@ -197,9 +197,29 @@ export const renderComponent = (
           yield* closeCurrentRenderScope;
           currentRenderScope = nextRender.scope;
         } else {
-          const nextResult = yield* renderAndPosition(nextElement).pipe(
-            Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
-          );
+          const actualParent = anchor.parentNode;
+          if (actualParent === null) {
+            yield* Scope.close(nextRender.scope, Exit.void);
+            return yield* Effect.fail(
+              new ComponentAnchorError({
+                message:
+                  "Component anchor has no parent - component may have been unmounted during rerender",
+              }),
+            );
+          }
+          // Render the replacement subtree off-DOM into a fragment so the
+          // user never sees the new tree mid-construction next to the old
+          // one. The previous renderAndPosition path mounted progressively
+          // into actualParent, producing visible "two trees coexisting"
+          // flashes under CPU throttling.
+          const tempFragment = document.createDocumentFragment();
+          const nextResult = yield* deps
+            .renderElement(nextElement, tempFragment, runtime, currentContext, options)
+            .pipe(
+              Effect.provideService(Signal.CurrentRenderPhase, null),
+              Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
+            );
+          actualParent.insertBefore(tempFragment, anchor);
           yield* cleanupCurrent;
           currentRenderScope = nextRender.scope;
           currentResult = nextResult;

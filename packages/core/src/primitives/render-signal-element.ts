@@ -89,9 +89,31 @@ export const renderSignalElement = (
         deps.runForkInRenderContext(
           Effect.gen(function* () {
             const newValue = yield* Signal.get(signal);
+            const element = renderValue(newValue);
+
+            // Reconcile in place when the new value's outer Component matches
+            // the current one by key/identity. Without this, sibling-route
+            // navigation (e.g. /docs/signals → /docs/resources) tears down
+            // and remounts the entire shared layout subtree.
+            if (currentResult !== null && currentResult.reconcile !== undefined) {
+              const reconciled = yield* currentResult
+                .reconcile(element, context)
+                .pipe(Effect.catchCause(() => Effect.succeed(false)));
+              if (reconciled) {
+                if (myVersion !== swapVersion) return;
+                if (onSwap !== undefined) {
+                  yield* onSwap;
+                }
+                yield* Debug.log({
+                  event: "render.signalelement.reconcile",
+                  signal_id: signal._debugId,
+                });
+                return;
+              }
+            }
+
             const tempFragment = document.createDocumentFragment();
             const scope = yield* Scope.fork(yield* Effect.scope);
-            const element = renderValue(newValue);
             const result = yield* deps
               .renderElement(element, tempFragment, renderContext, context, options)
               .pipe(
@@ -105,13 +127,24 @@ export const renderSignalElement = (
               return;
             }
 
-            yield* cleanupCurrent;
-
-            currentResult = result;
-            currentScope = scope;
+            // Insert the replacement BEFORE cleaning the old subtree so that
+            // the document never goes through a blank frame. The previous
+            // tree's finalizers see the replacement already mounted.
             const actualParent = anchor.parentNode;
             if (actualParent !== null) {
               actualParent.insertBefore(tempFragment, anchor);
+            }
+
+            const oldResult = currentResult;
+            const oldScope = currentScope;
+            currentResult = result;
+            currentScope = scope;
+
+            if (oldResult !== null) {
+              yield* oldResult.cleanup;
+            }
+            if (oldScope !== null) {
+              yield* Scope.close(oldScope, Exit.void);
             }
 
             if (onSwap !== undefined) {

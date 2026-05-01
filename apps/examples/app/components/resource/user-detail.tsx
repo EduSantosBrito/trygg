@@ -22,7 +22,7 @@ export const UserDetail = Component.gen(function* (
           <button
             className="text-sm px-3 py-1.5 border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100 disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={() =>
-              Signal.get(userId).pipe(
+              Signal.peek(userId).pipe(
                 Effect.flatMap((id) => Resource.invalidate(userResource({ id }))),
               )
             }
@@ -33,7 +33,7 @@ export const UserDetail = Component.gen(function* (
           <button
             className="text-sm px-3 py-1.5 border border-gray-300 rounded bg-white cursor-pointer transition-colors hover:bg-gray-100"
             onClick={() =>
-              Signal.get(userId).pipe(
+              Signal.peek(userId).pipe(
                 Effect.flatMap((id) => Resource.refresh(userResource({ id }))),
               )
             }
@@ -51,7 +51,7 @@ export const UserDetail = Component.gen(function* (
             <ErrorView
               error={error}
               onRetry={() =>
-                Signal.get(userId).pipe(
+                Signal.peek(userId).pipe(
                   Effect.flatMap((id) => Resource.refresh(userResource({ id }))),
                 )
               }
@@ -64,7 +64,7 @@ export const UserDetail = Component.gen(function* (
                 <button
                   className="bg-red-800 text-white border-none py-1.5 px-2.5 rounded cursor-pointer text-sm"
                   onClick={() =>
-                    Signal.get(userId).pipe(
+                    Signal.peek(userId).pipe(
                       Effect.flatMap((id) => Resource.refresh(userResource({ id }))),
                     )
                   }

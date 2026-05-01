@@ -6,7 +6,7 @@
  *
  * Test Categories:
  * - Creation: make, sync
- * - Reading: get, peekSync
+ * - Reading: get, peek
  * - Writing: set, update, modify
  * - Subscription: subscribe, notify listeners
  * - Derived: derive
@@ -146,13 +146,13 @@ describe("Signal.makeSync", () => {
     const signal = Signal.makeSync(42);
 
     assert.strictEqual(signal._tag, "Signal");
-    assert.strictEqual(Signal.peekSync(signal), 42);
+    assert.strictEqual(Effect.runSync(Signal.peek(signal)), 42);
   });
 
   it("should work for module-level global signals", () => {
     const globalSignal = Signal.makeSync({ initialized: true });
 
-    assert.deepStrictEqual(Signal.peekSync(globalSignal), { initialized: true });
+    assert.deepStrictEqual(Effect.runSync(Signal.peek(globalSignal)), { initialized: true });
   });
 });
 
@@ -195,23 +195,26 @@ describe("Signal.get", () => {
 });
 
 // =============================================================================
-// Signal.peekSync - Read without subscription
+// Signal.peek - Read without subscription
 // =============================================================================
-// Scope: Synchronous read without tracking
+// Scope: Effectful read without tracking
 
-describe("Signal.peekSync", () => {
-  it("should return current value synchronously", () => {
-    const signal = Signal.makeSync(99);
+describe("Signal.peek", () => {
+  scoped("should return current value", () =>
+    Effect.gen(function* () {
+      const signal = yield* Signal.make(99);
+      const value = yield* Signal.peek(signal);
 
-    assert.strictEqual(Signal.peekSync(signal), 99);
-  });
+      assert.strictEqual(value, 99);
+    }),
+  );
 
-  scoped("should not trigger any subscription", () =>
+  scoped("should not add signal to accessed set when in render phase", () =>
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
       const signal = yield* Signal.make(50);
 
-      const value = Signal.peekSync(signal);
+      const value = yield* withRenderPhase(Signal.peek(signal), phase);
 
       assert.strictEqual(value, 50);
       assert.isFalse(phase.accessed.has(signal));

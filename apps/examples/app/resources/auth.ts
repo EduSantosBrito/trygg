@@ -21,14 +21,14 @@ export const setAuth = (user: Option.Option<AuthUser>): Effect.Effect<void> =>
 /**
  * Helper to get current auth state
  */
-export const getAuth = Signal.get(authSignal);
+export const getAuth = Signal.peek(authSignal);
 
 /**
  * Route middleware - checks if user is authenticated.
  * Redirects to /login if not authenticated.
  */
 export const requireAuth = Effect.gen(function* () {
-  const user = yield* Signal.get(authSignal);
+  const user = yield* Signal.peek(authSignal);
 
   if (Option.isNone(user)) {
     return yield* Router.routeRedirect("/login");

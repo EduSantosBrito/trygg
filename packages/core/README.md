@@ -182,7 +182,8 @@ JSX lowering details now live with the entrypoints themselves: [`src/jsx-runtime
 | `Component.gen(fn)`                   | Create component with explicit DI                  |
 | `Component.gen(fn).provide(layer)`    | Satisfy service requirements with a layer          |
 | `Signal.make(initial)`                | Create reactive state                              |
-| `Signal.get(signal)`                  | Read value and subscribe to changes                |
+| `Signal.get(signal)`                  | Read value and subscribe current render            |
+| `Signal.peek(signal)`                 | Read value without subscribing current render      |
 | `Signal.set(signal, value)`           | Set signal value                                   |
 | `Signal.update(signal, fn)`           | Update signal with function                        |
 | `Signal.derive(source, fn)`           | Computed signal from a source                      |

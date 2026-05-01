@@ -26,6 +26,7 @@
  * - **Signal for state**: `Signal.make(initial)` creates reactive state
  * - **Fine-grained updates**: Pass signals directly to JSX for surgical DOM updates
  * - **Re-renders**: Use `Signal.get(signal)` when you need the component to re-render
+ * - **Snapshots**: Use `Signal.peek(signal)` for untracked imperative reads
  *
  * ## Core Exports
  *

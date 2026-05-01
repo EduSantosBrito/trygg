@@ -3,6 +3,8 @@ import { Effect, Exit, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
+import * as Component from "../component.js";
+import type { ComponentProps } from "../component.js";
 import * as Signal from "../signal.js";
 
 describe("render-signal-element", () => {
@@ -17,6 +19,98 @@ describe("render-signal-element", () => {
 
       assert.strictEqual((yield* getByTestId("after")).textContent, "after");
       assert.isTrue((yield* queryByTestId("before"))._tag === "None");
+    }),
+  );
+
+  scoped(
+    "keeps the replacement content visible while cleaning the previous content during swap",
+    () =>
+      Effect.gen(function* () {
+        const cleanupSnapshots: Array<string> = [];
+        let container: HTMLElement | null = null;
+
+        const Previous = Component.gen(function* () {
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              cleanupSnapshots.push(container?.textContent?.replace(/\s+/g, " ").trim() ?? "");
+            }),
+          );
+
+          return <section data-testid="previous">previous docs shell</section>;
+        });
+
+        const Replacement = Component.gen(function* () {
+          return <section data-testid="replacement">replacement docs shell</section>;
+        });
+
+        const view = yield* Signal.make(<Previous />);
+        const result = yield* render(<main>{view}</main>);
+        container = result.container;
+
+        assert.include(result.container.textContent ?? "", "previous docs shell");
+
+        yield* Signal.set(view, <Replacement />);
+        yield* TestClock.adjust(20);
+
+        assert.include(result.container.textContent ?? "", "replacement docs shell");
+        assert.deepStrictEqual(
+          cleanupSnapshots,
+          ["replacement docs shell"],
+          "The old tree cleanup must not expose a blank frame before the replacement is inserted",
+        );
+      }),
+  );
+
+  scoped("falls back to a fresh mount when component reconciliation fails during a swap", () =>
+    Effect.gen(function* () {
+      let nextRenderAttempts = 0;
+      const cleanupSnapshots: Array<string> = [];
+      let container: HTMLElement | null = null;
+
+      const FragilePanel = Component.gen(function* (
+        Props: ComponentProps<{ readonly label: "previous" | "next" }>,
+      ) {
+        const { label } = yield* Props;
+
+        if (label === "previous") {
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              cleanupSnapshots.push(container?.textContent?.replace(/\s+/g, " ").trim() ?? "");
+            }),
+          );
+        }
+
+        if (label === "next") {
+          nextRenderAttempts += 1;
+          if (nextRenderAttempts === 1) {
+            yield* Effect.die(new Error("synthetic reconcile-only failure"));
+          }
+        }
+
+        return <section data-testid={label}>{label} panel</section>;
+      });
+
+      const view = yield* Signal.make(<FragilePanel label="previous" />);
+      const result = yield* render(<main>{view}</main>);
+      container = result.container;
+
+      assert.include(result.container.textContent ?? "", "previous panel");
+
+      yield* Signal.set(view, <FragilePanel label="next" />);
+      yield* TestClock.adjust(20);
+
+      assert.include(
+        result.container.textContent ?? "",
+        "next panel",
+        `Signal element should recover by mounting the replacement after reconcile fails. DOM: ${result.container.innerHTML}`,
+      );
+      assert.notInclude(result.container.textContent ?? "", "previous panel");
+      assert.isAtLeast(nextRenderAttempts, 2);
+      assert.deepStrictEqual(
+        cleanupSnapshots,
+        ["next panel"],
+        "The failed reconcile must not clean the old tree until the fallback replacement is visible",
+      );
     }),
   );
 

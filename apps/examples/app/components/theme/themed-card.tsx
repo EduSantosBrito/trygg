@@ -1,23 +1,25 @@
-import { Component } from "trygg";
-import { Theme } from "../../services/theme";
+import { Component, Signal } from "trygg";
+import { ThemeStore } from "../../services/theme";
 
 export const ThemedCard = Component.gen(function* () {
-  const theme = yield* Theme;
+  const theme = yield* ThemeStore;
+  const tokens = yield* Signal.get(theme.tokens);
 
   return (
     <div
       className="p-6 rounded-lg border-2 border-solid"
       style={{
-        background: theme.background,
-        color: theme.text,
-        borderColor: theme.border,
+        background: tokens.background,
+        color: tokens.text,
+        borderColor: tokens.border,
       }}
     >
-      <h3 className="mt-0" style={{ color: theme.primary }}>
-        {theme.name} Theme
+      <h3 className="mt-0" style={{ color: tokens.primary }}>
+        {theme.themeName}
       </h3>
-      <p>This card uses the injected theme service.</p>
-      <p>Click "Switch to Dark/Light Theme" above to see the theme change.</p>
+      <p>This card observes theme state from the injected ThemeStore service.</p>
+      <p>Current mode: {theme.mode}</p>
+      <p>Click "Switch to Dark/Light Theme" above to send a toggle intent.</p>
     </div>
   );
 });

@@ -43,10 +43,10 @@ const TodoPage = Component.gen(function* () {
 
   const addTodo = () =>
     Effect.gen(function* () {
-      const text = (yield* Signal.get(inputValue)).trim();
+      const text = (yield* Signal.peek(inputValue)).trim();
       if (text === "") return;
 
-      const id = yield* Signal.get(nextId);
+      const id = yield* Signal.peek(nextId);
       yield* Signal.update(todos, (list) => [...list, { id, text, completed: false }]);
       yield* Signal.update(nextId, (n) => n + 1);
       yield* Signal.set(inputValue, "");
@@ -88,7 +88,7 @@ const TodoPage = Component.gen(function* () {
 
         const saveEditing = () =>
           Effect.gen(function* () {
-            const text = yield* Signal.get(editText);
+            const text = yield* Signal.peek(editText);
             if (Option.isSome(text) && text.value.trim() !== "") {
               yield* updateTodoText(todo.id, text.value.trim());
             }

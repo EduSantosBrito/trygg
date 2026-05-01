@@ -37,7 +37,6 @@ This project is issue-first. Do not open pull requests unless explicitly request
 | Feature request | `feature` | New user-facing capability or behavior |
 | DX improvement | `dx` | Developer experience, tooling, docs, examples, diagnostics |
 | Bug | `bug` | Incorrect behavior, crashes, regressions, broken contracts |
-| Sandcastle | `sandcastle` | Ralph looping tasks, exploratory iteration, throwaway scaffolding |
 | PRD | `prd` | Product requirements, larger specs, multi-issue plans |
 
 Issue titles should use this shape:
@@ -51,7 +50,6 @@ Examples:
 - `[feature] add scoped event handlers`
 - `[dx] improve component error messages`
 - `[bug] fix signal cleanup leak`
-- `[sandcastle] explore keyed list rendering loop`
 - `[prd] define router requirements`
 
 Good issues include:
