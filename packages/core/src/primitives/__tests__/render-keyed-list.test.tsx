@@ -25,13 +25,16 @@ describe("renderKeyedList", () => {
         <div>
           {Signal.each(
             items,
-            (item) => <span data-id={item}>{item}</span>,
+            (item) => (
+              <span data-id={item}>{item}</span>
+            ),
             { key: (item) => item },
           )}
         </div>,
       );
 
-      const ids = () => Array.from(container.querySelectorAll("[data-id]")).map((el) => el.textContent);
+      const ids = () =>
+        Array.from(container.querySelectorAll("[data-id]")).map((el) => el.textContent);
 
       assert.deepEqual(ids(), []);
 
@@ -56,7 +59,9 @@ describe("renderKeyedList", () => {
         <div>
           {Signal.each(
             items,
-            (item) => <span data-id={item}>{item}</span>,
+            (item) => (
+              <span data-id={item}>{item}</span>
+            ),
             { key: (item) => item },
           )}
         </div>,

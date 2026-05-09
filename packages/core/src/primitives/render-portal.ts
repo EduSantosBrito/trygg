@@ -44,7 +44,13 @@ export const renderPortal = (
     const normalizedChildren = yield* Element.fromChildren(children);
     const childResults: Array<RenderResult> = [];
     for (const child of normalizedChildren) {
-      const result = yield* deps.renderElement(child, targetElement, renderContext, context, options);
+      const result = yield* deps.renderElement(
+        child,
+        targetElement,
+        renderContext,
+        context,
+        options,
+      );
       childResults.push(result);
     }
 

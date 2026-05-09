@@ -785,13 +785,13 @@ describe("Props application", () => {
 
   scoped("should reject SVG-only props on HTML elements at typecheck", () =>
     Effect.sync(() => {
-      void <svg viewBox="0 0 24 24" strokeWidth="2" />;
+      void (<svg viewBox="0 0 24 24" strokeWidth="2" />);
 
       // @ts-expect-error viewBox is SVG-only.
-      void <div viewBox="0 0 24 24" />;
+      void (<div viewBox="0 0 24 24" />);
 
       // @ts-expect-error strokeWidth is SVG-only.
-      void <button strokeWidth="2" />;
+      void (<button strokeWidth="2" />);
     }),
   );
 

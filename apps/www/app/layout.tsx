@@ -88,7 +88,6 @@ export default Component.gen(function* () {
 
         {/* JSON-LD */}
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
-
       </head>
       <body>
         <Router.Outlet />
