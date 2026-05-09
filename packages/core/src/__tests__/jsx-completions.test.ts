@@ -13,7 +13,7 @@ const Svg = Component.gen(function* () {
 });
 `;
 
-const completionNamesFor = (tag: "div" | "svg"): ReadonlySet<string> => {
+const completionsForTags = (): ReadonlyMap<"div" | "svg", ReadonlySet<string>> => {
   const root = process.cwd();
   const fileName = path.join(root, "src", "__completion-repro.tsx");
   const files = new Map<string, { readonly version: string; readonly text: string }>([
@@ -58,16 +58,21 @@ const completionNamesFor = (tag: "div" | "svg"): ReadonlySet<string> => {
   };
 
   const service = ts.createLanguageService(host);
-  const marker = `<${tag} vi`;
-  const position = source.indexOf(marker) + marker.length;
-  const completions = service.getCompletionsAtPosition(fileName, position, {});
-  return new Set(completions?.entries.map((entry) => entry.name) ?? []);
+  return new Map(
+    (["div", "svg"] as const).map((tag) => {
+      const marker = `<${tag} vi`;
+      const position = source.indexOf(marker) + marker.length;
+      const completions = service.getCompletionsAtPosition(fileName, position, {});
+      return [tag, new Set(completions?.entries.map((entry) => entry.name) ?? [])];
+    }),
+  );
 };
 
 describe("JSX intrinsic completions", () => {
   it("does not offer SVG props on HTML elements", () => {
-    const divNames = completionNamesFor("div");
-    const svgNames = completionNamesFor("svg");
+    const completions = completionsForTags();
+    const divNames = completions.get("div") ?? new Set<string>();
+    const svgNames = completions.get("svg") ?? new Set<string>();
 
     assert.isFalse(divNames.has("viewBox"));
     assert.isFalse(divNames.has("strokeWidth"));

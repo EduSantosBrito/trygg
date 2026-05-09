@@ -27,8 +27,15 @@ export const renderProvide = (
   deps: RenderProvideDeps,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
   Effect.gen(function* () {
-    const mergedContext = context !== null ? Context.merge(context, providedContext) : providedContext;
-    const childResult = yield* deps.renderElement(child, parent, renderContext, mergedContext, options);
+    const mergedContext =
+      context !== null ? Context.merge(context, providedContext) : providedContext;
+    const childResult = yield* deps.renderElement(
+      child,
+      parent,
+      renderContext,
+      mergedContext,
+      options,
+    );
 
     return {
       get node() {

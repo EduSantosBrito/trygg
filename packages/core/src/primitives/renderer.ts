@@ -428,7 +428,9 @@ const renderElement = (
     ),
 
     Match.tag("Provide", ({ context: providedContext, child }) =>
-      renderProvide(providedContext, child, parent, renderContext, context, options, { renderElement }),
+      renderProvide(providedContext, child, parent, renderContext, context, options, {
+        renderElement,
+      }),
     ),
 
     Match.tag("Intrinsic", ({ tag, props, children, key }) =>

@@ -175,6 +175,15 @@ export interface CommonProps {
 /**
  * Backward-compatible alias for common intrinsic props.
  *
+ * @remarks
+ * `BaseProps` is retained for callers that imported the original shared
+ * intrinsic prop surface before `HtmlProps` and `SvgProps` were split.
+ *
+ * @example
+ * ```ts
+ * const props: BaseProps = { id: "root", className: "app" }
+ * ```
+ *
  * @category Elements
  * @public
  * @since 1.0.0
@@ -312,6 +321,16 @@ export interface HtmlProps extends CommonProps, EventProps {
 /**
  * Props for intrinsic SVG elements.
  *
+ * @remarks
+ * `SvgProps` is the shared prop shape used by known SVG intrinsic elements.
+ * It includes SVG-only attributes such as `viewBox` and `strokeWidth` that are
+ * intentionally not accepted by known HTML intrinsic elements.
+ *
+ * @example
+ * ```ts
+ * const props: SvgProps = { viewBox: "0 0 24 24", strokeWidth: 2 }
+ * ```
+ *
  * @category Elements
  * @public
  * @since 1.0.0
@@ -346,6 +365,11 @@ export interface SvgProps extends CommonProps, EventProps {
  * Kept as the broad low-level prop shape used by the element model and JSX
  * runtime bridge. JSX tag validation uses `IntrinsicElements` so known HTML
  * tags do not accept SVG-only props.
+ *
+ * @example
+ * ```ts
+ * const props: ElementProps = { id: "icon", viewBox: "0 0 24 24" }
+ * ```
  *
  * @category Elements
  * @public
@@ -598,9 +622,7 @@ export interface CustomIntrinsicElements {
 }
 
 export interface IntrinsicElements
-  extends HtmlIntrinsicElements,
-    SvgIntrinsicElements,
-    CustomIntrinsicElements {}
+  extends HtmlIntrinsicElements, SvgIntrinsicElements, CustomIntrinsicElements {}
 
 /**
  * Virtual DOM Element - the core type of trygg

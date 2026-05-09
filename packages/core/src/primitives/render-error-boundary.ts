@@ -94,7 +94,13 @@ export const renderErrorBoundary = (
 
         const fallbackScope = yield* Scope.fork(yield* Effect.scope);
         const fallbackResult = yield* deps
-          .renderElement(fallbackElement, renderParent, renderContext, context, deps.defaultRenderOptions)
+          .renderElement(
+            fallbackElement,
+            renderParent,
+            renderContext,
+            context,
+            deps.defaultRenderOptions,
+          )
           .pipe(
             Scope.provide(fallbackScope),
             Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
@@ -170,9 +176,7 @@ export const renderErrorBoundary = (
       .pipe(
         Scope.provide(childScope),
         Effect.onError(() => Scope.close(childScope, Exit.void)),
-        Effect.map(
-          (result): ChildRenderResult => ({ success: true, result, scope: childScope }),
-        ),
+        Effect.map((result): ChildRenderResult => ({ success: true, result, scope: childScope })),
         Effect.catchCause((cause) =>
           renderFallbackForError(cause).pipe(
             Effect.map((): ChildRenderResult => ({ success: false })),
