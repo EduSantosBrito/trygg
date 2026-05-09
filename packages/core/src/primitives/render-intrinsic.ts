@@ -51,8 +51,39 @@ const omitMode = (props: ElementProps): ElementProps => {
   return domProps;
 };
 
+const SVG_TAGS = new Set([
+  "svg",
+  "path",
+  "circle",
+  "ellipse",
+  "line",
+  "polygon",
+  "polyline",
+  "rect",
+  "g",
+  "defs",
+  "use",
+  "text",
+  "tspan",
+  "image",
+  "clipPath",
+  "mask",
+  "pattern",
+  "linearGradient",
+  "radialGradient",
+  "stop",
+  "symbol",
+  "marker",
+  "foreignObject",
+]);
+
+const createElement = (tag: string): globalThis.Element =>
+  SVG_TAGS.has(tag)
+    ? document.createElementNS("http://www.w3.org/2000/svg", tag)
+    : document.createElement(tag);
+
 const applyProps = Effect.fn("applyProps")(function* (
-  node: HTMLElement,
+  node: globalThis.Element,
   props: ElementProps,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
@@ -167,7 +198,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
     );
   }
 
-  const node = document.createElement(tag);
+  const node = createElement(tag);
 
   yield* Debug.log({ event: "render.intrinsic", element_tag: tag, element: node });
 
@@ -232,7 +263,9 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
   }
 
   if (Option.isSome(hoistAction) && hoistAction.value._tag === "head") {
-    yield* hoistAction.value.mount(node);
+    if (node instanceof HTMLElement) {
+      yield* hoistAction.value.mount(node);
+    }
     const anchor = document.createComment(`head:${tag}`);
     parent.appendChild(anchor);
 

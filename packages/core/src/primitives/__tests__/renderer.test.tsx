@@ -748,6 +748,41 @@ describe("Props application", () => {
     }),
   );
 
+  scoped("should apply className prop to SVG elements", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <svg data-testid="svg-classname" className="my-svg-class" viewBox="0 0 24 24" />,
+      );
+
+      assert.strictEqual(
+        (yield* getByTestId("svg-classname")).getAttribute("class"),
+        "my-svg-class",
+      );
+    }),
+  );
+
+  scoped("should update className on SVG elements when signal changes", () =>
+    Effect.gen(function* () {
+      const classSignal = Signal.makeSync("initial-svg");
+      const { getByTestId } = yield* render(
+        <svg data-testid="svg-sig-class" className={classSignal} viewBox="0 0 24 24" />,
+      );
+
+      assert.strictEqual(
+        (yield* getByTestId("svg-sig-class")).getAttribute("class"),
+        "initial-svg",
+      );
+
+      yield* Signal.set(classSignal, "updated-svg");
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual(
+        (yield* getByTestId("svg-sig-class")).getAttribute("class"),
+        "updated-svg",
+      );
+    }),
+  );
+
   scoped("should apply style object to element", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(

@@ -299,6 +299,26 @@ export interface ElementProps extends BaseProps, EventProps {
   readonly draggable?: boolean;
   readonly contentEditable?: boolean | "true" | "false" | "inherit";
   readonly spellCheck?: boolean | "true" | "false";
+
+  // SVG attributes
+  readonly viewBox?: string;
+  readonly xmlns?: string;
+  readonly fill?: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number | string;
+  readonly d?: string;
+  readonly cx?: number | string;
+  readonly cy?: number | string;
+  readonly r?: number | string;
+  readonly x?: number | string;
+  readonly y?: number | string;
+  readonly x1?: number | string;
+  readonly y1?: number | string;
+  readonly x2?: number | string;
+  readonly y2?: number | string;
+  readonly points?: string;
+  readonly transform?: string;
+  readonly pathLength?: number;
 }
 
 /**

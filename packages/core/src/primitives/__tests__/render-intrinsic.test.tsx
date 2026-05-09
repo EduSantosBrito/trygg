@@ -81,4 +81,24 @@ describe("renderIntrinsic", () => {
       assert.isFalse((yield* getByTestId("static-style")).hasAttribute("mode"));
     }),
   );
+
+  scoped("creates SVG elements with correct namespace", () =>
+    Effect.gen(function* () {
+      const { getByTestId } = yield* render(
+        <svg data-testid="svg-root" viewBox="0 0 24 24" width="24" height="24">
+          <circle data-testid="svg-circle" cx="12" cy="12" r="10" fill="red" />
+        </svg>,
+      );
+
+      const svg = yield* getByTestId("svg-root");
+      assert.strictEqual(svg.tagName, "svg");
+      assert.strictEqual(svg.namespaceURI, "http://www.w3.org/2000/svg");
+      assert.strictEqual(svg.getAttribute("viewBox"), "0 0 24 24");
+
+      const circle = yield* getByTestId("svg-circle");
+      assert.strictEqual(circle.tagName, "circle");
+      assert.strictEqual(circle.namespaceURI, "http://www.w3.org/2000/svg");
+      assert.strictEqual(circle.getAttribute("fill"), "red");
+    }),
+  );
 });
