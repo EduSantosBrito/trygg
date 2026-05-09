@@ -53,15 +53,17 @@ export const resolveReconcileTarget = (
  * @internal
  */
 export const applyPropValue = (
-  node: HTMLElement,
+  node: globalThis.Element,
   key: string,
   value: unknown,
   safeUrlConfig: SafeUrl.SafeUrlConfigService,
 ): Option.Option<BlockedSafeUrlAttribute> => {
   if (key === "style" && typeof value === "object" && value !== null) {
-    Object.assign(node.style, value);
+    if (node instanceof HTMLElement || node instanceof SVGElement) {
+      Object.assign(node.style, value);
+    }
   } else if (key === "className") {
-    node.className = String(value);
+    node.setAttribute("class", String(value));
   } else if (key === "htmlFor") {
     node.setAttribute("for", String(value));
   } else if (key === "checked" && node instanceof HTMLInputElement) {
