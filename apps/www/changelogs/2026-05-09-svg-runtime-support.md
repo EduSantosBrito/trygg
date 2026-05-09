@@ -8,11 +8,15 @@ version: "trygg@0.4.0-canary.1"
 This canary renders SVG intrinsic elements in the SVG namespace, so inline icons and graphics behave like browser-native SVG instead of HTML elements.
 
 ```tsx
-const icon = (
-  <svg viewBox="0 0 24 24" className="icon">
-    <circle cx="12" cy="12" r="10" fill="currentColor" />
-  </svg>
-);
+import { Component } from "trygg";
+
+const Icon = Component.gen(function* () {
+  return (
+    <svg viewBox="0 0 24 24" className="icon">
+      <circle cx="12" cy="12" r="10" fill="currentColor" />
+    </svg>
+  );
+});
 ```
 
 ## Added
