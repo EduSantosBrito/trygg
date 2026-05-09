@@ -116,7 +116,8 @@ export const isTryggMixedDynamicImportWarning = (warning: RollupWarning): boolea
   return message.includes("/packages/core/dist/") || message.includes("/node_modules/trygg/dist/");
 };
 
-const makeRollupOnwarn = (userOnwarn: RollupWarningHandler | undefined): RollupWarningHandler =>
+const makeRollupOnwarn =
+  (userOnwarn: RollupWarningHandler | undefined): RollupWarningHandler =>
   (warning, defaultHandler) => {
     if (isTryggMixedDynamicImportWarning(warning)) return;
     if (userOnwarn !== undefined) {
@@ -2249,18 +2250,18 @@ export const makeBuildOutput = ({
           })
         : output !== "server"
           ? Effect.void
-      : Effect.gen(function* () {
-          const paths = { appDir, generatedDir };
-          const serverEntryPath = yield* files
-            .writeProductionServerEntry(paths)
-            .pipe(Effect.provideService(ServerPlatform, serverPlatform));
+          : Effect.gen(function* () {
+              const paths = { appDir, generatedDir };
+              const serverEntryPath = yield* files
+                .writeProductionServerEntry(paths)
+                .pipe(Effect.provideService(ServerPlatform, serverPlatform));
 
-          yield* Effect.logInfo("Building production server...");
-          yield* buildServer(serverEntryPath, config);
-          yield* Effect.logInfo("Server build complete").pipe(
-            Effect.annotateLogs("style", "success"),
-          );
-        }),
+              yield* Effect.logInfo("Building production server...");
+              yield* buildServer(serverEntryPath, config);
+              yield* Effect.logInfo("Server build complete").pipe(
+                Effect.annotateLogs("style", "success"),
+              );
+            }),
 });
 
 const viteServerBuild = (

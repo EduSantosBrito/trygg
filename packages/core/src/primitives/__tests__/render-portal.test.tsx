@@ -13,7 +13,9 @@ describe("render-portal", () => {
       yield* Effect.addFinalizer(() => Effect.sync(() => target.remove()));
 
       const { getByTestId } = yield* render(
-        <div data-testid="host">{Element.Portal({ target, children: <span>teleported</span> })}</div>,
+        <div data-testid="host">
+          {Element.Portal({ target, children: <span>teleported</span> })}
+        </div>,
       );
 
       assert.strictEqual((yield* getByTestId("host")).textContent, "");

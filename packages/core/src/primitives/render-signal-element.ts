@@ -65,7 +65,10 @@ export const renderSignalElement = (
         const element = renderValue(value);
         const result = yield* deps
           .renderElement(element, parent, renderContext, context, options)
-          .pipe(Scope.provide(scope), Effect.onError(() => Scope.close(scope, Exit.void)));
+          .pipe(
+            Scope.provide(scope),
+            Effect.onError(() => Scope.close(scope, Exit.void)),
+          );
         return { result, scope };
       });
 
@@ -91,7 +94,10 @@ export const renderSignalElement = (
             const element = renderValue(newValue);
             const result = yield* deps
               .renderElement(element, tempFragment, renderContext, context, options)
-              .pipe(Scope.provide(scope), Effect.onError(() => Scope.close(scope, Exit.void)));
+              .pipe(
+                Scope.provide(scope),
+                Effect.onError(() => Scope.close(scope, Exit.void)),
+              );
 
             if (myVersion !== swapVersion) {
               yield* result.cleanup;

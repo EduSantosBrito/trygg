@@ -598,9 +598,7 @@ export interface CustomIntrinsicElements {
 }
 
 export interface IntrinsicElements
-  extends HtmlIntrinsicElements,
-    SvgIntrinsicElements,
-    CustomIntrinsicElements {}
+  extends HtmlIntrinsicElements, SvgIntrinsicElements, CustomIntrinsicElements {}
 
 /**
  * Virtual DOM Element - the core type of trygg

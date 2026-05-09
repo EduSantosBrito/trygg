@@ -1859,7 +1859,9 @@ mountDocument(<App />, { manifest: routes.manifest })
       build: Schema.Struct({
         rollupOptions: Schema.Struct({
           onwarn: Schema.declare(
-            (u: unknown): u is (warning: { readonly message?: string }, handler: () => void) => void =>
+            (
+              u: unknown,
+            ): u is (warning: { readonly message?: string }, handler: () => void) => void =>
               typeof u === "function",
           ),
         }),
