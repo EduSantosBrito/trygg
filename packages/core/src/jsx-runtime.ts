@@ -16,6 +16,7 @@ import {
   type ComponentElementWithRequirements,
   type ElementProps,
   type ElementKey,
+  type IntrinsicElements as CoreIntrinsicElements,
   empty,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
@@ -185,9 +186,7 @@ export namespace JSX {
     readonly key?: ElementKey;
   }
 
-  export interface IntrinsicElements {
-    [elemName: string]: ElementProps;
-  }
+  export interface IntrinsicElements extends CoreIntrinsicElements {}
 
   export interface ElementChildrenAttribute {
     children: {};

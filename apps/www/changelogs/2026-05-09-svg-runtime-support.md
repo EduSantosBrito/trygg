@@ -22,11 +22,12 @@ const Icon = Component.gen(function* () {
 ## Added
 
 - SVG intrinsic tags, including `svg`, `path`, `circle`, `rect`, `g`, gradients, and masks, now render through `createElementNS` with the SVG namespace.
-- `ElementProps` now includes common SVG attributes such as `viewBox`, `fill`, `strokeWidth`, `d`, `cx`, `cy`, and `r`.
+- `CommonProps`, `HtmlProps`, and `SvgProps` now separate shared, HTML-only, and SVG-only prop surfaces while keeping `ElementProps` as the low-level compatibility shape.
 
 ## Fixed
 
 - `className` now applies to SVG elements through the `class` attribute, including Signal-backed updates.
+- JSX now rejects SVG-only props such as `viewBox` and `strokeWidth` on known HTML tags.
 
 ## Versions
 
