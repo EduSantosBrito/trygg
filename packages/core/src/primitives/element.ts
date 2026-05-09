@@ -145,22 +145,22 @@ export type ElementChild =
 export type ElementChildren = ElementChild | ReadonlyArray<ElementChild>;
 
 /**
- * Base props shared by all intrinsic elements.
+ * Common props shared by all intrinsic elements.
  *
  * @remarks
- * `BaseProps` carries the common attributes every intrinsic element accepts
+ * `CommonProps` carries the common attributes every intrinsic element accepts
  * before element-specific props extend the shape.
  *
  * @example
  * ```ts
- * const props: BaseProps = { id: "app", children: "hello" }
+ * const props: CommonProps = { id: "app", children: "hello" }
  * ```
  *
  * @category Elements
  * @public
  * @since 1.0.0
  */
-export interface BaseProps {
+export interface CommonProps {
   readonly key?: ElementKey;
   readonly className?:
     | MaybeSignal<string>
@@ -171,6 +171,15 @@ export interface BaseProps {
   readonly [key: `data-${string}`]: AttributeInput | undefined;
   readonly [key: `aria-${string}`]: AttributeInput | undefined;
 }
+
+/**
+ * Backward-compatible alias for common intrinsic props.
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export interface BaseProps extends CommonProps {}
 
 /**
  * Event handler that accepts any service requirements.
@@ -185,8 +194,8 @@ type AnyEventHandler = EventHandler<void, never, unknown>;
  * services are provided by the ManagedRuntime at mount time.
  *
  * @remarks
- * `EventProps` is the shared event-handler surface mixed into `ElementProps`
- * for intrinsic elements.
+ * `EventProps` is the shared event-handler surface mixed into HTML and SVG
+ * intrinsic props.
  *
  * @example
  * ```tsx
@@ -219,26 +228,25 @@ export interface EventProps {
 }
 
 /**
- * Props for intrinsic HTML elements
+ * Props for intrinsic HTML elements.
  *
  * Props marked with MaybeSignal can accept either a static value or a Signal
  * for fine-grained reactivity. When you pass a Signal, the DOM attribute
  * updates directly without re-rendering the component.
  *
  * @remarks
- * `ElementProps` is the shared prop shape used by the JSX runtime when the tag
- * is an intrinsic string like `div` or `button`.
+ * `HtmlProps` is the shared prop shape used by known HTML intrinsic elements.
  *
  * @example
  * ```ts
- * const props: ElementProps = { id: "root", hidden: false }
+ * const props: HtmlProps = { id: "root", hidden: false }
  * ```
  *
  * @category Elements
  * @public
  * @since 1.0.0
  */
-export interface ElementProps extends BaseProps, EventProps {
+export interface HtmlProps extends CommonProps, EventProps {
   // Form elements - these support Signal for fine-grained updates
   // Note: Using union of individual Signal types due to invariance
   readonly value?:
@@ -299,10 +307,20 @@ export interface ElementProps extends BaseProps, EventProps {
   readonly draggable?: boolean;
   readonly contentEditable?: boolean | "true" | "false" | "inherit";
   readonly spellCheck?: boolean | "true" | "false";
+}
 
-  // SVG attributes
+/**
+ * Props for intrinsic SVG elements.
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export interface SvgProps extends CommonProps, EventProps {
   readonly viewBox?: string;
   readonly xmlns?: string;
+  readonly width?: string | number;
+  readonly height?: string | number;
   readonly fill?: string;
   readonly stroke?: string;
   readonly strokeWidth?: number | string;
@@ -320,6 +338,269 @@ export interface ElementProps extends BaseProps, EventProps {
   readonly transform?: string;
   readonly pathLength?: number;
 }
+
+/**
+ * Runtime-compatible intrinsic props.
+ *
+ * @remarks
+ * Kept as the broad low-level prop shape used by the element model and JSX
+ * runtime bridge. JSX tag validation uses `IntrinsicElements` so known HTML
+ * tags do not accept SVG-only props.
+ *
+ * @category Elements
+ * @public
+ * @since 1.0.0
+ */
+export interface ElementProps extends HtmlProps, SvgProps {}
+
+export interface AnchorHtmlProps extends HtmlProps {
+  readonly href?: MaybeSignal<string>;
+  readonly target?: "_blank" | "_self" | "_parent" | "_top";
+  readonly rel?: string;
+  readonly download?: string | boolean;
+}
+
+export interface ButtonHtmlProps extends HtmlProps {
+  readonly type?: "button" | "submit" | "reset";
+  readonly disabled?: MaybeSignal<boolean>;
+  readonly form?: string;
+  readonly formAction?: string;
+  readonly formMethod?: string;
+  readonly formNoValidate?: boolean;
+  readonly formTarget?: string;
+}
+
+export interface FormHtmlProps extends HtmlProps {
+  readonly action?: string;
+  readonly method?: "get" | "post";
+  readonly encType?: string;
+  readonly target?: string;
+  readonly noValidate?: boolean;
+  readonly autoComplete?: "on" | "off";
+}
+
+export interface InputHtmlProps extends HtmlProps {
+  readonly type?:
+    | "text"
+    | "password"
+    | "email"
+    | "number"
+    | "tel"
+    | "url"
+    | "search"
+    | "date"
+    | "time"
+    | "datetime-local"
+    | "month"
+    | "week"
+    | "color"
+    | "file"
+    | "hidden"
+    | "checkbox"
+    | "radio"
+    | "range"
+    | "submit"
+    | "reset"
+    | "button";
+  readonly value?:
+    | string
+    | number
+    | readonly string[]
+    | Signal<string>
+    | Signal<number>
+    | Signal<readonly string[]>;
+  readonly defaultValue?: string | number | readonly string[];
+  readonly checked?: MaybeSignal<boolean>;
+  readonly defaultChecked?: boolean;
+  readonly accept?: string;
+  readonly multiple?: boolean;
+  readonly capture?: boolean | "user" | "environment";
+}
+
+export interface LabelHtmlProps extends HtmlProps {
+  readonly htmlFor?: string;
+}
+
+export interface SelectHtmlProps extends HtmlProps {
+  readonly value?:
+    | string
+    | number
+    | readonly string[]
+    | Signal<string>
+    | Signal<number>
+    | Signal<readonly string[]>;
+  readonly defaultValue?: string | number | readonly string[];
+  readonly multiple?: boolean;
+}
+
+export interface TextareaHtmlProps extends HtmlProps {
+  readonly value?: MaybeSignal<string>;
+  readonly defaultValue?: string;
+  readonly rows?: number;
+  readonly cols?: number;
+  readonly wrap?: "hard" | "soft" | "off";
+}
+
+export interface ImgHtmlProps extends HtmlProps {
+  readonly src?: MaybeSignal<string>;
+  readonly srcSet?: string;
+  readonly sizes?: string;
+  readonly alt?: string;
+  readonly loading?: "eager" | "lazy";
+  readonly decoding?: "async" | "auto" | "sync";
+  readonly crossOrigin?: "anonymous" | "use-credentials";
+}
+
+export interface TableHtmlProps extends HtmlProps {
+  readonly cellPadding?: number | string;
+  readonly cellSpacing?: number | string;
+}
+
+export interface TableCellHtmlProps extends HtmlProps {
+  readonly colSpan?: number;
+  readonly rowSpan?: number;
+  readonly headers?: string;
+  readonly scope?: "col" | "row" | "colgroup" | "rowgroup";
+}
+
+export interface HtmlIntrinsicElements {
+  readonly html: HtmlProps;
+  readonly head: HtmlProps;
+  readonly body: HtmlProps;
+  readonly title: HtmlProps;
+  readonly meta: HtmlProps;
+  readonly link: HtmlProps;
+  readonly script: HtmlProps;
+  readonly style: HtmlProps;
+  readonly header: HtmlProps;
+  readonly footer: HtmlProps;
+  readonly main: HtmlProps;
+  readonly nav: HtmlProps;
+  readonly section: HtmlProps;
+  readonly article: HtmlProps;
+  readonly aside: HtmlProps;
+  readonly h1: HtmlProps;
+  readonly h2: HtmlProps;
+  readonly h3: HtmlProps;
+  readonly h4: HtmlProps;
+  readonly h5: HtmlProps;
+  readonly h6: HtmlProps;
+  readonly address: HtmlProps;
+  readonly div: HtmlProps;
+  readonly p: HtmlProps;
+  readonly pre: HtmlProps;
+  readonly blockquote: HtmlProps;
+  readonly ol: HtmlProps;
+  readonly ul: HtmlProps;
+  readonly li: HtmlProps;
+  readonly dl: HtmlProps;
+  readonly dt: HtmlProps;
+  readonly dd: HtmlProps;
+  readonly figure: HtmlProps;
+  readonly figcaption: HtmlProps;
+  readonly hr: HtmlProps;
+  readonly span: HtmlProps;
+  readonly a: AnchorHtmlProps;
+  readonly em: HtmlProps;
+  readonly strong: HtmlProps;
+  readonly small: HtmlProps;
+  readonly s: HtmlProps;
+  readonly cite: HtmlProps;
+  readonly q: HtmlProps;
+  readonly code: HtmlProps;
+  readonly kbd: HtmlProps;
+  readonly sub: HtmlProps;
+  readonly sup: HtmlProps;
+  readonly i: HtmlProps;
+  readonly b: HtmlProps;
+  readonly u: HtmlProps;
+  readonly mark: HtmlProps;
+  readonly ruby: HtmlProps;
+  readonly rt: HtmlProps;
+  readonly rp: HtmlProps;
+  readonly bdi: HtmlProps;
+  readonly bdo: HtmlProps;
+  readonly br: HtmlProps;
+  readonly wbr: HtmlProps;
+  readonly form: FormHtmlProps;
+  readonly input: InputHtmlProps;
+  readonly button: ButtonHtmlProps;
+  readonly select: SelectHtmlProps;
+  readonly textarea: TextareaHtmlProps;
+  readonly label: LabelHtmlProps;
+  readonly fieldset: HtmlProps;
+  readonly legend: HtmlProps;
+  readonly datalist: HtmlProps;
+  readonly option: HtmlProps;
+  readonly optgroup: HtmlProps;
+  readonly output: HtmlProps;
+  readonly progress: HtmlProps;
+  readonly meter: HtmlProps;
+  readonly table: TableHtmlProps;
+  readonly thead: HtmlProps;
+  readonly tbody: HtmlProps;
+  readonly tfoot: HtmlProps;
+  readonly tr: HtmlProps;
+  readonly th: TableCellHtmlProps;
+  readonly td: TableCellHtmlProps;
+  readonly caption: HtmlProps;
+  readonly colgroup: HtmlProps;
+  readonly col: HtmlProps;
+  readonly img: ImgHtmlProps;
+  readonly audio: HtmlProps;
+  readonly video: HtmlProps;
+  readonly source: HtmlProps;
+  readonly track: HtmlProps;
+  readonly picture: HtmlProps;
+  readonly iframe: HtmlProps;
+  readonly embed: HtmlProps;
+  readonly object: HtmlProps;
+  readonly param: HtmlProps;
+  readonly canvas: HtmlProps;
+  readonly map: HtmlProps;
+  readonly area: HtmlProps;
+  readonly details: HtmlProps;
+  readonly summary: HtmlProps;
+  readonly dialog: HtmlProps;
+  readonly menu: HtmlProps;
+  readonly slot: HtmlProps;
+  readonly template: HtmlProps;
+}
+
+export interface SvgIntrinsicElements {
+  readonly svg: SvgProps;
+  readonly path: SvgProps;
+  readonly circle: SvgProps;
+  readonly ellipse: SvgProps;
+  readonly line: SvgProps;
+  readonly polygon: SvgProps;
+  readonly polyline: SvgProps;
+  readonly rect: SvgProps;
+  readonly g: SvgProps;
+  readonly defs: SvgProps;
+  readonly use: SvgProps;
+  readonly text: SvgProps;
+  readonly tspan: SvgProps;
+  readonly image: SvgProps;
+  readonly clipPath: SvgProps;
+  readonly mask: SvgProps;
+  readonly pattern: SvgProps;
+  readonly linearGradient: SvgProps;
+  readonly radialGradient: SvgProps;
+  readonly stop: SvgProps;
+  readonly symbol: SvgProps;
+  readonly marker: SvgProps;
+  readonly foreignObject: SvgProps;
+}
+
+export interface CustomIntrinsicElements {
+  readonly [elemName: string]: ElementProps;
+}
+
+export interface IntrinsicElements
+  extends HtmlIntrinsicElements,
+    SvgIntrinsicElements,
+    CustomIntrinsicElements {}
 
 /**
  * Virtual DOM Element - the core type of trygg
