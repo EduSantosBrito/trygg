@@ -54,7 +54,7 @@
     },
     "packages/cli": {
       "name": "create-trygg",
-      "version": "0.4.0-canary.0",
+      "version": "0.4.0-canary.1",
       "bin": {
         "create-trygg": "./index.ts",
       },
@@ -73,7 +73,7 @@
     },
     "packages/core": {
       "name": "trygg",
-      "version": "0.4.0-canary.0",
+      "version": "0.4.0-canary.1",
       "dependencies": {
         "consola": "^3.4.2",
       },

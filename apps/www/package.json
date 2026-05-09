@@ -18,7 +18,7 @@
     "alchemy": "2.0.0-beta.25",
     "effect": "4.0.0-beta.58",
     "shiki": "^3.22.0",
-    "trygg": "^0.4.0-canary.0",
+    "trygg": "^0.4.0-canary.1",
     "vitest": "^4.1.5"
   },
   "devDependencies": {

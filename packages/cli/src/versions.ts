@@ -8,7 +8,7 @@
  */
 
 /** trygg framework version (from packages/core/package.json) */
-export const TRYGG_VERSION = "^0.4.0-canary.0";
+export const TRYGG_VERSION = "^0.4.0-canary.1";
 
 /** Effect ecosystem versions */
 export const EFFECT_VERSION = "^4.0.0-beta.51";
