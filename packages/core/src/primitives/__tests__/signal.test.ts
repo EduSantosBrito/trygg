@@ -21,7 +21,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Scope } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Result, Scope } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
@@ -137,23 +137,43 @@ describe("Signal.make", () => {
 });
 
 // =============================================================================
-// Signal.makeSync - Sync signal creation
+// Signal.make ownership
 // =============================================================================
-// Scope: Synchronous signal creation for global/module-level signals
+// Scope: Scope-owned signal creation and disposal
 
-describe("Signal.makeSync", () => {
-  it("should create signal synchronously without Effect context", () => {
-    const signal = Signal.makeSync(42);
+describe("Signal.make ownership", () => {
+  scoped("should create signal inside an owning Effect scope", () =>
+    Effect.gen(function* () {
+      // Test: should create a signal while an explicit Effect scope owns it.
+      // Scope: verifies scoped user code remains the non-component creation path.
+      // Assertion: the signal is readable until the owner scope closes.
+      const signal = yield* Signal.make(42);
 
-    assert.strictEqual(signal._tag, "Signal");
-    assert.strictEqual(Effect.runSync(Signal.peek(signal)), 42);
-  });
+      assert.strictEqual(signal._tag, "Signal");
+      assert.strictEqual(yield* Signal.peek(signal), 42);
+    }),
+  );
 
-  it("should work for module-level global signals", () => {
-    const globalSignal = Signal.makeSync({ initialized: true });
+  scoped("should fail disposed signal access after owner scope closes", () =>
+    Effect.gen(function* () {
+      // Test: should fail user reads after signal owner disposal.
+      // Scope: verifies leaked signal references fail clearly after scope close.
+      // Assertion: access defects with SignalDisposedError carrying the signal id.
+      const scope = yield* Scope.make();
+      const signal = yield* Signal.make({ initialized: true }).pipe(Scope.provide(scope));
+      yield* Scope.close(scope, Exit.void);
 
-    assert.deepStrictEqual(Effect.runSync(Signal.peek(globalSignal)), { initialized: true });
-  });
+      const exit = yield* Signal.peek(signal).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const defect = Cause.findDefect(exit.cause);
+        assert.isTrue(Result.isSuccess(defect));
+        if (Result.isSuccess(defect)) {
+          assert.instanceOf(defect.success, Signal.SignalDisposedError);
+        }
+      }
+    }),
+  );
 });
 
 // =============================================================================

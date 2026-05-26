@@ -32,6 +32,21 @@ type SignalCreateEvent = BaseEvent & {
   readonly signal_id: string;
   readonly value: unknown;
   readonly component: string;
+  readonly owner?: "component" | "provider" | "effect" | undefined;
+};
+
+type SignalDisposeEvent = BaseEvent & {
+  readonly event: "signal.dispose";
+  readonly signal_id: string;
+  readonly owner: "component" | "provider" | "effect";
+  readonly listener_count: number;
+};
+
+type SignalDisposedAccessEvent = BaseEvent & {
+  readonly event: "signal.disposed_access";
+  readonly signal_id: string;
+  readonly owner: "component" | "provider" | "effect";
+  readonly operation: "get" | "set" | "update" | "modify";
 };
 
 type SignalGetEvent = BaseEvent & {
@@ -161,15 +176,41 @@ type RenderComponentRerenderErrorEvent = BaseEvent & {
 
 type ProviderAcquireEvent = BaseEvent & {
   readonly event: "provider.acquire";
+  readonly provider_id?: string | undefined;
   readonly component?: string | undefined;
   readonly reason: "mount" | "rerender" | "identity-change" | "key-change" | "unmount" | "failure";
+  readonly duration_ms?: number | undefined;
+};
+
+type ProviderReuseEvent = BaseEvent & {
+  readonly event: "provider.reuse";
+  readonly provider_id: string;
+  readonly component?: string | undefined;
+  readonly reason: "rerender";
 };
 
 type ProviderFailureEvent = BaseEvent & {
   readonly event: "provider.failure";
+  readonly provider_id?: string | undefined;
   readonly component?: string | undefined;
   readonly reason: "failure";
+  readonly duration_ms?: number | undefined;
   readonly cause: string;
+};
+
+type ProviderReplaceEvent = BaseEvent & {
+  readonly event: "provider.replace";
+  readonly provider_id: string;
+  readonly component?: string | undefined;
+  readonly reason: "identity-change" | "key-change";
+};
+
+type ProviderFinalizeEvent = BaseEvent & {
+  readonly event: "provider.finalize";
+  readonly provider_id: string;
+  readonly component?: string | undefined;
+  readonly reason: "unmount";
+  readonly duration_ms: number;
 };
 
 type RenderSignalTextInitialEvent = BaseEvent & {
@@ -822,6 +863,8 @@ export type DebugEvent =
   | SignalUpdateEvent
   | SignalUpdateSkippedEvent
   | SignalNotifyEvent
+  | SignalDisposeEvent
+  | SignalDisposedAccessEvent
   | SignalSubscribeEvent
   | SignalUnsubscribeEvent
   | SignalListenerErrorEvent
@@ -836,7 +879,10 @@ export type DebugEvent =
   | RenderComponentErrorEvent
   | RenderComponentRerenderErrorEvent
   | ProviderAcquireEvent
+  | ProviderReuseEvent
   | ProviderFailureEvent
+  | ProviderReplaceEvent
+  | ProviderFinalizeEvent
   | RenderSignalTextInitialEvent
   | RenderSignalTextUpdateEvent
   | RenderSignalElementInitialEvent
@@ -1159,6 +1205,24 @@ let spanCounter = 0;
  * @internal
  */
 export const nextSpanId = (): string => `span_${++spanCounter}`;
+
+/**
+ * Allocate a fresh internal provider identifier.
+ *
+ * @internal
+ */
+let providerCounter = 0;
+
+/**
+ * Allocate a fresh internal provider identifier.
+ *
+ * @remarks
+ * Provider lifecycle tracing uses this to correlate acquire, reuse, replace,
+ * failure, and finalize events for one mounted provider boundary.
+ *
+ * @internal
+ */
+export const nextProviderId = (): string => `provider_${++providerCounter}`;
 
 // --- Trace Context References ---
 

@@ -103,7 +103,7 @@ interface BaseLinkProps<Path extends RoutePath> {
   /** Link content */
   readonly children?: unknown;
   /** CSS class name */
-  readonly className?: string;
+  readonly className?: ElementProps["className"];
   /**
    * Prefetch strategy (default: "intent")
    * - "intent": prefetch on hover (50ms debounce) or focus

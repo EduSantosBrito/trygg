@@ -61,7 +61,7 @@ describe("mount", () => {
 
   scoped("should enable reactivity via Component wrapper", () =>
     Effect.gen(function* () {
-      const count = Signal.makeSync(0);
+      const count = yield* Signal.make(0);
 
       const app = Effect.gen(function* () {
         const value = yield* Signal.get(count);
@@ -484,7 +484,7 @@ describe("Component element rendering", () => {
 
   scoped("should re-render when subscribed signal changes", () =>
     Effect.gen(function* () {
-      const count = Signal.makeSync(0);
+      const count = yield* Signal.make(0);
 
       const Counter = Component.gen(function* () {
         const value = yield* Signal.get(count);
@@ -503,7 +503,7 @@ describe("Component element rendering", () => {
 
   scoped("should remove undefined attributes during component re-render", () =>
     Effect.gen(function* () {
-      const active = Signal.makeSync(true);
+      const active = yield* Signal.make(true);
 
       const Link = Component.gen(function* () {
         const isActive = yield* Signal.get(active);
@@ -532,7 +532,7 @@ describe("Component element rendering", () => {
 
   scoped("should preserve signal identity on re-render", () =>
     Effect.gen(function* () {
-      const trigger = Signal.makeSync(0);
+      const trigger = yield* Signal.make(0);
       let signalInstance: Signal.Signal<number> | null = null;
 
       const MyComponent = Component.gen(function* () {
@@ -648,7 +648,7 @@ describe("Component element rendering", () => {
       // This tests the router pattern: Outlet subscribes to router.current
       // When router.current changes, Outlet should re-render
 
-      const outerSignal = Signal.makeSync(0);
+      const outerSignal = yield* Signal.make(0);
       let innerRenderCount = 0;
 
       // Inner component that subscribes to outer signal (like Outlet subscribes to router.current)
@@ -792,7 +792,7 @@ describe("Props application", () => {
 
   scoped("should update className on SVG elements when signal changes", () =>
     Effect.gen(function* () {
-      const classSignal = Signal.makeSync("initial-svg");
+      const classSignal = yield* Signal.make("initial-svg");
       const { getByTestId } = yield* render(
         <svg data-testid="svg-sig-class" className={classSignal} viewBox="0 0 24 24" />,
       );
@@ -1233,8 +1233,8 @@ describe("Scope and cleanup", () => {
 describe("Re-render behavior", () => {
   scoped("should only re-render components subscribed to changed signal", () =>
     Effect.gen(function* () {
-      const signal1 = Signal.makeSync(0);
-      const signal2 = Signal.makeSync(0);
+      const signal1 = yield* Signal.make(0);
+      const signal2 = yield* Signal.make(0);
       let comp1Renders = 0;
       let comp2Renders = 0;
 
@@ -1270,7 +1270,7 @@ describe("Re-render behavior", () => {
 
   scoped("should preserve stable child component identity on parent re-render", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.makeSync(0);
+      const parentTrigger = yield* Signal.make(0);
       let childRenderCount = 0;
       let childCleanupCount = 0;
       let childSignal: Signal.Signal<number> | null = null;
@@ -1323,7 +1323,7 @@ describe("Re-render behavior", () => {
 
   scoped("should preserve intrinsic nodes with static text children on parent re-render", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.makeSync(0);
+      const parentTrigger = yield* Signal.make(0);
 
       const Parent = Component.gen(function* () {
         const value = yield* Signal.get(parentTrigger);
@@ -1351,7 +1351,7 @@ describe("Re-render behavior", () => {
 
   scoped("should not defect when parent rerender compares inline event handlers", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.makeSync(0);
+      const parentTrigger = yield* Signal.make(0);
 
       const Parent = Component.gen(function* () {
         const value = yield* Signal.get(parentTrigger);
@@ -1381,7 +1381,7 @@ describe("Re-render behavior", () => {
 
   scoped("should skip stable child rerender when parent passes semantically equal props", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.makeSync(0);
+      const parentTrigger = yield* Signal.make(0);
       let childRenderCount = 0;
       let childCleanupCount = 0;
 
@@ -1424,7 +1424,7 @@ describe("Re-render behavior", () => {
 
   scoped("should rerender stable child when parent passes changed props without remounting", () =>
     Effect.gen(function* () {
-      const label = Signal.makeSync("before");
+      const label = yield* Signal.make("before");
       let childRenderCount = 0;
       let childCleanupCount = 0;
 
@@ -1467,7 +1467,7 @@ describe("Re-render behavior", () => {
     Effect.gen(function* () {
       class Theme extends Context.Service<Theme, { readonly value: string }>()("Theme") {}
 
-      const theme = Signal.makeSync("blue");
+      const theme = yield* Signal.make("blue");
       let childRenderCount = 0;
       let childCleanupCount = 0;
 
@@ -1646,7 +1646,7 @@ describe("Re-render behavior", () => {
 
   scoped("should preserve keyed child identity when siblings reorder under same parent", () =>
     Effect.gen(function* () {
-      const order = Signal.makeSync<ReadonlyArray<string>>(["a", "b", "c"]);
+      const order = yield* Signal.make<ReadonlyArray<string>>(["a", "b", "c"]);
       const localSignals = new Map<string, Signal.Signal<number>>();
       const renderCounts = new Map<string, number>();
       const cleanupCounts = new Map<string, number>();
@@ -1718,7 +1718,7 @@ describe("Re-render behavior", () => {
 
   scoped("should remount unkeyed children when a positional shift changes their parent index", () =>
     Effect.gen(function* () {
-      const showPrefix = Signal.makeSync(false);
+      const showPrefix = yield* Signal.make(false);
       let childNodeBefore: HTMLElement | null = null;
       let childSignal: Signal.Signal<number> | null = null;
       let childCleanupCount = 0;
@@ -1789,7 +1789,7 @@ describe("Re-render behavior", () => {
 
   scoped("should restart a child subtree when its key changes", () =>
     Effect.gen(function* () {
-      const childKey = Signal.makeSync("first");
+      const childKey = yield* Signal.make("first");
       let childSignal: Signal.Signal<number> | null = null;
       let childCleanupCount = 0;
 
@@ -1848,7 +1848,7 @@ describe("Re-render behavior", () => {
       // 2. When navigation happens, the signal updates to new component
       // 3. Old component should be cleaned up before new one renders
 
-      const routeSignal = Signal.makeSync<Element>(<div data-testid="route-a">Route A</div>);
+      const routeSignal = yield* Signal.make<Element>(<div data-testid="route-a">Route A</div>);
       let cleanupACalled = false;
 
       // Component A with cleanup tracking
@@ -1907,7 +1907,7 @@ describe("Re-render behavior", () => {
       // Models a router shell where navigation both swaps the route frame and
       // notifies components inside the old frame. If an old child rerender
       // finishes after its parent has been unmounted, its DOM must be discarded.
-      const route = Signal.makeSync("a");
+      const route = yield* Signal.make("a");
       let sidebarRuns = 0;
 
       const Sidebar = Component.gen(function* () {
@@ -1965,7 +1965,7 @@ describe("Re-render behavior", () => {
   scoped("should not duplicate content on rapid signal changes", () =>
     Effect.gen(function* () {
       // Test that rapid navigation doesn't cause duplicate DOM nodes
-      const routeSignal = Signal.makeSync<Element>(<span>Initial</span>);
+      const routeSignal = yield* Signal.make<Element>(<span>Initial</span>);
 
       const { container } = yield* render(<div data-testid="rapid-container">{routeSignal}</div>);
 
@@ -1994,11 +1994,13 @@ describe("Re-render behavior", () => {
       // - Outlet returns a SignalElement (tracker.view) that is UPDATED via Signal.set
       // - When router changes, the view signal is updated with new content
 
-      const routerSignal = Signal.makeSync("/page-a");
+      const routerSignal = yield* Signal.make("/page-a");
       let outletRenderCount = 0;
 
       // Create a view signal OUTSIDE the component (like async tracker does)
-      const viewSignal = Signal.makeSync<Element>(<div data-testid="page-a">Page A Content</div>);
+      const viewSignal = yield* Signal.make<Element>(
+        <div data-testid="page-a">Page A Content</div>,
+      );
 
       // Simulated outlet that re-renders on route change
       const SimulatedOutlet = Component.gen(function* () {
@@ -2079,7 +2081,7 @@ describe("Re-render behavior", () => {
       });
 
       // Create a signal holding the inner component (like outlet pattern)
-      const contentSignal = Signal.makeSync<Element>(<InnerComponent />);
+      const contentSignal = yield* Signal.make<Element>(<InnerComponent />);
 
       // Outer component that reads from the signal
       const OuterComponent = Component.gen(function* () {
@@ -2109,7 +2111,7 @@ describe("Re-render behavior", () => {
     Effect.gen(function* () {
       // More complex case: outer component subscribes to a signal
       // but inner component should still only render once initially
-      const routeSignal = Signal.makeSync("/home");
+      const routeSignal = yield* Signal.make("/home");
       let outerRenderCount = 0;
       let innerRenderCount = 0;
 
@@ -2163,7 +2165,7 @@ describe("Re-render behavior", () => {
       let layoutRenderCount = 0;
 
       // Simulated Outlet - a Component that subscribes to a route signal
-      const routeSignal = Signal.makeSync("/home");
+      const routeSignal = yield* Signal.make("/home");
       const Outlet = Component.gen(function* () {
         const route = yield* Signal.get(routeSignal);
         outletRenderCount++;
@@ -2308,7 +2310,7 @@ describe("Renderer error handling", () => {
 
   scoped("should preserve old content when component re-render fails", () =>
     Effect.gen(function* () {
-      const shouldError = Signal.makeSync(false);
+      const shouldError = yield* Signal.make(false);
 
       const ConditionalErrorComponent = Component.gen(function* () {
         const willError = yield* Signal.get(shouldError);
@@ -2364,7 +2366,7 @@ describe("Renderer error handling", () => {
 
   scoped("should maintain signal subscriptions after re-render error for retry", () =>
     Effect.gen(function* () {
-      const errorCount = Signal.makeSync(0);
+      const errorCount = yield* Signal.make(0);
       let renderCount = 0;
 
       const RetryableComponent = Component.gen(function* () {
@@ -2400,7 +2402,7 @@ describe("Renderer error handling", () => {
   scoped("should cleanup properly after re-render error when component unmounts", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
-      const shouldError = Signal.makeSync(false);
+      const shouldError = yield* Signal.make(false);
 
       const ErrorOnRerenderComponent = Component.gen(function* () {
         const willError = yield* Signal.get(shouldError);
@@ -2510,7 +2512,7 @@ describe("KeyedList rendering", () => {
         );
       });
 
-      const items = Signal.makeSync<ReadonlyArray<{ id: number; label: string }>>([
+      const items = yield* Signal.make<ReadonlyArray<{ id: number; label: string }>>([
         { id: 1, label: "A" },
         { id: 2, label: "B" },
         { id: 3, label: "C" },
@@ -2582,7 +2584,7 @@ describe("KeyedList rendering", () => {
         );
       });
 
-      const items = Signal.makeSync<ReadonlyArray<number>>([1, 2, 3, 4, 5]);
+      const items = yield* Signal.make<ReadonlyArray<number>>([1, 2, 3, 4, 5]);
 
       const List = Component.gen(function* () {
         return (

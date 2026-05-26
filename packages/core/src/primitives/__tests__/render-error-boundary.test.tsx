@@ -33,7 +33,7 @@ describe("render-error-boundary", () => {
 
   scoped("swaps to fallback for child update failure", () =>
     Effect.gen(function* () {
-      const fail = Signal.makeSync(false);
+      const fail = yield* Signal.make(false);
       const Risky = Component.gen(function* () {
         if (yield* Signal.get(fail)) {
           return yield* new BoundaryError({ message: "boom" });

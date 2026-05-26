@@ -593,7 +593,7 @@ export const link =
  */
 export const browserLayer: Layer.Layer<
   Router,
-  NavigationError,
+  NavigationError | Signal.SignalScopeError,
   SessionStorage | Scroll | Dom | History | Location | PlatformEventTarget | Observer
 > = Layer.effect(
   Router,
@@ -979,7 +979,9 @@ export const browserLayer: Layer.Layer<
  * @public
  * @since 1.0.0
  */
-export const testLayer = (initialPath: string = "/"): Layer.Layer<Router> =>
+export const testLayer = (
+  initialPath: string = "/",
+): Layer.Layer<Router, Signal.SignalScopeError> =>
   Layer.effect(
     Router,
     Effect.gen(function* () {

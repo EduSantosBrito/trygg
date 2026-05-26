@@ -136,7 +136,7 @@ describe("Link prefetch", () => {
 
   it.effect("preserves Link DOM node on parent rerender", () =>
     Effect.gen(function* () {
-      const parentTrigger = Signal.makeSync(0);
+      const parentTrigger = yield* Signal.make(0);
 
       const App = Component.gen(function* () {
         yield* Signal.get(parentTrigger);
