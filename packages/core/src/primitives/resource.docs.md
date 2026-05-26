@@ -61,10 +61,12 @@ const UserPanel = Component.gen(function* (
   );
 });
 
-const App = UserPanel.provide(
-  Layer.succeed(UsersApi, {
-    getUser: (id) => Effect.succeed({ id, name: `User ${id}` }),
-  }),
+const App = UserPanel.pipe(
+  Component.provide(
+    Layer.succeed(UsersApi, {
+      getUser: (id) => Effect.succeed({ id, name: `User ${id}` }),
+    }),
+  ),
 );
 ```
 

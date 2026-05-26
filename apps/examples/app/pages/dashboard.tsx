@@ -68,11 +68,20 @@ const DashboardPage = Component.gen(function* () {
 
   // Partial provision: provide services based on current signal state
   // Components have different requirements, so we provide different layer combinations
-  const ProvidedHeader = Header.provide([currentTheme, loggerLayer]);
-  const ProvidedStatCard = StatCard.provide(currentTheme);
-  const ProvidedActionButton = ActionButton.provide([currentTheme, analyticsLayer]);
-  const ProvidedSectionTitle = SectionTitle.provide(currentTheme);
-  const ProvidedActivityItem = ActivityItem.provide([currentTheme, analyticsLayer]);
+  const ProvidedHeader = Header.pipe(
+    Component.provide(currentTheme),
+    Component.provide(loggerLayer),
+  );
+  const ProvidedStatCard = StatCard.pipe(Component.provide(currentTheme));
+  const ProvidedActionButton = ActionButton.pipe(
+    Component.provide(currentTheme),
+    Component.provide(analyticsLayer),
+  );
+  const ProvidedSectionTitle = SectionTitle.pipe(Component.provide(currentTheme));
+  const ProvidedActivityItem = ActivityItem.pipe(
+    Component.provide(currentTheme),
+    Component.provide(analyticsLayer),
+  );
 
   return (
     <div className="min-h-screen font-sans -m-6 p-0" style={{ background: theme.background }}>

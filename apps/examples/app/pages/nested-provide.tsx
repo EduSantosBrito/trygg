@@ -1,7 +1,7 @@
 /**
  * Nested Provide Demo
  *
- * Demonstrates nested Component.provide() where child components access
+ * Demonstrates nested Component.provide(layer) where child components access
  * services from multiple ancestor layers. The key scenario: an event handler
  * that accesses an ancestor service at click time (not captured in a closure).
  *
@@ -82,7 +82,7 @@ const StyledSection = Component.gen(function* (
   }>,
 ) {
   const { label, name, style } = yield* Props;
-  const Provided = GreetingCard.provide(style);
+  const Provided = GreetingCard.pipe(Component.provide(style));
 
   return (
     <div>
@@ -130,7 +130,7 @@ const NestedProvidePage = Component.gen(function* () {
   const idx = yield* Signal.get(localeIndex);
   const locale = locales[idx] ?? locales[0];
 
-  const LocaleSection = StyledSection.provide(locale.layer);
+  const LocaleSection = StyledSection.pipe(Component.provide(locale.layer));
 
   return (
     <div>

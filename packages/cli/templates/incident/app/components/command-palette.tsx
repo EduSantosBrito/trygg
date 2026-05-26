@@ -106,7 +106,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
   );
 
   // Subscribe to open state and sync with dialog
-  yield* Signal.subscribe(open, () =>
+  const unsubscribeOpen = yield* Signal.subscribe(open, () =>
     Effect.gen(function* () {
       const node = document.getElementById(DIALOG_ID);
       if (!(node instanceof HTMLDialogElement)) {
@@ -128,6 +128,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
       }
     }),
   );
+  yield* Effect.addFinalizer(() => unsubscribeOpen);
 
   // Event handlers
   const onQueryInput = (event: Event) =>

@@ -10,8 +10,8 @@ const defaultTheme = Layer.succeed(CounterTheme, {
   text: "#1e40af",
 });
 
-const ProvidedCounterButton = CounterButton.provide(defaultTheme);
-const ProvidedCountDisplay = CountDisplay.provide(defaultTheme);
+const ProvidedCounterButton = CounterButton.pipe(Component.provide(defaultTheme));
+const ProvidedCountDisplay = CountDisplay.pipe(Component.provide(defaultTheme));
 
 const CounterPage = Component.gen(function* () {
   const count = yield* Signal.make(0);

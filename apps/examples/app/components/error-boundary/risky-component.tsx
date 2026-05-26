@@ -33,4 +33,4 @@ export const RiskyComponent = Component.gen(function* (
   }
 
   return <SuccessDisplay />;
-}).provide(defaultErrorTheme);
+}).pipe(Component.provide(defaultErrorTheme));

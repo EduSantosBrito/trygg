@@ -113,7 +113,7 @@ export const sections = {
 export default Component.gen(function* () {
   const state = yield* Resource.fetch(users);
   return <UserList state={state} />;
-}).provide(ApiClientLive);`,
+}).pipe(Component.provide(ApiClientLive));`,
       },
     ],
     continueHref: "/docs/getting-started",

@@ -27,4 +27,4 @@ const ThemeLive = Layer.succeed(Theme, {
   greeting: "Hello",
 });
 
-export default Greeting.provide(ThemeLive);
+export default Greeting.pipe(Component.provide(ThemeLive));

@@ -2,7 +2,7 @@
 
 ## When to use
 
-Use `Component` when UI needs explicit Effect requirements, parent-provided services, typed props, or local `Signal` state. It is the right surface for forms, service-backed pages, and trees where parents satisfy child requirements with `.provide(layer)`.
+Use `Component` when UI needs explicit Effect requirements, parent-provided services, typed props, or local `Signal` state. It is the right surface for forms, service-backed pages, and trees where parents satisfy child requirements with `Component.provide(layer)`.
 
 ## Behavior
 
@@ -144,7 +144,7 @@ const ValidatedForm = Component.gen(function* () {
 });
 ```
 
-For dependency injection, children `yield*` services and parents decide where to provide them. Each `.provide(layer)` narrows the remaining `R`; by the time an app reaches `mount`, the root effect must have `R = never`.
+For dependency injection, children `yield*` services and parents decide where to provide them. Each `.pipe(Component.provide(layer))` narrows the remaining `R`; by the time an app reaches `mount`, the root effect must have `R = never`.
 
 Complex trees often need multiple interdependent services. Define services with `Context.Tag`, build layers that depend on other layers with `Layer.provideMerge`, and let the type system enforce that every requirement is satisfied before `mount`:
 
@@ -195,7 +195,7 @@ const UserProfile = Component.gen(function* (
 const App = Component.gen(function* () {
   const userId = yield* Signal.make("1");
   return <UserProfile userId={userId} />;
-}).provide(UserRepositoryLive);
+}).pipe(Component.provide(UserRepositoryLive));
 ```
 
 `App` has `R = never` because `UserRepositoryLive` satisfies `UserRepository`, and `UserRepositoryLive` itself is satisfied by `HttpClientLive`. If a layer were missing, the type error would point to the exact unsatisfied tag at the `mount` call.

@@ -183,6 +183,31 @@ describe("scaffoldProject", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
+  it.effect("blank scaffold demonstrates Component.gen with Theme service", () =>
+    Effect.gen(function* () {
+      // Scope: verifies the default blank app teaches trygg DI basics.
+      // Assertion: generated home page uses Component.gen, a Theme service, and service injection.
+      const fs = yield* FileSystem.FileSystem;
+      const targetDir = yield* fs.makeTempDirectory({
+        directory: WORKSPACE_TEMP_DIR,
+        prefix: "trygg-scaffold-test-",
+      });
+      yield* Effect.addFinalizer(() =>
+        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
+      );
+
+      yield* runScaffold(targetDir, "blank");
+
+      const homePath = path.join(targetDir, "app", "pages", "home.tsx");
+      const homeContent = yield* fs.readFileString(homePath);
+
+      assert.include(homeContent, "Component.gen");
+      assert.include(homeContent, "class Theme extends Context.Service");
+      assert.include(homeContent, "yield* Theme");
+      assert.include(homeContent, "Layer.succeed(Theme");
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
   it.effect("blank scaffold should typecheck and build successfully", () =>
     Effect.gen(function* () {
       // Scope: verifies a freshly scaffolded blank app works without any API setup.
@@ -263,6 +288,43 @@ describe("scaffoldProject", () => {
         const output = `${buildResult.stdout}\n${buildResult.stderr}`;
         assert.include(output, "app/api.ts must export Api");
       }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
+  it.effect("blank scaffold home uses Component.gen and Theme service", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
+      yield* Effect.addFinalizer(() =>
+        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
+      );
+
+      yield* runScaffold(targetDir, "blank");
+
+      const homePath = path.join(targetDir, "app", "pages", "home.tsx");
+      const homeContent = yield* fs.readFileString(homePath);
+
+      assert.include(homeContent, "Component.gen");
+      assert.include(homeContent, "yield* Theme");
+      assert.include(homeContent, "Theme service");
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
+  it.effect("blank scaffold layout provides theme layer", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
+      yield* Effect.addFinalizer(() =>
+        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
+      );
+
+      yield* runScaffold(targetDir, "blank");
+
+      const layoutPath = path.join(targetDir, "app", "layout.tsx");
+      const layoutContent = yield* fs.readFileString(layoutPath);
+
+      assert.include(layoutContent, "ThemeLive");
+      assert.include(layoutContent, ".pipe(Component.provide(ThemeLive))");
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
   it.effect(

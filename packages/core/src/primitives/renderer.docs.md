@@ -8,7 +8,7 @@ Use `mount` for normal apps, `mountDocument` for root-layout ownership, and `Ren
 
 The renderer turns `Element` trees into DOM, preserves render scope for event handlers and subscriptions, and installs the browser/runtime layers needed for signals, resources, and routing.
 
-`mount` is also the service boundary: the app passed to it must already have `R = never`. In practice, children `yield*` services, parents satisfy them with `.provide(layer)`, and the final root effect is what you mount.
+`mount` is also the service boundary: the app passed to it must already have `R = never`. In practice, children `yield*` services, parents satisfy them with `Component.provide(layer)`, and the final root effect is what you mount.
 
 ```tsx
 import { Effect, Layer } from "effect";
@@ -22,10 +22,12 @@ const Header = Component.gen(function* () {
   return <h1>{yield* api.ping}</h1>;
 });
 
-const App = Header.provide(
-  Layer.succeed(Api, {
-    ping: Effect.succeed("ready"),
-  }),
+const App = Header.pipe(
+  Component.provide(
+    Layer.succeed(Api, {
+      ping: Effect.succeed("ready"),
+    }),
+  ),
 );
 ```
 

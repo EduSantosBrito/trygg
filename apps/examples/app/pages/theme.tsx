@@ -36,6 +36,6 @@ const ThemeExample = Component.gen(function* () {
   );
 });
 
-const ThemePage = ThemeExample.provide(ThemeStoreLive);
+const ThemePage = ThemeExample.pipe(Component.provide(ThemeStoreLive));
 
 export default ThemePage;

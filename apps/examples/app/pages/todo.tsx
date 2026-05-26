@@ -19,8 +19,8 @@ const defaultTodoTheme = Layer.succeed(TodoTheme, {
   primaryColor: "#0066cc",
 });
 
-const ProvidedTodoInput = TodoInput.provide(defaultTodoTheme);
-const ProvidedFilterButton = FilterButton.provide(defaultTodoTheme);
+const ProvidedTodoInput = TodoInput.pipe(Component.provide(defaultTodoTheme));
+const ProvidedFilterButton = FilterButton.pipe(Component.provide(defaultTodoTheme));
 
 const TodoPage = Component.gen(function* () {
   const todos = yield* Signal.make<ReadonlyArray<Todo>>([]);

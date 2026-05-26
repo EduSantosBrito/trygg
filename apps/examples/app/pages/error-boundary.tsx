@@ -77,6 +77,6 @@ const ErrorBoundaryPage = Component.gen(function* () {
       </div>
     </div>
   );
-}).provide(defaultErrorTheme);
+}).pipe(Component.provide(defaultErrorTheme));
 
 export default ErrorBoundaryPage;

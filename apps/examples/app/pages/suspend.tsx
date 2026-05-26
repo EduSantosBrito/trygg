@@ -145,6 +145,6 @@ const SuspendPage = Component.gen(function* () {
       </div>
     </div>
   );
-}).provide(SuspendUiLive);
+}).pipe(Component.provide(SuspendUiLive));
 
 export default SuspendPage;

@@ -2,7 +2,7 @@
  * Home Page: trygg.dev — Variant A (The Workbench)
  */
 import { Effect, Result, Scope } from "effect";
-import { Component, Signal, type ComponentProps } from "trygg";
+import { Component, Signal, type ComponentProps, type Element as TryggElement } from "trygg";
 import * as Router from "trygg/router";
 
 import {
@@ -172,11 +172,11 @@ const EditorPanel = Component.gen(function* (
   Props: ComponentProps<{
     readonly id: WorkbenchView;
     readonly active: Signal.Signal<WorkbenchView>;
-    readonly children: JSX.Element;
+    readonly children: TryggElement;
   }>,
 ) {
   const { id, active, children } = yield* Props;
-  const className = yield* Signal.derive(active, (view) =>
+  const className = yield* Signal.derive<WorkbenchView, string>(active, (view) =>
     view === id ? "home-workbench__panel home-workbench__panel--active" : "home-workbench__panel",
   );
 
@@ -196,7 +196,7 @@ const SidebarFile = Component.gen(function* (
   }>,
 ) {
   const { id, label, active, onSelect } = yield* Props;
-  const className = yield* Signal.derive(active, (view) => {
+  const className = yield* Signal.derive<WorkbenchView, string>(active, (view) => {
     const isActive = view === id;
     return isActive ? "home-workbench__file home-workbench__file--active" : "home-workbench__file";
   });
@@ -375,19 +375,15 @@ const Workbench = Component.gen(function* () {
   const highlightedByTheme = yield* Effect.promise(
     async (): Promise<Record<Theme, ReadonlyArray<ReadonlyArray<HighlightedLine>>>> => {
       const themes: ReadonlyArray<Theme> = ["dark", "light"];
-      const entries = await Promise.all(
-        themes.map(async (entryTheme) => {
-          const steps = await Promise.all(
+      const [dark, light] = await Promise.all(
+        themes.map((entryTheme) =>
+          Promise.all(
             sections.seam.steps.map((step) => highlightCode(step.code, "tsx", entryTheme)),
-          );
-          return [entryTheme, steps] as const;
-        }),
+          ),
+        ),
       );
 
-      return Object.fromEntries(entries) as Record<
-        Theme,
-        ReadonlyArray<ReadonlyArray<HighlightedLine>>
-      >;
+      return { dark, light };
     },
   );
 
