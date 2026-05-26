@@ -357,7 +357,7 @@ describe("SignalElement rendering", () => {
 
       const App = Component.gen(function* () {
         return <div data-testid="context-swap">{viewSignal}</div>;
-      }).provide(themeLayer);
+      }).pipe(Component.provide(themeLayer));
 
       const { getByTestId, queryByTestId } = yield* render(<App />);
 
@@ -2448,7 +2448,7 @@ describe("Provide element", () => {
 
       const Parent = Component.gen(function* () {
         return <Child />;
-      }).provide(Layer.succeed(TestCtx, { value: "provided" }));
+      }).pipe(Component.provide(Layer.succeed(TestCtx, { value: "provided" })));
 
       const { getByTestId } = yield* render(<Parent />);
 
@@ -2475,7 +2475,7 @@ describe("Provide element", () => {
 
       const TopLevel = Component.gen(function* () {
         return <MiddleChild />;
-      }).provide(Layer.succeed(DeepCtx, { nested: "deep-value" }));
+      }).pipe(Component.provide(Layer.succeed(DeepCtx, { nested: "deep-value" })));
 
       const { getByTestId } = yield* render(<TopLevel />);
 

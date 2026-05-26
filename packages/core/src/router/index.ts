@@ -183,7 +183,7 @@ import { currentRoute as _currentRoute } from "./service.js";
 
 /**
  * Route namespace - provides `Route.make(path)`, `Route.index(component)`,
- * `Route.provide(...layers)`, `Route.current`, `Route.redirect(path)`,
+ * `Route.provide(...strategies)`, `Route.current`, `Route.redirect(path)`,
  * and `Route.forbidden()`.
  *
  * @remarks

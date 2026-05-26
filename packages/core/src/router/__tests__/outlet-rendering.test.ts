@@ -24,7 +24,6 @@ import { Element, text } from "../../primitives/element.js";
 import type { ElementKey } from "../../primitives/element.js";
 import { getFiberRef, setFiberRef } from "../../internal/fiber-ref.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
-import type { Component } from "../../primitives/component.js";
 
 // =============================================================================
 // Helper: Create RouteComponent
@@ -36,8 +35,9 @@ const textComp = (content: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<LayerTypes.Any>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };
@@ -58,8 +58,9 @@ const layoutComp = (_name: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<LayerTypes.Any>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };

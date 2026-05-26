@@ -54,8 +54,8 @@ describe("ErrorBoundary .provide() preservation", () => {
         ErrorBoundary.catchAll(catchAllView("fallback")),
       );
 
-      // Apply .provide() - this should NOT break the error boundary
-      const ProvidedComponent = SafeComponent.provide(TestLayer);
+      // Apply Component.provide() - this should NOT break the error boundary
+      const ProvidedComponent = SafeComponent.pipe(Component.provide(TestLayer));
       const element = ProvidedComponent({});
 
       // Render and assert fallback shown, not crash
@@ -80,7 +80,7 @@ describe("ErrorBoundary .provide() preservation", () => {
         ErrorBoundary.catchAll(catchAllView("error")),
       );
 
-      const ProvidedComponent = SafeComponent.provide(TestLayer);
+      const ProvidedComponent = SafeComponent.pipe(Component.provide(TestLayer));
       const element = ProvidedComponent({});
 
       const { getByTestId } = yield* render(element);
@@ -139,7 +139,7 @@ describe("ErrorBoundary handler requirements propagation", () => {
       );
 
       // Render with ErrorTheme provided - should work
-      const ProvidedComponent = SafeComponent.provide(ErrorThemeLayer);
+      const ProvidedComponent = SafeComponent.pipe(Component.provide(ErrorThemeLayer));
       const element = ProvidedComponent({});
 
       const { getByText } = yield* render(element);

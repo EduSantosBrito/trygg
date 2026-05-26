@@ -11,7 +11,6 @@ import * as Route from "../route.js";
 class TestError extends Data.TaggedError("TestError")<{ readonly message: string }> {}
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Component } from "../../primitives/component.js";
 
 // Helper to create dummy RouteComponent
 const makeComp = (): RouteComponent => {
@@ -19,8 +18,9 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<LayerTypes.Any>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };

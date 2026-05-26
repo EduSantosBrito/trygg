@@ -32,7 +32,6 @@ import { Element } from "../../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { RouteComponent } from "../types.js";
-import type { Component } from "../../primitives/component.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
 
@@ -56,8 +55,9 @@ const identifiableComp = (testId: string, content: string): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<AnyLayer>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };
@@ -78,8 +78,9 @@ const loadingComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<AnyLayer>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };

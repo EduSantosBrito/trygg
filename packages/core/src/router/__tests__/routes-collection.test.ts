@@ -9,7 +9,6 @@ import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Component } from "../../primitives/component.js";
 import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
@@ -18,8 +17,9 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<AnyLayer>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };

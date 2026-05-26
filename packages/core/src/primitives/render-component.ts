@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import type { Element } from "./element.js";
+import { unsafeBuildProviderContext } from "../internal/unsafe.js";
 import { Element as ElementService } from "./element.js";
 import * as Signal from "./signal.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
@@ -63,7 +64,7 @@ export const renderComponent = (
   deps: RenderComponentDeps,
 ): Effect.Effect<RenderResult, unknown, unknown> =>
   Effect.gen(function* () {
-    const { run, key, identity, inputs } = component;
+    const { run, key, identity, inputs, provider = null } = component;
     const anchor = document.createComment("component");
     parent.appendChild(anchor);
 
@@ -76,8 +77,40 @@ export const renderComponent = (
     let currentRun = run;
     let currentInputs = inputs;
     let currentContext = context;
+    let providerContext: Context.Context<unknown> | null = null;
 
     const componentScope = yield* Scope.fork(yield* Effect.scope);
+    const providerScope = provider === null ? null : yield* Scope.fork(componentScope);
+    const mergeProviderContext = (parentContext: Context.Context<unknown> | null) =>
+      providerContext === null
+        ? parentContext
+        : Context.merge(deps.normalizeContext(parentContext), providerContext);
+
+    if (provider !== null && providerScope !== null) {
+      const acquireStart = performance.now();
+      providerContext = yield* unsafeBuildProviderContext(
+        provider.layer,
+        providerScope,
+        currentContext,
+      ).pipe(
+        Effect.tapCause((cause) =>
+          Debug.log({
+            event: "provider.failure",
+            component: provider.displayName,
+            reason: "failure",
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+      currentContext = mergeProviderContext(currentContext);
+      yield* Debug.log({
+        event: "provider.acquire",
+        component: provider.displayName,
+        reason: "mount",
+        duration_ms: performance.now() - acquireStart,
+      });
+    }
+
     const renderPhase = yield* Signal.makeRenderPhase;
     const rendererScope = yield* Effect.scope;
     let subscriptionCleanups: Array<Effect.Effect<void, unknown, unknown>> = [];
@@ -335,6 +368,10 @@ export const renderComponent = (
             return false;
           }
 
+          if (resolvedNextElement.provider?.layer !== provider?.layer) {
+            return false;
+          }
+
           const sameIdentity =
             identity !== undefined
               ? resolvedNextElement.identity === identity
@@ -345,14 +382,15 @@ export const renderComponent = (
           }
 
           const inputsChanged = !equalOrChanged(currentInputs, resolvedNextElement.inputs);
+          const effectiveNextContext = mergeProviderContext(resolvedNextContext);
           const contextChanged = !equalOrChanged(
             deps.normalizeContext(currentContext),
-            deps.normalizeContext(resolvedNextContext),
+            deps.normalizeContext(effectiveNextContext),
           );
 
           currentRun = resolvedNextElement.run;
           currentInputs = resolvedNextElement.inputs;
-          currentContext = resolvedNextContext;
+          currentContext = effectiveNextContext;
 
           if (!inputsChanged && !contextChanged) {
             return true;
