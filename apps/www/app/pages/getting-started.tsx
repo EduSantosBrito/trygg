@@ -8,7 +8,7 @@ import {
   type CommandSection,
   type PackageManager,
 } from "../content/getting-started";
-import { docsHeadings } from "../content/headings";
+import { setDocsHeadings } from "../content/headings";
 import gettingStartedSource from "../examples/getting-started.tsx?raw";
 
 const SectionShell = Component.gen(function* (
@@ -121,7 +121,7 @@ const gettingStartedHeadings = [
 ];
 
 export default Component.gen(function* () {
-  yield* Signal.set(docsHeadings, gettingStartedHeadings);
+  yield* setDocsHeadings(gettingStartedHeadings);
 
   const selectedPackageManager = yield* Signal.make<PackageManager>("bun");
   const exampleLines = yield* Effect.promise(() => highlightCode(gettingStartedSource, "tsx"));

@@ -545,39 +545,6 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>, SignalScopeError>
 });
 
 /**
- * Create a module-lifetime signal synchronously.
- *
- * @remarks
- * This compatibility factory intentionally does not register a scope finalizer.
- * Prefer `Signal.make` inside a component, lifecycle-provided layer, or
- * explicitly scoped Effect so signal ownership is observable and deterministic.
- *
- * @example
- * ```tsx
- * const signal = Signal.makeSync("legacy")
- * const value = yield* Signal.peek(signal)
- * ```
- *
- * @deprecated Use scoped `Signal.make` instead.
- * @category Reactivity
- * @public
- * @since 1.0.0
- */
-export const makeSync = <A>(initial: A): Signal<A> => {
-  const ref = Effect.runSync(SubscriptionRef.make(initial));
-  const disposed = Effect.runSync(Ref.make(false));
-  const debugId = Debug.nextSignalId();
-  return {
-    _tag: "Signal",
-    _ref: ref,
-    _listeners: new Set(),
-    _debugId: debugId,
-    _owner: "effect",
-    _disposed: disposed,
-  };
-};
-
-/**
  * Get the current value of a signal.
  *
  * IMPORTANT: Reading a signal with Signal.get() subscribes the current

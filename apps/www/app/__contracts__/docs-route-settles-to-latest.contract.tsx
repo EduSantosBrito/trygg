@@ -9,7 +9,8 @@
  *
  * @internal
  */
-import { Effect, SubscriptionRef } from "effect";
+import { Effect, Layer, SubscriptionRef } from "effect";
+import * as Context from "effect/Context";
 import { Component, Signal } from "trygg";
 import { click, render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -81,8 +82,24 @@ export const contract = {
   ],
 } as const;
 
-const headings = Signal.makeSync<ReadonlyArray<string>>([]);
-const rerenderTick = Signal.makeSync(0);
+interface ContractStateService {
+  readonly headings: Signal.Signal<ReadonlyArray<string>>;
+  readonly rerenderTick: Signal.Signal<number>;
+}
+
+class ContractState extends Context.Service<ContractState, ContractStateService>()(
+  "www/DocsRouteSettlesState",
+) {}
+
+const ContractStateLive = Layer.effect(
+  ContractState,
+  Effect.gen(function* () {
+    const headings = yield* Signal.make<ReadonlyArray<string>>([]).pipe(Effect.orDie);
+    const rerenderTick = yield* Signal.make(0).pipe(Effect.orDie);
+    return { headings, rerenderTick } satisfies ContractStateService;
+  }),
+);
+
 const staleRouteRenders: Array<string> = [];
 const routeRenderLog: Array<string> = [];
 
@@ -125,6 +142,7 @@ const DocsLikeLayout = Component.gen(function* () {
   // appears when this old layout re-renders with its previous Outlet child after
   // router.current has already moved to the next route.
   const route = yield* Router.currentRoute;
+  const { headings } = yield* ContractState;
 
   return (
     <section data-testid="docs-layout" data-path={route.path}>
@@ -170,6 +188,7 @@ const GettingStartedPage = Component.gen(function* () {
   // Subscribes the old route to a local route-state change. The contract then
   // bumps this while the next route is rendering, reproducing the debug trace's
   // stale getting-started work after router.current has moved on.
+  const { headings, rerenderTick } = yield* ContractState;
   yield* Signal.get(rerenderTick);
   yield* recordRouteRender("getting-started", "/docs/getting-started");
   yield* Signal.set(headings, ["Prerequisites", "Create a project", "Install"]);
@@ -182,6 +201,7 @@ const GettingStartedPage = Component.gen(function* () {
 });
 
 const ComponentsPage = Component.gen(function* () {
+  const { headings } = yield* ContractState;
   yield* recordRouteRender("components", "/docs/components");
   // The real docs topic route updates docsHeadings before async article work
   // such as syntax highlighting completes. Keep the new route render in flight
@@ -250,6 +270,7 @@ const runScenario = Effect.scoped(
   Effect.gen(function* () {
     staleRouteRenders.length = 0;
     routeRenderLog.length = 0;
+    const { headings, rerenderTick } = yield* ContractState;
     yield* Signal.set(headings, []);
     yield* Signal.set(rerenderTick, 0);
 
@@ -383,7 +404,9 @@ const runScenario = Effect.scoped(
     }
 
     return [] satisfies ReadonlyArray<ContractViolation>;
-  }).pipe(Effect.provide(Router.testLayer("/docs/getting-started"))),
+  }).pipe(
+    Effect.provide(Layer.merge(Router.testLayer("/docs/getting-started"), ContractStateLive)),
+  ),
 );
 
 const normalizeViolations = (

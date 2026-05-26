@@ -7,11 +7,18 @@ import * as Router from "trygg/router";
 
 import { DocsLayout } from "./docs-layout";
 import { DocsSidebar } from "./docs-sidebar";
+import { DocsHeadingsLive } from "../content/headings";
 import { Footer } from "./footer";
 
-const docsGettingStartedLayer = Layer.merge(testLayer, Router.testLayer("/docs/getting-started"));
-const docsElementsLayer = Layer.merge(testLayer, Router.testLayer("/docs/elements"));
-const homeLayer = Layer.merge(testLayer, Router.testLayer("/"));
+const docsGettingStartedLayer = Layer.merge(
+  Layer.merge(testLayer, Router.testLayer("/docs/getting-started")),
+  DocsHeadingsLive,
+);
+const docsElementsLayer = Layer.merge(
+  Layer.merge(testLayer, Router.testLayer("/docs/elements")),
+  DocsHeadingsLive,
+);
+const homeLayer = Layer.merge(Layer.merge(testLayer, Router.testLayer("/")), DocsHeadingsLive);
 
 describe("Docs chrome", () => {
   layer(docsGettingStartedLayer)("/docs/getting-started", (it) => {

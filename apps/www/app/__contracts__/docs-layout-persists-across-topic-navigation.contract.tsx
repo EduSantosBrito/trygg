@@ -147,7 +147,7 @@ const DocsLikeLayout = Component.gen(function* () {
         const observation = yield* observeLayout("layout-cleanup", observedContainer);
         yield* emitObservation(observation);
       }
-    }),
+    }).pipe(Effect.ignore),
   );
 
   return (

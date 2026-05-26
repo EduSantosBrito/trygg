@@ -61,7 +61,8 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
 
   const handleKeyDown = (e: Event): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const ke = e as KeyboardEvent;
+      if (!(e instanceof KeyboardEvent)) return;
+      const ke = e;
       if (ke.key === "Escape") {
         yield* close;
         return;
@@ -87,7 +88,9 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
 
   const handleInput = (e: Event): Effect.Effect<void> =>
     Effect.gen(function* () {
-      yield* Signal.set(query, (e.target as HTMLInputElement).value);
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      yield* Signal.set(query, target.value);
       yield* Signal.set(activeIndex, 0);
     });
 

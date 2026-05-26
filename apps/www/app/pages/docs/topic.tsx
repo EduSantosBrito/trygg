@@ -1,9 +1,9 @@
-import { Component, Signal } from "trygg";
+import { Component } from "trygg";
 import * as Router from "trygg/router";
 
 import { DocsArticle, extractDocsHeadings } from "../../components/docs-article";
 import { docsContent } from "../../content/docs-content";
-import { docsHeadings, type HeadingEntry } from "../../content/headings";
+import { setDocsHeadings, type HeadingEntry } from "../../content/headings";
 import { sidebarGroups } from "../../content/sidebar";
 import { currentRouteSnapshot } from "../../lib/router-snapshot";
 
@@ -24,7 +24,7 @@ export default Component.gen(function* () {
   const link = sidebarLinks.find((item) => item.href === path);
   const content = docsContent[path];
 
-  yield* Signal.set(docsHeadings, content ? extractDocsHeadings(content) : placeholderHeadings);
+  yield* setDocsHeadings(content ? extractDocsHeadings(content) : placeholderHeadings);
 
   if (content) {
     const docTitle = link?.label ?? "Docs topic";

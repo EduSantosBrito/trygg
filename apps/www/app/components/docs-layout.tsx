@@ -6,7 +6,7 @@ import { DocsSidebar } from "./docs-sidebar";
 import { Footer } from "./footer";
 import { Header } from "./header";
 import { sidebarGroups } from "../content/sidebar";
-import { docsHeadings } from "../content/headings";
+import { DocsHeadings } from "../content/headings";
 import { currentRouteSnapshot } from "../lib/router-snapshot";
 
 const sidebarLinks = sidebarGroups.flatMap((group) => group.links);
@@ -160,10 +160,12 @@ const DocsPrevNext = Component.gen(function* () {
 });
 
 export const DocsLayout = Component.gen(function* () {
+  const headings = yield* DocsHeadings;
   const drawerOpen = yield* Signal.make(false);
   const drawerClass = yield* Signal.derive(drawerOpen, (open): string =>
     open ? "docs-drawer docs-drawer--open" : "docs-drawer",
   );
+  const drawerHidden = yield* Signal.derive(drawerOpen, (open) => !open);
 
   const openDrawer = () => Signal.set(drawerOpen, true);
   const closeDrawer = () => Signal.set(drawerOpen, false);
@@ -200,7 +202,7 @@ export const DocsLayout = Component.gen(function* () {
           <DocsSidebar />
         </aside>
 
-        <div className={drawerClass} aria-hidden={Signal.derive(drawerOpen, (open) => !open)}>
+        <div className={drawerClass} aria-hidden={drawerHidden}>
           <button
             type="button"
             className="docs-drawer__backdrop"
@@ -221,7 +223,7 @@ export const DocsLayout = Component.gen(function* () {
           <p className="docs-rail__title">On this page</p>
           <ul className="docs-rail__links" role="list">
             {Signal.each(
-              docsHeadings,
+              headings.entries,
               (heading) =>
                 Effect.succeed(
                   <li>
