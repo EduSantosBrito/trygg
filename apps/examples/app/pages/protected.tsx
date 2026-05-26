@@ -1,10 +1,11 @@
 import { Effect, Option } from "effect";
 import { Signal, Component } from "trygg";
 import * as Router from "trygg/router";
-import { authSignal, setAuth } from "../resources/auth";
+import { AuthStore, setAuth } from "../resources/auth";
 
 const ProtectedPage = Component.gen(function* () {
-  const user = yield* Signal.get(authSignal);
+  const auth = yield* AuthStore;
+  const user = yield* Signal.get(auth.user);
 
   if (Option.isNone(user)) {
     return <div>Loading...</div>;

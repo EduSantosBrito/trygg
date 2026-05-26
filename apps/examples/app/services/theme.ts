@@ -30,14 +30,6 @@ const darkTheme: ThemeTokens = {
 
 const themeForMode = (mode: ThemeMode): ThemeTokens => (mode === "light" ? lightTheme : darkTheme);
 
-// Store signals are module-lifetime on purpose. Until provider Layer.effect
-// lifetimes are cached across ordinary rerenders, stateful stores should use
-// Signal.makeSync + Layer.succeed rather than rebuilding signals in Layer.effect.
-const mode = Signal.makeSync<ThemeMode>("light");
-const tokens = Signal.makeSync<ThemeTokens>(themeForMode("light"));
-const themeName = Signal.makeSync("Light Theme");
-const switchLabel = Signal.makeSync("Switch to Dark Theme");
-
 export class ThemeStore extends Context.Service<
   ThemeStore,
   {
@@ -49,19 +41,29 @@ export class ThemeStore extends Context.Service<
   }
 >()("examples/ThemeStore") {}
 
-export const ThemeStoreLive = Layer.succeed(ThemeStore, {
-  mode,
-  tokens,
-  themeName,
-  switchLabel,
-  toggle: () =>
-    Effect.gen(function* () {
-      const current = yield* Signal.peek(mode);
-      const next: ThemeMode = current === "light" ? "dark" : "light";
-      const nextTokens = themeForMode(next);
-      yield* Signal.set(mode, next);
-      yield* Signal.set(tokens, nextTokens);
-      yield* Signal.set(themeName, `${nextTokens.name} Theme`);
-      yield* Signal.set(switchLabel, `Switch to ${next === "dark" ? "Light" : "Dark"} Theme`);
-    }),
-});
+export const ThemeStoreLive = Layer.effect(
+  ThemeStore,
+  Effect.gen(function* () {
+    const mode = yield* Signal.make<ThemeMode>("light");
+    const tokens = yield* Signal.make<ThemeTokens>(themeForMode("light"));
+    const themeName = yield* Signal.make("Light Theme");
+    const switchLabel = yield* Signal.make("Switch to Dark Theme");
+
+    return {
+      mode,
+      tokens,
+      themeName,
+      switchLabel,
+      toggle: () =>
+        Effect.gen(function* () {
+          const current = yield* Signal.peek(mode);
+          const next: ThemeMode = current === "light" ? "dark" : "light";
+          const nextTokens = themeForMode(next);
+          yield* Signal.set(mode, next);
+          yield* Signal.set(tokens, nextTokens);
+          yield* Signal.set(themeName, `${nextTokens.name} Theme`);
+          yield* Signal.set(switchLabel, `Switch to ${next === "dark" ? "Light" : "Dark"} Theme`);
+        }),
+    };
+  }),
+);

@@ -1,13 +1,14 @@
 import { Effect, Option } from "effect";
 import { Signal, Component } from "trygg";
 import * as Router from "trygg/router";
-import { authSignal, type AuthUser, setAuth } from "../resources/auth";
+import { AuthStore, type AuthUser, setAuth } from "../resources/auth";
 
 const LoginPage = Component.gen(function* () {
   const username = yield* Signal.make("");
   const error = yield* Signal.make<Option.Option<string>>(Option.none());
 
-  const user = yield* Signal.get(authSignal);
+  const auth = yield* AuthStore;
+  const user = yield* Signal.get(auth.user);
 
   const handleLogin = (e: Event) =>
     Effect.gen(function* () {
