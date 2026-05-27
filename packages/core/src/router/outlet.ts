@@ -64,7 +64,8 @@ import {
   type AsyncLoaderShape,
 } from "./outlet-services.js";
 import { RenderLoadError } from "./render-strategy.js";
-import { makeRouteActivation } from "./route-activation.js";
+import { makeRouteActivation, makeRouteActivationBoundary } from "./route-activation.js";
+import type { RouteActivationRequest } from "./route-activation.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
   type ComponentInput,
@@ -556,15 +557,47 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     const matcher = matcherOpt.value;
     const routeActivation = yield* makeRouteActivation({ emitTraceEvents: true }, matcher);
     const boundaries: BoundaryResolverShape = BoundaryResolver.make(manifest);
+    const routeActivationBoundary = yield* makeRouteActivationBoundary(
+      { interruptStaleLoads: true },
+      {
+        matcher,
+        collectPrefetchTargets,
+        isComponentLoader: (component) => isComponentLoader(component),
+        loadComponent: (component) => resolveComponent(component),
+        runRoutePrefetch: (path, match, query) =>
+          Effect.gen(function* () {
+            const prefetchFns = match.route.definition.prefetch;
+            if (prefetchFns.length === 0) return;
+            const decodedParamsResult = yield* decodeRouteParams(match.route, match.params).pipe(
+              Effect.result,
+            );
+            if (Result.isFailure(decodedParamsResult)) return;
+            const decodedQueryResult = yield* decodeRouteQuery(match.route, query).pipe(
+              Effect.result,
+            );
+            if (Result.isFailure(decodedQueryResult)) return;
+            yield* runPrefetch(prefetchFns, {
+              params: decodedParamsResult.success,
+              query: decodedQueryResult.success,
+            });
+            void path;
+          }),
+        resolveLoading: (match) => boundaries.resolveLoading(match.route),
+        isStale: (activationId) =>
+          Effect.gen(function* () {
+            const current = yield* routeActivation.currentActivationId;
+            return Option.isSome(current) && current.value !== activationId;
+          }),
+      },
+    );
 
     const router = yield* getRouter;
 
     // Register prefetch resolver so router.prefetch() can warm lazy modules
     const currentMatcher = yield* Ref.get(cachedMatcherRef);
     if (Option.isSome(currentMatcher)) {
-      yield* router.outletCoordination.activatePrefetch(
-        buildPrefetchResolver(currentMatcher.value),
-      );
+      void currentMatcher;
+      yield* router.outletCoordination.activatePrefetch(routeActivationBoundary.prefetch);
     }
 
     const componentScope = yield* Signal.CurrentComponentScope;
@@ -673,7 +706,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       decodedParams: Record<string, unknown>,
       decodedQuery: Record<string, unknown>,
       routePath: string,
-      options: { readonly deferLazyLeaf: boolean },
+      options: { readonly deferLazyLeaf: boolean; readonly request: RouteActivationRequest },
     ): Effect.Effect<Element, unknown, never> => {
       const renderLazyLeaf = (
         loader: ComponentLoader,
@@ -690,7 +723,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                   level: "semantic",
                   payload: { path: routeIdentity.path },
                 });
-                const component = yield* resolveComponent(loader);
+                const component = yield* routeActivationBoundary.loadComponent(options.request, loader);
                 const leafElement = yield* renderComponent(
                   component,
                   decodedParams,
@@ -1059,6 +1092,12 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const hasLoadingBoundary = Option.isSome(boundaries.resolveLoading(match.route));
       const routeElement = buildRouteElement(match, decodedParams, decodedQuery, route.path, {
         deferLazyLeaf: !hasLoadingBoundary,
+        request: {
+          activationId,
+          path: route.path,
+          query: route.query,
+          scrollIntent: Option.none(),
+        },
       });
       const withError = wrapWithErrorBoundary(routeElement, match, route.path);
       yield* commitView(withError, match, queryString, epoch, activationId, route.path);
