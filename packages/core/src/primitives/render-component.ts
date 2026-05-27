@@ -1,4 +1,4 @@
-import { Cause, Effect, Equal, Exit, Scope } from "effect";
+import { Cause, Effect, Equal, Exit, Option, Scope } from "effect";
 import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -8,6 +8,7 @@ import { unsafeBuildProviderContext } from "../internal/unsafe.js";
 import { Element as ElementService } from "./element.js";
 import * as Signal from "./signal.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
+import { makeRenderTransaction } from "./render-transaction.js";
 
 export interface RenderComponentOptions {
   readonly errorHandler: ((cause: Cause.Cause<unknown>) => void) | null;
@@ -79,6 +80,7 @@ export const renderComponent = (
     let currentInputs = inputs;
     let currentContext = context;
     let providerContext: Context.Context<unknown> | null = null;
+    const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
 
     const componentScope = yield* Scope.fork(yield* Effect.scope);
     const providerScope = provider === null ? null : yield* Scope.fork(componentScope);
@@ -157,7 +159,7 @@ export const renderComponent = (
 
     const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
       if (currentResult !== null) {
-        yield* currentResult.cleanup;
+        yield* renderTransaction.cleanup(currentResult);
         currentResult = null;
       }
       yield* closeCurrentRenderScope;
@@ -274,12 +276,17 @@ export const renderComponent = (
 
         const nextRender = yield* runComponentEffect();
         const nextElement = yield* ElementService.fromUnknown(nextRender.element);
-        const reused =
-          currentResult !== null && currentResult.reconcile !== undefined
-            ? yield* currentResult.reconcile(nextElement, currentContext)
-            : false;
+        const reconcileOutcome =
+          currentResult === null
+            ? ({ _tag: "NotReconciled", result: currentResult } as const)
+            : yield* renderTransaction.reconcile({
+                previous: currentResult,
+                nextElement,
+                nextContext: currentContext,
+                context: runtime,
+              });
 
-        if (reused) {
+        if (reconcileOutcome._tag === "Reconciled") {
           yield* closeCurrentRenderScope;
           currentRenderScope = nextRender.scope;
         } else {
@@ -299,16 +306,29 @@ export const renderComponent = (
           // into actualParent, producing visible "two trees coexisting"
           // flashes under CPU throttling.
           const tempFragment = document.createDocumentFragment();
-          const nextResult = yield* deps
-            .renderElement(nextElement, tempFragment, runtime, currentContext, options)
-            .pipe(
-              Effect.provideService(Signal.CurrentRenderPhase, null),
-              Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
-            );
-          actualParent.insertBefore(tempFragment, anchor);
-          yield* cleanupCurrent;
+          const previousResult = currentResult;
+          const outcome = yield* renderTransaction.replace({
+            parent: actualParent,
+            previous: previousResult === null ? Option.none() : Option.some(previousResult),
+            renderNext: deps
+              .renderElement(nextElement, tempFragment, runtime, currentContext, options)
+              .pipe(
+                Effect.provideService(Signal.CurrentRenderPhase, null),
+                Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
+              ),
+            context: runtime,
+          });
+
+          if (outcome._tag === "FailedBeforeCommit") {
+            yield* Scope.close(nextRender.scope, Exit.void);
+            return yield* Effect.fail(outcome.cause);
+          }
+
+          if (currentRenderScope !== null) {
+            yield* Scope.close(currentRenderScope, Exit.void);
+          }
           currentRenderScope = nextRender.scope;
-          currentResult = nextResult;
+          currentResult = outcome.result;
         }
 
         const rerenderDuration = performance.now() - rerenderStart;

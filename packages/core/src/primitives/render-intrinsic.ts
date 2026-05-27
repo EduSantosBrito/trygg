@@ -14,6 +14,7 @@ import {
 import * as Head from "./head.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { InvalidEventHandlerError } from "./renderer.js";
+import { makeRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -215,6 +216,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
   }
 
   const node = createElement(tag);
+  const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
 
   yield* Debug.log({ event: "render.intrinsic", element_tag: tag, element: node });
 
@@ -242,7 +244,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
   const cleanupChildSlot = (slot: ChildSlot) =>
     Effect.gen(function* () {
-      yield* slot.result.cleanup;
+      yield* renderTransaction.cleanup(slot.result);
       slot.startMarker.remove();
       slot.endMarker.remove();
     });
@@ -277,7 +279,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
     if (hasKeyedChildren) {
       for (const childSlot of childSlots) yield* cleanupChildSlot(childSlot);
     } else {
-      for (const child of childResults) yield* child.cleanup;
+      for (const child of childResults) yield* renderTransaction.cleanup(child);
     }
     for (const cleanup of propCleanups) yield* cleanup;
     node.remove();
@@ -312,7 +314,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
         if (hasKeyedChildren) {
           for (const childSlot of childSlots) yield* cleanupChildSlot(childSlot);
         } else {
-          for (const child of childResults) yield* child.cleanup;
+          for (const child of childResults) yield* renderTransaction.cleanup(child);
         }
         for (const cleanup of propCleanups) yield* cleanup;
         anchor.remove();
@@ -326,7 +328,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
       if (hasKeyedChildren) {
         for (const childSlot of childSlots) yield* cleanupChildSlot(childSlot);
       } else {
-        for (const child of childResults) yield* child.cleanup;
+        for (const child of childResults) yield* renderTransaction.cleanup(child);
       }
       for (const cleanup of propCleanups) yield* cleanup;
       node.remove();
@@ -371,8 +373,13 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
             ) {
               return false;
             }
-            const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);
-            if (!reused) return false;
+            const outcome = yield* renderTransaction.reconcile({
+              previous: childResult,
+              nextElement: nextChild,
+              nextContext: resolvedNextContext,
+              context: renderContext,
+            });
+            if (outcome._tag !== "Reconciled") return false;
           }
 
           return true;
@@ -393,8 +400,13 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
             if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
             const slot = childSlots[slotIndex];
             if (slot === undefined || slot.result.reconcile === undefined) return false;
-            const reused = yield* slot.result.reconcile(nextChild, resolvedNextContext);
-            if (!reused) return false;
+            const outcome = yield* renderTransaction.reconcile({
+              previous: slot.result,
+              nextElement: nextChild,
+              nextContext: resolvedNextContext,
+              context: renderContext,
+            });
+            if (outcome._tag !== "Reconciled") return false;
             usedIndices.add(slotIndex);
             nextSlots.push(slot);
             return true;

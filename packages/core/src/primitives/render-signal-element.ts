@@ -49,7 +49,7 @@ export const renderSignalElement = (
 
     const cleanupCurrent: Effect.Effect<void, unknown, unknown> = Effect.gen(function* () {
       if (currentResult !== null) {
-        yield* currentResult.cleanup;
+        yield* renderTransaction.cleanup(currentResult);
         currentResult = null;
       }
       if (currentScope !== null) {

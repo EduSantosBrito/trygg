@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import type { Element } from "./element.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { resolveReconcileTarget } from "./render-utils.js";
+import { makeRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -28,10 +29,11 @@ export const renderFragment = (
 ): Effect.Effect<RenderResult, unknown, unknown> =>
   Effect.gen(function* () {
     const childResults: Array<RenderResult> = [];
+    const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
 
     const cleanupRenderedChildren = Effect.gen(function* () {
       for (const child of childResults) {
-        yield* child.cleanup;
+        yield* renderTransaction.cleanup(child);
       }
     }).pipe(Effect.catchCause(() => Effect.void));
 
@@ -61,7 +63,7 @@ export const renderFragment = (
       node: maybeFirstChild.node,
       cleanup: Effect.gen(function* () {
         for (const child of childResults) {
-          yield* child.cleanup;
+          yield* renderTransaction.cleanup(child);
         }
       }),
       reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
@@ -84,8 +86,13 @@ export const renderFragment = (
               return false;
             }
 
-            const reused = yield* childResult.reconcile(nextChild, resolvedNextContext);
-            if (!reused) return false;
+            const outcome = yield* renderTransaction.reconcile({
+              previous: childResult,
+              nextElement: nextChild,
+              nextContext: resolvedNextContext,
+              context: renderContext,
+            });
+            if (outcome._tag !== "Reconciled") return false;
           }
 
           return true;
