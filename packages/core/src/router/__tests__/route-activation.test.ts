@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Option, Ref } from "effect";
+import * as ContractTrace from "../../contract/trace.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { RouteMatch, RouteMatcherShape } from "../matching.js";
 import { makeRouteActivation, makeRouteActivationBoundary } from "../route-activation.js";
@@ -29,6 +30,19 @@ const makeMatcher = (matchPath: string, match: RouteMatch = makeMatch(matchPath)
   routes: Effect.succeed([]),
   match: (path) => Effect.succeed(path === matchPath ? Option.some(match) : Option.none()),
 });
+
+const traceEventsFor = <E, R>(
+  effect: Effect.Effect<void, E, R>,
+): Effect.Effect<ReadonlyArray<ContractTrace.ContractTraceRecord>, E, R> =>
+  Effect.gen(function* () {
+    const collector = yield* ContractTrace.createInMemoryCollector("route-activation");
+    yield* ContractTrace.withCollector(effect, collector);
+    return yield* collector.snapshot;
+  });
+
+const eventNames = (
+  records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
+): ReadonlyArray<ContractTrace.ContractTraceEventName> => records.map((record) => record.event.event);
 
 const makeBoundary = (overrides: Partial<Parameters<typeof makeRouteActivationBoundary>[1]> = {}) =>
   makeRouteActivationBoundary(
@@ -435,6 +449,107 @@ describe("RouteActivation", () => {
     );
 
     expect(intent._tag).toBe("NoBoundary");
+  });
+
+  it("emits latest-route-wins activation traces", async () => {
+    const records = await Effect.runPromise(
+      unsafeEraseR(
+        traceEventsFor(
+          Effect.gen(function* () {
+            const activation = yield* makeRouteActivation(
+              { emitTraceEvents: true },
+              makeMatcher("/fast"),
+            );
+            yield* activation.activate(request("nav-1", "/slow")).pipe(Effect.result);
+            yield* activation.activate(request("nav-2", "/fast")).pipe(Effect.orDie);
+            yield* activation.commitAfterDomSwap(
+              { activationId: "nav-1", path: "/slow" },
+              Effect.void,
+              Effect.void,
+            );
+          }),
+        ),
+      ),
+    );
+
+    expect(eventNames(records)).toEqual([
+      "outlet.process.start",
+      "outlet.match.notFound",
+      "outlet.process.start",
+      "outlet.match.found",
+      "outlet.process.dropStale",
+    ]);
+    expect(records[4]?.event.payload).toMatchObject({
+      activationId: "nav-1",
+      path: "/slow",
+      supersededBy: "nav-2",
+    });
+  });
+
+  it("emits lazy load and boundary outcome traces", async () => {
+    const loaded = Effect.succeed({ _tag: "Text", value: "Lazy" }) as unknown as RouteComponent;
+    const loader = (() => Promise.resolve({ default: loaded })) as ComponentInput;
+    const loading = Effect.succeed({ _tag: "Text", value: "Loading" }) as unknown as ComponentInput;
+    const match = makeMatch("/lazy", { component: loader, loading });
+    const records = await Effect.runPromise(
+      unsafeEraseR(
+        traceEventsFor(
+          Effect.gen(function* () {
+            const boundary = yield* makeBoundary({
+              isComponentLoader: (component) => component === loader,
+              loadComponent: () => Effect.succeed(loaded),
+              resolveLoading: () => Option.some(loading),
+            });
+            yield* boundary.resolve(request("nav-1", "/lazy"), match);
+            yield* boundary.loadComponent(request("nav-1", "/lazy"), loader);
+            yield* boundary.resolveErrorBoundary(request("nav-1", "/lazy"), match, "boom");
+          }),
+        ),
+      ),
+    );
+
+    expect(eventNames(records)).toEqual([
+      "outlet.boundary.resolve",
+      "outlet.lazyLeaf.load.start",
+      "outlet.lazyLeaf.load.ready",
+      "outlet.boundary.resolve",
+    ]);
+    expect(records[0]?.event.payload).toMatchObject({
+      activationId: "nav-1",
+      path: "/lazy",
+      phase: "render",
+      outcome: "Loading",
+    });
+    expect(records[3]?.event.payload).toMatchObject({
+      phase: "error",
+      outcome: "NoBoundary",
+    });
+  });
+
+  it("emits commit and scroll traces after DOM swap", async () => {
+    const events: Array<string> = [];
+    const records = await Effect.runPromise(
+      unsafeEraseR(
+        traceEventsFor(
+          Effect.gen(function* () {
+            const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+            yield* activation.activate(request("nav-1", "/docs"));
+            yield* activation.commitAfterDomSwap(
+              { activationId: "nav-1", path: "/docs" },
+              Effect.sync(() => events.push("swap")),
+              Effect.sync(() => events.push("scroll")),
+            );
+          }),
+        ),
+      ),
+    );
+
+    expect(events).toEqual(["swap", "scroll"]);
+    expect(eventNames(records)).toEqual([
+      "outlet.process.start",
+      "scroll.apply",
+      "outlet.process.commit",
+    ]);
   });
 
   it("integrates with the canonical matcher for matched routes", async () => {
