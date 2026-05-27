@@ -185,6 +185,108 @@ export const matchCompiledRoutePathPattern = (
   return pathIndex === pathParts.length ? Option.some({ pattern, params }) : Option.none();
 };
 
+export type PathParamValue = string | number;
+export type PathParamInput = Readonly<Record<string, PathParamValue>>;
+
+export class MissingRoutePathParam extends Data.TaggedError("MissingRoutePathParam")<{
+  readonly pattern: string;
+  readonly param: string;
+}> {}
+
+export class UnusedRoutePathParam extends Data.TaggedError("UnusedRoutePathParam")<{
+  readonly pattern: string;
+  readonly param: string;
+}> {}
+
+export class InvalidRoutePathParamValue extends Data.TaggedError("InvalidRoutePathParamValue")<{
+  readonly pattern: string;
+  readonly param: string;
+  readonly value: unknown;
+  readonly reason: string;
+}> {}
+
+export const RoutePathInterpolationConfigInput = Schema.Struct({
+  rejectUnusedParams: Schema.Boolean,
+});
+
+type RoutePathInterpolationConfig = typeof RoutePathInterpolationConfigInput.Type;
+
+type RoutePathInterpolationError =
+  | MissingRoutePathParam
+  | UnusedRoutePathParam
+  | InvalidRoutePathParamValue;
+
+export const getPathParamOption = (
+  params: PathParamInput,
+  key: string,
+): Option.Option<PathParamValue> => {
+  if (!Object.prototype.hasOwnProperty.call(params, key)) {
+    return Option.none();
+  }
+  const value = params[key];
+  return value === undefined ? Option.none() : Option.some(value);
+};
+
+const validateParamValue = (
+  pattern: CompiledRoutePathPattern,
+  param: string,
+  value: unknown,
+): Effect.Effect<PathParamValue, InvalidRoutePathParamValue> => {
+  if (typeof value === "string" || typeof value === "number") {
+    return Effect.succeed(value);
+  }
+  return Effect.fail(
+    new InvalidRoutePathParamValue({
+      pattern: pattern.pattern,
+      param,
+      value,
+      reason: "path params must be strings or numbers",
+    }),
+  );
+};
+
+export const interpolateCompiledRoutePathPattern = (
+  pattern: CompiledRoutePathPattern,
+  params: PathParamInput,
+  config: RoutePathInterpolationConfig = { rejectUnusedParams: false },
+): Effect.Effect<string, RoutePathInterpolationError> =>
+  Effect.gen(function* () {
+    if (config.rejectUnusedParams) {
+      for (const key of Object.keys(params)) {
+        if (!pattern.paramNames.includes(key)) {
+          return yield* new UnusedRoutePathParam({ pattern: pattern.pattern, param: key });
+        }
+      }
+    }
+
+    const parts: Array<string> = [];
+    for (const segment of pattern.segments) {
+      if (segment._tag === "Static") {
+        parts.push(segment.value);
+        continue;
+      }
+
+      const option = getPathParamOption(params, segment.name);
+      if (Option.isNone(option)) {
+        if (segment._tag === "Wildcard") {
+          continue;
+        }
+        return yield* new MissingRoutePathParam({ pattern: pattern.pattern, param: segment.name });
+      }
+
+      const value = yield* validateParamValue(pattern, segment.name, option.value);
+      const text = String(value);
+      if (segment._tag !== "Wildcard" && text === "") {
+        return yield* new MissingRoutePathParam({ pattern: pattern.pattern, param: segment.name });
+      }
+      if (text !== "") {
+        parts.push(...text.split("/").filter(Boolean));
+      }
+    }
+
+    return `/${parts.join("/")}`;
+  });
+
 /** RoutePathPattern service. */
 export class RoutePathPattern extends Context.Service<
   RoutePathPattern,
@@ -213,6 +315,38 @@ export class RoutePathPattern extends Context.Service<
       ),
       match: Effect.fn("RoutePathPattern.match")((pattern, pathname) =>
         Effect.succeed(matchCompiledRoutePathPattern(pattern, pathname, config)),
+      ),
+    });
+  };
+}
+
+export class RoutePathInterpolation extends Context.Service<
+  RoutePathInterpolation,
+  {
+    readonly paramNames: (
+      pattern: CompiledRoutePathPattern,
+    ) => Effect.Effect<ReadonlyArray<string>>;
+    readonly interpolate: (
+      pattern: CompiledRoutePathPattern,
+      params: PathParamInput,
+    ) => Effect.Effect<string, RoutePathInterpolationError>;
+    readonly paramOption: (
+      params: PathParamInput,
+      key: string,
+    ) => Effect.Effect<Option.Option<PathParamValue>>;
+  }
+>()("trygg/RoutePathInterpolation") {
+  static readonly layer = (input: RoutePathInterpolationConfig): Layer.Layer<RoutePathInterpolation> => {
+    const config = RoutePathInterpolationConfigInput.make(input);
+    return Layer.succeed(RoutePathInterpolation, {
+      paramNames: Effect.fn("RoutePathInterpolation.paramNames")((pattern) =>
+        Effect.succeed(pattern.paramNames),
+      ),
+      interpolate: Effect.fn("RoutePathInterpolation.interpolate")((pattern, params) =>
+        interpolateCompiledRoutePathPattern(pattern, params, config),
+      ),
+      paramOption: Effect.fn("RoutePathInterpolation.paramOption")((params, key) =>
+        Effect.succeed(getPathParamOption(params, key)),
       ),
     });
   };

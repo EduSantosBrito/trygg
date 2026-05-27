@@ -53,6 +53,19 @@ const ScrollState = Schema.Struct({ _scrollKey: Schema.String });
 /** @internal */
 const decodeScrollState = Schema.decodeUnknownOption(ScrollState);
 
+const interpolateNavigationPath = (
+  targetPath: string,
+  params: Record<string, string | number>,
+): Effect.Effect<string, NavigationError> =>
+  interpolateParams(targetPath, params).pipe(
+    Effect.mapError((cause) => new NavigationError({ operation: "interpolateParams", cause })),
+  );
+
+const interpolateActivePath = (
+  targetPath: string,
+  params: Record<string, string | number>,
+): Effect.Effect<string> => interpolateParams(targetPath, params).pipe(Effect.orDie);
+
 // F-001: Viewport prefetch constants from framework research
 /** IntersectionObserver threshold - 10% visible triggers prefetch */
 const INTERSECTION_THRESHOLD = 0.1;
@@ -780,7 +793,7 @@ export const browserLayer: Layer.Layer<
 
         // Interpolate params into path pattern if provided
         const resolvedPath = options?.params
-          ? yield* interpolateParams(targetPath, options.params)
+          ? yield* interpolateNavigationPath(targetPath, options.params)
           : targetPath;
 
         const current = yield* Signal.get(currentSignal);
@@ -910,7 +923,7 @@ export const browserLayer: Layer.Layer<
       isActive: (targetPath: string, options?: IsActiveOptions) =>
         Effect.gen(function* () {
           const resolvedPath = options?.params
-            ? yield* interpolateParams(targetPath, options.params)
+            ? yield* interpolateActivePath(targetPath, options.params)
             : targetPath;
           const matcher = options?.exact
             ? (route: Route) => route.path === resolvedPath
@@ -1043,7 +1056,7 @@ export const testLayer = (
 
           // Interpolate params into path pattern if provided
           const resolvedPath = options?.params
-            ? yield* interpolateParams(targetPath, options.params)
+            ? yield* interpolateNavigationPath(targetPath, options.params)
             : targetPath;
 
           const current = yield* Signal.get(currentSignal);
@@ -1164,7 +1177,7 @@ export const testLayer = (
         isActive: (targetPath: string, options?: IsActiveOptions) =>
           Effect.gen(function* () {
             const resolvedPath = options?.params
-              ? yield* interpolateParams(targetPath, options.params)
+              ? yield* interpolateActivePath(targetPath, options.params)
               : targetPath;
             const matcher = options?.exact
               ? (route: Route) => route.path === resolvedPath

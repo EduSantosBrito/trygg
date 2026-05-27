@@ -208,10 +208,10 @@ describe("interpolateParams", () => {
     }),
   );
 
-  it.effect("should not replace non-matching params", () =>
+  it.effect("should fail clearly when required params are missing", () =>
     Effect.gen(function* () {
-      const result = yield* interpolateParams("/users/:id", { name: "test" });
-      assert.strictEqual(result, "/users/:id");
+      const result = yield* Effect.exit(interpolateParams("/users/:id", { name: "test" }));
+      assert.strictEqual(result._tag, "Failure");
     }),
   );
 

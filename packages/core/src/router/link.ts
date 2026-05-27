@@ -222,7 +222,7 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
   const run = (): Effect.Effect<Element, never, Router> =>
     Effect.gen(function* () {
       // Build resolved path (substitute params if provided)
-      const resolvedPath = params ? yield* buildPathWithParams(to, params) : to;
+      const resolvedPath = params ? yield* buildPathWithParams(to, params).pipe(Effect.orDie) : to;
 
       // Build full href with query string
       const href = yield* buildPath(resolvedPath, queryParams);
