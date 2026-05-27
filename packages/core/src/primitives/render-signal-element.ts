@@ -1,9 +1,10 @@
-import { Effect, Scope, Exit } from "effect";
+import { Effect, Scope, Exit, Option } from "effect";
 import * as Context from "effect/Context";
 import { Element, isElement } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
+import { makeRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -41,6 +42,7 @@ export const renderSignalElement = (
     let currentScope: Scope.Closeable | null = null;
     let isUnmounted = false;
     let swapVersion = 0;
+    const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
 
     const renderValue = (value: unknown): Element =>
       isElement(value) ? value : Element.Text({ content: String(value) });
@@ -114,7 +116,7 @@ export const renderSignalElement = (
 
             const tempFragment = document.createDocumentFragment();
             const scope = yield* Scope.fork(yield* Effect.scope);
-            const result = yield* deps
+            const renderNext = deps
               .renderElement(element, tempFragment, renderContext, context, options)
               .pipe(
                 Scope.provide(scope),
@@ -122,27 +124,32 @@ export const renderSignalElement = (
               );
 
             if (myVersion !== swapVersion) {
-              yield* result.cleanup;
               yield* Scope.close(scope, Exit.void);
               return;
             }
 
-            // Insert the replacement BEFORE cleaning the old subtree so that
-            // the document never goes through a blank frame. The previous
-            // tree's finalizers see the replacement already mounted.
             const actualParent = anchor.parentNode;
-            if (actualParent !== null) {
-              actualParent.insertBefore(tempFragment, anchor);
+            if (actualParent === null) {
+              yield* Scope.close(scope, Exit.void);
+              return;
             }
 
-            const oldResult = currentResult;
             const oldScope = currentScope;
-            currentResult = result;
+            const outcome = yield* renderTransaction.replace({
+              parent: actualParent,
+              previous: currentResult === null ? Option.none() : Option.some(currentResult),
+              renderNext,
+              context: renderContext,
+            });
+
+            if (outcome._tag === "FailedBeforeCommit") {
+              yield* Scope.close(scope, Exit.void);
+              throw outcome.cause;
+            }
+
+            currentResult = outcome.result;
             currentScope = scope;
 
-            if (oldResult !== null) {
-              yield* oldResult.cleanup;
-            }
             if (oldScope !== null) {
               yield* Scope.close(oldScope, Exit.void);
             }
