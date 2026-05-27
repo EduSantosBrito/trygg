@@ -21,7 +21,19 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Data, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Result, Scope } from "effect";
+import {
+  Cause,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Result,
+  Scope,
+} from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";

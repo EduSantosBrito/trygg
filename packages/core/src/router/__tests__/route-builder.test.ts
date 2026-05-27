@@ -378,13 +378,18 @@ describe("Route.provide", () => {
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.Auto);
   });
 
-  it("should handle multiple layers (RenderStrategy + ScrollStrategy)", () => {
+  it("should compose one route strategy per provide call", () => {
     const route = Route.make("/")
       .component(component)
-      .pipe(Route.provide(RenderStrategy.Eager, ScrollStrategy.None));
+      .pipe(Route.provide(RenderStrategy.Eager), Route.provide(ScrollStrategy.None));
 
     assert.strictEqual(route.definition.renderStrategy, RenderStrategy.Eager);
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.None);
+  });
+
+  it("rejects multi-strategy provision in one call", () => {
+    // @ts-expect-error Route.provide accepts one strategy layer per call.
+    Route.provide(RenderStrategy.Eager, ScrollStrategy.None);
   });
 
   it("should not store route service layers", () => {
@@ -400,11 +405,10 @@ describe("Route.provide", () => {
   it("should combine only strategy layers", () => {
     const route = Route.make("/")
       .component(component)
-      .pipe(Route.provide(RenderStrategy.Eager, ScrollStrategy.None));
+      .pipe(Route.provide(RenderStrategy.Eager), Route.provide(ScrollStrategy.None));
 
     assert.strictEqual(route.definition.renderStrategy, RenderStrategy.Eager);
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.None);
-    assert.strictEqual(route.definition.layers.length, 0);
   });
 
   it("should return a RouteBuilder (not an Effect)", () => {
@@ -448,7 +452,5 @@ describe("Route.provide", () => {
       typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh> ? R : never;
     const _check: Equals<R, AuthService> = true;
     void _check;
-
-    assert.strictEqual(route.definition.layers.length, 0);
   });
 });

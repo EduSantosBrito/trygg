@@ -2255,7 +2255,6 @@ describe("Re-render behavior", () => {
             querySchema: undefined,
             renderStrategy: undefined,
             scrollStrategy: undefined,
-            layers: [],
           },
         ],
         notFound: undefined,

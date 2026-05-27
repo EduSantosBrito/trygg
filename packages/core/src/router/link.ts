@@ -43,19 +43,16 @@
  * @module trygg/router/link
  */
 import { Duration, Effect, Fiber } from "effect";
-import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
 import * as Signal from "../primitives/signal.js";
 import {
   Element,
   intrinsic,
   type ElementProps,
   type AttributeInput,
-  provideElement,
 } from "../primitives/element.js";
 
 import * as Debug from "../debug/debug.js";
 import * as ContractTrace from "../contract/trace.js";
-import { unsafeWidenContext } from "../internal/unsafe.js";
 import { get as getRouter, Router } from "./service.js";
 import { buildPath } from "./utils.js";
 import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
@@ -386,45 +383,21 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
   return Element.fromEffect(Effect.suspend(run), { identity: linkRuntimeIdentity, inputs: props });
 }
 
-// Define the Link component type with Component.Type properties
+// Define the Link component type with Component.Type properties.
 interface LinkComponent {
   <Path extends RoutePath>(props: LinkProps<Path>): Element;
   readonly _tag: "EffectComponent";
-  readonly _layers: ReadonlyArray<AnyLayer>;
+  readonly _layers: ReadonlyArray<unknown>;
   readonly _displayName: "Link";
-  provide<RIn, E2, ROut>(layer: LayerType<ROut, E2, RIn>): LinkComponent;
 }
 
-// Apply Component.Type properties to Link function
+// Apply Component.Type properties to Link function.
 const linkComponent: LinkComponent = Object.assign(
   <Path extends RoutePath>(props: LinkProps<Path>): Element => LinkImpl(props),
   {
     _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
+    _layers: [] as ReadonlyArray<unknown>,
     _displayName: "Link" as const,
-    provide: <RIn, E2, ROut>(layer: LayerType<ROut, E2, RIn>): LinkComponent => {
-      const wrappedLink: LinkComponent = Object.assign(
-        <Path extends RoutePath>(props: LinkProps<Path>): Element => {
-          const run = (): Effect.Effect<Element, E2, RIn> =>
-            Effect.gen(function* () {
-              const context = yield* Effect.context<ROut>().pipe(
-                Effect.provide(layer),
-                Effect.map((ctx) => unsafeWidenContext(ctx)),
-              );
-              const element = LinkImpl(props);
-              return provideElement(context, element);
-            });
-          return Element.fromEffect(Effect.suspend(run), { identity: wrappedLink, inputs: props });
-        },
-        {
-          _tag: "EffectComponent" as const,
-          _layers: [layer] as ReadonlyArray<AnyLayer>,
-          _displayName: "Link" as const,
-          provide: linkComponent.provide,
-        },
-      );
-      return wrappedLink;
-    },
   },
 );
 

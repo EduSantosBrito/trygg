@@ -108,7 +108,6 @@ export interface RouteDefinition {
   readonly querySchema: unknown | undefined;
   readonly renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined;
   readonly scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined;
-  readonly layers: ReadonlyArray<LayerTypes.Any>;
 }
 
 // =============================================================================
@@ -516,7 +515,6 @@ const emptyDefinition = (path: string | IndexMarker): RouteDefinition => ({
   querySchema: undefined,
   renderStrategy: undefined,
   scrollStrategy: undefined,
-  layers: [],
 });
 
 // =============================================================================
@@ -637,7 +635,7 @@ const isScrollStrategyLayer = (
  *
  * Route.make("/settings")
  *   .component(SettingsPage)
- *   .pipe(Route.provide(RenderStrategy.Eager, ScrollStrategy.None))
+ *   .pipe(Route.provide(RenderStrategy.Eager), Route.provide(ScrollStrategy.None))
  * ```
  *
  * @remarks
@@ -660,41 +658,6 @@ export function provide(
   HEB extends boolean,
 >(
   builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-) => RouteBuilder<Path, R, HC, HCh, NC, HEB>;
-
-/**
- * Apply multiple strategy layers to a route.
- *
- * @category Route Builders
- * @public
- * @since 1.0.0
- */
-export function provide(
-  layer1: RouteStrategyLayer,
-  layer2: RouteStrategyLayer,
-  ...rest: Array<RouteStrategyLayer>
-): <
-  Path extends string,
-  R,
-  HC extends boolean,
-  HCh extends boolean,
-  NC extends boolean,
-  HEB extends boolean,
->(
-  builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-) => RouteBuilder<Path, R, HC, HCh, NC, HEB>;
-
-export function provide(
-  ...layers: ReadonlyArray<RouteStrategyLayer>
-): <
-  Path extends string,
-  R,
-  HC extends boolean,
-  HCh extends boolean,
-  NC extends boolean,
-  HEB extends boolean,
->(
-  builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
 ) => RouteBuilder<Path, R, HC, HCh, NC, HEB> {
   return <
     Path extends string,
@@ -706,24 +669,13 @@ export function provide(
   >(
     builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
   ): RouteBuilder<Path, R, HC, HCh, NC, HEB> => {
-    let renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined =
-      builder.definition.renderStrategy;
-    let scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined =
-      builder.definition.scrollStrategy;
-
-    for (const layer of layers) {
-      if (isRenderStrategyLayer(layer)) {
-        renderStrategy = layer;
-      } else if (isScrollStrategyLayer(layer)) {
-        scrollStrategy = layer;
-      }
-    }
+    const renderStrategy = isRenderStrategyLayer(layer) ? layer : builder.definition.renderStrategy;
+    const scrollStrategy = isScrollStrategyLayer(layer) ? layer : builder.definition.scrollStrategy;
 
     return makeBuilder<Path, R, HC, HCh, NC, HEB>({
       ...builder.definition,
       renderStrategy,
       scrollStrategy,
-      layers: builder.definition.layers,
     });
   };
 }

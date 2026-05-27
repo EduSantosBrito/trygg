@@ -183,8 +183,8 @@ import { currentRoute as _currentRoute } from "./service.js";
 
 /**
  * Route namespace - provides `Route.make(path)`, `Route.index(component)`,
- * `Route.provide(...strategies)`, `Route.current`, `Route.redirect(path)`,
- * and `Route.forbidden()`.
+ * `Route.provide(strategy)`, `Route.current`, `Route.redirect(path)`, and
+ * `Route.forbidden()`.
  *
  * @remarks
  * Use `Route` for the fluent route-definition API. The namespace groups the
