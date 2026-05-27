@@ -650,25 +650,13 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // wait until the Ready state propagates and the DOM has been swapped.
     let pendingScroll: {
       readonly activationId: string;
+      readonly routePath: string;
       readonly strategyLayer: Layer.Layer<ScrollStrategy> | undefined;
     } | null = null;
     let routeEpoch = 0;
 
     const nextActivationId = () => `route-${++routeEpoch}`;
 
-    const mayCommitActivation = (activationId: string, path: string) =>
-      Effect.gen(function* () {
-        const outcome = yield* routeActivation.commit({ activationId, path });
-        if (outcome._tag === "DroppedStale") {
-          yield* ContractTrace.emit({
-            event: "outlet.process.dropStale",
-            level: "semantic",
-            payload: { activationId, supersededBy: outcome.supersededBy, path },
-          });
-          return false;
-        }
-        return true;
-      });
 
     /**
      * Process a route: match, middleware, boundaries, render, update view.
@@ -829,12 +817,18 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               const state = yield* SubscriptionRef.get(loader.state._ref);
               const val = yield* SubscriptionRef.get(loader.view._ref);
               if (pendingScroll !== null && state._tag === "Ready") {
-                const { activationId, strategyLayer } = pendingScroll;
+                const { activationId, routePath, strategyLayer } = pendingScroll;
                 pendingScroll = null;
-                const canCommit = yield* mayCommitActivation(activationId, "async-loader");
-                if (!canCommit) return;
-                yield* setViewAndAwaitSwap(val);
-                yield* applyScroll(strategyLayer);
+                yield* routeActivation.commitAfterDomSwap(
+                  { activationId, path: routePath },
+                  setViewAndAwaitSwap(val),
+                  applyScroll(strategyLayer),
+                );
+              } else if (pendingScroll !== null) {
+                yield* routeActivation.showLoadingFallback(
+                  { activationId: pendingScroll.activationId, path: pendingScroll.routePath },
+                  Signal.set(viewSignal, val),
+                );
               } else {
                 yield* Signal.set(viewSignal, val);
               }
@@ -865,15 +859,17 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           // Defer scroll across loading/refreshing states. `track` forks the
           // render fiber, so fast loads can already be Ready by the time it
           // returns; handle that window explicitly after track.
-          pendingScroll = { activationId, strategyLayer };
+          pendingScroll = { activationId, routePath, strategyLayer };
           yield* loader.track(matchKey, renderEffect, { epoch });
           const currentState = yield* SubscriptionRef.get(loader.state._ref);
           const currentView = yield* SubscriptionRef.get(loader.view._ref);
           if (pendingScroll !== null && currentState._tag === "Ready") {
             pendingScroll = null;
-            const canCommit = yield* mayCommitActivation(activationId, routePath);
-            if (!canCommit) return;
-            yield* setViewAndAwaitSwap(currentView);
+            yield* routeActivation.commitAfterDomSwap(
+              { activationId, path: routePath },
+              setViewAndAwaitSwap(currentView),
+              applyScroll(strategyLayer),
+            );
             yield* ContractTrace.emit({
               event: "outlet.process.commit",
               level: "semantic",
@@ -884,9 +880,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                 epoch,
               },
             });
-            yield* applyScroll(strategyLayer);
           } else {
-            yield* Signal.set(viewSignal, currentView);
+            yield* routeActivation.showLoadingFallback(
+              { activationId, path: routePath },
+              Signal.set(viewSignal, currentView),
+            );
             yield* ContractTrace.emit({
               event: "outlet.process.commit",
               level: "semantic",
@@ -901,15 +899,16 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           }
         } else {
           const rendered = yield* renderEffect;
-          const canCommit = yield* mayCommitActivation(activationId, routePath);
-          if (!canCommit) return;
-          yield* setViewAndAwaitSwap(rendered);
+          yield* routeActivation.commitAfterDomSwap(
+            { activationId, path: routePath },
+            setViewAndAwaitSwap(rendered),
+            applyScroll(resolveScrollStrategy(match.route)),
+          );
           yield* ContractTrace.emit({
             event: "outlet.process.commit",
             level: "semantic",
             payload: { path: routePath, routePattern: match.route.path, query: queryString, epoch },
           });
-          yield* applyScroll(resolveScrollStrategy(match.route));
         }
       });
 
@@ -950,10 +949,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
-        const canCommit = yield* mayCommitActivation(activationId, route.path);
-        if (!canCommit) return;
-        yield* setViewAndAwaitSwap(notFoundEl);
-        yield* applyScroll(undefined);
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(notFoundEl),
+          applyScroll(undefined),
+        );
         return;
       }
 
@@ -977,10 +977,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
-        const canCommit = yield* mayCommitActivation(activationId, route.path);
-        if (!canCommit) return;
-        yield* setViewAndAwaitSwap(el);
-        yield* applyScroll(resolveScrollStrategy(match.route));
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(el),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
         return;
       }
       if (middlewareResult._tag === "Error") {
@@ -991,10 +992,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(middlewareResult.cause), route.path),
             ),
         });
-        const canCommit = yield* mayCommitActivation(activationId, route.path);
-        if (!canCommit) return;
-        yield* setViewAndAwaitSwap(el);
-        yield* applyScroll(resolveScrollStrategy(match.route));
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(el),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
         return;
       }
 
@@ -1016,10 +1018,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
             ),
         });
-        const canCommit = yield* mayCommitActivation(activationId, route.path);
-        if (!canCommit) return;
-        yield* setViewAndAwaitSwap(el);
-        yield* applyScroll(resolveScrollStrategy(match.route));
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(el),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
         return;
       }
 
@@ -1041,10 +1044,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
             ),
         });
-        const canCommit = yield* mayCommitActivation(activationId, route.path);
-        if (!canCommit) return;
-        yield* setViewAndAwaitSwap(el);
-        yield* applyScroll(resolveScrollStrategy(match.route));
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(el),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
         return;
       }
 

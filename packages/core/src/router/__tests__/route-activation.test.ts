@@ -71,6 +71,88 @@ describe("RouteActivation", () => {
     expect(outcome).toEqual({ _tag: "NotFound", activationId: "nav-1", path: "/missing" });
   });
 
+  it("controls loading fallback display for the latest activation", async () => {
+    const events = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+          const events: Array<string> = [];
+          yield* activation.activate(request("nav-1", "/slow"));
+          yield* activation.showLoadingFallback(
+            { activationId: "nav-1", path: "/slow" },
+            Effect.sync(() => events.push("loading")),
+          );
+          return events;
+        }),
+      ),
+    );
+
+    expect(events).toEqual(["loading"]);
+  });
+
+  it("suppresses stale loading fallback display", async () => {
+    const events = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+          const events: Array<string> = [];
+          yield* activation.activate(request("nav-1", "/slow"));
+          yield* activation.activate(request("nav-2", "/fast"));
+          yield* activation.showLoadingFallback(
+            { activationId: "nav-1", path: "/slow" },
+            Effect.sync(() => events.push("stale-loading")),
+          );
+          return events;
+        }),
+      ),
+    );
+
+    expect(events).toEqual([]);
+  });
+
+  it("runs scroll work only after the activation DOM swap", async () => {
+    const events = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+          const events: Array<string> = [];
+          yield* activation.activate(request("nav-1", "/docs"));
+          yield* activation.commitAfterDomSwap(
+            { activationId: "nav-1", path: "/docs" },
+            Effect.sync(() => events.push("swap")),
+            Effect.sync(() => events.push("scroll")),
+          );
+          return events;
+        }),
+      ),
+    );
+
+    expect(events).toEqual(["swap", "scroll"]);
+  });
+
+  it("suppresses scroll if the activation becomes stale during DOM swap", async () => {
+    const events = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+          const events: Array<string> = [];
+          yield* activation.activate(request("nav-1", "/slow"));
+          yield* activation.commitAfterDomSwap(
+            { activationId: "nav-1", path: "/slow" },
+            Effect.gen(function* () {
+              events.push("swap");
+              yield* activation.activate(request("nav-2", "/fast")).pipe(Effect.orDie);
+            }),
+            Effect.sync(() => events.push("stale-scroll")),
+          );
+          return events;
+        }),
+      ),
+    );
+
+    expect(events).toEqual(["swap"]);
+  });
+
   it("integrates with the canonical matcher for matched routes", async () => {
     const outcome = await Effect.runPromise(
       unsafeEraseR(
