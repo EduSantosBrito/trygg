@@ -12,6 +12,7 @@
  */
 import { Data, Deferred, Effect, Layer, Option, Schema, Scope, SynchronizedRef } from "effect";
 import * as Context from "effect/Context";
+import * as ContractTrace from "../contract/trace.js";
 import type { ScrollIntent } from "./navigation-outlet-coordination.js";
 import type { RouteMatch, RouteMatcherShape } from "./matching.js";
 import type { MiddlewareResult } from "./route.js";
@@ -41,6 +42,35 @@ export const RouteActivationConfigInput = Schema.Struct({
 });
 
 type RouteActivationConfig = typeof RouteActivationConfigInput.Type;
+
+const activationPayload = (request: Pick<RouteActivationRequest, "activationId" | "path">) => ({
+  activationId: request.activationId,
+  path: request.path,
+});
+
+const emitActivationTrace = (
+  enabled: boolean,
+  event: ContractTrace.ContractTraceEventName,
+  payload: Record<string, unknown>,
+): Effect.Effect<void> =>
+  enabled
+    ? ContractTrace.emit({ event, level: "semantic", payload }).pipe(Effect.ignore)
+    : Effect.void;
+
+const emitBoundaryTrace = (
+  event: ContractTrace.ContractTraceEventName,
+  payload: Record<string, unknown>,
+): Effect.Effect<void> => ContractTrace.emit({ event, level: "semantic", payload }).pipe(Effect.ignore);
+
+const boundaryOutcomePayload = (
+  request: Pick<RouteActivationRequest, "activationId" | "path">,
+  outcome: RouteActivationRenderIntent | { readonly _tag: "Continue" },
+  phase: string,
+): Record<string, unknown> => ({
+  ...activationPayload(request),
+  phase,
+  outcome: outcome._tag,
+});
 
 export interface RouteActivationShape {
   readonly activate: (
@@ -74,13 +104,24 @@ export const makeRouteActivation = (
       Effect.gen(function* () {
         const latest = yield* SynchronizedRef.get(current);
         if (Option.isSome(latest) && latest.value !== activationId) {
-          return { _tag: "DroppedStale", activationId, supersededBy: latest.value } as const;
+          const outcome = { _tag: "DroppedStale", activationId, supersededBy: latest.value } as const;
+          yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.dropStale", {
+            activationId,
+            path,
+            supersededBy: latest.value,
+          });
+          return outcome;
         }
         return { _tag: "Committed", activationId, path } as const;
       });
 
     return {
       activate: Effect.fn("RouteActivation.activate")(function* (request) {
+        yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.start", {
+          ...activationPayload(request),
+          query: request.query.toString(),
+          hasScrollIntent: Option.isSome(request.scrollIntent),
+        });
         yield* SynchronizedRef.set(current, Option.some(request.activationId));
         if (matcher !== undefined) {
           const match = yield* matcher.match(request.path).pipe(
@@ -94,14 +135,26 @@ export const makeRouteActivation = (
             ),
           );
           if (Option.isNone(match)) {
+            yield* emitActivationTrace(config.emitTraceEvents, "outlet.match.notFound", {
+              ...activationPayload(request),
+            });
             return { _tag: "NotFound", activationId: request.activationId, path: request.path };
           }
+          yield* emitActivationTrace(config.emitTraceEvents, "outlet.match.found", {
+            ...activationPayload(request),
+            routePattern: match.value.route.path,
+          });
         }
-        void config;
         return { _tag: "Committed", activationId: request.activationId, path: request.path };
       }),
       commit: Effect.fn("RouteActivation.commit")(function* (request) {
-        return yield* currentOrStale(request.activationId, request.path);
+        const outcome = yield* currentOrStale(request.activationId, request.path);
+        if (outcome._tag === "Committed") {
+          yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+            ...activationPayload(request),
+          });
+        }
+        return outcome;
       }),
       currentActivationId: SynchronizedRef.get(current),
       waitForDomSwap: Effect.fn("RouteActivation.waitForDomSwap")(function* (_activationId) {
@@ -114,6 +167,10 @@ export const makeRouteActivation = (
         const outcome = yield* currentOrStale(request.activationId, request.path);
         if (outcome._tag === "DroppedStale") return outcome;
         yield* show;
+        yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+          ...activationPayload(request),
+          state: "Loading",
+        });
         return outcome;
       }),
       commitAfterDomSwap: Effect.fn("RouteActivation.commitAfterDomSwap")(function* (
@@ -127,6 +184,12 @@ export const makeRouteActivation = (
         const afterDomSwap = yield* currentOrStale(request.activationId, request.path);
         if (afterDomSwap._tag === "DroppedStale") return afterDomSwap;
         yield* afterSwap;
+        yield* emitActivationTrace(config.emitTraceEvents, "scroll.apply", {
+          ...activationPayload(request),
+        });
+        yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+          ...activationPayload(request),
+        });
         return afterDomSwap;
       }),
     };
@@ -238,7 +301,14 @@ export const makeRouteActivationBoundary = (
       request: RouteActivationRequest,
       component: ComponentInput,
     ) {
+      yield* emitBoundaryTrace("outlet.lazyLeaf.load.start", activationPayload(request));
       const loaded = yield* dependencies.loadComponent(component).pipe(
+        Effect.tapError((cause) =>
+          emitBoundaryTrace("outlet.lazyLeaf.load.error", {
+            ...activationPayload(request),
+            cause: String(cause),
+          }),
+        ),
         Effect.mapError(
           (cause) =>
             new LazyRouteLoadError({ activationId: request.activationId, path: request.path, cause }),
@@ -246,12 +316,17 @@ export const makeRouteActivationBoundary = (
       );
       const stale = yield* dependencies.isStale(request.activationId);
       if (config.interruptStaleLoads && stale) {
+        yield* emitBoundaryTrace("outlet.lazyLeaf.load.error", {
+          ...activationPayload(request),
+          cause: "stale activation",
+        });
         return yield* new LazyRouteLoadError({
           activationId: request.activationId,
           path: request.path,
           cause: "stale activation",
         });
       }
+      yield* emitBoundaryTrace("outlet.lazyLeaf.load.ready", activationPayload(request));
       return loaded;
     });
 
@@ -267,12 +342,27 @@ export const makeRouteActivationBoundary = (
           component !== undefined &&
           dependencies.isComponentLoader(component)
         ) {
-          return { _tag: "Loading", component: loading.value };
+          const outcome = { _tag: "Loading", component: loading.value } as const;
+          yield* emitBoundaryTrace(
+            "outlet.boundary.resolve",
+            boundaryOutcomePayload(request, outcome, "render"),
+          );
+          return outcome;
         }
         if (component !== undefined) {
-          return { _tag: "Leaf", component };
+          const outcome = { _tag: "Leaf", component } as const;
+          yield* emitBoundaryTrace(
+            "outlet.boundary.resolve",
+            boundaryOutcomePayload(request, outcome, "render"),
+          );
+          return outcome;
         }
-        return { _tag: "NoBoundary", cause: "route has no component" };
+        const outcome = { _tag: "NoBoundary", cause: "route has no component" } as const;
+        yield* emitBoundaryTrace(
+          "outlet.boundary.resolve",
+          boundaryOutcomePayload(request, outcome, "render"),
+        );
+        return outcome;
       }),
       prefetch: Effect.fn("RouteActivationBoundary.prefetch")(function* (path) {
         const parsed = yield* parsePath(path).pipe(Effect.orDie);
@@ -295,26 +385,41 @@ export const makeRouteActivationBoundary = (
       ) {
         if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
         const component = dependencies.resolveError(match, cause);
-        return Option.isSome(component)
-          ? { _tag: "ErrorBoundary", component: component.value, cause }
+        const outcome = Option.isSome(component)
+          ? ({ _tag: "ErrorBoundary", component: component.value, cause } as const)
           : noBoundary(request, "missing error boundary", cause);
+        yield* emitBoundaryTrace(
+          "outlet.boundary.resolve",
+          boundaryOutcomePayload(request, outcome, "error"),
+        );
+        return outcome;
       }),
       resolveNotFoundBoundary: Effect.fn("RouteActivationBoundary.resolveNotFoundBoundary")(
         function* (request) {
           if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
           const component = dependencies.resolveNotFound(request.path);
-          return Option.isSome(component)
-            ? { _tag: "NotFoundBoundary", component: component.value }
+          const outcome = Option.isSome(component)
+            ? ({ _tag: "NotFoundBoundary", component: component.value } as const)
             : noBoundary(request, "missing not-found boundary", "not found");
+          yield* emitBoundaryTrace(
+            "outlet.boundary.resolve",
+            boundaryOutcomePayload(request, outcome, "notFound"),
+          );
+          return outcome;
         },
       ),
       resolveForbiddenBoundary: Effect.fn("RouteActivationBoundary.resolveForbiddenBoundary")(
         function* (request, match) {
           if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
           const component = dependencies.resolveForbidden(match);
-          return Option.isSome(component)
-            ? { _tag: "ForbiddenBoundary", component: component.value }
+          const outcome = Option.isSome(component)
+            ? ({ _tag: "ForbiddenBoundary", component: component.value } as const)
             : noBoundary(request, "missing forbidden boundary", "forbidden");
+          yield* emitBoundaryTrace(
+            "outlet.boundary.resolve",
+            boundaryOutcomePayload(request, outcome, "forbidden"),
+          );
+          return outcome;
         },
       ),
       resolveMiddleware: Effect.fn("RouteActivationBoundary.resolveMiddleware")(function* (
@@ -323,24 +428,34 @@ export const makeRouteActivationBoundary = (
       ) {
         if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
         const result = yield* dependencies.runMiddleware(match);
+        let outcome: RouteActivationRenderIntent | { readonly _tag: "Continue" };
         switch (result._tag) {
           case "Continue":
-            return { _tag: "Continue" } as const;
+            outcome = { _tag: "Continue" } as const;
+            break;
           case "Redirect":
-            return { _tag: "Redirect", location: result.path, replace: result.replace } as const;
+            outcome = { _tag: "Redirect", location: result.path, replace: result.replace } as const;
+            break;
           case "Forbidden": {
             const component = dependencies.resolveForbidden(match);
-            return Option.isSome(component)
-              ? { _tag: "ForbiddenBoundary", component: component.value }
+            outcome = Option.isSome(component)
+              ? ({ _tag: "ForbiddenBoundary", component: component.value } as const)
               : noBoundary(request, "missing forbidden boundary", "forbidden");
+            break;
           }
           case "Error": {
             const component = dependencies.resolveError(match, result.cause);
-            return Option.isSome(component)
-              ? { _tag: "ErrorBoundary", component: component.value, cause: result.cause }
+            outcome = Option.isSome(component)
+              ? ({ _tag: "ErrorBoundary", component: component.value, cause: result.cause } as const)
               : noBoundary(request, "missing error boundary", result.cause);
+            break;
           }
         }
+        yield* emitBoundaryTrace(
+          "outlet.boundary.resolve",
+          boundaryOutcomePayload(request, outcome, "middleware"),
+        );
+        return outcome;
       }),
     };
   });

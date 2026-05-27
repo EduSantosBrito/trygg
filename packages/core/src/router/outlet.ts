@@ -620,11 +620,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           Effect.provide(strategyLayer ?? ScrollStrategy.Auto),
         );
         yield* router.outletCoordination.applyScroll({ strategy });
-        yield* ContractTrace.emit({
-          event: "scroll.apply",
-          level: "semantic",
-          payload: { kind: strategy._tag },
-        });
       }).pipe(
         Effect.catchCause((cause) =>
           ContractTrace.emit({
@@ -722,11 +717,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
             yield* Effect.forkScoped(
               Effect.gen(function* () {
-                yield* ContractTrace.emit({
-                  event: "outlet.lazyLeaf.load.start",
-                  level: "semantic",
-                  payload: { path: routeIdentity.path },
-                });
                 const component = yield* routeActivationBoundary.loadComponent(options.request, loader);
                 const leafElement = yield* renderComponent(
                   component,
@@ -734,28 +724,16 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
                   decodedQuery,
                   routeIdentity,
                 );
-                yield* ContractTrace.emit({
-                  event: "outlet.lazyLeaf.load.ready",
-                  level: "semantic",
-                  payload: { path: routeIdentity.path },
-                });
                 yield* Signal.set(childSignal, leafElement);
               }).pipe(
                 Effect.catchCause((cause) =>
-                  Effect.gen(function* () {
-                    yield* ContractTrace.emit({
-                      event: "outlet.lazyLeaf.load.error",
-                      level: "semantic",
-                      payload: { path: routeIdentity.path, cause: Cause.pretty(cause) },
-                    });
-                    yield* Signal.set(
-                      childSignal,
-                      Element.fail(Cause.squash(cause), {
-                        identity: outletLazyLeafIdentity,
-                        inputs: { routeIdentity, phase: "error" },
-                      }),
-                    );
-                  }),
+                  Signal.set(
+                    childSignal,
+                    Element.fail(Cause.squash(cause), {
+                      identity: outletLazyLeafIdentity,
+                      inputs: { routeIdentity, phase: "error" },
+                    }),
+                  ),
                 ),
               ),
             );
@@ -907,32 +885,14 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               setViewAndAwaitSwap(currentView),
               applyScroll(strategyLayer),
             );
-            yield* ContractTrace.emit({
-              event: "outlet.process.commit",
-              level: "semantic",
-              payload: {
-                path: routePath,
-                routePattern: match.route.path,
-                query: queryString,
-                epoch,
-              },
-            });
+            void epoch;
           } else {
             yield* routeActivation.showLoadingFallback(
               { activationId, path: routePath },
               Signal.set(viewSignal, currentView),
             );
-            yield* ContractTrace.emit({
-              event: "outlet.process.commit",
-              level: "semantic",
-              payload: {
-                path: routePath,
-                routePattern: match.route.path,
-                query: queryString,
-                epoch,
-                state: currentState._tag,
-              },
-            });
+            void currentState;
+            void epoch;
           }
         } else {
           const rendered = yield* renderEffect;
@@ -941,11 +901,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
             setViewAndAwaitSwap(rendered),
             applyScroll(resolveScrollStrategy(match.route)),
           );
-          yield* ContractTrace.emit({
-            event: "outlet.process.commit",
-            level: "semantic",
-            payload: { path: routePath, routePattern: match.route.path, query: queryString, epoch },
-          });
+          void queryString;
+          void epoch;
         }
       });
 
@@ -960,11 +917,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const activationId = nextActivationId();
       const epoch = routeEpoch;
       const route = yield* SubscriptionRef.get(router.current._ref);
-      yield* ContractTrace.emit({
-        event: "outlet.process.start",
-        level: "semantic",
-        payload: { path: route.path, epoch, activationId },
-      });
+      void epoch;
       const activationRequest: RouteActivationRequest = {
         activationId,
         path: route.path,
@@ -977,11 +930,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       // 404
       if (Option.isNone(matchOption)) {
-        yield* ContractTrace.emit({
-          event: "outlet.match.notFound",
-          level: "semantic",
-          payload: { path: route.path, epoch },
-        });
         const notFoundIntent = yield* routeActivationBoundary.resolveNotFoundBoundary(
           activationRequest,
         );
@@ -1000,12 +948,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       }
 
       const match = matchOption.value;
-      yield* ContractTrace.emit({
-        event: "outlet.match.found",
-        level: "semantic",
-        payload: { path: route.path, routePattern: match.route.path, epoch },
-      });
-
       // Middleware
       const middlewareIntent = yield* routeActivationBoundary.resolveMiddleware(
         activationRequest,

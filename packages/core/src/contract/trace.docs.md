@@ -52,6 +52,7 @@ Events:
 - `outlet.lazyLeaf.load.error`
 - `outlet.match.found`
 - `outlet.match.notFound`
+- `outlet.boundary.resolve`
 - `route.leaf.mount`
 - `route.leaf.unmount`
 - `route.render.skipStale`
@@ -62,9 +63,10 @@ Ordering guarantees:
 
 1. `outlet.process.start` begins one Outlet attempt to render the active **Route** tree from the **Routes manifest**.
 2. Lazy leaf events are ordered as `outlet.lazyLeaf.load.start` followed by either `outlet.lazyLeaf.load.ready` or `outlet.lazyLeaf.load.error` for the same activation.
-3. `outlet.process.dropStale`, `route.render.skipStale`, and `route.layout.skipStale` mean a newer activation won; they must happen before any stale visible commit.
-4. `outlet.process.commit` is emitted only after the activation selected by RouteActivation becomes the visible route content.
-5. `route.leaf.unmount` and `route.finalizer.run` belong to cleanup of the previously visible route tree and occur after the replacement commit that makes cleanup safe.
+3. `outlet.boundary.resolve` records loading, error, not-found, forbidden, redirect, no-boundary, and middleware outcomes selected for an activation.
+4. `outlet.process.dropStale`, `route.render.skipStale`, and `route.layout.skipStale` mean a newer activation won; they must happen before any stale visible commit.
+5. `outlet.process.commit` is emitted only after the activation selected by RouteActivation becomes the visible route content.
+6. `route.leaf.unmount` and `route.finalizer.run` belong to cleanup of the previously visible route tree and occur after the replacement commit that makes cleanup safe.
 
 ### Render transaction family
 

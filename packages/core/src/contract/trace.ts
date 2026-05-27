@@ -38,6 +38,7 @@ export type ContractTraceEventName =
   | "outlet.lazyLeaf.load.error"
   | "outlet.match.found"
   | "outlet.match.notFound"
+  | "outlet.boundary.resolve"
   | "route.leaf.mount"
   | "route.leaf.unmount"
   | "route.render.skipStale"
