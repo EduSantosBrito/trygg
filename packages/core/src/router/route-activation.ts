@@ -14,6 +14,7 @@ import { Data, Deferred, Effect, Layer, Option, Schema, Scope, SynchronizedRef }
 import * as Context from "effect/Context";
 import type { ScrollIntent } from "./navigation-outlet-coordination.js";
 import type { RouteMatch, RouteMatcherShape } from "./matching.js";
+import type { MiddlewareResult } from "./route.js";
 import type { ComponentInput, RouteComponent } from "./types.js";
 import { parsePath } from "./utils.js";
 
@@ -146,7 +147,7 @@ export type RouteActivationRenderIntent =
   | { readonly _tag: "ErrorBoundary"; readonly component: ComponentInput; readonly cause: unknown }
   | { readonly _tag: "NotFoundBoundary"; readonly component: ComponentInput }
   | { readonly _tag: "ForbiddenBoundary"; readonly component: ComponentInput }
-  | { readonly _tag: "Redirect"; readonly location: string }
+  | { readonly _tag: "Redirect"; readonly location: string; readonly replace?: boolean }
   | { readonly _tag: "NoBoundary"; readonly cause: unknown };
 
 export class LazyRouteLoadError extends Data.TaggedError("LazyRouteLoadError")<{
@@ -174,6 +175,10 @@ export interface RouteActivationBoundaryDependencies {
   readonly loadComponent: (component: ComponentInput) => Effect.Effect<RouteComponent, unknown>;
   readonly runRoutePrefetch: (path: string, match: RouteMatch, query: URLSearchParams) => Effect.Effect<void>;
   readonly resolveLoading: (match: RouteMatch) => Option.Option<ComponentInput>;
+  readonly resolveError: (match: RouteMatch, cause: unknown) => Option.Option<ComponentInput>;
+  readonly resolveNotFound: (path: string) => Option.Option<ComponentInput>;
+  readonly resolveForbidden: (match: RouteMatch) => Option.Option<ComponentInput>;
+  readonly runMiddleware: (match: RouteMatch) => Effect.Effect<MiddlewareResult>;
   readonly isStale: (activationId: string) => Effect.Effect<boolean>;
 }
 
@@ -191,6 +196,22 @@ export interface RouteActivationBoundaryShape {
     request: RouteActivationRequest,
     component: ComponentInput,
   ) => Effect.Effect<RouteComponent, LazyRouteLoadError>;
+  readonly resolveErrorBoundary: (
+    request: RouteActivationRequest,
+    match: RouteMatch,
+    cause: unknown,
+  ) => Effect.Effect<RouteActivationRenderIntent, BoundaryResolutionError>;
+  readonly resolveNotFoundBoundary: (
+    request: RouteActivationRequest,
+  ) => Effect.Effect<RouteActivationRenderIntent, BoundaryResolutionError>;
+  readonly resolveForbiddenBoundary: (
+    request: RouteActivationRequest,
+    match: RouteMatch,
+  ) => Effect.Effect<RouteActivationRenderIntent, BoundaryResolutionError>;
+  readonly resolveMiddleware: (
+    request: RouteActivationRequest,
+    match: RouteMatch,
+  ) => Effect.Effect<RouteActivationRenderIntent | { readonly _tag: "Continue" }, BoundaryResolutionError>;
 }
 
 export const makeRouteActivationBoundary = (
@@ -199,6 +220,19 @@ export const makeRouteActivationBoundary = (
 ): Effect.Effect<RouteActivationBoundaryShape> =>
   Effect.gen(function* () {
     const config = RouteActivationBoundaryConfigInput.make(input);
+
+    const staleBoundaryError = (request: RouteActivationRequest) =>
+      new BoundaryResolutionError({
+        activationId: request.activationId,
+        path: request.path,
+        reason: "stale activation",
+      });
+
+    const noBoundary = (request: RouteActivationRequest, reason: string, cause: unknown) => {
+      void request;
+      void reason;
+      return { _tag: "NoBoundary", cause } as const;
+    };
 
     const loadForActivation = Effect.fn("RouteActivationBoundary.loadComponent")(function* (
       request: RouteActivationRequest,
@@ -224,11 +258,7 @@ export const makeRouteActivationBoundary = (
     return {
       resolve: Effect.fn("RouteActivationBoundary.resolve")(function* (request, match) {
         if (yield* dependencies.isStale(request.activationId)) {
-          return yield* new BoundaryResolutionError({
-            activationId: request.activationId,
-            path: request.path,
-            reason: "stale activation",
-          });
+          return yield* staleBoundaryError(request);
         }
         const loading = dependencies.resolveLoading(match);
         const component = match.route.definition.component;
@@ -258,6 +288,60 @@ export const makeRouteActivationBoundary = (
         yield* dependencies.runRoutePrefetch(path, match, parsed.query).pipe(Effect.ignore);
       }),
       loadComponent: loadForActivation,
+      resolveErrorBoundary: Effect.fn("RouteActivationBoundary.resolveErrorBoundary")(function* (
+        request,
+        match,
+        cause,
+      ) {
+        if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
+        const component = dependencies.resolveError(match, cause);
+        return Option.isSome(component)
+          ? { _tag: "ErrorBoundary", component: component.value, cause }
+          : noBoundary(request, "missing error boundary", cause);
+      }),
+      resolveNotFoundBoundary: Effect.fn("RouteActivationBoundary.resolveNotFoundBoundary")(
+        function* (request) {
+          if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
+          const component = dependencies.resolveNotFound(request.path);
+          return Option.isSome(component)
+            ? { _tag: "NotFoundBoundary", component: component.value }
+            : noBoundary(request, "missing not-found boundary", "not found");
+        },
+      ),
+      resolveForbiddenBoundary: Effect.fn("RouteActivationBoundary.resolveForbiddenBoundary")(
+        function* (request, match) {
+          if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
+          const component = dependencies.resolveForbidden(match);
+          return Option.isSome(component)
+            ? { _tag: "ForbiddenBoundary", component: component.value }
+            : noBoundary(request, "missing forbidden boundary", "forbidden");
+        },
+      ),
+      resolveMiddleware: Effect.fn("RouteActivationBoundary.resolveMiddleware")(function* (
+        request,
+        match,
+      ) {
+        if (yield* dependencies.isStale(request.activationId)) return yield* staleBoundaryError(request);
+        const result = yield* dependencies.runMiddleware(match);
+        switch (result._tag) {
+          case "Continue":
+            return { _tag: "Continue" } as const;
+          case "Redirect":
+            return { _tag: "Redirect", location: result.path, replace: result.replace } as const;
+          case "Forbidden": {
+            const component = dependencies.resolveForbidden(match);
+            return Option.isSome(component)
+              ? { _tag: "ForbiddenBoundary", component: component.value }
+              : noBoundary(request, "missing forbidden boundary", "forbidden");
+          }
+          case "Error": {
+            const component = dependencies.resolveError(match, result.cause);
+            return Option.isSome(component)
+              ? { _tag: "ErrorBoundary", component: component.value, cause: result.cause }
+              : noBoundary(request, "missing error boundary", result.cause);
+          }
+        }
+      }),
     };
   });
 

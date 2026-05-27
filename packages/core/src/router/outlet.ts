@@ -583,6 +583,10 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
             void path;
           }),
         resolveLoading: (match) => boundaries.resolveLoading(match.route),
+        resolveError: (match) => boundaries.resolveError(match.route),
+        resolveNotFound: () => boundaries.resolveNotFoundRoot(),
+        resolveForbidden: (match) => boundaries.resolveForbidden(match.route),
+        runMiddleware: (match) => runRouteMiddleware(match.route),
         isStale: (activationId) =>
           Effect.gen(function* () {
             const current = yield* routeActivation.currentActivationId;
@@ -961,12 +965,13 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         level: "semantic",
         payload: { path: route.path, epoch, activationId },
       });
-      const activationOutcome = yield* routeActivation.activate({
+      const activationRequest: RouteActivationRequest = {
         activationId,
         path: route.path,
         query: route.query,
         scrollIntent: Option.none(),
-      });
+      };
+      const activationOutcome = yield* routeActivation.activate(activationRequest);
       const matchOption =
         activationOutcome._tag === "NotFound" ? Option.none() : yield* matcher.match(route.path);
 
@@ -977,11 +982,15 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           level: "semantic",
           payload: { path: route.path, epoch },
         });
-        const notFoundEl = yield* Option.match(boundaries.resolveNotFoundRoot(), {
-          onNone: () => Effect.succeed(text("404 - Not Found")),
-          onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
-        });
+        const notFoundIntent = yield* routeActivationBoundary.resolveNotFoundBoundary(
+          activationRequest,
+        );
+        const notFoundEl =
+          notFoundIntent._tag === "NotFoundBoundary"
+            ? yield* Effect.flatMap(resolveComponent(notFoundIntent.component), (resolved) =>
+                renderComponent(resolved, {}, {}),
+              )
+            : text("404 - Not Found");
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(notFoundEl),
@@ -998,18 +1007,21 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       });
 
       // Middleware
-      const middlewareResult = yield* runRouteMiddleware(match.route);
+      const middlewareIntent = yield* routeActivationBoundary.resolveMiddleware(
+        activationRequest,
+        match,
+      );
 
-      if (middlewareResult._tag === "Redirect") {
-        yield* router.navigate(middlewareResult.path, { replace: middlewareResult.replace });
+      if (middlewareIntent._tag === "Redirect") {
+        yield* router.navigate(middlewareIntent.location, {
+          ...(middlewareIntent.replace !== undefined ? { replace: middlewareIntent.replace } : {}),
+        });
         return;
       }
-      if (middlewareResult._tag === "Forbidden") {
-        const el = yield* Option.match(boundaries.resolveForbidden(match.route), {
-          onNone: () => Effect.succeed(text("403 - Forbidden")),
-          onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
-        });
+      if (middlewareIntent._tag === "ForbiddenBoundary") {
+        const el = yield* Effect.flatMap(resolveComponent(middlewareIntent.component), (resolved) =>
+          renderComponent(resolved, {}, {}),
+        );
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1017,14 +1029,19 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         );
         return;
       }
-      if (middlewareResult._tag === "Error") {
-        const el = yield* Option.match(boundaries.resolveError(match.route), {
-          onNone: () => Effect.succeed(text("Error")),
-          onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) =>
-              renderError(resolved, Cause.fail(middlewareResult.cause), route.path),
-            ),
-        });
+      if (middlewareIntent._tag === "ErrorBoundary") {
+        const el = yield* Effect.flatMap(resolveComponent(middlewareIntent.component), (resolved) =>
+          renderError(resolved, Cause.fail(middlewareIntent.cause), route.path),
+        );
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: route.path },
+          setViewAndAwaitSwap(el),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
+        return;
+      }
+      if (middlewareIntent._tag === "NoBoundary") {
+        const el = text(middlewareIntent.cause === "forbidden" ? "403 - Forbidden" : "Error");
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1038,19 +1055,22 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         Effect.result,
       );
       if (Result.isFailure(decodedParamsResult)) {
-        const el = yield* Option.match(boundaries.resolveError(match.route), {
-          onNone: () =>
-            Debug.log({
-              event: "router.outlet.error",
-              phase: "decode_params",
-              path: route.path,
-              error: decodedParamsResult.failure,
-            }).pipe(Effect.as(text("Error"))),
-          onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) =>
-              renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
-            ),
-        });
+        const errorIntent = yield* routeActivationBoundary.resolveErrorBoundary(
+          activationRequest,
+          match,
+          decodedParamsResult.failure,
+        );
+        const el =
+          errorIntent._tag === "ErrorBoundary"
+            ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
+                renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
+              )
+            : yield* Debug.log({
+                event: "router.outlet.error",
+                phase: "decode_params",
+                path: route.path,
+                error: decodedParamsResult.failure,
+              }).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1064,19 +1084,22 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         Effect.result,
       );
       if (Result.isFailure(decodedQueryResult)) {
-        const el = yield* Option.match(boundaries.resolveError(match.route), {
-          onNone: () =>
-            Debug.log({
-              event: "router.outlet.error",
-              phase: "decode_query",
-              path: route.path,
-              error: decodedQueryResult.failure,
-            }).pipe(Effect.as(text("Error"))),
-          onSome: (comp) =>
-            Effect.flatMap(resolveComponent(comp), (resolved) =>
-              renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
-            ),
-        });
+        const errorIntent = yield* routeActivationBoundary.resolveErrorBoundary(
+          activationRequest,
+          match,
+          decodedQueryResult.failure,
+        );
+        const el =
+          errorIntent._tag === "ErrorBoundary"
+            ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
+                renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
+              )
+            : yield* Debug.log({
+                event: "router.outlet.error",
+                phase: "decode_query",
+                path: route.path,
+                error: decodedQueryResult.failure,
+              }).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
