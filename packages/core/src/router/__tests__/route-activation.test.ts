@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Option } from "effect";
+import { Effect, Option, Ref } from "effect";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { RouteMatch, RouteMatcherShape } from "../matching.js";
-import { makeRouteActivation } from "../route-activation.js";
+import { makeRouteActivation, makeRouteActivationBoundary } from "../route-activation.js";
+import type { ComponentInput, RouteComponent } from "../types.js";
 
 const request = (activationId: string, path: string) => ({
   activationId,
@@ -11,14 +12,22 @@ const request = (activationId: string, path: string) => ({
   scrollIntent: Option.none(),
 });
 
-const makeMatcher = (matchPath: string): RouteMatcherShape => ({
+const makeMatch = (
+  path: string,
+  definition: Record<string, unknown> = {},
+): RouteMatch =>
+  ({
+    route: {
+      path,
+      ancestors: [],
+      definition: { prefetch: [], ...definition },
+    },
+    params: {},
+  }) as unknown as RouteMatch;
+
+const makeMatcher = (matchPath: string, match: RouteMatch = makeMatch(matchPath)): RouteMatcherShape => ({
   routes: Effect.succeed([]),
-  match: (path) =>
-    Effect.succeed(
-      path === matchPath
-        ? Option.some({ route: { path: matchPath, ancestors: [], definition: {} }, params: {} } as unknown as RouteMatch)
-        : Option.none(),
-    ),
+  match: (path) => Effect.succeed(path === matchPath ? Option.some(match) : Option.none()),
 });
 
 describe("RouteActivation", () => {
@@ -151,6 +160,146 @@ describe("RouteActivation", () => {
     );
 
     expect(events).toEqual(["swap"]);
+  });
+
+  it("resolves lazy loader routes to the nearest loading intent", async () => {
+    const loader = (() => Promise.resolve({ default: Effect.succeed({ _tag: "Text", value: "Lazy" }) })) as ComponentInput;
+    const loading = Effect.succeed({ _tag: "Text", value: "Loading" }) as unknown as ComponentInput;
+    const match = makeMatch("/lazy", { component: loader, loading });
+    const intent = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const boundary = yield* makeRouteActivationBoundary(
+            { interruptStaleLoads: true },
+            {
+              matcher: makeMatcher("/lazy", match),
+              collectPrefetchTargets: () => [loader],
+              isComponentLoader: (component) => component === loader,
+              loadComponent: () => Effect.succeed(Effect.succeed({ _tag: "Text", value: "Lazy" }) as unknown as RouteComponent),
+              runRoutePrefetch: () => Effect.void,
+              resolveLoading: () => Option.some(loading),
+              isStale: () => Effect.succeed(false),
+            },
+          );
+          return yield* boundary.resolve(request("nav-1", "/lazy"), match);
+        }),
+      ),
+    );
+
+    expect(intent._tag).toBe("Loading");
+    if (intent._tag === "Loading") {
+      expect(intent.component).toBe(loading);
+    }
+  });
+
+  it("loads lazy components through RouteActivationBoundary", async () => {
+    const loaded = Effect.succeed({ _tag: "Text", value: "Lazy" }) as unknown as RouteComponent;
+    const component = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const match = makeMatch("/lazy");
+          const boundary = yield* makeRouteActivationBoundary(
+            { interruptStaleLoads: true },
+            {
+              matcher: makeMatcher("/lazy", match),
+              collectPrefetchTargets: () => [],
+              isComponentLoader: () => true,
+              loadComponent: () => Effect.succeed(loaded),
+              runRoutePrefetch: () => Effect.void,
+              resolveLoading: () => Option.none(),
+              isStale: () => Effect.succeed(false),
+            },
+          );
+          return yield* boundary.loadComponent(request("nav-1", "/lazy"), (() => Promise.resolve({ default: loaded })) as ComponentInput);
+        }),
+      ),
+    );
+
+    expect(component).toBe(loaded);
+  });
+
+  it("normalizes lazy load failures", async () => {
+    const exit = await Effect.runPromiseExit(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const match = makeMatch("/lazy");
+          const boundary = yield* makeRouteActivationBoundary(
+            { interruptStaleLoads: true },
+            {
+              matcher: makeMatcher("/lazy", match),
+              collectPrefetchTargets: () => [],
+              isComponentLoader: () => true,
+              loadComponent: () => Effect.fail("boom"),
+              runRoutePrefetch: () => Effect.void,
+              resolveLoading: () => Option.none(),
+              isStale: () => Effect.succeed(false),
+            },
+          );
+          return yield* boundary.loadComponent(request("nav-1", "/lazy"), (() => Promise.resolve({ default: null })) as ComponentInput);
+        }),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(String(exit.cause)).toContain("LazyRouteLoadError");
+    }
+  });
+
+  it("prefetches lazy modules best-effort", async () => {
+    const calls = await Effect.runPromise(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const callsRef = yield* Ref.make<Array<string>>([]);
+          const loader = (() => Promise.resolve({ default: null })) as ComponentInput;
+          const match = makeMatch("/lazy");
+          const boundary = yield* makeRouteActivationBoundary(
+            { interruptStaleLoads: true },
+            {
+              matcher: makeMatcher("/lazy", match),
+              collectPrefetchTargets: () => [loader],
+              isComponentLoader: (component) => component === loader,
+              loadComponent: () => Ref.update(callsRef, (calls) => [...calls, "module"]).pipe(Effect.as(Effect.succeed({ _tag: "Text", value: "Lazy" }) as unknown as RouteComponent)),
+              runRoutePrefetch: () => Ref.update(callsRef, (calls) => [...calls, "route"]),
+              resolveLoading: () => Option.none(),
+              isStale: () => Effect.succeed(false),
+            },
+          );
+          yield* boundary.prefetch("/lazy");
+          return yield* Ref.get(callsRef);
+        }),
+      ),
+    );
+
+    expect(calls).toEqual(["module", "route"]);
+  });
+
+  it("suppresses stale lazy load results", async () => {
+    const exit = await Effect.runPromiseExit(
+      unsafeEraseR(
+        Effect.gen(function* () {
+          const match = makeMatch("/lazy");
+          const boundary = yield* makeRouteActivationBoundary(
+            { interruptStaleLoads: true },
+            {
+              matcher: makeMatcher("/lazy", match),
+              collectPrefetchTargets: () => [],
+              isComponentLoader: () => true,
+              loadComponent: () => Effect.succeed(Effect.succeed({ _tag: "Text", value: "Lazy" }) as unknown as RouteComponent),
+              runRoutePrefetch: () => Effect.void,
+              resolveLoading: () => Option.none(),
+              isStale: () => Effect.succeed(true),
+            },
+          );
+          return yield* boundary.loadComponent(request("nav-1", "/lazy"), (() => Promise.resolve({ default: null })) as ComponentInput);
+        }),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(String(exit.cause)).toContain("LazyRouteLoadError");
+    }
   });
 
   it("integrates with the canonical matcher for matched routes", async () => {

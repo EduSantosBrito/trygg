@@ -10,10 +10,12 @@
  * @since 1.0.0
  * @module trygg/router/route-activation
  */
-import { Data, Deferred, Effect, Layer, Option, Schema, SynchronizedRef } from "effect";
+import { Data, Deferred, Effect, Layer, Option, Schema, Scope, SynchronizedRef } from "effect";
 import * as Context from "effect/Context";
 import type { ScrollIntent } from "./navigation-outlet-coordination.js";
 import type { RouteMatch, RouteMatcherShape } from "./matching.js";
+import type { ComponentInput, RouteComponent } from "./types.js";
+import { parsePath } from "./utils.js";
 
 export interface RouteActivationRequest {
   readonly activationId: string;
@@ -136,6 +138,138 @@ export class RouteActivation extends Context.Service<RouteActivation, RouteActiv
     input: RouteActivationConfig,
     matcher?: RouteMatcherShape,
   ): Layer.Layer<RouteActivation> => Layer.effect(RouteActivation, makeRouteActivation(input, matcher));
+}
+
+export type RouteActivationRenderIntent =
+  | { readonly _tag: "Leaf"; readonly component: ComponentInput }
+  | { readonly _tag: "Loading"; readonly component: ComponentInput }
+  | { readonly _tag: "ErrorBoundary"; readonly component: ComponentInput; readonly cause: unknown }
+  | { readonly _tag: "NotFoundBoundary"; readonly component: ComponentInput }
+  | { readonly _tag: "ForbiddenBoundary"; readonly component: ComponentInput }
+  | { readonly _tag: "Redirect"; readonly location: string }
+  | { readonly _tag: "NoBoundary"; readonly cause: unknown };
+
+export class LazyRouteLoadError extends Data.TaggedError("LazyRouteLoadError")<{
+  readonly activationId: string;
+  readonly path: string;
+  readonly cause: unknown;
+}> {}
+
+export class BoundaryResolutionError extends Data.TaggedError("BoundaryResolutionError")<{
+  readonly activationId: string;
+  readonly path: string;
+  readonly reason: string;
+}> {}
+
+export const RouteActivationBoundaryConfigInput = Schema.Struct({
+  interruptStaleLoads: Schema.Boolean,
+});
+
+type RouteActivationBoundaryConfig = typeof RouteActivationBoundaryConfigInput.Type;
+
+export interface RouteActivationBoundaryDependencies {
+  readonly matcher: RouteMatcherShape;
+  readonly collectPrefetchTargets: (match: RouteMatch) => ReadonlyArray<ComponentInput>;
+  readonly isComponentLoader: (component: ComponentInput) => boolean;
+  readonly loadComponent: (component: ComponentInput) => Effect.Effect<RouteComponent, unknown>;
+  readonly runRoutePrefetch: (path: string, match: RouteMatch, query: URLSearchParams) => Effect.Effect<void>;
+  readonly resolveLoading: (match: RouteMatch) => Option.Option<ComponentInput>;
+  readonly isStale: (activationId: string) => Effect.Effect<boolean>;
+}
+
+export interface RouteActivationBoundaryShape {
+  readonly resolve: (
+    request: RouteActivationRequest,
+    match: RouteMatch,
+  ) => Effect.Effect<
+    RouteActivationRenderIntent,
+    LazyRouteLoadError | BoundaryResolutionError,
+    Scope.Scope
+  >;
+  readonly prefetch: (path: string) => Effect.Effect<void>;
+  readonly loadComponent: (
+    request: RouteActivationRequest,
+    component: ComponentInput,
+  ) => Effect.Effect<RouteComponent, LazyRouteLoadError>;
+}
+
+export const makeRouteActivationBoundary = (
+  input: RouteActivationBoundaryConfig,
+  dependencies: RouteActivationBoundaryDependencies,
+): Effect.Effect<RouteActivationBoundaryShape> =>
+  Effect.gen(function* () {
+    const config = RouteActivationBoundaryConfigInput.make(input);
+
+    const loadForActivation = Effect.fn("RouteActivationBoundary.loadComponent")(function* (
+      request: RouteActivationRequest,
+      component: ComponentInput,
+    ) {
+      const loaded = yield* dependencies.loadComponent(component).pipe(
+        Effect.mapError(
+          (cause) =>
+            new LazyRouteLoadError({ activationId: request.activationId, path: request.path, cause }),
+        ),
+      );
+      const stale = yield* dependencies.isStale(request.activationId);
+      if (config.interruptStaleLoads && stale) {
+        return yield* new LazyRouteLoadError({
+          activationId: request.activationId,
+          path: request.path,
+          cause: "stale activation",
+        });
+      }
+      return loaded;
+    });
+
+    return {
+      resolve: Effect.fn("RouteActivationBoundary.resolve")(function* (request, match) {
+        if (yield* dependencies.isStale(request.activationId)) {
+          return yield* new BoundaryResolutionError({
+            activationId: request.activationId,
+            path: request.path,
+            reason: "stale activation",
+          });
+        }
+        const loading = dependencies.resolveLoading(match);
+        const component = match.route.definition.component;
+        if (
+          Option.isSome(loading) &&
+          component !== undefined &&
+          dependencies.isComponentLoader(component)
+        ) {
+          return { _tag: "Loading", component: loading.value };
+        }
+        if (component !== undefined) {
+          return { _tag: "Leaf", component };
+        }
+        return { _tag: "NoBoundary", cause: "route has no component" };
+      }),
+      prefetch: Effect.fn("RouteActivationBoundary.prefetch")(function* (path) {
+        const parsed = yield* parsePath(path).pipe(Effect.orDie);
+        const matchOption = yield* dependencies.matcher.match(parsed.path).pipe(Effect.orDie);
+        if (Option.isNone(matchOption)) return;
+        const match = matchOption.value;
+        const targets = dependencies.collectPrefetchTargets(match);
+        yield* Effect.forEach(
+          targets.filter(dependencies.isComponentLoader),
+          (component) => dependencies.loadComponent(component).pipe(Effect.ignore),
+          { concurrency: "unbounded" },
+        );
+        yield* dependencies.runRoutePrefetch(path, match, parsed.query).pipe(Effect.ignore);
+      }),
+      loadComponent: loadForActivation,
+    };
+  });
+
+export class RouteActivationBoundary extends Context.Service<
+  RouteActivationBoundary,
+  RouteActivationBoundaryShape
+>()("trygg/RouteActivationBoundary") {
+  static readonly layer = (
+    input: RouteActivationBoundaryConfig,
+    dependencies: RouteActivationBoundaryDependencies,
+  ): Layer.Layer<RouteActivationBoundary> =>
+    Layer.effect(RouteActivationBoundary, makeRouteActivationBoundary(input, dependencies));
 }
 
 export type RouteActivationMatch = RouteMatch;

@@ -186,14 +186,22 @@ export type {
 // Route Activation
 export {
   RouteActivation,
+  RouteActivationBoundary,
   RouteActivationError,
+  LazyRouteLoadError,
+  BoundaryResolutionError,
   RouteActivationConfigInput,
+  RouteActivationBoundaryConfigInput,
   makeRouteActivation,
+  makeRouteActivationBoundary,
 } from "./route-activation.js";
 export type {
   RouteActivationRequest,
   RouteActivationOutcome,
   RouteActivationShape,
+  RouteActivationBoundaryShape,
+  RouteActivationBoundaryDependencies,
+  RouteActivationRenderIntent,
   RouteActivationMatch,
 } from "./route-activation.js";
 
