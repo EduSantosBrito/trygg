@@ -1,10 +1,11 @@
 /* @vitest-environment happy-dom */
 
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
 
+import { DocsHeadingsLive } from "./content/headings";
 import { sidebarGroups } from "./content/sidebar";
 import { routes } from "./routes";
 
@@ -16,7 +17,7 @@ const renderRoute = (path: string) =>
     const current = yield* Router.currentRoute;
 
     return { current, result };
-  }).pipe(Effect.provide(Router.testLayer(path)), Effect.scoped);
+  }).pipe(Effect.provide(Layer.merge(Router.testLayer(path), DocsHeadingsLive)), Effect.scoped);
 
 describe("docs routes", () => {
   it("renders the docs landing at /docs", async () => {
@@ -77,7 +78,9 @@ describe("docs routes", () => {
             }
             return true;
           });
-        }).pipe(Effect.provide(Router.testLayer("/docs/components"))),
+        }).pipe(
+          Effect.provide(Layer.merge(Router.testLayer("/docs/components"), DocsHeadingsLive)),
+        ),
       ),
     );
   });
@@ -109,7 +112,7 @@ describe("docs routes", () => {
           expect(result.container.querySelectorAll(".docs-layout__sidebar")).toHaveLength(1);
           expect(result.container.querySelectorAll("footer")).toHaveLength(1);
           expect(result.container.textContent).not.toContain("Page not found");
-        }).pipe(Effect.provide(Router.testLayer("/docs/elements"))),
+        }).pipe(Effect.provide(Layer.merge(Router.testLayer("/docs/elements"), DocsHeadingsLive))),
       ),
     );
   });

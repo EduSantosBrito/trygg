@@ -9,7 +9,8 @@
  *
  * @internal
  */
-import { Effect, SubscriptionRef } from "effect";
+import { Effect, Layer, SubscriptionRef } from "effect";
+import * as Context from "effect/Context";
 import { Component, Signal } from "trygg";
 import { click, render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -91,7 +92,22 @@ export const contract = {
   ],
 } as const;
 
-const headings = Signal.makeSync<ReadonlyArray<string>>([]);
+interface ContractStateService {
+  readonly headings: Signal.Signal<ReadonlyArray<string>>;
+}
+
+class ContractState extends Context.Service<ContractState, ContractStateService>()(
+  "www/DocsNavigationNoBlankSwapState",
+) {}
+
+const ContractStateLive = Layer.effect(
+  ContractState,
+  Signal.make<ReadonlyArray<string>>([]).pipe(
+    Effect.orDie,
+    Effect.map((headings): ContractStateService => ({ headings })),
+  ),
+);
+
 const cleanupSnapshots: Array<SwapSnapshot> = [];
 let observedContainer: HTMLElement | null = null;
 
@@ -160,6 +176,7 @@ const recordCleanupSnapshot = (phase: string) =>
 
 const DocsLikeLayout = Component.gen(function* () {
   const route = yield* Router.currentRoute;
+  const { headings } = yield* ContractState;
 
   if (route.path === "/docs/signals") {
     yield* Effect.addFinalizer(() => recordCleanupSnapshot("old-signals-layout-cleanup"));
@@ -201,6 +218,7 @@ const DocsLikeLayout = Component.gen(function* () {
 });
 
 const SignalsPage = Component.gen(function* () {
+  const { headings } = yield* ContractState;
   yield* Signal.set(headings, ["When to use", "Behavior", "Related exports"]);
   return (
     <article data-testid="signals-article">
@@ -211,6 +229,7 @@ const SignalsPage = Component.gen(function* () {
 });
 
 const ResourcesPage = Component.gen(function* () {
+  const { headings } = yield* ContractState;
   yield* Signal.set(headings, ["When to use", "Behavior", "Related exports"]);
   // Keep the replacement render in flight long enough to mirror the real docs
   // page, where markdown/code rendering is expensive. The invariant is about
@@ -252,6 +271,7 @@ const runScenario = Effect.scoped(
   Effect.gen(function* () {
     cleanupSnapshots.length = 0;
     observedContainer = null;
+    const { headings } = yield* ContractState;
     yield* Signal.set(headings, []);
 
     const result = yield* ContractTrace.withAction(
@@ -365,7 +385,7 @@ const runScenario = Effect.scoped(
     }
 
     return [] satisfies ReadonlyArray<ContractViolation>;
-  }).pipe(Effect.provide(Router.testLayer("/docs/signals"))),
+  }).pipe(Effect.provide(Layer.merge(Router.testLayer("/docs/signals"), ContractStateLive))),
 );
 
 const normalizeViolations = (

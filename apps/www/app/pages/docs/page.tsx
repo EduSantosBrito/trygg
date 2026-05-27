@@ -1,6 +1,6 @@
-import { Component, Signal } from "trygg";
+import { Component } from "trygg";
 import * as Router from "trygg/router";
-import { docsHeadings } from "../../content/headings";
+import { setDocsHeadings } from "../../content/headings";
 import { sidebarGroups } from "../../content/sidebar";
 
 const quickPath = [
@@ -65,7 +65,7 @@ const sectionSummaries: ReadonlyArray<{
 const sectionCounts = sidebarGroups.map((group) => group.links.length);
 
 export default Component.gen(function* () {
-  yield* Signal.set(docsHeadings, []);
+  yield* setDocsHeadings([]);
 
   return (
     <>

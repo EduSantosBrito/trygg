@@ -113,10 +113,9 @@ type _UserListProps = AssertTrue<
   >
 >;
 
-// Probe: does UserList's error slot collapse to `never` after Resource.exhaustive
-// covers all three states (Pending, Success, Failure)? Resource.exhaustive
-// returns `Effect.Effect<ElementType, never, Scope.Scope | R>`, so the
-// component should carry E = never.
+// Probe: Resource.exhaustive covers all three resource states (Pending,
+// Success, Failure). Disposed signal access is reported as a diagnostic defect,
+// not as a typed component error channel.
 type _UserListErrorIsNever = AssertTrue<
   Types.Equals<
     typeof UserList extends Component.Type<infer _P, infer E, infer _R> ? E : never,

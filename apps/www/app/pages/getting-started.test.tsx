@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { click, renderElement, testLayer, waitFor } from "trygg/testing";
 
 import GettingStartedPage from "./getting-started";
+import { DocsHeadingsLive } from "../content/headings";
 
 const renderGettingStarted = () =>
-  renderElement(<GettingStartedPage />).pipe(Effect.provide(testLayer));
+  renderElement(<GettingStartedPage />).pipe(
+    Effect.provide(Layer.merge(testLayer, DocsHeadingsLive)),
+  );
 
 describe("GettingStartedPage", () => {
   it("renders prerequisites, create project, and install instructions", async () => {

@@ -10,7 +10,7 @@ This canary adds selectable project templates, a full-stack incident dashboard s
 ## Changed
 
 - **Breaking:** Return `Signal<boolean>` from `Router.isActive` instead of a boolean, enabling fine-grained active-link updates without rerendering route components; see the [router service guide](../../../packages/core/src/router/service.docs.md).
-- **Breaking:** Rename `Signal.unsafeMake` to `Signal.makeSync`, clarifying that synchronous signals are for module-lifetime state and service-backed globals; see the [signal guide](../../../packages/core/src/primitives/signal.docs.md).
+- **Breaking:** Move signal creation toward Effect-scoped `Signal.make` state for service-backed globals; see the [signal guide](../../../packages/core/src/primitives/signal.docs.md).
 - **Breaking:** Move testing helper imports from the root `trygg` entrypoint to `trygg/testing`.
 - Forward user `data-*` and `aria-*` attributes from `Link` to the underlying anchor, supporting active-state attributes derived from `Router.isActive`; see the [link guide](../../../packages/core/src/router/link.docs.md).
 - Track schema-decoded route params and query requirements through route builders and error-boundary coverage, surfacing missing route boundaries at typecheck time; see the [route guide](../../../packages/core/src/router/route.docs.md).

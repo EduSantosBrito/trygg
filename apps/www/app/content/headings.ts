@@ -1,3 +1,5 @@
+import { Effect, Layer } from "effect";
+import * as Context from "effect/Context";
 import { Signal } from "trygg";
 
 export interface HeadingEntry {
@@ -6,5 +8,29 @@ export interface HeadingEntry {
   readonly level: 2 | 3;
 }
 
-// Shared signal for docs page headings (used by right rail "On this page")
-export const docsHeadings = Signal.makeSync<ReadonlyArray<HeadingEntry>>([]);
+export interface DocsHeadingsService {
+  readonly entries: Signal.Signal<ReadonlyArray<HeadingEntry>>;
+  readonly set: (entries: ReadonlyArray<HeadingEntry>) => Effect.Effect<void>;
+}
+
+export class DocsHeadings extends Context.Service<DocsHeadings, DocsHeadingsService>()(
+  "www/DocsHeadings",
+) {}
+
+export const DocsHeadingsLive = Layer.effect(
+  DocsHeadings,
+  Signal.make<ReadonlyArray<HeadingEntry>>([]).pipe(
+    Effect.orDie,
+    Effect.map(
+      (entries): DocsHeadingsService => ({
+        entries,
+        set: (nextEntries) => Signal.set(entries, nextEntries),
+      }),
+    ),
+  ),
+);
+
+export const setDocsHeadings = (
+  entries: ReadonlyArray<HeadingEntry>,
+): Effect.Effect<void, never, DocsHeadings> =>
+  Effect.service(DocsHeadings).pipe(Effect.flatMap((headings) => headings.set(entries)));

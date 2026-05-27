@@ -9,6 +9,7 @@ import "../styles.css";
 import { Component } from "trygg";
 import * as Router from "trygg/router";
 
+import { DocsHeadingsLive } from "./content/headings";
 import { themeColor, themeInitScript } from "./lib/theme";
 
 const seo = {
@@ -34,7 +35,7 @@ const jsonLd = {
   programmingLanguage: "TypeScript",
 };
 
-export default Component.gen(function* () {
+const AppLayout = Component.gen(function* () {
   return (
     <html lang="en" data-theme="light">
       <head>
@@ -97,3 +98,5 @@ export default Component.gen(function* () {
     </html>
   );
 });
+
+export default AppLayout.pipe(Component.provide(DocsHeadingsLive));
