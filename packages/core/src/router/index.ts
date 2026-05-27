@@ -153,6 +153,24 @@ export type {
   PathParamInput,
 } from "./path-pattern.js";
 
+// Navigation Core
+export {
+  NavigationCore,
+  NavigationCoreError,
+  NavigationCoreConfigInput,
+  makeNavigationCore,
+  makeInMemoryNavigationAdapter,
+  navigationTarget,
+  resolveNavigationTarget,
+  sameQuery,
+} from "./navigation-core.js";
+export type {
+  NavigationSnapshot,
+  NavigationTarget,
+  NavigationAdapter,
+  NavigationCoreShape,
+} from "./navigation-core.js";
+
 // Route Builder
 export {
   make as routeMake,

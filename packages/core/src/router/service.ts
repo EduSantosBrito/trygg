@@ -43,6 +43,13 @@ import { PlatformEventTarget } from "../platform/event-target.js";
 import { Observer } from "../platform/observer.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
+import {
+  makeInMemoryNavigationAdapter,
+  makeNavigationCore,
+  navigationTarget,
+  resolveNavigationTarget,
+  sameQuery,
+} from "./navigation-core.js";
 
 /** @internal */
 const ScrollPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
@@ -1011,36 +1018,40 @@ export const testLayer = (
 
       const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
 
-      // History stack for back/forward (in-memory)
-      const historyStack: Array<string> = [initialPath];
-      let historyIndex = 0;
+      const navigationAdapter = yield* makeInMemoryNavigationAdapter(initialPath).pipe(Effect.orDie);
+      const navigationCore = yield* makeNavigationCore(
+        { notifyUnchangedQuery: false },
+        navigationAdapter,
+      ).pipe(Effect.orDie);
 
-      const updateFromPath = (fullPath: string) =>
-        Effect.gen(function* () {
-          const current = yield* Signal.get(currentSignal);
-          const { path: newPath, query: newQuery } = yield* parsePath(fullPath);
-          yield* Signal.set(currentSignal, {
-            path: newPath,
-            params: {},
-            query: newQuery,
-          });
-          yield* ContractTrace.emit({
-            event: "router.current.set",
-            level: "semantic",
-            payload: { fromPath: current.path, toPath: newPath },
-          });
-          yield* Signal.set(querySignal, newQuery);
-          yield* ContractTrace.emit({
-            event: "router.query.set",
-            level: "semantic",
-            payload: {
-              fromQuery: current.query.toString(),
-              toQuery: newQuery.toString(),
-              changed: current.query.toString() !== newQuery.toString(),
-              notified: current.query.toString() !== newQuery.toString(),
-            },
-          });
+      const applyNavigationSnapshot = Effect.fn("RouterService.applyNavigationSnapshot")(function* () {
+        const current = yield* Signal.get(currentSignal);
+        const snapshot = yield* navigationCore.current;
+        yield* Signal.set(currentSignal, {
+          path: snapshot.path,
+          params: {},
+          query: snapshot.query,
         });
+        yield* ContractTrace.emit({
+          event: "router.current.set",
+          level: "semantic",
+          payload: { fromPath: current.path, toPath: snapshot.path },
+        });
+        const queryChanged = !sameQuery(current.query, snapshot.query);
+        if (queryChanged) {
+          yield* Signal.set(querySignal, snapshot.query);
+        }
+        yield* ContractTrace.emit({
+          event: "router.query.set",
+          level: "semantic",
+          payload: {
+            fromQuery: current.query.toString(),
+            toQuery: snapshot.query.toString(),
+            changed: queryChanged,
+            notified: queryChanged,
+          },
+        });
+      });
 
       const routerService: RouterService = {
         current: currentSignal,
@@ -1054,11 +1065,10 @@ export const testLayer = (
           const traceId = Debug.nextTraceId();
           yield* Debug.setTraceId(traceId);
 
-          // Interpolate params into path pattern if provided
-          const resolvedPath = options?.params
-            ? yield* interpolateNavigationPath(targetPath, options.params)
-            : targetPath;
-
+          const target = navigationTarget(targetPath, options);
+          const resolvedPath = yield* resolveNavigationTarget(target).pipe(
+            Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
+          );
           const current = yield* Signal.get(currentSignal);
           yield* ContractTrace.emit({
             event: "router.navigate.request",
@@ -1079,72 +1089,33 @@ export const testLayer = (
           // Record navigation metric
           yield* Metrics.recordNavigation;
 
-          const fullPath = yield* buildPath(resolvedPath, options?.query);
-          const { path: newPath, query: newQuery } = yield* parsePath(fullPath);
-
-          if (options?.replace) {
-            // Replace current entry
-            historyStack[historyIndex] = fullPath;
-            yield* ContractTrace.emit({
-              event: "history.replace",
-              level: "semantic",
-              payload: { path: fullPath },
-            });
-          } else {
-            // Push new entry, removing any forward history
-            historyStack.splice(historyIndex + 1);
-            historyStack.push(fullPath);
-            historyIndex = historyStack.length - 1;
-            yield* ContractTrace.emit({
-              event: "history.push",
-              level: "semantic",
-              payload: { path: fullPath },
-            });
-          }
-
-          yield* Signal.set(currentSignal, {
-            path: newPath,
-            params: {},
-            query: newQuery,
-          });
+          yield* navigationCore.navigate(target).pipe(
+            Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
+          );
           yield* ContractTrace.emit({
-            event: "router.current.set",
+            event: options?.replace ? "history.replace" : "history.push",
             level: "semantic",
-            payload: { fromPath: current.path, toPath: newPath },
+            payload: { path: resolvedPath },
           });
-          yield* Signal.set(querySignal, newQuery);
-          yield* ContractTrace.emit({
-            event: "router.query.set",
-            level: "semantic",
-            payload: {
-              fromQuery: current.query.toString(),
-              toQuery: newQuery.toString(),
-              changed: current.query.toString() !== newQuery.toString(),
-              notified: current.query.toString() !== newQuery.toString(),
-            },
-          });
+          yield* applyNavigationSnapshot();
+          const snapshot = yield* navigationCore.current;
 
           yield* ContractTrace.emit({
             event: "router.navigate.commit",
             level: "semantic",
-            payload: { path: fullPath, query: newQuery.toString() },
+            payload: { path: resolvedPath, query: snapshot.query.toString() },
           });
           yield* Debug.log({
             event: "router.navigate.complete",
-            path: fullPath,
+            path: resolvedPath,
           });
         }),
 
         back: () =>
           Effect.gen(function* () {
             const before = yield* Signal.get(currentSignal);
-            if (historyIndex > 0) {
-              historyIndex--;
-              const path = historyStack[historyIndex];
-              if (path !== undefined) {
-                yield* updateFromPath(path);
-              }
-            }
+            yield* navigationCore.back.pipe(Effect.orDie);
+            yield* applyNavigationSnapshot();
             const after = yield* Signal.get(currentSignal);
             yield* ContractTrace.emit({
               event: "history.back",
@@ -1156,13 +1127,8 @@ export const testLayer = (
         forward: () =>
           Effect.gen(function* () {
             const before = yield* Signal.get(currentSignal);
-            if (historyIndex < historyStack.length - 1) {
-              historyIndex++;
-              const path = historyStack[historyIndex];
-              if (path !== undefined) {
-                yield* updateFromPath(path);
-              }
-            }
+            yield* navigationCore.forward.pipe(Effect.orDie);
+            yield* applyNavigationSnapshot();
             const after = yield* Signal.get(currentSignal);
             yield* ContractTrace.emit({
               event: "history.forward",
@@ -1176,12 +1142,11 @@ export const testLayer = (
 
         isActive: (targetPath: string, options?: IsActiveOptions) =>
           Effect.gen(function* () {
-            const resolvedPath = options?.params
-              ? yield* interpolateActivePath(targetPath, options.params)
-              : targetPath;
+            const target = navigationTarget(targetPath, options);
+            const resolvedPath = yield* resolveNavigationTarget(target).pipe(Effect.orDie);
             const matcher = options?.exact
-              ? (route: Route) => route.path === resolvedPath
-              : (route: Route) => route.path.startsWith(resolvedPath);
+              ? (route: Route) => route.path === resolvedPath.split("?")[0]
+              : (route: Route) => route.path.startsWith(resolvedPath.split("?")[0] ?? resolvedPath);
             return yield* Signal.derive(currentSignal, matcher);
           }),
 
