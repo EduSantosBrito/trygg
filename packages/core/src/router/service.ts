@@ -25,7 +25,6 @@ import type {
   RouterService,
   NavigateOptions,
   NavigationContext,
-  OutletPrefetchState,
   IsActiveOptions,
   RouteErrorInfo,
   RoutePath,
@@ -51,6 +50,7 @@ import {
   resolveNavigationTarget,
   sameQuery,
 } from "./navigation-core.js";
+import { makeNavigationOutletCoordination } from "./navigation-outlet-coordination.js";
 
 /** @internal */
 const ScrollPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
@@ -661,7 +661,9 @@ export const browserLayer: Layer.Layer<
       scrollKey: currentNavKey,
     });
 
-    const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
+    const outletCoordination = yield* makeNavigationOutletCoordination({
+      replayLatestPrefetchState: true,
+    });
 
     const navigationAdapter = {
       read: Effect.gen(function* () {
@@ -837,6 +839,11 @@ export const browserLayer: Layer.Layer<
           hash,
           scrollKey: currentNavKey,
         });
+        yield* outletCoordination.publishScrollIntent({
+          isPopstate: true,
+          hash,
+          scrollKey: currentNavKey,
+        });
 
         // Read current location and update shared navigation state/signals.
         yield* navigationCore.refresh.pipe(Effect.ignore);
@@ -893,6 +900,11 @@ export const browserLayer: Layer.Layer<
 
         const hash = yield* location.hash.pipe(Effect.orElseSucceed(() => ""));
         yield* Ref.set(navContextRef, {
+          isPopstate: false,
+          hash,
+          scrollKey: currentNavKey,
+        });
+        yield* outletCoordination.publishScrollIntent({
           isPopstate: false,
           hash,
           scrollKey: currentNavKey,
@@ -959,18 +971,17 @@ export const browserLayer: Layer.Layer<
           event: "router.prefetch.start",
           path: targetPath,
         });
-        const prefetchState = yield* Ref.get(prefetchStateRef);
-        if (prefetchState._tag === "Active") {
-          yield* prefetchState.prefetch(targetPath);
-        }
+        yield* outletCoordination.prefetch(targetPath);
       }),
 
       outletCoordination: {
-        prefetchState: Ref.get(prefetchStateRef),
-        activatePrefetch: (prefetch) => Ref.set(prefetchStateRef, { _tag: "Active", prefetch }),
+        prefetchState: outletCoordination.prefetchState,
+        activatePrefetch: outletCoordination.activatePrefetch,
         applyScroll: (opts) =>
           Effect.gen(function* () {
-            const navCtx = yield* Ref.get(navContextRef);
+            const intent = yield* outletCoordination.takeScrollIntent;
+            const navCtx = Option.isSome(intent) ? intent.value : yield* Ref.get(navContextRef);
+            yield* Ref.set(navContextRef, navCtx);
             yield* doApplyScroll({
               strategy: opts.strategy,
               hash: navCtx.hash,
@@ -1032,7 +1043,9 @@ export const testLayer = (
 
       const querySignal = yield* Signal.make<URLSearchParams>(initialQuery);
 
-      const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
+      const outletCoordination = yield* makeNavigationOutletCoordination({
+        replayLatestPrefetchState: true,
+      });
 
       const navigationAdapter = yield* makeInMemoryNavigationAdapter(initialPath).pipe(Effect.orDie);
       const navigationCore = yield* makeNavigationCore(
@@ -1108,6 +1121,12 @@ export const testLayer = (
           yield* navigationCore.navigate(target).pipe(
             Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
           );
+          const snapshotAfterNavigate = yield* navigationCore.current;
+          yield* outletCoordination.publishScrollIntent({
+            isPopstate: false,
+            hash: snapshotAfterNavigate.hash,
+            scrollKey: snapshotAfterNavigate.scrollKey,
+          });
           yield* ContractTrace.emit({
             event: options?.replace ? "history.replace" : "history.push",
             level: "semantic",
@@ -1171,16 +1190,13 @@ export const testLayer = (
             event: "router.prefetch.start",
             path: targetPath,
           });
-          const prefetchState = yield* Ref.get(prefetchStateRef);
-          if (prefetchState._tag === "Active") {
-            yield* prefetchState.prefetch(targetPath);
-          }
+          yield* outletCoordination.prefetch(targetPath);
         }),
 
         outletCoordination: {
-          prefetchState: Ref.get(prefetchStateRef),
-          activatePrefetch: (prefetch) => Ref.set(prefetchStateRef, { _tag: "Active", prefetch }),
-          applyScroll: () => Effect.void,
+          prefetchState: outletCoordination.prefetchState,
+          activatePrefetch: outletCoordination.activatePrefetch,
+          applyScroll: () => outletCoordination.takeScrollIntent.pipe(Effect.asVoid),
         },
         _saveScroll: Effect.void,
       };
