@@ -48,6 +48,15 @@ export interface RouteActivationShape {
   ) => Effect.Effect<RouteActivationOutcome>;
   readonly currentActivationId: Effect.Effect<Option.Option<string>>;
   readonly waitForDomSwap: (activationId: string) => Effect.Effect<Deferred.Deferred<void>>;
+  readonly showLoadingFallback: (
+    request: Pick<RouteActivationRequest, "activationId" | "path">,
+    show: Effect.Effect<void>,
+  ) => Effect.Effect<RouteActivationOutcome>;
+  readonly commitAfterDomSwap: (
+    request: Pick<RouteActivationRequest, "activationId" | "path">,
+    swap: Effect.Effect<void>,
+    afterSwap: Effect.Effect<void>,
+  ) => Effect.Effect<RouteActivationOutcome>;
 }
 
 export const makeRouteActivation = (
@@ -94,6 +103,28 @@ export const makeRouteActivation = (
       currentActivationId: SynchronizedRef.get(current),
       waitForDomSwap: Effect.fn("RouteActivation.waitForDomSwap")(function* (_activationId) {
         return yield* Deferred.make<void>();
+      }),
+      showLoadingFallback: Effect.fn("RouteActivation.showLoadingFallback")(function* (
+        request,
+        show,
+      ) {
+        const outcome = yield* currentOrStale(request.activationId, request.path);
+        if (outcome._tag === "DroppedStale") return outcome;
+        yield* show;
+        return outcome;
+      }),
+      commitAfterDomSwap: Effect.fn("RouteActivation.commitAfterDomSwap")(function* (
+        request,
+        swap,
+        afterSwap,
+      ) {
+        const beforeSwap = yield* currentOrStale(request.activationId, request.path);
+        if (beforeSwap._tag === "DroppedStale") return beforeSwap;
+        yield* swap;
+        const afterDomSwap = yield* currentOrStale(request.activationId, request.path);
+        if (afterDomSwap._tag === "DroppedStale") return afterDomSwap;
+        yield* afterSwap;
+        return afterDomSwap;
       }),
     };
   });
