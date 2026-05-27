@@ -1,5 +1,6 @@
 import { Cause, Data, Effect, Exit, Layer, Option, Schema } from "effect";
 import * as Context from "effect/Context";
+import type { Element } from "./element.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
 
 export interface RenderTransactionRequest {
@@ -9,9 +10,17 @@ export interface RenderTransactionRequest {
   readonly context: RenderContext;
 }
 
+export interface RenderTransactionReconcileRequest {
+  readonly previous: RenderResult;
+  readonly nextElement: Element;
+  readonly nextContext: Context.Context<unknown> | null;
+  readonly context: RenderContext;
+}
+
 export type RenderTransactionOutcome =
   | { readonly _tag: "Committed"; readonly result: RenderResult }
   | { readonly _tag: "Reconciled"; readonly result: RenderResult }
+  | { readonly _tag: "NotReconciled"; readonly result: RenderResult }
   | { readonly _tag: "FailedBeforeCommit"; readonly cause: unknown };
 
 export class RenderTransactionError extends Data.TaggedError("RenderTransactionError")<{
@@ -29,6 +38,9 @@ export interface RenderTransactionShape {
   readonly replace: (
     request: RenderTransactionRequest,
   ) => Effect.Effect<RenderTransactionOutcome, RenderTransactionError>;
+  readonly reconcile: (
+    request: RenderTransactionReconcileRequest,
+  ) => Effect.Effect<RenderTransactionOutcome>;
   readonly cleanup: (result: RenderResult) => Effect.Effect<void, unknown>;
 }
 
@@ -71,6 +83,24 @@ export const makeRenderTransaction = (
       }
 
       return { _tag: "Committed", result: next };
+    }),
+    reconcile: Effect.fn("RenderTransaction.reconcile")(function* (request) {
+      if (request.previous.reconcile === undefined) {
+        return { _tag: "NotReconciled", result: request.previous };
+      }
+
+      const reconciled = yield* Effect.exit(
+        request.previous
+          .reconcile(request.nextElement, request.nextContext)
+          .pipe(Effect.provide(request.context.services)),
+      );
+      if (Exit.isFailure(reconciled)) {
+        return { _tag: "FailedBeforeCommit", cause: Cause.squash(reconciled.cause) };
+      }
+
+      return reconciled.value
+        ? { _tag: "Reconciled", result: request.previous }
+        : { _tag: "NotReconciled", result: request.previous };
     }),
     cleanup: Effect.fn("RenderTransaction.cleanup")(function* (result) {
       yield* result.cleanup.pipe(Effect.provide(Context.empty() as Context.Context<unknown>));

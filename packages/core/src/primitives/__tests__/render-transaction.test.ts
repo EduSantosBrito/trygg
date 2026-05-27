@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Context, Effect, Option, Scope } from "effect";
 import { makeRenderTransaction } from "../render-transaction.js";
 import * as SafeUrl from "../../security/safe-url.js";
+import { Element } from "../element.js";
 import type { RenderContext, RenderResult } from "../renderer.js";
 
 const context: RenderContext = {
@@ -44,6 +45,35 @@ describe("RenderTransaction", () => {
     expect(outcome._tag).toBe("Committed");
     expect(parent.textContent).toBe("new");
     expect(cleanupSnapshots).toEqual(["old"]);
+  });
+
+  it("represents reconcile success and skipped fallback explicitly", async () => {
+    const node = document.createElement("div");
+    const transaction = makeRenderTransaction({ emitTraceEvents: false });
+    const previous = {
+      ...result(node, [], "previous"),
+      reconcile: () => Effect.succeed(true),
+    } satisfies RenderResult;
+
+    const reconciled = await Effect.runPromise(
+      transaction.reconcile({
+        previous,
+        nextElement: Element.Text({ content: "next" }),
+        nextContext: null,
+        context,
+      }),
+    );
+    const skipped = await Effect.runPromise(
+      transaction.reconcile({
+        previous: result(node, [], "previous"),
+        nextElement: Element.Text({ content: "next" }),
+        nextContext: null,
+        context,
+      }),
+    );
+
+    expect(reconciled._tag).toBe("Reconciled");
+    expect(skipped._tag).toBe("NotReconciled");
   });
 
   it("preserves previous UI when render fails before commit", async () => {

@@ -5,6 +5,7 @@ import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import { moveRange } from "./render-utils.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
+import { makeRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -83,6 +84,7 @@ export const renderKeyedList = (
     // Create anchor comment for the list
     const anchor = document.createComment("keyed-list");
     parent.appendChild(anchor);
+    const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
 
     // Track item states by key
     type ItemState = {
@@ -279,7 +281,7 @@ export const renderKeyedList = (
                     yield* unsubscribe;
                   }
                   // Clean up rendered content + markers
-                  yield* state.result.cleanup;
+                  yield* renderTransaction.cleanup(state.result);
                   state.startMarker.remove();
                   state.endMarker.remove();
                   yield* Scope.close(state.scope, Exit.void);
@@ -406,7 +408,7 @@ export const renderKeyedList = (
                             moveRange(newStartMarker, newEndMarker, oldStartMarker);
 
                             // Clean up old render (removes old content)
-                            yield* currentState.result.cleanup;
+                            yield* renderTransaction.cleanup(currentState.result);
                             oldStartMarker.remove();
                             oldEndMarker.remove();
 
@@ -438,7 +440,9 @@ export const renderKeyedList = (
                                 // Cleanup new render result, ensuring markers are removed
                                 // even if cleanup fails (prevents DOM leaks)
                                 yield* Effect.ensuring(
-                                  newResult !== null ? newResult.cleanup : Effect.void,
+                                  newResult !== null
+                                    ? renderTransaction.cleanup(newResult)
+                                    : Effect.void,
                                   Effect.sync(() => {
                                     if (newStartMarker !== null) newStartMarker.remove();
                                     if (newEndMarker !== null) newEndMarker.remove();
@@ -629,7 +633,7 @@ export const renderKeyedList = (
           for (const [, unsubscribe] of state.subscriptions) {
             yield* unsubscribe;
           }
-          yield* state.result.cleanup;
+          yield* renderTransaction.cleanup(state.result);
           state.startMarker.remove();
           state.endMarker.remove();
           yield* Scope.close(state.scope, Exit.void);
