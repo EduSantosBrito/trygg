@@ -11,12 +11,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@effect/platform-browser": "4.0.0-beta.58",
-    "@effect/platform-bun": "4.0.0-beta.58",
-    "@effect/platform-node": "4.0.0-beta.58",
-    "@effect/vitest": "^0.29.0",
+    "@effect/platform-browser": "catalog:",
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
     "alchemy": "2.0.0-beta.25",
-    "effect": "4.0.0-beta.58",
+    "effect": "catalog:",
     "shiki": "^3.22.0",
     "trygg": "workspace:*",
     "vitest": "^4.1.5"

@@ -28,7 +28,7 @@ describe("render-component", () => {
 
   scoped("subscribes to signals and re-renders on change", () =>
     Effect.gen(function* () {
-      const count = Signal.makeSync(0);
+      const count = yield* Signal.make(0);
 
       const Counter = Component.gen(function* () {
         const value = yield* Signal.get(count);
@@ -47,7 +47,7 @@ describe("render-component", () => {
 
   scoped("batches multiple signal writes into one microtask render", () =>
     Effect.gen(function* () {
-      const count = Signal.makeSync(0);
+      const count = yield* Signal.make(0);
       const Counter = Component.gen(function* () {
         const value = yield* Signal.get(count);
         return <div data-testid="batched">{String(value)}</div>;
@@ -66,7 +66,7 @@ describe("render-component", () => {
 
   scoped("preserves current DOM when signal re-render fails without boundary", () =>
     Effect.gen(function* () {
-      const shouldFail = Signal.makeSync(false);
+      const shouldFail = yield* Signal.make(false);
 
       const Risky = Component.gen(function* () {
         if (yield* Signal.get(shouldFail)) {
@@ -85,7 +85,7 @@ describe("render-component", () => {
 
   scoped("propagates re-render failures to error boundaries", () =>
     Effect.gen(function* () {
-      const shouldFail = Signal.makeSync(false);
+      const shouldFail = yield* Signal.make(false);
 
       const Risky = Component.gen(function* () {
         if (yield* Signal.get(shouldFail)) {
@@ -114,7 +114,7 @@ describe("render-component", () => {
   scoped("cleans subscriptions and DOM on unmount", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();
-      const count = Signal.makeSync(0);
+      const count = yield* Signal.make(0);
 
       const Counter = Component.gen(function* () {
         const value = yield* Signal.get(count);
@@ -143,7 +143,7 @@ describe("render-component", () => {
       // With the fix, the replacement is assembled off-DOM in a
       // DocumentFragment so the new <section> is fully populated when it
       // first appears in the live tree.
-      const which = Signal.makeSync<"first" | "second">("first");
+      const which = yield* Signal.make<"first" | "second">("first");
 
       const First = Component.gen(function* () {
         return (

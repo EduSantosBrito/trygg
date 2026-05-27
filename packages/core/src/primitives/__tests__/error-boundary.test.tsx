@@ -209,7 +209,7 @@ describe("ErrorBoundary basic functionality", () => {
         return <div data-testid="symbol-prop">{value}</div>;
       });
 
-      const valueSignal = Signal.makeSync("symbol-value");
+      const valueSignal = yield* Signal.make("symbol-value");
       const SafeComponent = yield* ErrorBoundary.catch(SymbolComponent).pipe(
         ErrorBoundary.catchAll(catchAllView("fallback")),
       );
@@ -232,7 +232,7 @@ describe("ErrorBoundary basic functionality", () => {
         return <div data-testid="doubled">{doubled}</div>;
       });
 
-      const count = Signal.makeSync(3);
+      const count = yield* Signal.make(3);
       const SafeComponent = yield* ErrorBoundary.catch(SignalPropComponent).pipe(
         ErrorBoundary.catchAll(catchAllView("fallback", "fallback")),
       );

@@ -407,7 +407,7 @@ const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
 export interface ResourceRegistry {
   readonly _tag: "ResourceRegistry";
   readonly get: (key: string) => Effect.Effect<Option.Option<RegistryEntry>>;
-  readonly getOrCreate: (key: string) => Effect.Effect<RegistryEntry>;
+  readonly getOrCreate: (key: string) => Effect.Effect<RegistryEntry, Signal.SignalScopeError>;
   readonly delete: (key: string) => Effect.Effect<void>;
 }
 
@@ -445,77 +445,78 @@ export class ResourceRegistryTag extends Context.Service<ResourceRegistryTag, Re
  * @public
  * @since 1.0.0
  */
-export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag> = Layer.effect(
-  ResourceRegistryTag,
-  Effect.gen(function* () {
-    const cache = yield* SynchronizedRef.make(new Map<string, RegistryEntry>());
-    const registryScope = yield* Effect.scope;
+export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag, Signal.SignalScopeError> =
+  Layer.effect(
+    ResourceRegistryTag,
+    Effect.gen(function* () {
+      const cache = yield* SynchronizedRef.make(new Map<string, RegistryEntry>());
+      const registryScope = yield* Effect.scope;
 
-    const get = (key: string): Effect.Effect<Option.Option<RegistryEntry>> =>
-      SynchronizedRef.get(cache).pipe(Effect.map((map) => fromNullable(map.get(key))));
+      const get = (key: string): Effect.Effect<Option.Option<RegistryEntry>> =>
+        SynchronizedRef.get(cache).pipe(Effect.map((map) => fromNullable(map.get(key))));
 
-    const getOrCreate = (key: string): Effect.Effect<RegistryEntry> =>
-      SynchronizedRef.modifyEffect(cache, (map) =>
-        Effect.gen(function* () {
-          const existing = map.get(key);
-          if (existing !== undefined) {
+      const getOrCreate = (key: string): Effect.Effect<RegistryEntry, Signal.SignalScopeError> =>
+        SynchronizedRef.modifyEffect(cache, (map) =>
+          Effect.gen(function* () {
+            const existing = map.get(key);
+            if (existing !== undefined) {
+              yield* Debug.log({
+                event: "resource.registry.get_existing",
+                key,
+              });
+              const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [existing, map];
+              return result;
+            }
+
             yield* Debug.log({
-              event: "resource.registry.get_existing",
+              event: "resource.registry.create_entry",
               key,
             });
-            const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [existing, map];
+
+            // Create new entry
+            const state = yield* Signal.make<ResourceState<unknown, unknown>>(Pending());
+            const inFlight = yield* Ref.make<Option.Option<Deferred.Deferred<void, never>>>(
+              Option.none(),
+            );
+            const currentFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
+              Option.none(),
+            );
+            const timestamp = yield* Ref.make(0);
+            const scope = yield* Scope.fork(registryScope);
+
+            const entry: RegistryEntry = { state, inFlight, currentFiber, timestamp, scope };
+            const newMap = new Map(map);
+            newMap.set(key, entry);
+
+            const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [entry, newMap];
             return result;
-          }
+          }),
+        );
 
-          yield* Debug.log({
-            event: "resource.registry.create_entry",
-            key,
-          });
+      const deleteEntry = (key: string): Effect.Effect<void> =>
+        SynchronizedRef.modifyEffect(cache, (map) =>
+          Effect.gen(function* () {
+            const newMap = new Map(map);
+            const entry = newMap.get(key);
+            newMap.delete(key);
 
-          // Create new entry
-          const state = yield* Signal.make<ResourceState<unknown, unknown>>(Pending());
-          const inFlight = yield* Ref.make<Option.Option<Deferred.Deferred<void, never>>>(
-            Option.none(),
-          );
-          const currentFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
-            Option.none(),
-          );
-          const timestamp = yield* Ref.make(0);
-          const scope = yield* Scope.fork(registryScope);
+            if (entry !== undefined) {
+              yield* Scope.close(entry.scope, Exit.void);
+            }
 
-          const entry: RegistryEntry = { state, inFlight, currentFiber, timestamp, scope };
-          const newMap = new Map(map);
-          newMap.set(key, entry);
+            const result: readonly [void, Map<string, RegistryEntry>] = [undefined, newMap];
+            return result;
+          }),
+        );
 
-          const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [entry, newMap];
-          return result;
-        }),
-      );
-
-    const deleteEntry = (key: string): Effect.Effect<void> =>
-      SynchronizedRef.modifyEffect(cache, (map) =>
-        Effect.gen(function* () {
-          const newMap = new Map(map);
-          const entry = newMap.get(key);
-          newMap.delete(key);
-
-          if (entry !== undefined) {
-            yield* Scope.close(entry.scope, Exit.void);
-          }
-
-          const result: readonly [void, Map<string, RegistryEntry>] = [undefined, newMap];
-          return result;
-        }),
-      );
-
-    return {
-      _tag: "ResourceRegistry" satisfies ResourceRegistry["_tag"],
-      get,
-      getOrCreate,
-      delete: deleteEntry,
-    };
-  }),
-);
+      return {
+        _tag: "ResourceRegistry" satisfies ResourceRegistry["_tag"],
+        get,
+        getOrCreate,
+        delete: deleteEntry,
+      };
+    }),
+  );
 
 // =============================================================================
 // Internal helpers
@@ -665,13 +666,17 @@ const fetchInternal = <A, E, R>(
 export const fetch: {
   <A, E, R>(
     resource: Resource<A, E, R>,
-  ): Effect.Effect<Signal.Signal<ResourceState<A, E>>, never, ResourceRegistryTag | R>;
+  ): Effect.Effect<
+    Signal.Signal<ResourceState<A, E>>,
+    Signal.SignalScopeError,
+    ResourceRegistryTag | R
+  >;
   <P extends object, A, E, R>(
     factory: (params: P) => Resource<A, E, R>,
     params: ReactiveParams<P>,
   ): Effect.Effect<
     Signal.Signal<ResourceState<A, E>>,
-    never,
+    Signal.SignalScopeError,
     ResourceRegistryTag | R | Scope.Scope
   >;
 } = unsafeAsOverload(
@@ -697,7 +702,11 @@ export const fetch: {
  */
 const fetchStatic = <A, E, R>(
   resource: Resource<A, E, R>,
-): Effect.Effect<Signal.Signal<ResourceState<A, E>>, never, ResourceRegistryTag | R> =>
+): Effect.Effect<
+  Signal.Signal<ResourceState<A, E>>,
+  Signal.SignalScopeError,
+  ResourceRegistryTag | R
+> =>
   Effect.gen(function* () {
     yield* Debug.log({
       event: "resource.fetch.called",
@@ -756,7 +765,7 @@ const fetchReactive = <P extends object, A, E, R>(
   reactiveParams: ReactiveParams<P>,
 ): Effect.Effect<
   Signal.Signal<ResourceState<A, E>>,
-  never,
+  Signal.SignalScopeError,
   ResourceRegistryTag | R | Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -806,7 +815,7 @@ const fetchReactive = <P extends object, A, E, R>(
     // so that invalidate/refresh changes propagate to the component.
     // Uses SynchronizedRef.updateEffect to atomically interrupt+fork+store, preventing
     // race conditions where concurrent doFetch calls could leak daemons.
-    const doFetch = (resource: Resource<A, E, R>): Effect.Effect<void> =>
+    const doFetch = (resource: Resource<A, E, R>): Effect.Effect<void, Signal.SignalScopeError> =>
       Effect.gen(function* () {
         yield* Ref.set(activeKey, resource.key);
         yield* Signal.set(outputState, Pending<A, E>());
@@ -888,7 +897,7 @@ const fetchReactive = <P extends object, A, E, R>(
 
     // If there are reactive signals, subscribe to changes
     if (signalFields.length > 0) {
-      const onParamChange = (): Effect.Effect<void> =>
+      const onParamChange = (): Effect.Effect<void, Signal.SignalScopeError> =>
         Effect.gen(function* () {
           const newParams = yield* unwrapParams();
           const newResource = factory(newParams);
@@ -1234,7 +1243,7 @@ export const exhaustive = <A, E, R>(
       Scope.Scope | R
     >(
       self.state,
-      Signal.derive,
+      (source, render) => Signal.derive(source, render),
       (signal) => Element.SignalElement({ signal, onSwap: undefined }),
       render,
     );
@@ -1311,7 +1320,7 @@ export const invalidate = <A, E, R>(
  */
 export const refresh = <A, E, R>(
   resource: Resource<A, E, R>,
-): Effect.Effect<void, never, ResourceRegistryTag | R> =>
+): Effect.Effect<void, Signal.SignalScopeError, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;

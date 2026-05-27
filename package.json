@@ -6,6 +6,16 @@
     "apps/*"
   ],
   "type": "module",
+  "catalog": {
+    "@effect/language-service": "^0.85.1",
+    "@effect/platform-browser": "4.0.0-beta.58",
+    "@effect/platform-bun": "4.0.0-beta.58",
+    "@effect/platform-node": "4.0.0-beta.58",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.58",
+    "@effect/tsgo": "0.5.2",
+    "@effect/vitest": "4.0.0-beta.58",
+    "effect": "4.0.0-beta.58"
+  },
   "scripts": {
     "build": "bun run --cwd packages/core build",
     "typecheck": "bun run --cwd packages/core typecheck",
@@ -28,10 +38,10 @@
     "prepare": "effect-tsgo patch"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.58",
-    "@effect/tsgo": "0.5.2",
+    "@effect/platform-node": "catalog:",
+    "@effect/tsgo": "catalog:",
     "@typescript/native-preview": "latest",
-    "effect": "4.0.0-beta.58",
+    "effect": "catalog:",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.41.0",
     "typescript": "^5.9.3"

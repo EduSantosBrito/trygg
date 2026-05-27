@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Exit, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element } from "./element.js";
 import * as Signal from "./signal.js";
@@ -101,11 +101,14 @@ export const renderKeyedList = (
       pendingRerender: boolean;
       /** Map from signal debugId to unsubscribe Effect */
       subscriptions: Map<string, Effect.Effect<void>>;
+      /** Scope that owns render-function signals and child component scopes for this keyed item */
+      scope: Scope.Closeable;
       /** Trigger item rerender while preserving scope */
       scheduleRerender: () => Effect.Effect<void>;
     };
     const itemStates = new Map<string | number, ItemState>();
     const keyOrder: Array<string | number> = [];
+    const listScope = yield* Scope.fork(yield* Effect.scope);
     let isUnmounted = false;
     let isUpdating = false;
     let pendingUpdate = false;
@@ -115,6 +118,7 @@ export const renderKeyedList = (
       item: unknown,
       index: number,
       existingPhase: Signal.RenderPhase | null,
+      itemScope: Scope.Closeable,
       parentOverride?: Node,
     ) {
       // Use existing phase or create new one
@@ -132,7 +136,7 @@ export const renderKeyedList = (
         renderEffect,
         Signal.CurrentRenderPhase,
         renderPhase,
-      );
+      ).pipe(Scope.provide(itemScope));
 
       const listParent = parentOverride ?? anchor.parentNode ?? parent;
 
@@ -142,13 +146,9 @@ export const renderKeyedList = (
 
       // Render into list parent (content appended after startMarker)
       const normalizedElement = yield* Element.fromUnknown(element);
-      const result = yield* deps.renderElement(
-        normalizedElement,
-        listParent,
-        runtime,
-        context,
-        options,
-      );
+      const result = yield* deps
+        .renderElement(normalizedElement, listParent, runtime, context, options)
+        .pipe(Scope.provide(itemScope));
 
       // Insert end marker after content - ensures moveRange captures full Fragment range
       const endMarker = document.createComment("item-end");
@@ -282,6 +282,7 @@ export const renderKeyedList = (
                   yield* state.result.cleanup;
                   state.startMarker.remove();
                   state.endMarker.remove();
+                  yield* Scope.close(state.scope, Exit.void);
                   itemStates.delete(key);
                   yield* Debug.log({
                     event: "render.keyedlist.item.remove",
@@ -349,12 +350,14 @@ export const renderKeyedList = (
                 });
               } else {
                 // New item - create new state
+                const itemScope = yield* Scope.fork(listScope);
                 const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
                   item,
                   i,
                   null,
+                  itemScope,
                   stagedParent,
-                );
+                ).pipe(Effect.onError(() => Scope.close(itemScope, Exit.void)));
 
                 // Set up subscriptions for this item's accessed signals.
                 // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
@@ -393,6 +396,7 @@ export const renderKeyedList = (
                               currentState.item,
                               currentState.currentIndex,
                               currentState.renderPhase,
+                              currentState.scope,
                             );
                             newResult = rendered.result;
                             newStartMarker = rendered.startMarker;
@@ -468,6 +472,7 @@ export const renderKeyedList = (
                   isRerendering: false,
                   pendingRerender: false,
                   subscriptions: new Map(),
+                  scope: itemScope,
                   scheduleRerender: scheduleItemRerender,
                 };
 
@@ -627,8 +632,10 @@ export const renderKeyedList = (
           yield* state.result.cleanup;
           state.startMarker.remove();
           state.endMarker.remove();
+          yield* Scope.close(state.scope, Exit.void);
         }
         itemStates.clear();
+        yield* Scope.close(listScope, Exit.void);
         anchor.remove();
       }),
     };

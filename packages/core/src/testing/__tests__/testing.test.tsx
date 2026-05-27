@@ -180,7 +180,7 @@ describe("Testing Utilities", () => {
 
     scoped("should support reactive updates in components", () =>
       Effect.gen(function* () {
-        const count = Signal.makeSync(0);
+        const count = yield* Signal.make(0);
 
         const component = Effect.gen(function* () {
           const value = yield* Signal.get(count);

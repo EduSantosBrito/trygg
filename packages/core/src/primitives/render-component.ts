@@ -2,6 +2,7 @@ import { Cause, Effect, Equal, Exit, Scope } from "effect";
 import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
+import * as ContractTrace from "../contract/trace.js";
 import type { Element } from "./element.js";
 import { unsafeBuildProviderContext } from "../internal/unsafe.js";
 import { Element as ElementService } from "./element.js";
@@ -81,33 +82,64 @@ export const renderComponent = (
 
     const componentScope = yield* Scope.fork(yield* Effect.scope);
     const providerScope = provider === null ? null : yield* Scope.fork(componentScope);
+    const providerId = provider === null ? null : Debug.nextProviderId();
     const mergeProviderContext = (parentContext: Context.Context<unknown> | null) =>
       providerContext === null
         ? parentContext
         : Context.merge(deps.normalizeContext(parentContext), providerContext);
 
-    if (provider !== null && providerScope !== null) {
+    if (provider !== null && providerScope !== null && providerId !== null) {
       const acquireStart = performance.now();
       providerContext = yield* unsafeBuildProviderContext(
         provider.layer,
         providerScope,
         currentContext,
       ).pipe(
+        Effect.provideService(Signal.CurrentSignalOwner, "provider"),
         Effect.tapCause((cause) =>
-          Debug.log({
-            event: "provider.failure",
-            component: provider.displayName,
-            reason: "failure",
-            cause: Cause.pretty(cause),
+          Effect.gen(function* () {
+            const durationMs = performance.now() - acquireStart;
+            yield* Debug.log({
+              event: "provider.failure",
+              provider_id: providerId,
+              component: provider.displayName,
+              reason: "failure",
+              duration_ms: durationMs,
+              cause: Cause.pretty(cause),
+            });
+            yield* ContractTrace.emit({
+              event: "provider.failure",
+              level: "semantic",
+              payload: {
+                provider_id: providerId,
+                component: provider.displayName,
+                reason: "failure",
+                duration_ms: durationMs,
+              },
+            });
           }),
         ),
       );
       currentContext = mergeProviderContext(currentContext);
+      const durationMs = performance.now() - acquireStart;
+      yield* Metrics.recordProviderAcquisition;
+      yield* Metrics.recordProviderAcquisitionDuration(durationMs);
       yield* Debug.log({
         event: "provider.acquire",
+        provider_id: providerId,
         component: provider.displayName,
         reason: "mount",
-        duration_ms: performance.now() - acquireStart,
+        duration_ms: durationMs,
+      });
+      yield* ContractTrace.emit({
+        event: "provider.acquire",
+        level: "semantic",
+        payload: {
+          provider_id: providerId,
+          component: provider.displayName,
+          reason: "mount",
+          duration_ms: durationMs,
+        },
       });
     }
 
@@ -140,12 +172,16 @@ export const renderComponent = (
       const renderScope = yield* Scope.fork(componentScope);
       const element = yield* Effect.provideService(
         Effect.provideService(
-          Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
-          Signal.CurrentComponentScope,
-          componentScope,
+          Effect.provideService(
+            Effect.provideService(effectWithContext, Signal.CurrentRenderPhase, renderPhase),
+            Signal.CurrentComponentScope,
+            componentScope,
+          ),
+          Signal.CurrentRenderScope,
+          renderScope,
         ),
-        Signal.CurrentRenderScope,
-        renderScope,
+        Signal.CurrentSignalOwner,
+        "component",
       ).pipe(
         Scope.provide(componentScope),
         Effect.onError(() => Scope.close(renderScope, Exit.void)),
@@ -217,6 +253,23 @@ export const renderComponent = (
         }
 
         const rerenderStart = performance.now();
+        if (provider !== null && providerId !== null) {
+          yield* Debug.log({
+            event: "provider.reuse",
+            provider_id: providerId,
+            component: provider.displayName,
+            reason: "rerender",
+          });
+          yield* ContractTrace.emit({
+            event: "provider.reuse",
+            level: "semantic",
+            payload: {
+              provider_id: providerId,
+              component: provider.displayName,
+              reason: "rerender",
+            },
+          });
+        }
         yield* Signal.resetRenderPhase(renderPhase);
 
         const nextRender = yield* runComponentEffect();
@@ -355,7 +408,30 @@ export const renderComponent = (
         }
         subscriptionCleanups = [];
         yield* cleanupCurrent;
+        const providerFinalizeStart = providerId === null ? null : performance.now();
         yield* Scope.close(componentScope, Exit.void);
+        if (provider !== null && providerId !== null && providerFinalizeStart !== null) {
+          const durationMs = performance.now() - providerFinalizeStart;
+          yield* Metrics.recordProviderFinalization;
+          yield* Metrics.recordProviderFinalizationDuration(durationMs);
+          yield* Debug.log({
+            event: "provider.finalize",
+            provider_id: providerId,
+            component: provider.displayName,
+            reason: "unmount",
+            duration_ms: durationMs,
+          });
+          yield* ContractTrace.emit({
+            event: "provider.finalize",
+            level: "semantic",
+            payload: {
+              provider_id: providerId,
+              component: provider.displayName,
+              reason: "unmount",
+              duration_ms: durationMs,
+            },
+          });
+        }
         anchor.remove();
       }),
       reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
@@ -364,11 +440,49 @@ export const renderComponent = (
           const resolvedNextElement = resolved.element;
           const resolvedNextContext = resolved.context;
 
-          if (resolvedNextElement._tag !== "Component" || resolvedNextElement.key !== key) {
+          if (resolvedNextElement._tag !== "Component") {
+            return false;
+          }
+
+          if (resolvedNextElement.key !== key) {
+            if (provider !== null && providerId !== null) {
+              yield* Debug.log({
+                event: "provider.replace",
+                provider_id: providerId,
+                component: provider.displayName,
+                reason: "key-change",
+              });
+              yield* ContractTrace.emit({
+                event: "provider.replace",
+                level: "semantic",
+                payload: {
+                  provider_id: providerId,
+                  component: provider.displayName,
+                  reason: "key-change",
+                },
+              });
+            }
             return false;
           }
 
           if (resolvedNextElement.provider?.layer !== provider?.layer) {
+            if (provider !== null && providerId !== null) {
+              yield* Debug.log({
+                event: "provider.replace",
+                provider_id: providerId,
+                component: provider.displayName,
+                reason: "identity-change",
+              });
+              yield* ContractTrace.emit({
+                event: "provider.replace",
+                level: "semantic",
+                payload: {
+                  provider_id: providerId,
+                  component: provider.displayName,
+                  reason: "identity-change",
+                },
+              });
+            }
             return false;
           }
 
@@ -378,6 +492,23 @@ export const renderComponent = (
               : resolvedNextElement.identity === identity && resolvedNextElement.run === currentRun;
 
           if (!sameIdentity) {
+            if (provider !== null && providerId !== null) {
+              yield* Debug.log({
+                event: "provider.replace",
+                provider_id: providerId,
+                component: provider.displayName,
+                reason: "identity-change",
+              });
+              yield* ContractTrace.emit({
+                event: "provider.replace",
+                level: "semantic",
+                payload: {
+                  provider_id: providerId,
+                  component: provider.displayName,
+                  reason: "identity-change",
+                },
+              });
+            }
             return false;
           }
 
@@ -393,6 +524,23 @@ export const renderComponent = (
           currentContext = effectiveNextContext;
 
           if (!inputsChanged && !contextChanged) {
+            if (provider !== null && providerId !== null) {
+              yield* Debug.log({
+                event: "provider.reuse",
+                provider_id: providerId,
+                component: provider.displayName,
+                reason: "rerender",
+              });
+              yield* ContractTrace.emit({
+                event: "provider.reuse",
+                level: "semantic",
+                payload: {
+                  provider_id: providerId,
+                  component: provider.displayName,
+                  reason: "rerender",
+                },
+              });
+            }
             return true;
           }
 

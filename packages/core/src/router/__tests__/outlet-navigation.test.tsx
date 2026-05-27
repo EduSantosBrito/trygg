@@ -86,7 +86,7 @@ const loadingComp = (): RouteComponent => {
 };
 
 /** Custom test layer with specified initial path */
-const testLayerAt = (path: string): LayerType<Renderer | Router.Router> =>
+const testLayerAt = (path: string): LayerType<Renderer | Router.Router, Signal.SignalScopeError> =>
   Layer.merge(browserLayer, Router.testLayer(path));
 
 // =============================================================================
@@ -473,8 +473,8 @@ describe("Outlet - Navigation integration", () => {
     "should not let a stale route rerender overwrite shared route chrome while the next route is pending",
     () =>
       Effect.gen(function* () {
-        const headings = Signal.makeSync<ReadonlyArray<string>>([]);
-        const oldRouteTick = Signal.makeSync(0);
+        const headings = yield* Signal.make<ReadonlyArray<string>>([]);
+        const oldRouteTick = yield* Signal.make(0);
         const newRouteReady = yield* Deferred.make<void>();
         const flushDom = Effect.promise<void>(
           () => new Promise((resolve) => setTimeout(resolve, 10)),

@@ -9,7 +9,7 @@
  * @since 1.0.0
  * @module trygg/primitives/cx
  */
-import { Effect, Scope, SubscriptionRef } from "effect";
+import { Effect, Scope } from "effect";
 import * as Signal from "./signal.js";
 
 /**
@@ -100,7 +100,7 @@ const computeClassesEffect = (inputs: ReadonlyArray<ClassInput>): Effect.Effect<
 
     for (const input of inputs) {
       if (Signal.isSignal(input)) {
-        const value = yield* SubscriptionRef.get(input._ref);
+        const value = yield* Signal.peek(input);
         signalValues.set(input, value);
       }
     }
@@ -140,7 +140,7 @@ const computeClassesEffect = (inputs: ReadonlyArray<ClassInput>): Effect.Effect<
  */
 export const cx = (
   ...inputs: ReadonlyArray<ClassInput>
-): Effect.Effect<string | Signal.Signal<string>, never, Scope.Scope> =>
+): Effect.Effect<string | Signal.Signal<string>, Signal.SignalScopeError, Scope.Scope> =>
   Effect.gen(function* () {
     // Collect Signal inputs
     const signals: Array<Signal.Signal<unknown>> = [];

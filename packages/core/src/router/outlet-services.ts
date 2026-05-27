@@ -14,6 +14,7 @@ import {
   Layer,
   Option,
   Ref,
+  Result,
   Scope,
   SubscriptionRef,
 } from "effect";
@@ -33,6 +34,24 @@ import {
   type RouteParams,
 } from "./types.js";
 import type { ResolvedRoute } from "./matching.js";
+
+const isSignalDisposedCause = (cause: Cause.Cause<unknown>): boolean => {
+  const defect = Cause.findDefect(cause);
+  return Result.isSuccess(defect) && defect.success instanceof Signal.SignalDisposedError;
+};
+
+const ignoreExpectedSignalDisposed = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A | void, E, R> =>
+  Effect.catchCause(effect, (cause) =>
+    isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
+  );
+
+const runSignalSetupSync = <A>(effect: Effect.Effect<A, Signal.SignalScopeError>): A => {
+  const exit = Effect.runSyncExit(effect);
+  if (Exit.isSuccess(exit)) return exit.value;
+  throw Cause.squash(exit.cause);
+};
 import {
   resolveErrorBoundary,
   resolveForbiddenBoundary,
@@ -223,7 +242,7 @@ export interface OutletRendererShape {
     errorComp: RouteComponent,
     cause: Cause.Cause<unknown>,
     path: string,
-  ) => Effect.Effect<ElementType, InvalidRouteComponent, never>;
+  ) => Effect.Effect<ElementType, InvalidRouteComponent | Signal.SignalScopeError, never>;
 }
 
 /**
@@ -319,7 +338,7 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
   static readonly make = (
     loadingElement: Element,
     scope: Scope.Scope,
-  ): Effect.Effect<AsyncLoaderShape> =>
+  ): Effect.Effect<AsyncLoaderShape, Signal.SignalScopeError> =>
     Effect.gen(function* () {
       const state = yield* Signal.make<AsyncLoadState>(AsyncLoadState.Loading());
       const view = yield* Signal.derive(
@@ -435,22 +454,26 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
                 });
                 yield* Signal.set(state, AsyncLoadState.Loading());
               }
-            }),
+            }).pipe(ignoreExpectedSignalDisposed),
             scope,
           );
 
           yield* Ref.set(currentFiberRef, Option.some(fiber));
-        });
+        }).pipe(ignoreExpectedSignalDisposed);
 
       return { state, view, track } satisfies AsyncLoaderShape;
     });
 
   /** Passthrough AsyncLoader for testing (no async tracking, immediate render). */
   static readonly test = (fallbackElement: Element): AsyncLoaderShape => {
-    // In test mode, track just resolves the effect synchronously and stores the result
+    // In test mode, track just resolves the effect synchronously and stores the result.
+    // The helper creates an explicit owner scope so tests do not depend on module-lifetime signals.
     let lastElement: Element = fallbackElement;
-    const stateSignal = Signal.makeSync<AsyncLoadState>(AsyncLoadState.Loading());
-    const viewSignal = Signal.makeSync(fallbackElement);
+    const scope = Effect.runSync(Scope.make());
+    const stateSignal = runSignalSetupSync(
+      Signal.make<AsyncLoadState>(AsyncLoadState.Loading()).pipe(Scope.provide(scope)),
+    );
+    const viewSignal = runSignalSetupSync(Signal.make(fallbackElement).pipe(Scope.provide(scope)));
 
     return {
       state: stateSignal,
@@ -460,8 +483,10 @@ export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>(
           const exit = yield* Effect.exit(loadEffect);
           if (Exit.isSuccess(exit)) {
             lastElement = exit.value;
-            yield* Signal.set(stateSignal, AsyncLoadState.Ready({ element: lastElement }));
-            yield* Signal.set(viewSignal, lastElement);
+            yield* ignoreExpectedSignalDisposed(
+              Signal.set(stateSignal, AsyncLoadState.Ready({ element: lastElement })),
+            );
+            yield* ignoreExpectedSignalDisposed(Signal.set(viewSignal, lastElement));
           }
         }),
     };
@@ -607,7 +632,7 @@ export function renderError(
   errorComp: RouteComponent,
   cause: Cause.Cause<unknown>,
   path: string,
-): Effect.Effect<ElementType, InvalidRouteComponent, never> {
+): Effect.Effect<ElementType, InvalidRouteComponent | Signal.SignalScopeError, never> {
   return unsafeEraseR(
     Effect.gen(function* () {
       yield* Metrics.recordRouteError;

@@ -164,7 +164,7 @@ export interface CommonProps {
   readonly key?: ElementKey;
   readonly className?:
     | MaybeSignal<string>
-    | Effect.Effect<string | Signal<string>, never, Scope.Scope>;
+    | Effect.Effect<string | Signal<string>, unknown, Scope.Scope>;
   readonly id?: string;
   readonly style?: Readonly<Record<string, string | number>>;
   readonly children?: ElementChildren;
@@ -195,7 +195,7 @@ export interface BaseProps extends CommonProps {}
  * Services are provided by the ManagedRuntime at mount time.
  * @internal
  */
-type AnyEventHandler = EventHandler<void, never, unknown>;
+type AnyEventHandler = EventHandler<void, unknown, unknown>;
 
 /**
  * Event props that can be attached to intrinsic elements.

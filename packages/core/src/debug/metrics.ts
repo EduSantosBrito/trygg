@@ -16,7 +16,7 @@ const metricsLogger = createConsola({ defaults: { tag: "trygg" } });
 
 // --- Naming Convention ---
 // All metrics use `trygg.` prefix
-// Categories: router, render, signal
+// Categories: router, render, signal, provider
 // Format: trygg.<category>.<metric_name>
 
 // --- Counters ---
@@ -82,6 +82,69 @@ export const routeErrorCounter: Metric.Counter<number> = Metric.counter(
 export const signalUpdateCounter: Metric.Counter<number> = Metric.counter(
   "trygg.signal.update.count",
   { description: "Total number of signal value changes", incremental: true },
+);
+
+/**
+ * Counter for disposed signal access attempts.
+ * Incremented when user code reads or writes a signal after owner disposal.
+ *
+ * @remarks
+ * Use this to detect callbacks or async work that outlive their signal owner.
+ *
+ * @example
+ * ```ts
+ * const counter = Metrics.disposedSignalAccessCounter
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const disposedSignalAccessCounter: Metric.Counter<number> = Metric.counter(
+  "trygg.signal.disposed_access.count",
+  { description: "Total number of disposed signal access attempts", incremental: true },
+);
+
+/**
+ * Counter for provider acquisitions.
+ * Incremented each time a lifecycle-provided component acquires its layer.
+ *
+ * @remarks
+ * Use this to confirm provider layers are acquired once per stable mounted instance.
+ *
+ * @example
+ * ```ts
+ * const counter = Metrics.providerAcquisitionCounter
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const providerAcquisitionCounter: Metric.Counter<number> = Metric.counter(
+  "trygg.provider.acquire.count",
+  { description: "Total number of provider layer acquisitions", incremental: true },
+);
+
+/**
+ * Counter for provider finalizations.
+ * Incremented each time a lifecycle provider scope closes.
+ *
+ * @remarks
+ * Use this with acquisition counts to spot provider leaks or duplicate finalizers.
+ *
+ * @example
+ * ```ts
+ * const counter = Metrics.providerFinalizationCounter
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const providerFinalizationCounter: Metric.Counter<number> = Metric.counter(
+  "trygg.provider.finalize.count",
+  { description: "Total number of provider scope finalizations", incremental: true },
 );
 
 /**
@@ -152,6 +215,52 @@ export const renderDurationHistogram: Metric.Histogram<number> = Metric.histogra
   },
 );
 
+/**
+ * Histogram for provider acquisition duration.
+ *
+ * @remarks
+ * Records how long lifecycle provider layer acquisition takes in milliseconds.
+ *
+ * @example
+ * ```ts
+ * const histogram = Metrics.providerAcquisitionDurationHistogram
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const providerAcquisitionDurationHistogram: Metric.Histogram<number> = Metric.histogram(
+  "trygg.provider.acquire.duration_ms",
+  {
+    boundaries: renderDurationBoundaries,
+    description: "Distribution of provider acquisition durations in milliseconds",
+  },
+);
+
+/**
+ * Histogram for provider finalization duration.
+ *
+ * @remarks
+ * Records how long provider scope finalization takes in milliseconds.
+ *
+ * @example
+ * ```ts
+ * const histogram = Metrics.providerFinalizationDurationHistogram
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const providerFinalizationDurationHistogram: Metric.Histogram<number> = Metric.histogram(
+  "trygg.provider.finalize.duration_ms",
+  {
+    boundaries: renderDurationBoundaries,
+    description: "Distribution of provider finalization durations in milliseconds",
+  },
+);
+
 // --- Metric Recording API ---
 
 /**
@@ -207,6 +316,66 @@ export const recordRouteError: Effect.Effect<void> = Metric.update(routeErrorCou
 export const recordSignalUpdate: Effect.Effect<void> = Metric.update(signalUpdateCounter, 1);
 
 /**
+ * Increment the disposed signal access counter.
+ *
+ * @remarks
+ * Framework signal guards call this when a disposed signal is read or written.
+ *
+ * @example
+ * ```ts
+ * yield* Metrics.recordDisposedSignalAccess
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const recordDisposedSignalAccess: Effect.Effect<void> = Metric.update(
+  disposedSignalAccessCounter,
+  1,
+);
+
+/**
+ * Increment the provider acquisition counter.
+ *
+ * @remarks
+ * Renderer internals call this after a provided layer is acquired.
+ *
+ * @example
+ * ```ts
+ * yield* Metrics.recordProviderAcquisition
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const recordProviderAcquisition: Effect.Effect<void> = Metric.update(
+  providerAcquisitionCounter,
+  1,
+);
+
+/**
+ * Increment the provider finalization counter.
+ *
+ * @remarks
+ * Renderer internals call this when a provider scope is finalized.
+ *
+ * @example
+ * ```ts
+ * yield* Metrics.recordProviderFinalization
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const recordProviderFinalization: Effect.Effect<void> = Metric.update(
+  providerFinalizationCounter,
+  1,
+);
+
+/**
  * Increment the component render counter.
  *
  * @remarks
@@ -242,6 +411,42 @@ export const recordComponentRender: Effect.Effect<void> = Metric.update(componen
 export const recordRenderDuration = (durationMs: number): Effect.Effect<void> =>
   Metric.update(renderDurationHistogram, durationMs);
 
+/**
+ * Record a provider acquisition duration in milliseconds.
+ *
+ * @remarks
+ * Call with the measured elapsed time for provider layer acquisition.
+ *
+ * @example
+ * ```ts
+ * yield* Metrics.recordProviderAcquisitionDuration(3.5)
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const recordProviderAcquisitionDuration = (durationMs: number): Effect.Effect<void> =>
+  Metric.update(providerAcquisitionDurationHistogram, durationMs);
+
+/**
+ * Record a provider finalization duration in milliseconds.
+ *
+ * @remarks
+ * Call with the measured elapsed time for provider scope finalization.
+ *
+ * @example
+ * ```ts
+ * yield* Metrics.recordProviderFinalizationDuration(1.2)
+ * ```
+ *
+ * @category Metrics
+ * @public
+ * @since 1.0.0
+ */
+export const recordProviderFinalizationDuration = (durationMs: number): Effect.Effect<void> =>
+  Metric.update(providerFinalizationDurationHistogram, durationMs);
+
 // --- Snapshot API ---
 
 /**
@@ -267,10 +472,32 @@ export interface MetricsSnapshot {
   readonly routeErrorCount: number;
   /** Total number of signal value changes */
   readonly signalUpdateCount: number;
+  /** Total number of disposed signal access attempts */
+  readonly disposedSignalAccessCount: number;
+  /** Total number of provider acquisitions */
+  readonly providerAcquisitionCount: number;
+  /** Total number of provider finalizations */
+  readonly providerFinalizationCount: number;
   /** Total number of component renders */
   readonly componentRenderCount: number;
   /** Render duration histogram state */
   readonly renderDurationHistogram: {
+    readonly count: number;
+    readonly min: number;
+    readonly max: number;
+    readonly sum: number;
+    readonly buckets: ReadonlyArray<readonly [number, number]>;
+  };
+  /** Provider acquisition duration histogram state */
+  readonly providerAcquisitionDurationHistogram: {
+    readonly count: number;
+    readonly min: number;
+    readonly max: number;
+    readonly sum: number;
+    readonly buckets: ReadonlyArray<readonly [number, number]>;
+  };
+  /** Provider finalization duration histogram state */
+  readonly providerFinalizationDurationHistogram: {
     readonly count: number;
     readonly min: number;
     readonly max: number;
@@ -299,15 +526,25 @@ export const snapshot: Effect.Effect<MetricsSnapshot> = Effect.gen(function* () 
   const navState = yield* Metric.value(navigationCounter);
   const errorState = yield* Metric.value(routeErrorCounter);
   const signalState = yield* Metric.value(signalUpdateCounter);
+  const disposedSignalAccessState = yield* Metric.value(disposedSignalAccessCounter);
+  const providerAcquisitionState = yield* Metric.value(providerAcquisitionCounter);
+  const providerFinalizationState = yield* Metric.value(providerFinalizationCounter);
   const renderState = yield* Metric.value(componentRenderCounter);
   const histState = yield* Metric.value(renderDurationHistogram);
+  const providerAcquisitionHistState = yield* Metric.value(providerAcquisitionDurationHistogram);
+  const providerFinalizationHistState = yield* Metric.value(providerFinalizationDurationHistogram);
 
   return {
     navigationCount: extractCounterValue(navState),
     routeErrorCount: extractCounterValue(errorState),
     signalUpdateCount: extractCounterValue(signalState),
+    disposedSignalAccessCount: extractCounterValue(disposedSignalAccessState),
+    providerAcquisitionCount: extractCounterValue(providerAcquisitionState),
+    providerFinalizationCount: extractCounterValue(providerFinalizationState),
     componentRenderCount: extractCounterValue(renderState),
     renderDurationHistogram: extractHistogramValue(histState),
+    providerAcquisitionDurationHistogram: extractHistogramValue(providerAcquisitionHistState),
+    providerFinalizationDurationHistogram: extractHistogramValue(providerFinalizationHistState),
   };
 });
 
@@ -522,6 +759,31 @@ export const consoleSink: MetricsSink = createSink("console", (s) =>
       navigation: s.navigationCount,
       errors: s.routeErrorCount,
       signals: s.signalUpdateCount,
+      disposedSignalAccess: s.disposedSignalAccessCount,
+      providers: {
+        acquisitions: s.providerAcquisitionCount,
+        finalizations: s.providerFinalizationCount,
+        acquisitionDuration: {
+          count: s.providerAcquisitionDurationHistogram.count,
+          min: s.providerAcquisitionDurationHistogram.min,
+          max: s.providerAcquisitionDurationHistogram.max,
+          avg:
+            s.providerAcquisitionDurationHistogram.count > 0
+              ? s.providerAcquisitionDurationHistogram.sum /
+                s.providerAcquisitionDurationHistogram.count
+              : 0,
+        },
+        finalizationDuration: {
+          count: s.providerFinalizationDurationHistogram.count,
+          min: s.providerFinalizationDurationHistogram.min,
+          max: s.providerFinalizationDurationHistogram.max,
+          avg:
+            s.providerFinalizationDurationHistogram.count > 0
+              ? s.providerFinalizationDurationHistogram.sum /
+                s.providerFinalizationDurationHistogram.count
+              : 0,
+        },
+      },
       renders: s.componentRenderCount,
       renderDuration: {
         count: s.renderDurationHistogram.count,

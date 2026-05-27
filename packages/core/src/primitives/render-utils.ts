@@ -115,7 +115,11 @@ export const applyPropValue = (
       node.removeAttribute("hidden");
     }
   } else if (key.startsWith("data-") || key.startsWith("aria-")) {
-    node.setAttribute(key, String(value));
+    if (value === undefined || value === null || value === false) {
+      node.removeAttribute(key);
+    } else {
+      node.setAttribute(key, String(value));
+    }
   } else if (key === "href" || key === "src") {
     const url = String(value);
     const validated = SafeUrl.validateSyncWithConfig(url, safeUrlConfig);

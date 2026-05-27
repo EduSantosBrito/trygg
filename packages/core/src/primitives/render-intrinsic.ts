@@ -37,7 +37,7 @@ interface RenderIntrinsicDeps {
     options: RenderOptions,
   ) => Effect.Effect<RenderResult, unknown, unknown>;
   readonly runForkInRenderContext: (
-    effect: Effect.Effect<void, never, unknown>,
+    effect: Effect.Effect<void, unknown, unknown>,
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
   ) => void;

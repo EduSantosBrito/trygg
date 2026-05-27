@@ -418,7 +418,7 @@ describe("Portal.make — visible prop", () => {
       const target = document.createElement("div");
       document.body.appendChild(target);
 
-      const isOpen = Signal.makeSync(false);
+      const isOpen = yield* Signal.make(false);
 
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span data-testid="reactive-vis">Reactive</span>, {
@@ -463,7 +463,7 @@ describe("Portal.make — visible prop", () => {
       const target = document.createElement("div");
       document.body.appendChild(target);
 
-      const isOpen = Signal.makeSync(true);
+      const isOpen = yield* Signal.make(true);
 
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span data-testid="destroy-check">Check</span>, {
@@ -509,7 +509,7 @@ describe("Portal.make — reactivity inside portalled content", () => {
       const target = document.createElement("div");
       document.body.appendChild(target);
 
-      const message = Signal.makeSync("Initial");
+      const message = yield* Signal.make("Initial");
 
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span data-testid="reactive-text">{message}</span>, {
@@ -696,7 +696,7 @@ describe("Portal.make — cleanup", () => {
       const target = document.createElement("div");
       document.body.appendChild(target);
       const scope = yield* Scope.make();
-      const isOpen = Signal.makeSync(true);
+      const isOpen = yield* Signal.make(true);
 
       const App = Component.gen(function* () {
         const MyPortal = yield* Portal.make(<span data-testid="sub-cleanup">Subscribed</span>, {

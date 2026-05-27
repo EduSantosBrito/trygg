@@ -581,7 +581,7 @@ describe("Renderer Integration", () => {
 
   effect("should keep hoisting on component re-render", () =>
     Effect.gen(function* () {
-      const page = Signal.makeSync("A");
+      const page = yield* Signal.make("A");
 
       const App = Component.gen(function* () {
         const current = yield* Signal.get(page);
