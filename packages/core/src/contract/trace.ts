@@ -7,6 +7,7 @@
  * Events are no-op by default and are collected only when a contract runner
  * provides a collector.
  *
+ * @see ./trace.docs.md - Source-owned event family and ordering guide
  * @internal
  */
 import { Cause, Effect, Option, Ref } from "effect";
