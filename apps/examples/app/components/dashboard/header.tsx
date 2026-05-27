@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "trygg";
+import { Component, Signal, type ComponentProps } from "trygg";
 import { DashboardTheme, Logger } from "../../services/dashboard";
 
 export const Header = Component.gen(function* (
@@ -7,8 +7,9 @@ export const Header = Component.gen(function* (
   }>,
 ) {
   const { userName } = yield* Props;
-  const theme = yield* DashboardTheme;
+  const themeStore = yield* DashboardTheme;
   const logger = yield* Logger;
+  const theme = yield* Signal.get(themeStore.tokens);
 
   yield* logger.info(`Header rendered for ${userName}`);
 

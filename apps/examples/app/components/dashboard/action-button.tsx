@@ -1,17 +1,18 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "trygg";
+import { Component, Signal, type ComponentProps } from "trygg";
 import { DashboardTheme, Analytics } from "../../services/dashboard";
 
 export const ActionButton = Component.gen(function* (
   Props: ComponentProps<{
     label: string;
     variant: "primary" | "secondary";
-    onClick: () => Effect.Effect<void>;
+    onClick: () => Effect.Effect<void, unknown, unknown>;
   }>,
 ) {
   const { label, variant, onClick } = yield* Props;
-  const theme = yield* DashboardTheme;
+  const themeStore = yield* DashboardTheme;
   const analytics = yield* Analytics;
+  const theme = yield* Signal.get(themeStore.tokens);
 
   const handleClick = () =>
     Effect.gen(function* () {
