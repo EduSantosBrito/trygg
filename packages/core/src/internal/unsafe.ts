@@ -82,11 +82,10 @@ export const unsafeBuildProviderContext = (
   scope: Scope.Scope,
   parentContext: Context.Context<unknown> | null,
 ): Effect.Effect<Context.Context<unknown>, unknown, unknown> => {
-  const build = Layer.buildWithScope(layer, scope) as Effect.Effect<
-    Context.Context<unknown>,
-    unknown,
-    unknown
-  >;
+  const build = Effect.gen(function* () {
+    const memoMap = yield* Layer.makeMemoMap;
+    return yield* Layer.buildWithMemoMap(layer, memoMap, scope);
+  }) as Effect.Effect<Context.Context<unknown>, unknown, unknown>;
   return parentContext === null ? build : Effect.provide(build, parentContext);
 };
 

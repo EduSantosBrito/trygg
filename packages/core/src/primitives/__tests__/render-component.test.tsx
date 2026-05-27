@@ -3,7 +3,8 @@ import { Cause, Effect, Exit, Layer, Scope } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
-import { render } from "../../testing/index.js";
+import * as ContractTrace from "../../contract/trace.js";
+import { click, render } from "../../testing/index.js";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -108,6 +109,193 @@ describe("render-component", () => {
       yield* TestClock.adjust(20);
 
       assert.strictEqual((yield* getByTestId("fallback")).textContent, "fallback");
+    }),
+  );
+
+  scoped("replaces provider scope when component key changes", () =>
+    Effect.gen(function* () {
+      const collector = yield* ContractTrace.createInMemoryCollector("provider-key-change");
+      const selectedKey = yield* Signal.make<"first" | "second">("first");
+      const acquireLog: Array<string> = [];
+      const finalizeLog: Array<string> = [];
+
+      class Label extends Context.Service<Label, { readonly value: string }>()("test/Label") {}
+
+      const LabelLive = Layer.effect(
+        Label,
+        Effect.gen(function* () {
+          acquireLog.push("label");
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              finalizeLog.push("label");
+            }),
+          );
+          return { value: "label" };
+        }),
+      );
+
+      const LabelView = Component.gen(function* () {
+        const label = yield* Label;
+        return <div data-testid="key-label">{label.value}</div>;
+      });
+
+      const ProvidedLabel = LabelView.pipe(Component.provide(LabelLive));
+
+      const Host = Component.gen(function* () {
+        const key = yield* Signal.get(selectedKey);
+        return <ProvidedLabel key={key} />;
+      });
+
+      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      assert.strictEqual((yield* getByTestId("key-label")).textContent, "label");
+      assert.deepStrictEqual(acquireLog, ["label"]);
+
+      yield* Signal.set(selectedKey, "second");
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("key-label")).textContent, "label");
+      const records = yield* collector.snapshot;
+      assert.deepStrictEqual(acquireLog, ["label", "label"]);
+      assert.deepStrictEqual(finalizeLog, ["label"]);
+
+      const replacementReasons = records.flatMap((record) =>
+        record.event.event === "provider.replace" &&
+        typeof record.event.payload?.reason === "string"
+          ? [record.event.payload.reason]
+          : [],
+      );
+      assert.include(replacementReasons, "key-change");
+    }),
+  );
+
+  scoped("replaces provider scope when layer identity changes", () =>
+    Effect.gen(function* () {
+      const collector = yield* ContractTrace.createInMemoryCollector("provider-identity-change");
+      const selected = yield* Signal.make<"first" | "second">("first");
+      const acquireLog: Array<string> = [];
+      const finalizeLog: Array<string> = [];
+
+      class Label extends Context.Service<Label, { readonly value: string }>()("test/Label") {}
+
+      const makeLabelLayer = (value: string) =>
+        Layer.effect(
+          Label,
+          Effect.gen(function* () {
+            acquireLog.push(value);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                finalizeLog.push(value);
+              }),
+            );
+            return { value };
+          }),
+        );
+
+      const FirstLive = makeLabelLayer("first");
+      const SecondLive = makeLabelLayer("second");
+
+      const LabelView = Component.gen(function* () {
+        const label = yield* Label;
+        return <div data-testid="identity-label">{label.value}</div>;
+      });
+
+      const FirstLabel = LabelView.pipe(Component.provide(FirstLive));
+      const SecondLabel = LabelView.pipe(Component.provide(SecondLive));
+
+      const Host = Component.gen(function* () {
+        const value = yield* Signal.get(selected);
+        return value === "first" ? <FirstLabel key="stable" /> : <SecondLabel key="stable" />;
+      });
+
+      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      assert.strictEqual((yield* getByTestId("identity-label")).textContent, "first");
+      assert.deepStrictEqual(acquireLog, ["first"]);
+
+      yield* Signal.set(selected, "second");
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("identity-label")).textContent, "second");
+      assert.deepStrictEqual(acquireLog, ["first", "second"]);
+      assert.deepStrictEqual(finalizeLog, ["first"]);
+
+      const records = yield* collector.snapshot;
+      const replacementReasons = records.flatMap((record) =>
+        record.event.event === "provider.replace" &&
+        typeof record.event.payload?.reason === "string"
+          ? [record.event.payload.reason]
+          : [],
+      );
+      assert.include(replacementReasons, "identity-change");
+    }),
+  );
+
+  scoped("routes provider acquisition failure through error boundary and retries on reset", () =>
+    Effect.gen(function* () {
+      const collector = yield* ContractTrace.createInMemoryCollector("provider-failure-retry");
+      const providerShouldFail = yield* Signal.make(true);
+      const retryKey = yield* Signal.make(0);
+      let acquireAttempts = 0;
+
+      class FlakyService extends Context.Service<FlakyService, { readonly label: string }>()(
+        "test/FlakyService",
+      ) {}
+
+      const FlakyLive = Layer.effect(
+        FlakyService,
+        Effect.gen(function* () {
+          acquireAttempts += 1;
+          const shouldFail = yield* Signal.peek(providerShouldFail);
+          if (shouldFail) {
+            return yield* Effect.fail("provider failed");
+          }
+          return { label: "ready" };
+        }),
+      );
+
+      const Risky = Component.gen(function* () {
+        const service = yield* FlakyService;
+        return <div data-testid="provider-ready">{service.label}</div>;
+      }).pipe(Component.provide(FlakyLive));
+
+      const Fallback = Component.gen(function* (
+        Props: Component.ComponentProps<{ readonly cause: Cause.Cause<unknown> }>,
+      ) {
+        yield* Props;
+        return (
+          <button
+            data-testid="provider-retry"
+            onClick={() =>
+              Effect.gen(function* () {
+                yield* Signal.set(providerShouldFail, false);
+                yield* Signal.update(retryKey, (value) => value + 1);
+              })
+            }
+          >
+            Retry provider
+          </button>
+        );
+      });
+
+      const SafeRisky = yield* ErrorBoundary.catch(Risky).pipe(ErrorBoundary.catchAll(Fallback));
+
+      const Host = Component.gen(function* () {
+        const key = yield* Signal.get(retryKey);
+        return <SafeRisky key={key} />;
+      });
+
+      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      assert.strictEqual((yield* getByTestId("provider-retry")).textContent, "Retry provider");
+      assert.strictEqual(acquireAttempts, 1);
+
+      yield* click(yield* getByTestId("provider-retry"));
+      yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("provider-ready")).textContent, "ready");
+      assert.strictEqual(acquireAttempts, 2);
+
+      const events = (yield* collector.snapshot).map((record) => record.event.event);
+      assert.strictEqual(events.filter((event) => event === "provider.failure").length, 1);
+      assert.strictEqual(events.filter((event) => event === "provider.acquire").length, 1);
     }),
   );
 
