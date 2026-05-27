@@ -25,6 +25,7 @@ import { Component } from "../primitives/component.js";
 import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
+import type { NavigationPrefetchState } from "./navigation-outlet-coordination.js";
 import {
   compileRoutePathPattern,
   interpolateCompiledRoutePathPattern,
@@ -598,9 +599,7 @@ export interface RouterService {
  * @public
  * @since 1.0.0
  */
-export type OutletPrefetchState =
-  | { readonly _tag: "Idle" }
-  | { readonly _tag: "Active"; readonly prefetch: (path: string) => Effect.Effect<void> };
+export type OutletPrefetchState = NavigationPrefetchState;
 
 /**
  * Public coordination seam from Router service to Outlet.

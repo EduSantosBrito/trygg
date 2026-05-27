@@ -171,6 +171,18 @@ export type {
   NavigationCoreShape,
 } from "./navigation-core.js";
 
+// Navigation Outlet Coordination
+export {
+  NavigationOutletCoordination,
+  NavigationOutletCoordinationConfigInput,
+  makeNavigationOutletCoordination,
+} from "./navigation-outlet-coordination.js";
+export type {
+  NavigationPrefetchState,
+  ScrollIntent,
+  NavigationOutletCoordinationShape,
+} from "./navigation-outlet-coordination.js";
+
 // Route Builder
 export {
   make as routeMake,
