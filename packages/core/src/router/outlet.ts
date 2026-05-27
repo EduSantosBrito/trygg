@@ -64,6 +64,7 @@ import {
   type AsyncLoaderShape,
 } from "./outlet-services.js";
 import { RenderLoadError } from "./render-strategy.js";
+import { makeRouteActivation } from "./route-activation.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
   type ComponentInput,
@@ -553,6 +554,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       return text("No routes configured");
     }
     const matcher = matcherOpt.value;
+    const routeActivation = yield* makeRouteActivation({ emitTraceEvents: true }, matcher);
     const boundaries: BoundaryResolverShape = BoundaryResolver.make(manifest);
 
     const router = yield* getRouter;
@@ -646,9 +648,27 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Set in processRoute, consumed by loader.view subscription after Ready state.
     // loader.track() forks a render fiber and returns immediately — scroll must
     // wait until the Ready state propagates and the DOM has been swapped.
-    let pendingScroll: { readonly strategyLayer: Layer.Layer<ScrollStrategy> | undefined } | null =
-      null;
+    let pendingScroll: {
+      readonly activationId: string;
+      readonly strategyLayer: Layer.Layer<ScrollStrategy> | undefined;
+    } | null = null;
     let routeEpoch = 0;
+
+    const nextActivationId = () => `route-${++routeEpoch}`;
+
+    const mayCommitActivation = (activationId: string, path: string) =>
+      Effect.gen(function* () {
+        const outcome = yield* routeActivation.commit({ activationId, path });
+        if (outcome._tag === "DroppedStale") {
+          yield* ContractTrace.emit({
+            event: "outlet.process.dropStale",
+            level: "semantic",
+            payload: { activationId, supersededBy: outcome.supersededBy, path },
+          });
+          return false;
+        }
+        return true;
+      });
 
     /**
      * Process a route: match, middleware, boundaries, render, update view.
@@ -809,8 +829,10 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               const state = yield* SubscriptionRef.get(loader.state._ref);
               const val = yield* SubscriptionRef.get(loader.view._ref);
               if (pendingScroll !== null && state._tag === "Ready") {
-                const { strategyLayer } = pendingScroll;
+                const { activationId, strategyLayer } = pendingScroll;
                 pendingScroll = null;
+                const canCommit = yield* mayCommitActivation(activationId, "async-loader");
+                if (!canCommit) return;
                 yield* setViewAndAwaitSwap(val);
                 yield* applyScroll(strategyLayer);
               } else {
@@ -830,6 +852,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       match: RouteMatch,
       queryString: string,
       epoch: number,
+      activationId: string,
       routePath: string,
     ) =>
       Effect.gen(function* () {
@@ -842,12 +865,14 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           // Defer scroll across loading/refreshing states. `track` forks the
           // render fiber, so fast loads can already be Ready by the time it
           // returns; handle that window explicitly after track.
-          pendingScroll = { strategyLayer };
+          pendingScroll = { activationId, strategyLayer };
           yield* loader.track(matchKey, renderEffect, { epoch });
           const currentState = yield* SubscriptionRef.get(loader.state._ref);
           const currentView = yield* SubscriptionRef.get(loader.view._ref);
           if (pendingScroll !== null && currentState._tag === "Ready") {
             pendingScroll = null;
+            const canCommit = yield* mayCommitActivation(activationId, routePath);
+            if (!canCommit) return;
             yield* setViewAndAwaitSwap(currentView);
             yield* ContractTrace.emit({
               event: "outlet.process.commit",
@@ -875,7 +900,10 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
             });
           }
         } else {
-          yield* setViewAndAwaitSwap(yield* renderEffect);
+          const rendered = yield* renderEffect;
+          const canCommit = yield* mayCommitActivation(activationId, routePath);
+          if (!canCommit) return;
+          yield* setViewAndAwaitSwap(rendered);
           yield* ContractTrace.emit({
             event: "outlet.process.commit",
             level: "semantic",
@@ -893,14 +921,22 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       // Clear stale scroll intent from prior navigation
       pendingScroll = null;
 
-      const epoch = ++routeEpoch;
+      const activationId = nextActivationId();
+      const epoch = routeEpoch;
       const route = yield* SubscriptionRef.get(router.current._ref);
       yield* ContractTrace.emit({
         event: "outlet.process.start",
         level: "semantic",
-        payload: { path: route.path, epoch },
+        payload: { path: route.path, epoch, activationId },
       });
-      const matchOption = yield* matcher.match(route.path);
+      const activationOutcome = yield* routeActivation.activate({
+        activationId,
+        path: route.path,
+        query: route.query,
+        scrollIntent: Option.none(),
+      });
+      const matchOption =
+        activationOutcome._tag === "NotFound" ? Option.none() : yield* matcher.match(route.path);
 
       // 404
       if (Option.isNone(matchOption)) {
@@ -914,6 +950,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
+        const canCommit = yield* mayCommitActivation(activationId, route.path);
+        if (!canCommit) return;
         yield* setViewAndAwaitSwap(notFoundEl);
         yield* applyScroll(undefined);
         return;
@@ -939,6 +977,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           onSome: (comp) =>
             Effect.flatMap(resolveComponent(comp), (resolved) => renderComponent(resolved, {}, {})),
         });
+        const canCommit = yield* mayCommitActivation(activationId, route.path);
+        if (!canCommit) return;
         yield* setViewAndAwaitSwap(el);
         yield* applyScroll(resolveScrollStrategy(match.route));
         return;
@@ -951,6 +991,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(middlewareResult.cause), route.path),
             ),
         });
+        const canCommit = yield* mayCommitActivation(activationId, route.path);
+        if (!canCommit) return;
         yield* setViewAndAwaitSwap(el);
         yield* applyScroll(resolveScrollStrategy(match.route));
         return;
@@ -974,6 +1016,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
             ),
         });
+        const canCommit = yield* mayCommitActivation(activationId, route.path);
+        if (!canCommit) return;
         yield* setViewAndAwaitSwap(el);
         yield* applyScroll(resolveScrollStrategy(match.route));
         return;
@@ -997,6 +1041,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
             ),
         });
+        const canCommit = yield* mayCommitActivation(activationId, route.path);
+        if (!canCommit) return;
         yield* setViewAndAwaitSwap(el);
         yield* applyScroll(resolveScrollStrategy(match.route));
         return;
@@ -1011,7 +1057,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         deferLazyLeaf: !hasLoadingBoundary,
       });
       const withError = wrapWithErrorBoundary(routeElement, match, route.path);
-      yield* commitView(withError, match, queryString, epoch, route.path);
+      yield* commitView(withError, match, queryString, epoch, activationId, route.path);
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {

@@ -183,6 +183,20 @@ export type {
   NavigationOutletCoordinationShape,
 } from "./navigation-outlet-coordination.js";
 
+// Route Activation
+export {
+  RouteActivation,
+  RouteActivationError,
+  RouteActivationConfigInput,
+  makeRouteActivation,
+} from "./route-activation.js";
+export type {
+  RouteActivationRequest,
+  RouteActivationOutcome,
+  RouteActivationShape,
+  RouteActivationMatch,
+} from "./route-activation.js";
+
 // Route Builder
 export {
   make as routeMake,
