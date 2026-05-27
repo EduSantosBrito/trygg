@@ -32,6 +32,7 @@ Stable payload fields:
 - `replace`: boolean replacement intent for push/replace requests.
 - `previous` / `next`: committed **Current route** snapshots with `path`, `query`, `hash`, `scrollKey`, and `isPopstate`.
 - `previousQuery` / `nextQuery`: canonical query strings for query changes.
+- `changed`: whether a query notification represents a canonical query value change.
 
 Ordering guarantees:
 
@@ -77,6 +78,7 @@ Events:
 - `signalElement.swap.start`
 - `signalElement.swap.render`
 - `signalElement.swap.dropStale`
+- `signalElement.swap.failBeforeCommit`
 - `signalElement.swap.commit`
 - `signalElement.cleanup`
 - `dom.create`
@@ -88,8 +90,9 @@ Ordering guarantees:
 1. A no-blank replacement renders the next **Element** before removing the previous visible DOM.
 2. `signalElement.swap.render` precedes `signalElement.swap.commit` for successful SignalElement swaps.
 3. `signalElement.swap.dropStale` means the rendered result was superseded and must be cleaned without becoming visible.
-4. `signalElement.cleanup` and `dom.remove` describe cleanup after a safe commit or unmount, not pre-commit blanking.
-5. `component.render` is a cost/semantic boundary for the **Component** producing an **Element** tree; it must not imply a provider scope replacement by itself.
+4. `signalElement.swap.failBeforeCommit` means rendering or reconciliation failed before previous visible DOM was removed.
+5. `signalElement.cleanup` and `dom.remove` describe cleanup after a safe commit or unmount, not pre-commit blanking.
+6. `component.render` is a cost/semantic boundary for the **Component** producing an **Element** tree; it must not imply a provider scope replacement by itself.
 
 ### Provider and signal lifecycle family
 
@@ -120,6 +123,15 @@ Ordering guarantees:
 Events:
 
 - `scroll.apply`
+
+Stable payload fields:
+
+- `kind`: `hash`, `restore`, `top`, `none`, or `ignoredError`.
+- `strategy`: selected scroll strategy tag.
+- `hash`: committed navigation hash used for hash-scroll decisions.
+- `isPopstate`: whether the activation came from browser history traversal.
+- `scrollKey`: storage key used for restore decisions.
+- `restored`: present on restore decisions to indicate whether a saved position was available.
 
 Ordering guarantees:
 

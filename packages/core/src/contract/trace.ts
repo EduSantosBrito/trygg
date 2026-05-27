@@ -67,6 +67,7 @@ export type ContractTraceEventName =
   | "signalElement.swap.start"
   | "signalElement.swap.render"
   | "signalElement.swap.dropStale"
+  | "signalElement.swap.failBeforeCommit"
   | "signalElement.swap.commit"
   | "signalElement.cleanup"
   | "scroll.apply"

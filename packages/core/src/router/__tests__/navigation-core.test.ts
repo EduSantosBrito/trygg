@@ -206,20 +206,40 @@ describe("NavigationCore semantic traces", () => {
     }),
   );
 
-  it.effect("suppresses unchanged query trace events", () =>
+  it.effect("suppresses unchanged query trace events unless explicitly configured", () =>
     Effect.gen(function* () {
-      const records = yield* traceEventsFor(
+      const suppressed = yield* traceEventsFor(
         Effect.gen(function* () {
           const core = yield* makeCore("/dashboard?tab=main");
           yield* core.navigate(navigationTarget("/dashboard", { query: { tab: "main" } }));
         }),
       );
 
-      assert.deepStrictEqual(eventNames(records), [
+      assert.deepStrictEqual(eventNames(suppressed), [
         "router.navigate.request",
         "history.push",
         "router.navigate.commit",
       ]);
+
+      const emitted = yield* traceEventsFor(
+        Effect.gen(function* () {
+          const adapter = yield* makeInMemoryNavigationAdapter("/dashboard?tab=main").pipe(
+            Effect.orDie,
+          );
+          const core = yield* makeNavigationCore({ notifyUnchangedQuery: true }, adapter).pipe(
+            Effect.orDie,
+          );
+          yield* core.navigate(navigationTarget("/dashboard", { query: { tab: "main" } }));
+        }),
+      );
+
+      assert.deepStrictEqual(eventNames(emitted), [
+        "router.navigate.request",
+        "history.push",
+        "router.query.set",
+        "router.navigate.commit",
+      ]);
+      assert.strictEqual(emitted[2]?.event.payload?.changed, false);
     }),
   );
 

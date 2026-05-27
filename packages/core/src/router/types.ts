@@ -602,6 +602,21 @@ export interface RouterService {
 export type OutletPrefetchState = NavigationPrefetchState;
 
 /**
+ * Verifier-facing scroll decision applied after route activation commits DOM.
+ *
+ * @public
+ * @since 1.0.0
+ */
+export interface ScrollApplyPayload {
+  readonly kind: "none" | "hash" | "restore" | "top" | "ignoredError";
+  readonly strategy: ScrollStrategyType["_tag"];
+  readonly hash: string;
+  readonly isPopstate: boolean;
+  readonly scrollKey: string;
+  readonly restored?: boolean;
+}
+
+/**
  * Public coordination seam from Router service to Outlet.
  *
  * @public
@@ -621,5 +636,7 @@ export interface OutletCoordination {
   /**
    * Apply scroll behavior using router-captured platform services.
    */
-  readonly applyScroll: (options: { readonly strategy: ScrollStrategyType }) => Effect.Effect<void>;
+  readonly applyScroll: (options: {
+    readonly strategy: ScrollStrategyType;
+  }) => Effect.Effect<ScrollApplyPayload>;
 }

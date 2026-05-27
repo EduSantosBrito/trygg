@@ -87,6 +87,7 @@ const emitSnapshotChanges = (
   operation: NavigationOperation,
   previous: NavigationSnapshot,
   next: NavigationSnapshot,
+  notifyUnchangedQuery: boolean,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
     if (previous.path !== next.path || previous.hash !== next.hash) {
@@ -97,11 +98,13 @@ const emitSnapshotChanges = (
       });
     }
 
-    if (!sameQuery(previous.query, next.query)) {
+    const queryChanged = !sameQuery(previous.query, next.query);
+    if (queryChanged || notifyUnchangedQuery) {
       yield* emitNavigationTrace("router.query.set", {
         operation,
         previousQuery: queryString(previous.query),
         nextQuery: queryString(next.query),
+        changed: queryChanged,
       });
     }
   });
@@ -166,7 +169,7 @@ export const makeNavigationCore = (
         const previous = yield* SynchronizedRef.get(state);
         yield* refresh;
         const next = yield* SynchronizedRef.get(state);
-        yield* emitSnapshotChanges(operation, previous, next);
+        yield* emitSnapshotChanges(operation, previous, next, config.notifyUnchangedQuery);
         yield* emitNavigationTrace("router.navigate.commit", {
           operation,
           previous: snapshotPayload(previous),
@@ -194,7 +197,6 @@ export const makeNavigationCore = (
         }
         yield* emitNavigationTrace(historyEventFor(operation), { operation, url });
         yield* commitSnapshot(operation);
-        void config;
       }),
       back: Effect.gen(function* () {
         yield* emitNavigationTrace("router.navigate.request", { operation: "back" });

@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Effect, Fiber, Option, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, getKey, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
@@ -124,8 +124,11 @@ const applyProps = Effect.fn("applyProps")(function* (
 
       const eventName = key.slice(2).toLowerCase();
       const listener = (event: Event) => {
-        Effect.runForkWith(Context.empty())(
+        const fiber = Effect.runForkWith(Context.empty())(
           contextTransaction.runEventHandler(eventSnapshot, value(event)),
+        );
+        void Effect.runPromiseWith(Context.empty())(
+          Scope.addFinalizer(eventSnapshot.scope, Fiber.interrupt(fiber)),
         );
       };
       node.addEventListener(eventName, listener);

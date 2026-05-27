@@ -3,6 +3,7 @@ import { Effect, Option, Ref } from "effect";
 import * as ContractTrace from "../../contract/trace.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { RouteMatch, RouteMatcherShape } from "../matching.js";
+import type { RouteDefinition } from "../route.js";
 import { makeRouteActivation, makeRouteActivationBoundary } from "../route-activation.js";
 import type { ComponentInput, RouteComponent } from "../types.js";
 
@@ -13,18 +14,39 @@ const request = (activationId: string, path: string) => ({
   scrollIntent: Option.none(),
 });
 
+const makeDefinition = (
+  path: string,
+  overrides: Partial<RouteDefinition> = {},
+): RouteDefinition => ({
+  _tag: "RouteDefinition",
+  path,
+  component: undefined,
+  layout: undefined,
+  loading: undefined,
+  error: undefined,
+  notFound: undefined,
+  forbidden: undefined,
+  middleware: [],
+  prefetch: [],
+  children: [],
+  paramsSchema: undefined,
+  querySchema: undefined,
+  renderStrategy: undefined,
+  scrollStrategy: undefined,
+  ...overrides,
+});
+
 const makeMatch = (
   path: string,
-  definition: Record<string, unknown> = {},
-): RouteMatch =>
-  ({
-    route: {
-      path,
-      ancestors: [],
-      definition: { prefetch: [], ...definition },
-    },
-    params: {},
-  }) as unknown as RouteMatch;
+  definition: Partial<RouteDefinition> = {},
+): RouteMatch => ({
+  route: {
+    path,
+    ancestors: [],
+    definition: makeDefinition(path, definition),
+  },
+  params: {},
+});
 
 const makeMatcher = (matchPath: string, match: RouteMatch = makeMatch(matchPath)): RouteMatcherShape => ({
   routes: Effect.succeed([]),
@@ -75,7 +97,7 @@ describe("RouteActivation", () => {
       ),
     );
 
-    expect(outcome).toEqual({ _tag: "Committed", activationId: "nav-1", path: "/docs" });
+    expect(outcome).toMatchObject({ _tag: "Committed", activationId: "nav-1", path: "/docs" });
   });
 
   it("drops stale activations when a newer activation wins", async () => {
@@ -537,7 +559,10 @@ describe("RouteActivation", () => {
             yield* activation.commitAfterDomSwap(
               { activationId: "nav-1", path: "/docs" },
               Effect.sync(() => events.push("swap")),
-              Effect.sync(() => events.push("scroll")),
+              Effect.sync(() => {
+                events.push("scroll");
+                return { kind: "Auto" };
+              }),
             );
           }),
         ),
@@ -550,6 +575,7 @@ describe("RouteActivation", () => {
       "scroll.apply",
       "outlet.process.commit",
     ]);
+    expect(records[1]?.event.payload).toMatchObject({ kind: "Auto" });
   });
 
   it("integrates with the canonical matcher for matched routes", async () => {
@@ -565,6 +591,6 @@ describe("RouteActivation", () => {
       ),
     );
 
-    expect(outcome).toEqual({ _tag: "Committed", activationId: "nav-1", path: "/known" });
+    expect(outcome).toMatchObject({ _tag: "Committed", activationId: "nav-1", path: "/known" });
   });
 });

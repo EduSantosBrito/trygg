@@ -1,5 +1,6 @@
 import { Cause, Data, Effect, Exit, Layer, Option, Schema } from "effect";
 import * as Context from "effect/Context";
+import * as ContractTrace from "../contract/trace.js";
 import type { Element } from "./element.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
 
@@ -34,6 +35,15 @@ export const RenderTransactionConfigInput = Schema.Struct({
 
 type RenderTransactionConfig = typeof RenderTransactionConfigInput.Type;
 
+const emitRenderTrace = (
+  enabled: boolean,
+  event: ContractTrace.ContractTraceEventName,
+  payload: Record<string, unknown>,
+): Effect.Effect<void> =>
+  enabled
+    ? ContractTrace.emit({ event, level: "semantic", payload }).pipe(Effect.ignore)
+    : Effect.void;
+
 export interface RenderTransactionShape {
   readonly replace: (
     request: RenderTransactionRequest,
@@ -48,17 +58,29 @@ export const makeRenderTransaction = (
   configInput: RenderTransactionConfig,
 ): RenderTransactionShape => {
   const config = RenderTransactionConfigInput.make(configInput);
-  void config;
 
   return {
     replace: Effect.fn("RenderTransaction.replace")(function* (request) {
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.start", {
+        operation: "replace",
+        hasPrevious: Option.isSome(request.previous),
+      });
       const rendered = yield* Effect.exit(
         request.renderNext.pipe(Effect.provide(request.context.services)),
       );
       if (Exit.isFailure(rendered)) {
-        return { _tag: "FailedBeforeCommit", cause: Cause.squash(rendered.cause) };
+        const cause = Cause.squash(rendered.cause);
+        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
+          operation: "replace",
+          phase: "render",
+          cause: String(cause),
+        });
+        return { _tag: "FailedBeforeCommit", cause };
       }
 
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
+        operation: "replace",
+      });
       const next = rendered.value;
       const previous = Option.getOrUndefined(request.previous);
 
@@ -75,7 +97,15 @@ export const makeRenderTransaction = (
         catch: (cause) => new RenderTransactionError({ phase: "commit", cause }),
       });
 
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.commit", {
+        operation: "replace",
+      });
+
       if (previous !== undefined) {
+        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.cleanup", {
+          operation: "replace",
+          reason: "previous-result",
+        });
         yield* previous.cleanup.pipe(
           Effect.provide(request.context.services),
           Effect.mapError((cause) => new RenderTransactionError({ phase: "cleanup", cause })),
@@ -85,6 +115,9 @@ export const makeRenderTransaction = (
       return { _tag: "Committed", result: next };
     }),
     reconcile: Effect.fn("RenderTransaction.reconcile")(function* (request) {
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.start", {
+        operation: "reconcile",
+      });
       if (request.previous.reconcile === undefined) {
         return { _tag: "NotReconciled", result: request.previous };
       }
@@ -95,14 +128,33 @@ export const makeRenderTransaction = (
           .pipe(Effect.provide(request.context.services)),
       );
       if (Exit.isFailure(reconciled)) {
-        return { _tag: "FailedBeforeCommit", cause: Cause.squash(reconciled.cause) };
+        const cause = Cause.squash(reconciled.cause);
+        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
+          operation: "reconcile",
+          phase: "render",
+          cause: String(cause),
+        });
+        return { _tag: "FailedBeforeCommit", cause };
       }
 
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
+        operation: "reconcile",
+        reconciled: reconciled.value,
+      });
+      if (reconciled.value) {
+        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.commit", {
+          operation: "reconcile",
+        });
+      }
       return reconciled.value
         ? { _tag: "Reconciled", result: request.previous }
         : { _tag: "NotReconciled", result: request.previous };
     }),
     cleanup: Effect.fn("RenderTransaction.cleanup")(function* (result) {
+      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.cleanup", {
+        operation: "cleanup",
+        reason: "explicit",
+      });
       yield* result.cleanup.pipe(Effect.provide(Context.empty() as Context.Context<unknown>));
     }),
   };
