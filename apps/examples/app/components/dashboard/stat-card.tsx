@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "trygg";
+import { Component, Signal, type ComponentProps } from "trygg";
 import { DashboardTheme } from "../../services/dashboard";
 
 export const StatCard = Component.gen(function* (
@@ -9,7 +9,8 @@ export const StatCard = Component.gen(function* (
   }>,
 ) {
   const { title, value, change } = yield* Props;
-  const theme = yield* DashboardTheme;
+  const themeStore = yield* DashboardTheme;
+  const theme = yield* Signal.get(themeStore.tokens);
 
   return (
     <div className="p-6 rounded-lg shadow" style={{ background: theme.cardBackground }}>

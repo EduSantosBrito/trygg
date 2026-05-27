@@ -166,7 +166,7 @@ const themeLayer = Layer.succeed(Theme, { primary: "blue" });
 
 const App = Component.gen(function* () {
   return <Header />;
-}).provide(themeLayer);
+}).pipe(Component.provide(themeLayer));
 ```
 
 ### JSX Runtime Entry Points
@@ -177,30 +177,30 @@ JSX lowering details now live with the entrypoints themselves: [`src/jsx-runtime
 
 ### Core Exports
 
-| Export                                | Description                                        |
-| ------------------------------------- | -------------------------------------------------- |
-| `Component.gen(fn)`                   | Create component with explicit DI                  |
-| `Component.gen(fn).provide(layer)`    | Satisfy service requirements with a layer          |
-| `Signal.make(initial)`                | Create reactive state                              |
-| `Signal.get(signal)`                  | Read value and subscribe current render            |
-| `Signal.peek(signal)`                 | Read value without subscribing current render      |
-| `Signal.set(signal, value)`           | Set signal value                                   |
-| `Signal.update(signal, fn)`           | Update signal with function                        |
-| `Signal.derive(source, fn)`           | Computed signal from a source                      |
-| `Signal.deriveAll(sources, fn)`       | Computed signal from multiple sources              |
-| `Signal.each(source, fn, opts)`       | Efficient list rendering                           |
-| `Signal.suspend(component, handlers)` | Async component suspension                         |
-| `Resource.make(fn, opts)`             | Data fetching with cache and dedup                 |
-| `Resource.fetch(resource)`            | Fetch and return `ResourceState`                   |
-| `Resource.match(state, handlers)`     | Pattern-match on `Pending` / `Success` / `Failure` |
-| `Resource.invalidate(key)`            | Stale-while-revalidate a cached resource           |
-| `Resource.refresh(key)`               | Force re-fetch a cached resource                   |
-| `DevMode`                             | Enable debug output from JSX                       |
-| `ErrorBoundary`                       | Match tagged render failures                       |
-| `Portal`                              | Render into another DOM target                     |
-| `Head`                                | Head hoisting and dedup helpers                    |
-| `Debug`                               | Low-level debug events, plugins, spans             |
-| `Metrics`                             | Low-level framework metrics and sinks              |
+| Export                                | Description                                         |
+| ------------------------------------- | --------------------------------------------------- |
+| `Component.gen(fn)`                   | Create component with explicit DI                   |
+| `Component.provide(layer)`            | Satisfy component service requirements with a layer |
+| `Signal.make(initial)`                | Create reactive state                               |
+| `Signal.get(signal)`                  | Read value and subscribe current render             |
+| `Signal.peek(signal)`                 | Read value without subscribing current render       |
+| `Signal.set(signal, value)`           | Set signal value                                    |
+| `Signal.update(signal, fn)`           | Update signal with function                         |
+| `Signal.derive(source, fn)`           | Computed signal from a source                       |
+| `Signal.deriveAll(sources, fn)`       | Computed signal from multiple sources               |
+| `Signal.each(source, fn, opts)`       | Efficient list rendering                            |
+| `Signal.suspend(component, handlers)` | Async component suspension                          |
+| `Resource.make(fn, opts)`             | Data fetching with cache and dedup                  |
+| `Resource.fetch(resource)`            | Fetch and return `ResourceState`                    |
+| `Resource.match(state, handlers)`     | Pattern-match on `Pending` / `Success` / `Failure`  |
+| `Resource.invalidate(key)`            | Stale-while-revalidate a cached resource            |
+| `Resource.refresh(key)`               | Force re-fetch a cached resource                    |
+| `DevMode`                             | Enable debug output from JSX                        |
+| `ErrorBoundary`                       | Match tagged render failures                        |
+| `Portal`                              | Render into another DOM target                      |
+| `Head`                                | Head hoisting and dedup helpers                     |
+| `Debug`                               | Low-level debug events, plugins, spans              |
+| `Metrics`                             | Low-level framework metrics and sinks               |
 
 ### Router Exports
 

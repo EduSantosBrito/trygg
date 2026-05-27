@@ -1,4 +1,4 @@
-import { Component, type ComponentProps } from "trygg";
+import { Component, Signal, type ComponentProps } from "trygg";
 import { DashboardTheme, Analytics } from "../../services/dashboard";
 
 export const ActivityItem = Component.gen(function* (
@@ -8,8 +8,9 @@ export const ActivityItem = Component.gen(function* (
   }>,
 ) {
   const { text, time } = yield* Props;
-  const theme = yield* DashboardTheme;
+  const themeStore = yield* DashboardTheme;
   const analytics = yield* Analytics;
+  const theme = yield* Signal.get(themeStore.tokens);
 
   const onClick = () => analytics.track("activity_clicked", { text });
 

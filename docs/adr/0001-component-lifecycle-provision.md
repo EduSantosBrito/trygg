@@ -10,6 +10,7 @@ Trygg treats `.provide(layer)` as a component lifecycle boundary rather than a r
 - Store construction parameters are explicit config services composed with layers, not implicit component props.
 - Event handlers run with the provider context captured for their rendered element.
 - `Signal.makeSync` is removed rather than repositioned; reactive state should be created inside Effect scopes with `Signal.make`.
+- Disposed signal access is treated as a lifecycle defect, not a typed application error: public reads and writes keep clean `Effect` signatures, emit `signal.disposed_access` diagnostics, and fail loudly with `SignalDisposedError` as a defect so ErrorBoundary/debug tooling can observe stale lifecycle bugs.
 - General application services should be provided at component/layout boundaries; route-level provision is reserved for route strategies.
 - Component provision accepts one boundary layer per `Component.provide(layer)` call through the canonical pipeable API; repeated provision creates nested provider scopes with Effect-style semantics rather than merging layers in Trygg.
 - Layer composition, provision ordering, requirements narrowing, dependency satisfaction, and shadowing remain owned by Effect APIs and semantics.
