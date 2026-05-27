@@ -14,6 +14,7 @@ import {
 import * as Head from "./head.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { InvalidEventHandlerError } from "./renderer.js";
+import { makeRenderContextTransaction } from "./render-context-transaction.js";
 import { makeRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
@@ -107,6 +108,11 @@ const applyProps = Effect.fn("applyProps")(function* (
   deps: RenderIntrinsicDeps,
 ) {
   const cleanups: Array<Effect.Effect<void>> = [];
+  const contextTransaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
+  const eventSnapshot = {
+    ...renderContext,
+    services: context === null ? renderContext.services : Context.merge(context, renderContext.services),
+  };
 
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined) continue;
@@ -118,7 +124,9 @@ const applyProps = Effect.fn("applyProps")(function* (
 
       const eventName = key.slice(2).toLowerCase();
       const listener = (event: Event) => {
-        deps.runForkInRenderContext(value(event), renderContext, context);
+        Effect.runForkWith(Context.empty())(
+          contextTransaction.runEventHandler(eventSnapshot, value(event)),
+        );
       };
       node.addEventListener(eventName, listener);
       cleanups.push(Effect.sync(() => node.removeEventListener(eventName, listener)));
