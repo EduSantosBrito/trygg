@@ -159,6 +159,19 @@ type RenderComponentRerenderErrorEvent = BaseEvent & {
   readonly reason: string;
 };
 
+type ProviderAcquireEvent = BaseEvent & {
+  readonly event: "provider.acquire";
+  readonly component?: string | undefined;
+  readonly reason: "mount" | "rerender" | "identity-change" | "key-change" | "unmount" | "failure";
+};
+
+type ProviderFailureEvent = BaseEvent & {
+  readonly event: "provider.failure";
+  readonly component?: string | undefined;
+  readonly reason: "failure";
+  readonly cause: string;
+};
+
 type RenderSignalTextInitialEvent = BaseEvent & {
   readonly event: "render.signaltext.initial";
   readonly signal_id: string;
@@ -822,6 +835,8 @@ export type DebugEvent =
   | RenderComponentCleanupEvent
   | RenderComponentErrorEvent
   | RenderComponentRerenderErrorEvent
+  | ProviderAcquireEvent
+  | ProviderFailureEvent
   | RenderSignalTextInitialEvent
   | RenderSignalTextUpdateEvent
   | RenderSignalElementInitialEvent

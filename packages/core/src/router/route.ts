@@ -592,67 +592,65 @@ export const isRouteBuilder = (
   typeof value === "object" && value !== null && RouteBuilderTypeId in value;
 
 // =============================================================================
-// Route.provide — Layer Application
+// Route.provide — Strategy Application
 // =============================================================================
 
 /** Known RenderStrategy layer instances for detection. @internal */
-const KNOWN_RENDER_STRATEGIES = new Set<LayerTypes.Any>([
+const KNOWN_RENDER_STRATEGIES = new Set<LayerTypes.Layer<RenderStrategy>>([
   RenderStrategy.Lazy,
   RenderStrategy.Eager,
 ]);
 
 /** Known ScrollStrategy layer instances for detection. @internal */
-const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Any>([ScrollStrategy.Auto, ScrollStrategy.None]);
+const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Layer<ScrollStrategy>>([
+  ScrollStrategy.Auto,
+  ScrollStrategy.None,
+]);
 
 /** @internal */
-const isRenderStrategyLayer = (layer: LayerTypes.Any): layer is LayerTypes.Layer<RenderStrategy> =>
-  KNOWN_RENDER_STRATEGIES.has(layer);
+type RouteStrategyLayer =
+  | LayerTypes.Layer<RenderStrategy, never, never>
+  | LayerTypes.Layer<ScrollStrategy, never, never>;
 
 /** @internal */
-const isScrollStrategyLayer = (layer: LayerTypes.Any): layer is LayerTypes.Layer<ScrollStrategy> =>
-  KNOWN_SCROLL_STRATEGIES.has(layer);
+const isRenderStrategyLayer = (
+  layer: RouteStrategyLayer,
+): layer is LayerTypes.Layer<RenderStrategy, never, never> =>
+  KNOWN_RENDER_STRATEGIES.has(layer as LayerTypes.Layer<RenderStrategy>);
 
-/** @internal Distributive helper to extract layer's provided services */
-type LayerSuccess<L> = L extends LayerTypes.Layer<infer A, infer _E, infer _R> ? A : never;
-/** @internal Distributive helper to extract layer's requirements */
-type LayerContext<L> = L extends LayerTypes.Layer<infer _A, infer _E, infer R> ? R : never;
+/** @internal */
+const isScrollStrategyLayer = (
+  layer: RouteStrategyLayer,
+): layer is LayerTypes.Layer<ScrollStrategy, never, never> =>
+  KNOWN_SCROLL_STRATEGIES.has(layer as LayerTypes.Layer<ScrollStrategy>);
 
 /**
- * Apply Layers to a route. Detects layer type and stores appropriately:
+ * Apply strategy layers to a route:
  * - `RenderStrategy` layer -> stored as render strategy
  * - `ScrollStrategy` layer -> stored as scroll strategy
- * - Other layers -> stored for middleware R requirements (narrows R type)
  *
- * Used with `.pipe()`:
+ * @example
  * ```tsx
  * Route.make("/")
  *   .component(HomePage)
  *   .pipe(Route.provide(RenderStrategy.Eager))
  *
  * Route.make("/settings")
- *   .middleware(requireAuth)
- *   .children(...)
- *   .pipe(Route.provide(AuthLive, ScrollStrategy.None))
+ *   .component(SettingsPage)
+ *   .pipe(Route.provide(RenderStrategy.Eager, ScrollStrategy.None))
  * ```
  *
  * @remarks
- * `provide` attaches route-local layers without breaking the fluent builder
- * flow. Strategy layers go to dedicated fields while other layers stay on the
- * definition for middleware requirements.
- *
- * @example
- * ```tsx
- * Route.make("/settings")
- *   .component(SettingsPage)
- *   .pipe(Route.provide(AuthLive, ScrollStrategy.None))
- * ```
+ * `provide` attaches route-local strategy layers without breaking the fluent
+ * builder flow. Component data/services belong at component lifecycle
+ * boundaries via `Component.provide(layer)`.
  *
  * @category Route Builders
  * @public
  * @since 1.0.0
  */
-export function provide<ROut, E2 = never, RIn = never>(
-  layer: LayerTypes.Layer<ROut, E2, RIn>,
+export function provide(
+  layer: RouteStrategyLayer,
 ): <
   Path extends string,
   R,
@@ -662,27 +660,19 @@ export function provide<ROut, E2 = never, RIn = never>(
   HEB extends boolean,
 >(
   builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-) => RouteBuilder<Path, RIn | Exclude<R, ROut>, HC, HCh, NC, HEB>;
+) => RouteBuilder<Path, R, HC, HCh, NC, HEB>;
 
 /**
- * Apply multiple Layers to a route.
- *
- * @remarks
- * Use this overload when a route needs more than one layer and you want the
- * builder to carry the combined requirements.
+ * Apply multiple strategy layers to a route.
  *
  * @category Route Builders
  * @public
  * @since 1.0.0
  */
-export function provide<
-  L1 extends LayerTypes.Any,
-  L2 extends LayerTypes.Any,
-  Rest extends LayerTypes.Any[],
->(
-  layer1: L1,
-  layer2: L2,
-  ...rest: Rest
+export function provide(
+  layer1: RouteStrategyLayer,
+  layer2: RouteStrategyLayer,
+  ...rest: Array<RouteStrategyLayer>
 ): <
   Path extends string,
   R,
@@ -692,17 +682,10 @@ export function provide<
   HEB extends boolean,
 >(
   builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-) => RouteBuilder<
-  Path,
-  LayerContext<L1 | L2 | Rest[number]> | Exclude<R, LayerSuccess<L1 | L2 | Rest[number]>>,
-  HC,
-  HCh,
-  NC,
-  HEB
->;
+) => RouteBuilder<Path, R, HC, HCh, NC, HEB>;
 
 export function provide(
-  ...layers: ReadonlyArray<LayerTypes.Any>
+  ...layers: ReadonlyArray<RouteStrategyLayer>
 ): <
   Path extends string,
   R,
@@ -712,7 +695,7 @@ export function provide(
   HEB extends boolean,
 >(
   builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-) => RouteBuilder<Path, unknown, HC, HCh, NC, HEB> {
+) => RouteBuilder<Path, R, HC, HCh, NC, HEB> {
   return <
     Path extends string,
     R,
@@ -722,28 +705,25 @@ export function provide(
     HEB extends boolean,
   >(
     builder: RouteBuilder<Path, R, HC, HCh, NC, HEB>,
-  ): RouteBuilder<Path, unknown, HC, HCh, NC, HEB> => {
+  ): RouteBuilder<Path, R, HC, HCh, NC, HEB> => {
     let renderStrategy: LayerTypes.Layer<RenderStrategy> | undefined =
       builder.definition.renderStrategy;
     let scrollStrategy: LayerTypes.Layer<ScrollStrategy> | undefined =
       builder.definition.scrollStrategy;
-    const otherLayers: Array<LayerTypes.Any> = [...builder.definition.layers];
 
     for (const layer of layers) {
       if (isRenderStrategyLayer(layer)) {
         renderStrategy = layer;
       } else if (isScrollStrategyLayer(layer)) {
         scrollStrategy = layer;
-      } else {
-        otherLayers.push(layer);
       }
     }
 
-    return makeBuilder<Path, unknown, HC, HCh, NC, HEB>({
+    return makeBuilder<Path, R, HC, HCh, NC, HEB>({
       ...builder.definition,
       renderStrategy,
       scrollStrategy,
-      layers: otherLayers,
+      layers: builder.definition.layers,
     });
   };
 }

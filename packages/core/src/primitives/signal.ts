@@ -14,7 +14,18 @@
  * @since 1.0.0
  * @module trygg/primitives/signal
  */
-import { Cause, Data, Effect, Equal, Exit, Hash, Ref, Scope, SubscriptionRef } from "effect";
+import {
+  Cause,
+  Data,
+  Effect,
+  Equal,
+  Exit,
+  Hash,
+  Pipeable,
+  Ref,
+  Scope,
+  SubscriptionRef,
+} from "effect";
 import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
@@ -1055,10 +1066,14 @@ const makeSignalElement = (signal: Signal<Element>): SuspendElement =>
 const makeComponentElement = <E, R>(
   run: () => Effect.Effect<SuspendElement, E, R>,
 ): SuspendElement =>
-  ({ _tag: "Component", run, key: null, identity: undefined, inputs: undefined }) satisfies Extract<
-    SuspendElement,
-    { readonly _tag: "Component" }
-  >;
+  ({
+    _tag: "Component",
+    run,
+    key: null,
+    identity: undefined,
+    inputs: undefined,
+    provider: null,
+  }) satisfies Extract<SuspendElement, { readonly _tag: "Component" }>;
 
 const isEffectComponentLike = (
   value: unknown,
@@ -1193,7 +1208,6 @@ export const exhaustive = <Props, E, R>(
   self: SuspendMatcher<Props, E, R, true, true>,
 ): Effect.Effect<SuspendedComponent<Props, E, R>, never> =>
   Effect.gen(function* () {
-    const { tagComponent } = yield* Effect.promise(() => import("./component.js"));
     const pending = self.pending;
     const failure = self.failure;
 
@@ -1211,6 +1225,9 @@ export const exhaustive = <Props, E, R>(
           _tag: "EffectComponent",
           _layers: self.component._layers,
           _signal: makeSync(makeTextElement("Signal.suspend unavailable")),
+          pipe() {
+            return Pipeable.pipeArguments(this, arguments);
+          },
         },
       );
     }
@@ -1340,7 +1357,9 @@ export const exhaustive = <Props, E, R>(
       _layers: self.component._layers,
       _runFn: runFn,
       _signal: initialSignal,
-      provide: tagComponent(suspendedComponent, self.component._layers, runFn).provide,
+      pipe() {
+        return Pipeable.pipeArguments(this, arguments);
+      },
     });
   });
 

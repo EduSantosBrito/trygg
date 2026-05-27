@@ -8,7 +8,7 @@
  * - Runtime-effectful operations use Debug.log for observability
  * - This is the ONLY file where `as` casts are permitted
  */
-import { Effect, Layer, Context } from "effect";
+import { Effect, Layer, Context, Scope } from "effect";
 import * as Match from "effect/Match";
 import * as Debug from "../debug/debug.js";
 import type { Component } from "../primitives/component.js";
@@ -69,6 +69,26 @@ export const unsafeBuildContext = <A>(
     const merged = yield* unsafeMergeLayers(layers);
     return yield* Effect.scoped(Layer.build(merged as Parameters<typeof Layer.build>[0]));
   }) as Effect.Effect<Context.Context<A>, never, never>;
+
+/**
+ * Build one provider layer into an explicit lifecycle scope.
+ *
+ * SAFETY: Provider layers are stored as Layer.Any at the element boundary after
+ * public Component.provide typing has validated the layer. The returned Context
+ * is widened because renderer context propagation is intentionally untyped.
+ */
+export const unsafeBuildProviderContext = (
+  layer: Layer.Layer<never, unknown, unknown>,
+  scope: Scope.Scope,
+  parentContext: Context.Context<unknown> | null,
+): Effect.Effect<Context.Context<unknown>, unknown, unknown> => {
+  const build = Layer.buildWithScope(layer, scope) as Effect.Effect<
+    Context.Context<unknown>,
+    unknown,
+    unknown
+  >;
+  return parentContext === null ? build : Effect.provide(build, parentContext);
+};
 
 // =============================================================================
 // Component Tagging

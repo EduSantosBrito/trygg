@@ -17,13 +17,14 @@
  * - Verify provide propagates to children
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Layer, Result, Context } from "effect";
+import { Data, Effect, Exit, Layer, Result, Context, Scope } from "effect";
 
 // Tagged error for testing component failures
 class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
 import * as Component from "../component.js";
 import { unsafeBuildContext } from "../../internal/unsafe.js";
-import { render } from "../../testing/index.js";
+import { click, render } from "../../testing/index.js";
+import * as Signal from "../signal.js";
 
 // Test service for DI tests
 class TestService extends Context.Service<TestService, { value: string }>()("TestService") {}
@@ -86,7 +87,7 @@ describe("Component.gen without props", () => {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
         return <div data-testid="service">{service.value}</div>;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
@@ -154,7 +155,7 @@ describe("Component.gen with props", () => {
             {prefix}-{service.value}
           </div>
         );
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent prefix="Test" />);
 
@@ -198,7 +199,7 @@ describe("Component.provide", () => {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
         return <div data-testid="provided">{service.value}</div>;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
@@ -219,7 +220,7 @@ describe("Component.provide", () => {
             <Child />
           </div>
         );
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<Parent />);
 
@@ -231,7 +232,7 @@ describe("Component.provide", () => {
     Effect.gen(function* () {
       const MyComponent = Component.gen(function* () {
         return <div data-testid="wrapped">Content</div>;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
@@ -253,11 +254,11 @@ describe("Component.provide", () => {
 
       const Parent = Component.gen(function* () {
         return <Child />;
-      }).provide(Layer.succeed(AnotherService, { other: "other-value" }));
+      }).pipe(Component.provide(Layer.succeed(AnotherService, { other: "other-value" })));
 
       const GrandParent = Component.gen(function* () {
         return <Parent />;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<GrandParent />);
 
@@ -274,14 +275,93 @@ describe("Component.provide", () => {
         const a = yield* ServiceA;
         const b = yield* ServiceB;
         return <div data-testid="chained">{`${a.a}-${b.b}`}</div>;
-      })
-        .provide(Layer.succeed(ServiceA, { a: "A" }))
-        .provide(Layer.succeed(ServiceB, { b: "B" }));
+      }).pipe(
+        Component.provide(Layer.succeed(ServiceA, { a: "A" })),
+        Component.provide(Layer.succeed(ServiceB, { b: "B" })),
+      );
 
       const { getByTestId } = yield* render(<MyComponent />);
 
       assert.strictEqual((yield* getByTestId("chained")).textContent, "A-B");
     }),
+  );
+
+  it.effect(
+    "should acquire pipeable lifecycle provider once while rerendering stable component",
+    () =>
+      Effect.gen(function* () {
+        let acquireCount = 0;
+        let finalizeCount = 0;
+
+        class Store extends Context.Service<
+          Store,
+          {
+            readonly count: Signal.Signal<number>;
+            readonly increment: Effect.Effect<void>;
+          }
+        >()("Store") {}
+
+        const StoreLive = Layer.effect(
+          Store,
+          Effect.gen(function* () {
+            acquireCount += 1;
+            const count = yield* Signal.make(0);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                finalizeCount += 1;
+              }),
+            );
+            return {
+              count,
+              increment: Signal.update(count, (value) => value + 1),
+            };
+          }),
+        );
+
+        const StoreView = Component.gen(function* () {
+          const store = yield* Store;
+          const count = yield* Signal.get(store.count);
+          return (
+            <button data-testid="store" onClick={() => store.increment}>
+              {String(count)}
+            </button>
+          );
+        });
+
+        const App = Component.gen(function* () {
+          const parentRenders = yield* Signal.make(0);
+          const renderCount = yield* Signal.get(parentRenders);
+          return (
+            <section>
+              <button
+                data-testid="rerender"
+                onClick={() => Signal.update(parentRenders, (value) => value + 1)}
+              >
+                {String(renderCount)}
+              </button>
+              <StoreView />
+            </section>
+          );
+        }).pipe(Component.provide(StoreLive));
+
+        const scope = yield* Scope.make();
+        const result = yield* render(<App />).pipe(Scope.provide(scope));
+
+        assert.strictEqual(acquireCount, 1);
+        assert.strictEqual((yield* result.getByTestId("store")).textContent, "0");
+
+        yield* click(yield* result.getByTestId("store"));
+        yield* Effect.yieldNow;
+        assert.strictEqual((yield* result.getByTestId("store")).textContent, "1");
+
+        yield* click(yield* result.getByTestId("rerender"));
+        yield* Effect.yieldNow;
+        assert.strictEqual(acquireCount, 1);
+        assert.strictEqual((yield* result.getByTestId("store")).textContent, "1");
+
+        yield* Scope.close(scope, Exit.void);
+        assert.strictEqual(finalizeCount, 1);
+      }),
   );
 });
 
@@ -296,7 +376,7 @@ describe("Service access", () => {
       const MyComponent = Component.gen(function* () {
         const service = yield* TestService;
         return <div data-testid="service">{service.value}</div>;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
@@ -394,7 +474,7 @@ describe("isEffectComponent", () => {
   it("should return true for components with .provide() applied", () => {
     const MyComponent = Component.gen(function* () {
       return <div>Test</div>;
-    }).provide(testServiceLayer);
+    }).pipe(Component.provide(testServiceLayer));
 
     assert.isTrue(Component.isEffectComponent(MyComponent));
   });
@@ -459,7 +539,7 @@ describe("Component function API", () => {
           const service = yield* TestService;
           return <div data-testid="svc">{service.value}</div>;
         }),
-      ).provide(testServiceLayer);
+      ).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
@@ -471,10 +551,10 @@ describe("Component function API", () => {
 // =============================================================================
 // Layer Precedence
 // =============================================================================
-// Scope: Verify last-write-wins semantics
+// Scope: Verify nested provider semantics
 
 describe("Layer Precedence", () => {
-  it.effect("should override via chaining (last provision wins)", () =>
+  it.effect("should preserve Effect nesting via chaining (inner provision wins)", () =>
     Effect.gen(function* () {
       class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
@@ -484,35 +564,30 @@ describe("Layer Precedence", () => {
       const MyComponent = Component.gen(function* () {
         const theme = yield* Theme;
         return <div data-testid="theme">{theme.color}</div>;
-      })
-        .provide(BlueTheme)
-        .provide(RedTheme);
+      }).pipe(Component.provide(BlueTheme), Component.provide(RedTheme));
 
       const { getByTestId } = yield* render(<MyComponent />);
 
-      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
+      assert.strictEqual((yield* getByTestId("theme")).textContent, "blue");
     }),
   );
 
-  it.effect("should override via array order (last in array wins)", () =>
-    Effect.gen(function* () {
-      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
+  it("rejects legacy array provision", () => {
+    class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
-      const BlueTheme = Layer.succeed(Theme, { color: "blue" });
-      const RedTheme = Layer.succeed(Theme, { color: "red" });
+    const BlueTheme = Layer.succeed(Theme, { color: "blue" });
+    const RedTheme = Layer.succeed(Theme, { color: "red" });
 
-      const MyComponent = Component.gen(function* () {
-        const theme = yield* Theme;
-        return <div data-testid="theme">{theme.color}</div>;
-      }).provide([BlueTheme, RedTheme]);
+    const MyComponent = Component.gen(function* () {
+      const theme = yield* Theme;
+      return <div data-testid="theme">{theme.color}</div>;
+    });
 
-      const { getByTestId } = yield* render(<MyComponent />);
+    // @ts-expect-error array provision was removed; use one Component.provide(layer) per call.
+    MyComponent.pipe(Component.provide([BlueTheme, RedTheme]));
+  });
 
-      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
-    }),
-  );
-
-  it.effect("should allow override after full provision", () =>
+  it.effect("should keep fully provided component services nested inside later provision", () =>
     Effect.gen(function* () {
       class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
 
@@ -522,13 +597,13 @@ describe("Layer Precedence", () => {
       const BaseComponent = Component.gen(function* () {
         const theme = yield* Theme;
         return <div data-testid="theme">{theme.color}</div>;
-      }).provide(BlueTheme);
+      }).pipe(Component.provide(BlueTheme));
 
-      const OverriddenComponent = BaseComponent.provide(RedTheme);
+      const OverriddenComponent = BaseComponent.pipe(Component.provide(RedTheme));
 
       const { getByTestId } = yield* render(<OverriddenComponent />);
 
-      assert.strictEqual((yield* getByTestId("theme")).textContent, "red");
+      assert.strictEqual((yield* getByTestId("theme")).textContent, "blue");
     }),
   );
 });
@@ -544,7 +619,7 @@ describe("Immutability", () => {
       return <div>Base</div>;
     });
 
-    const ProvidedComponent = BaseComponent.provide(testServiceLayer);
+    const ProvidedComponent = BaseComponent.pipe(Component.provide(testServiceLayer));
 
     // Original should still have empty layers
     assert.strictEqual(BaseComponent._layers.length, 0);
@@ -567,9 +642,9 @@ describe("Immutability", () => {
         );
       });
 
-      // Provide ServiceA via .provide; ServiceB via outer layer
-      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" })).provide(
-        Layer.succeed(ServiceB, { value: "B" }),
+      const VariantA = BaseComponent.pipe(
+        Component.provide(Layer.succeed(ServiceA, { value: "A" })),
+        Component.provide(Layer.succeed(ServiceB, { value: "B" })),
       );
 
       const { getByTestId: getA } = yield* render(<VariantA />);
@@ -593,7 +668,9 @@ describe("Immutability", () => {
       });
 
       // Only provide ServiceA — ServiceB is missing
-      const VariantA = BaseComponent.provide(Layer.succeed(ServiceA, { value: "A" }));
+      const VariantA = BaseComponent.pipe(
+        Component.provide(Layer.succeed(ServiceA, { value: "A" })),
+      );
 
       const context = yield* unsafeBuildContext<unknown>([]);
       const result = yield* render(<VariantA />).pipe(
@@ -608,10 +685,10 @@ describe("Immutability", () => {
   it("should create distinct objects on chaining", () => {
     const Step1 = Component.gen(function* () {
       return <div>Step1</div>;
-    }).provide(testServiceLayer);
+    }).pipe(Component.provide(testServiceLayer));
 
-    const Step2 = Step1.provide(testServiceLayer);
-    const Step3 = Step2.provide(testServiceLayer);
+    const Step2 = Step1.pipe(Component.provide(testServiceLayer));
+    const Step3 = Step2.pipe(Component.provide(testServiceLayer));
 
     // Each step should be a different object
     assert.notStrictEqual(Step1, Step2);
@@ -632,7 +709,7 @@ describe("Edge Cases", () => {
         return <div data-testid="no-req">No requirements</div>;
       });
 
-      const ProvidedComponent = MyComponent.provide(testServiceLayer);
+      const ProvidedComponent = MyComponent.pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<ProvidedComponent />);
 
@@ -647,7 +724,7 @@ describe("Edge Cases", () => {
       ) {
         const { title } = yield* Props;
         return <div data-testid="props">{title}</div>;
-      }).provide(testServiceLayer);
+      }).pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<MyComponent title="Test Title" />);
 
@@ -663,7 +740,7 @@ describe("Edge Cases", () => {
       });
 
       // Providing extra layers should be harmless
-      const ProvidedComponent = MyComponent.provide(testServiceLayer);
+      const ProvidedComponent = MyComponent.pipe(Component.provide(testServiceLayer));
 
       const { getByTestId } = yield* render(<ProvidedComponent />);
 

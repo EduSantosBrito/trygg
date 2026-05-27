@@ -10,10 +10,10 @@
  * @since 1.0.0
  * @module trygg/primitives/component
  */
-import { Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer, Pipeable } from "effect";
 import * as Context from "effect/Context";
-import { unsafeBuildContext, unsafeTagCallable } from "../internal/unsafe.js";
-import { Element, provideElement, type ComponentElementWithRequirements } from "./element.js";
+import { unsafeTagCallable } from "../internal/unsafe.js";
+import { Element, type ComponentElementWithRequirements } from "./element.js";
 
 /**
  * Error raised when an invalid component type is used in JSX.
@@ -91,74 +91,25 @@ type LegacyGenResume = undefined;
 
 const effectComponentTag = "EffectComponent" as const;
 
-// buildContextFromLayers moved to internal/unsafe.ts as unsafeBuildContext
-// Handles heterogeneous Layer.Any[] merging at a type system boundary
-
 /**
- * Deduplicate layers by keeping only the last occurrence of each service
- * This prevents unnecessary layer accumulation while preserving last-write-wins semantics
- * @internal
- */
-const deduplicateLayers = (layers: ReadonlyArray<Layer.Any>): ReadonlyArray<Layer.Any> => {
-  // For now, we keep all layers and let Layer.mergeAll handle precedence
-  // In a more sophisticated implementation, we could track service tags and deduplicate
-  // But Layer.mergeAll already handles "last layer wins" correctly
-  return layers;
-};
-
-/**
- * Tag a component function with Component metadata
+ * Tag a component function with Component metadata.
  * @internal
  */
 export const tagComponent = <Props, RuntimeProps, E, R>(
   fn: (props: RuntimeProps) => Element,
-  layers: ReadonlyArray<Layer.Any> = [],
+  layers: ReadonlyArray<unknown> = [],
   runFn?: (props: RuntimeProps) => Effect.Effect<Element, E, unknown>,
   displayName?: string,
-): Component.Type<Props, E, R> => {
-  // Build provide as a standalone function, then pass to unsafeTagCallable
-  // The provide implementation serves multiple overloads — the overload
-  // signatures on Component.Type ensure type safety at call sites
-  const provide = (layerOrLayers: Layer.Any | ReadonlyArray<Layer.Any>) => {
-    const newLayers = Array.isArray(layerOrLayers) ? layerOrLayers : [layerOrLayers];
-    // Append new layers - Layer.mergeAll applies left-to-right with last-write-wins
-    // When we call .provide(A).provide(B), mergedLayers = [A, B], B wins
-    // When we call .provide([A, B]), mergedLayers = [A, B], B wins (last in array)
-    const mergedLayers = deduplicateLayers([...layers, ...newLayers]);
-
-    // Create new component function that preserves the Props type
-    const newComponent = (props: RuntimeProps): Element => {
-      // Create a Component element whose run function builds context and wraps output in Provide
-      const run = (): Effect.Effect<Element, E, unknown> =>
-        Effect.gen(function* () {
-          // Build context from layers
-          // Layer.mergeAll applies layers left-to-right with last-write-wins semantics
-          // mergedLayers is ordered chronologically, so last layer wins correctly
-          const context = yield* unsafeBuildContext(mergedLayers);
-
-          // Execute the stored runFn directly to get the element
-          // Provide the context to satisfy service requirements
-          const element = runFn ? yield* runFn(props).pipe(Effect.provide(context)) : fn(props);
-
-          // Wrap the element in a Provide element so context propagates to children
-          return provideElement(context, element);
-        });
-
-      return Element.fromEffect(Effect.suspend(run), { identity: newComponent, inputs: props });
-    };
-
-    // Tag the new component with merged layers and preserve the runFn and displayName
-    return tagComponent<Props, RuntimeProps, E, R>(newComponent, mergedLayers, runFn, displayName);
-  };
-
-  return unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
+): Component.Type<Props, E, R> =>
+  unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
     _tag: effectComponentTag,
     _layers: layers,
     _runFn: runFn,
     _displayName: displayName,
-    provide,
+    pipe() {
+      return Pipeable.pipeArguments(this, arguments);
+    },
   });
-};
 
 const normalizeResult = <E, R>(
   effect: Effect.Effect<ComponentResult, E, R>,
@@ -203,7 +154,7 @@ function makeComponent<P extends object = {}>(): <E, R>(
  */
 export interface ComponentInternal {
   readonly _tag: "EffectComponent";
-  readonly _layers: ReadonlyArray<Layer.Any>;
+  readonly _layers: ReadonlyArray<unknown>;
   readonly _baseFn: (props: unknown) => Element;
 }
 
@@ -215,45 +166,13 @@ export interface ComponentInternal {
 export declare namespace Component {
   export interface Type<Props = never, _E = never, _R = never> {
     readonly _tag: "EffectComponent";
-    readonly _layers: ReadonlyArray<Layer.Any>;
+    readonly _layers: ReadonlyArray<unknown>;
     readonly _runFn?: (
       props: ComponentCallProps<Props>,
     ) => Effect.Effect<Element, unknown, unknown>;
     readonly _displayName?: string;
+    readonly pipe: Pipeable.Pipeable["pipe"];
     (props: ComponentCallProps<Props>): ComponentElementWithRequirements<_R>;
-
-    /**
-     * Provide services to satisfy component requirements at definition time.
-     * Returns a new component with narrowed R type.
-     *
-     * @example
-     * ```tsx
-     * const Button = Component.gen(function* () {
-     *   const theme = yield* Theme;
-     *   return <button style={theme.primary}>Click</button>;
-     * }).provide(themeLayer);
-     * ```
-     */
-    provide<ROut, E2, RIn>(
-      layer: Layer.Layer<ROut, E2, RIn>,
-    ): Component.Type<Props, _E | E2, RIn | Exclude<_R, ROut>>;
-
-    /**
-     * Provide multiple services at once using an array of layers.
-     *
-     * @example
-     * ```tsx
-     * const Button = Component.gen(...).provide([themeLayer, analyticsLayer]);
-     * ```
-     */
-    provide<const Layers extends readonly [Layer.Any, ...Array<Layer.Any>]>(
-      layers: Layers,
-    ): Component.Type<
-      Props,
-      _E | { [k in keyof Layers]: Layer.Error<Layers[k]> }[number],
-      | { [k in keyof Layers]: Layer.Services<Layers[k]> }[number]
-      | Exclude<_R, { [k in keyof Layers]: Layer.Success<Layers[k]> }[number]>
-    >;
   }
 }
 
@@ -460,8 +379,29 @@ export const gen: Gen = function <P extends object>(f?: unknown): any {
   });
 };
 
+export const provide =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <Props, E, R>(
+    component: Component.Type<Props, E, R>,
+  ): Component.Type<Props, E | E2, RIn | Exclude<R, ROut>> => {
+    const providedComponent = (props: ComponentCallProps<Props>): Element =>
+      Element.fromEffect(Effect.succeed(component(props)), {
+        identity: providedComponent,
+        inputs: props,
+        provider: { layer, displayName: component._displayName },
+      });
+
+    return tagComponent<Props, ComponentCallProps<Props>, E | E2, RIn | Exclude<R, ROut>>(
+      providedComponent,
+      [layer],
+      (props) => Effect.succeed(component(props)),
+      component._displayName,
+    );
+  };
+
 type ComponentApi = typeof makeComponent & {
   readonly gen: typeof gen;
+  readonly provide: typeof provide;
 };
 
 /**
@@ -485,4 +425,5 @@ type ComponentApi = typeof makeComponent & {
  */
 export const Component: ComponentApi = Object.assign(makeComponent, {
   gen,
+  provide,
 });

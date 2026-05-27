@@ -16,7 +16,7 @@ describe("render-provide", () => {
 
       const Parent = Component.gen(function* () {
         return <Child />;
-      }).provide(Layer.succeed(Label, { value: "provided" }));
+      }).pipe(Component.provide(Layer.succeed(Label, { value: "provided" })));
 
       const { getByTestId } = yield* render(<Parent />);
 

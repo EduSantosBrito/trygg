@@ -13,7 +13,6 @@ import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Component } from "../../primitives/component.js";
 import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
@@ -22,8 +21,9 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<AnyLayer>,
-
-    provide: () => comp as Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };
@@ -387,27 +387,24 @@ describe("Route.provide", () => {
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.None);
   });
 
-  it("should store unknown layers in layers array", () => {
-    // Use a fresh layer not in the known sets (Layer.effect creates a new instance)
-    const FreshLayer = Layer.effect(RenderStrategy, Effect.succeed({ _tag: "Lazy" as const }));
+  it("should not store route service layers", () => {
+    class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
+      "AuthService",
+    ) {}
+    const AuthLive = Layer.succeed(AuthService)({ userId: "test" });
 
-    const route = Route.make("/").component(component).pipe(Route.provide(FreshLayer));
-
-    assert.strictEqual(route.definition.layers.length, 1);
-    assert.strictEqual(route.definition.layers[0], FreshLayer);
+    // @ts-expect-error Route.provide only accepts RenderStrategy and ScrollStrategy layers.
+    Route.provide(AuthLive);
   });
 
-  it("should combine strategy layers and other layers", () => {
-    const FreshLayer = Layer.effect(RenderStrategy, Effect.succeed({ _tag: "Lazy" as const }));
-
+  it("should combine only strategy layers", () => {
     const route = Route.make("/")
       .component(component)
-      .pipe(Route.provide(RenderStrategy.Eager, FreshLayer, ScrollStrategy.None));
+      .pipe(Route.provide(RenderStrategy.Eager, ScrollStrategy.None));
 
     assert.strictEqual(route.definition.renderStrategy, RenderStrategy.Eager);
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.None);
-    assert.strictEqual(route.definition.layers.length, 1);
-    assert.strictEqual(route.definition.layers[0], FreshLayer);
+    assert.strictEqual(route.definition.layers.length, 0);
   });
 
   it("should return a RouteBuilder (not an Effect)", () => {
@@ -429,85 +426,29 @@ describe("Route.provide", () => {
     assert.strictEqual(route.definition.renderStrategy, RenderStrategy.Eager);
   });
 
-  it("should narrow R when providing service layers", () => {
-    // Type equality check - fails compilation if types don't match
+  it("should keep middleware requirements on the route", () => {
     type Equals<X, Y> =
       (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
-    // Create a service
     class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
       "AuthService",
     ) {}
-    const AuthLive = Layer.succeed(AuthService)({ userId: "test" });
 
-    // Middleware that requires AuthService
     const requireAuth = Effect.gen(function* () {
       const auth = yield* AuthService;
       if (!auth.userId) return yield* Effect.fail("unauthorized");
     });
 
-    // Route with middleware (R = AuthService)
-    const routeWithRequirement = Route.make("/protected")
+    const route = Route.make("/protected")
       .middleware(requireAuth)
-      .component(component);
-
-    // Type-level assertion: before provide, R includes AuthService
-    type BeforeR =
-      typeof routeWithRequirement extends Route.RouteBuilder<
-        infer _P,
-        infer R,
-        infer _HC,
-        infer _HCh
-      >
-        ? R
-        : never;
-    const _beforeCheck: Equals<BeforeR, AuthService> = true;
-
-    // After provide, R should be never (AuthService is satisfied)
-    const routeProvided = routeWithRequirement.pipe(Route.provide(AuthLive));
-
-    // Type-level assertion: after provide, R is never
-    type AfterR =
-      typeof routeProvided extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh>
-        ? R
-        : never;
-    const _afterCheck: Equals<AfterR, never> = true;
-
-    // Suppress unused variable warnings
-    void _beforeCheck;
-    void _afterCheck;
-
-    // Runtime check: layer was stored
-    assert.strictEqual(routeProvided.definition.layers.length, 1);
-    assert.strictEqual(routeProvided.definition.layers[0], AuthLive);
-  });
-
-  it("should narrow R with multiple service layers", () => {
-    type Equals<X, Y> =
-      (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
-
-    class ServiceA extends Context.Service<ServiceA, { readonly a: string }>()("ServiceA") {}
-    class ServiceB extends Context.Service<ServiceB, { readonly b: number }>()("ServiceB") {}
-
-    const LayerA = Layer.succeed(ServiceA)({ a: "test" });
-    const LayerB = Layer.succeed(ServiceB)({ b: 42 });
-
-    const middleware = Effect.gen(function* () {
-      yield* ServiceA;
-      yield* ServiceB;
-    });
-
-    const route = Route.make("/multi")
-      .middleware(middleware)
       .component(component)
-      .pipe(Route.provide(LayerA, LayerB));
+      .pipe(Route.provide(RenderStrategy.Eager));
 
-    // Type-level: after provide, R should be never
     type R =
       typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh> ? R : never;
-    const _check: Equals<R, never> = true;
+    const _check: Equals<R, AuthService> = true;
     void _check;
 
-    assert.strictEqual(route.definition.layers.length, 2);
+    assert.strictEqual(route.definition.layers.length, 0);
   });
 });

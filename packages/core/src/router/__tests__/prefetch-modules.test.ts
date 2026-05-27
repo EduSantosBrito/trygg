@@ -8,7 +8,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
 import type { Any as AnyLayer } from "effect/Layer";
-import * as Component from "../../primitives/component.js";
 import { empty } from "../../primitives/element.js";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
@@ -26,8 +25,9 @@ const makeComp = (): RouteComponent => {
   const comp = Object.assign(fn, {
     _tag: "EffectComponent" as const,
     _layers: [] as ReadonlyArray<AnyLayer>,
-
-    provide: () => comp as Component.Component.Type<never, unknown, unknown>,
+    pipe() {
+      return this;
+    },
   });
   return comp as RouteComponent;
 };

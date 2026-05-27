@@ -1148,7 +1148,9 @@ describe("Signal.suspend", () => {
         Signal.exhaustive,
       );
 
-      const Provided = suspended.provide(Layer.succeed(PendingTheme, { label: "loading" }));
+      const Provided = suspended.pipe(
+        Component.provide(Layer.succeed(PendingTheme, { label: "loading" })),
+      );
       const result = yield* Effect.exit(render(Provided({})));
       assert.isTrue(Exit.isSuccess(result));
     }),

@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/element
  */
-import { Cause, Data, Effect, Schema, Scope, SubscriptionRef } from "effect";
+import { Cause, Data, Effect, Layer, Schema, Scope, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
 import type { Signal } from "./signal.js";
 
@@ -702,6 +702,7 @@ export type Element = Data.TaggedEnum<{
     readonly key: ElementKey | null;
     readonly identity: unknown;
     readonly inputs: unknown;
+    readonly provider?: ComponentProvider | null;
   };
   /**
    * Fragment containing multiple children without a wrapper element
@@ -743,6 +744,11 @@ export type ElementWithRequirements<R> = Element & {
   readonly [ElementRequirementsSymbol]?: R;
 };
 
+export interface ComponentProvider {
+  readonly layer: Layer.Layer<never, unknown, unknown>;
+  readonly displayName: string | undefined;
+}
+
 export type ComponentElement = Extract<Element, { _tag: "Component" }>;
 
 export type ComponentElementWithRequirements<R> = ComponentElement & {
@@ -773,6 +779,7 @@ export interface ComponentElementOptions {
   readonly key?: ElementKey | undefined;
   readonly identity?: unknown;
   readonly inputs?: unknown;
+  readonly provider?: ComponentProvider | undefined;
 }
 
 /**
@@ -837,6 +844,7 @@ const ComponentElementOptionsSchema = Schema.Struct({
   key: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   identity: Schema.optional(Schema.Any),
   inputs: Schema.optional(Schema.Any),
+  provider: Schema.optional(Schema.Any),
 });
 
 const decodeComponentElementOptions = Schema.decodeUnknownSync<
@@ -872,6 +880,7 @@ export const fromEffect = <E, R>(
     key: decoded.key ?? null,
     identity: decoded.identity,
     inputs: decoded.inputs,
+    provider: decoded.provider ?? null,
   });
 };
 

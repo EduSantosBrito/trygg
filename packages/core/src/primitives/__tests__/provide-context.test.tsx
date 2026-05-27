@@ -137,11 +137,11 @@ describe("Provide context merging", () => {
 
       const Outer = Component.gen(function* () {
         return <Inner />;
-      }).provide(Layer.succeed(ThemeService, { color: "blue" }));
+      }).pipe(Component.provide(Layer.succeed(ThemeService, { color: "blue" })));
 
       const App = Component.gen(function* () {
         return <Outer />;
-      }).provide(Layer.succeed(AuthService, { user: "alice" }));
+      }).pipe(Component.provide(Layer.succeed(AuthService, { user: "alice" })));
 
       const { getByTestId } = yield* render(<App />);
       const btn = yield* getByTestId("btn");
