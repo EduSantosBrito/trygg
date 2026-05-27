@@ -25,6 +25,14 @@ import { Component } from "../primitives/component.js";
 import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
+import {
+  compileRoutePathPattern,
+  interpolateCompiledRoutePathPattern,
+  type InvalidRoutePathPattern,
+  type InvalidRoutePathParamValue,
+  type MissingRoutePathParam,
+  type UnusedRoutePathParam,
+} from "./path-pattern.js";
 
 // ==========================================
 // Errors
@@ -336,16 +344,16 @@ export type TypeSafeLinkProps<Path extends string> =
 export const buildPathWithParams = <Path extends string>(
   path: Path,
   params: RouteParamsFor<Path>,
-): Effect.Effect<string> =>
-  Effect.sync(() => {
-    let result: string = path;
-    for (const key of Object.keys(params)) {
-      const value = (params as Record<string, string | number>)[key];
-      if (value !== undefined) {
-        result = result.replace(`:${key}`, String(value));
-      }
-    }
-    return result;
+): Effect.Effect<
+  string,
+  | InvalidRoutePathPattern
+  | MissingRoutePathParam
+  | UnusedRoutePathParam
+  | InvalidRoutePathParamValue
+> =>
+  Effect.gen(function* () {
+    const pattern = yield* compileRoutePathPattern(path);
+    return yield* interpolateCompiledRoutePathPattern(pattern, params);
   });
 
 /**
@@ -363,16 +371,16 @@ export const buildPathWithParams = <Path extends string>(
 export const interpolateParams = (
   path: string,
   params: Record<string, string | number>,
-): Effect.Effect<string> =>
-  Effect.sync(() => {
-    let result = path;
-    for (const key of Object.keys(params)) {
-      const value = params[key];
-      if (value !== undefined) {
-        result = result.replace(`:${key}`, String(value));
-      }
-    }
-    return result;
+): Effect.Effect<
+  string,
+  | InvalidRoutePathPattern
+  | MissingRoutePathParam
+  | UnusedRoutePathParam
+  | InvalidRoutePathParamValue
+> =>
+  Effect.gen(function* () {
+    const pattern = yield* compileRoutePathPattern(path);
+    return yield* interpolateCompiledRoutePathPattern(pattern, params);
   });
 
 // ==========================================

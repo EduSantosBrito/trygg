@@ -132,16 +132,25 @@ export type { ResolvedRoute, RouteMatch, RouteMatcherShape, SyncMatcher } from "
 // Route Path Pattern
 export {
   RoutePathPattern,
+  RoutePathInterpolation,
   compileRoutePathPattern,
   compareCompiledRoutePathPatterns,
   matchCompiledRoutePathPattern,
+  interpolateCompiledRoutePathPattern,
+  getPathParamOption,
   InvalidRoutePathPattern,
+  MissingRoutePathParam,
+  UnusedRoutePathParam,
+  InvalidRoutePathParamValue,
   RoutePathPatternConfigInput,
+  RoutePathInterpolationConfigInput,
 } from "./path-pattern.js";
 export type {
   RoutePathSegment,
   CompiledRoutePathPattern,
   RoutePathPatternMatch,
+  PathParamValue,
+  PathParamInput,
 } from "./path-pattern.js";
 
 // Route Builder
