@@ -24,6 +24,15 @@ Events:
 - `history.forward`
 - `prefetch.trigger`
 
+Stable payload fields:
+
+- `operation`: `push`, `replace`, `back`, `forward`, or `refresh`.
+- `url`: resolved navigation URL for push/replace requests and history writes.
+- `patternOrPath`: original route pattern or path supplied to push/replace requests.
+- `replace`: boolean replacement intent for push/replace requests.
+- `previous` / `next`: committed **Current route** snapshots with `path`, `query`, `hash`, `scrollKey`, and `isPopstate`.
+- `previousQuery` / `nextQuery`: canonical query strings for query changes.
+
 Ordering guarantees:
 
 1. `router.navigate.request` is emitted before a Router-owned navigation writes history or commits the **Current route**.

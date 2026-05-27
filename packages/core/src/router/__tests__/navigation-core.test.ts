@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
+import * as ContractTrace from "../../contract/trace.js";
 import * as Signal from "../../primitives/signal.js";
 import {
   NavigationCoreError,
@@ -56,6 +57,19 @@ const makeBrowserLikeCore = (initialPath: string): Effect.Effect<NavigationCoreS
     };
     return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(Effect.orDie);
   });
+
+const traceEventsFor = <E>(
+  effect: Effect.Effect<void, E>,
+): Effect.Effect<ReadonlyArray<ContractTrace.ContractTraceRecord>, E> =>
+  Effect.gen(function* () {
+    const collector = yield* ContractTrace.createInMemoryCollector("navigation-core");
+    yield* ContractTrace.withCollector(effect, collector);
+    return yield* collector.snapshot;
+  });
+
+const eventNames = (
+  records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
+): ReadonlyArray<ContractTrace.ContractTraceEventName> => records.map((record) => record.event.event);
 
 const runNavigationLaws = (name: string, make: () => Effect.Effect<NavigationCoreShape>): void => {
   describe(name, () => {
@@ -134,6 +148,107 @@ runNavigationLaws("NavigationCore in-memory laws", () => makeCore("/dashboard?ta
 runNavigationLaws("NavigationCore browser-like adapter laws", () =>
   makeBrowserLikeCore("/dashboard?tab=main"),
 );
+
+describe("NavigationCore semantic traces", () => {
+  it.effect("orders push and replace request, history, state, query, and commit events", () =>
+    Effect.gen(function* () {
+      const records = yield* traceEventsFor(
+        Effect.gen(function* () {
+          const core = yield* makeCore("/dashboard?tab=main");
+          yield* core.navigate(navigationTarget("/users", { query: { tab: "details" } }));
+          yield* core.navigate(navigationTarget("/users", { query: { tab: "settings" }, replace: true }));
+        }),
+      );
+
+      assert.deepStrictEqual(eventNames(records), [
+        "router.navigate.request",
+        "history.push",
+        "router.current.set",
+        "router.query.set",
+        "router.navigate.commit",
+        "router.navigate.request",
+        "history.replace",
+        "router.query.set",
+        "router.navigate.commit",
+      ]);
+
+      assert.strictEqual(records[0]?.event.payload?.operation, "push");
+      assert.strictEqual(records[5]?.event.payload?.operation, "replace");
+    }),
+  );
+
+  it.effect("orders back and forward traces after adapter history movement", () =>
+    Effect.gen(function* () {
+      const records = yield* traceEventsFor(
+        Effect.gen(function* () {
+          const core = yield* makeCore("/dashboard");
+          yield* core.navigate(navigationTarget("/first"));
+          yield* core.navigate(navigationTarget("/second"));
+          yield* core.back;
+          yield* core.forward;
+        }),
+      );
+      const backStart = eventNames(records).indexOf("history.back");
+      const forwardStart = eventNames(records).indexOf("history.forward");
+
+      assert.deepStrictEqual(eventNames(records).slice(backStart - 1, backStart + 3), [
+        "router.navigate.request",
+        "history.back",
+        "router.current.set",
+        "router.navigate.commit",
+      ]);
+      assert.deepStrictEqual(eventNames(records).slice(forwardStart - 1, forwardStart + 3), [
+        "router.navigate.request",
+        "history.forward",
+        "router.current.set",
+        "router.navigate.commit",
+      ]);
+    }),
+  );
+
+  it.effect("suppresses unchanged query trace events", () =>
+    Effect.gen(function* () {
+      const records = yield* traceEventsFor(
+        Effect.gen(function* () {
+          const core = yield* makeCore("/dashboard?tab=main");
+          yield* core.navigate(navigationTarget("/dashboard", { query: { tab: "main" } }));
+        }),
+      );
+
+      assert.deepStrictEqual(eventNames(records), [
+        "router.navigate.request",
+        "history.push",
+        "router.navigate.commit",
+      ]);
+    }),
+  );
+
+  it.effect("does not emit commit traces when adapter navigation fails", () =>
+    Effect.gen(function* () {
+      const adapter: NavigationAdapter = {
+        read: Effect.succeed({
+          path: "/dashboard",
+          query: new URLSearchParams(),
+          isPopstate: false,
+          hash: "",
+          scrollKey: "failing-0",
+        }),
+        push: () => Effect.fail(new NavigationCoreError({ operation: "push", cause: "boom" })),
+        replace: () => Effect.void,
+        back: Effect.void,
+        forward: Effect.void,
+      };
+      const core = yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(
+        Effect.orDie,
+      );
+      const records = yield* traceEventsFor(
+        core.navigate(navigationTarget("/broken")).pipe(Effect.result, Effect.asVoid),
+      );
+
+      assert.deepStrictEqual(eventNames(records), ["router.navigate.request"]);
+    }),
+  );
+});
 
 describe("Router.testLayer NavigationCore delegation", () => {
   it.effect("does not notify query subscribers when the semantic query is unchanged", () =>
