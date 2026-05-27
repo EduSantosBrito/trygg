@@ -73,7 +73,10 @@ export default Component.gen(function* () {
       </div>
     )),
     Resource.on("Failure", ({ error }) => (
-      <ErrorView error={error} onRetry={() => Resource.refresh(incidentsResource)} />
+      <ErrorView
+        error={error}
+        onRetry={() => Resource.refresh(incidentsResource).pipe(Effect.orDie)}
+      />
     )),
     Resource.exhaustive,
   );

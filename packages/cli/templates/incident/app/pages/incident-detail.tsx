@@ -186,7 +186,7 @@ export default Component.gen(function* () {
       const retry =
         error instanceof IncidentNotFound
           ? undefined
-          : () => Resource.refresh(incidentResource({ id: numericId }));
+          : () => Resource.refresh(incidentResource({ id: numericId })).pipe(Effect.orDie);
 
       return (
         <>

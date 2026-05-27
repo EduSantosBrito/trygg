@@ -7,6 +7,7 @@
 import { Component, DevMode } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
+import { AuthLive } from "./resources/auth";
 import "../styles.css";
 
 export default Component.gen(function* () {
@@ -117,4 +118,4 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).pipe(Component.provide(ApiClientLive));
+}).pipe(Component.provide(ApiClientLive), Component.provide(AuthLive));
