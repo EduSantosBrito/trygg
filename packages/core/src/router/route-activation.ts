@@ -27,7 +27,12 @@ export interface RouteActivationRequest {
 }
 
 export type RouteActivationOutcome =
-  | { readonly _tag: "Committed"; readonly activationId: string; readonly path: string }
+  | {
+      readonly _tag: "Committed";
+      readonly activationId: string;
+      readonly path: string;
+      readonly match: Option.Option<RouteMatch>;
+    }
   | { readonly _tag: "DroppedStale"; readonly activationId: string; readonly supersededBy: string }
   | { readonly _tag: "NotFound"; readonly activationId: string; readonly path: string };
 
@@ -88,7 +93,7 @@ export interface RouteActivationShape {
   readonly commitAfterDomSwap: (
     request: Pick<RouteActivationRequest, "activationId" | "path">,
     swap: Effect.Effect<void>,
-    afterSwap: Effect.Effect<void>,
+    afterSwap: Effect.Effect<unknown>,
   ) => Effect.Effect<RouteActivationOutcome>;
 }
 
@@ -112,7 +117,7 @@ export const makeRouteActivation = (
           });
           return outcome;
         }
-        return { _tag: "Committed", activationId, path } as const;
+        return { _tag: "Committed", activationId, path, match: Option.none<RouteMatch>() } as const;
       });
 
     return {
@@ -144,8 +149,19 @@ export const makeRouteActivation = (
             ...activationPayload(request),
             routePattern: match.value.route.path,
           });
+          return {
+            _tag: "Committed",
+            activationId: request.activationId,
+            path: request.path,
+            match,
+          };
         }
-        return { _tag: "Committed", activationId: request.activationId, path: request.path };
+        return {
+          _tag: "Committed",
+          activationId: request.activationId,
+          path: request.path,
+          match: Option.none<RouteMatch>(),
+        };
       }),
       commit: Effect.fn("RouteActivation.commit")(function* (request) {
         const outcome = yield* currentOrStale(request.activationId, request.path);
@@ -183,9 +199,10 @@ export const makeRouteActivation = (
         yield* swap;
         const afterDomSwap = yield* currentOrStale(request.activationId, request.path);
         if (afterDomSwap._tag === "DroppedStale") return afterDomSwap;
-        yield* afterSwap;
+        const scrollPayload = yield* afterSwap;
         yield* emitActivationTrace(config.emitTraceEvents, "scroll.apply", {
           ...activationPayload(request),
+          ...(typeof scrollPayload === "object" && scrollPayload !== null ? scrollPayload : {}),
         });
         yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
           ...activationPayload(request),

@@ -619,7 +619,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         const strategy = yield* Effect.service(ScrollStrategy).pipe(
           Effect.provide(strategyLayer ?? ScrollStrategy.Auto),
         );
-        yield* router.outletCoordination.applyScroll({ strategy });
+        return yield* router.outletCoordination.applyScroll({ strategy });
       }).pipe(
         Effect.catchCause((cause) =>
           ContractTrace.emit({
@@ -926,7 +926,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       };
       const activationOutcome = yield* routeActivation.activate(activationRequest);
       const matchOption =
-        activationOutcome._tag === "NotFound" ? Option.none() : yield* matcher.match(route.path);
+        activationOutcome._tag === "Committed" && Option.isSome(activationOutcome.match)
+          ? activationOutcome.match
+          : activationOutcome._tag === "NotFound"
+            ? Option.none()
+            : yield* matcher.match(route.path);
 
       // 404
       if (Option.isNone(matchOption)) {

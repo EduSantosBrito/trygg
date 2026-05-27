@@ -778,7 +778,13 @@ export const browserLayer: Layer.Layer<
       isPopstate: boolean;
     }) =>
       Effect.gen(function* () {
-        if (opts.strategy._tag === "None") return;
+        const payloadBase = {
+          strategy: opts.strategy._tag,
+          hash: opts.hash,
+          isPopstate: opts.isPopstate,
+          scrollKey: currentNavKey,
+        } as const;
+        if (opts.strategy._tag === "None") return { ...payloadBase, kind: "none" as const };
 
         // Defer until after DOM update — signal element swap runs in a forked
         // fiber (microtask). Without this, scrollTo fires before the new page
@@ -793,7 +799,7 @@ export const browserLayer: Layer.Layer<
           const el = yield* dom.getElementById(id);
           if (el !== null) {
             yield* scroll.scrollIntoView(el);
-            return;
+            return { ...payloadBase, kind: "hash" as const };
           }
         }
 
@@ -809,14 +815,26 @@ export const browserLayer: Layer.Layer<
               y: pos.y,
             });
             yield* scroll.scrollTo(pos.x, pos.y);
+            return { ...payloadBase, kind: "restore" as const, restored: true };
           }
-          return;
+          return { ...payloadBase, kind: "restore" as const, restored: false };
         }
 
         // New navigation: scroll to top
         yield* Debug.log({ event: "router.scroll.top" });
         yield* scroll.scrollTo(0, 0);
-      }).pipe(Effect.ignore);
+        return { ...payloadBase, kind: "top" as const };
+      }).pipe(
+        Effect.catchCause(() =>
+          Effect.succeed({
+            strategy: opts.strategy._tag,
+            hash: opts.hash,
+            isPopstate: opts.isPopstate,
+            scrollKey: currentNavKey,
+            kind: "ignoredError" as const,
+          }),
+        ),
+      );
 
     // Listen to browser popstate (back/forward) via EventTarget service
     // Lifecycle managed by scope — removed when layer scope closes
@@ -982,7 +1000,7 @@ export const browserLayer: Layer.Layer<
             const intent = yield* outletCoordination.takeScrollIntent;
             const navCtx = Option.isSome(intent) ? intent.value : yield* Ref.get(navContextRef);
             yield* Ref.set(navContextRef, navCtx);
-            yield* doApplyScroll({
+            return yield* doApplyScroll({
               strategy: opts.strategy,
               hash: navCtx.hash,
               isPopstate: navCtx.isPopstate,
@@ -1196,7 +1214,16 @@ export const testLayer = (
         outletCoordination: {
           prefetchState: outletCoordination.prefetchState,
           activatePrefetch: outletCoordination.activatePrefetch,
-          applyScroll: () => outletCoordination.takeScrollIntent.pipe(Effect.asVoid),
+          applyScroll: () =>
+            outletCoordination.takeScrollIntent.pipe(
+              Effect.as({
+                kind: "none",
+                strategy: "None",
+                hash: "",
+                isPopstate: false,
+                scrollKey: "test",
+              }),
+            ),
         },
         _saveScroll: Effect.void,
       };
