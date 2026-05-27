@@ -141,4 +141,4 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).provide([AppThemeDark, ApiClientLive]);
+}).pipe(Component.provide(AppThemeDark), Component.provide(ApiClientLive));

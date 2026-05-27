@@ -21,4 +21,4 @@ export default Component.gen(function* () {
       </button>
     </main>
   );
-}).provide(ThemeLive);
+}).pipe(Component.provide(ThemeLive));

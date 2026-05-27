@@ -25,14 +25,19 @@ The generated client uses same-origin `baseUrl: ""` by default. Provide `ApiClie
 ```ts
 import { ApiClient, ApiClientLive } from "trygg/api";
 
-const users = Resource.make(
-  () =>
-    Effect.gen(function* () {
-      const client = yield* ApiClient;
-      return yield* client.users.list();
-    }),
-  { key: "users.list" },
-).provide(ApiClientLive);
+const UsersPage = Component.gen(function* () {
+  const users = Resource.make(
+    () =>
+      Effect.gen(function* () {
+        const client = yield* ApiClient;
+        return yield* client.users.list();
+      }),
+    { key: "users.list" },
+  );
+
+  const state = yield* Resource.fetch(users);
+  return <UserList state={state} />;
+}).pipe(Component.provide(ApiClientLive));
 ```
 
 ### Required `export const Api`

@@ -168,8 +168,9 @@ const runScenario = Effect.scoped(
       );
     });
 
+    const context = yield* Effect.context<never>();
     const LazyResourcesPage = () =>
-      Effect.runPromise(
+      Effect.runPromiseWith(context)(
         Effect.gen(function* () {
           yield* Deferred.succeed(moduleRequested, void 0);
           yield* Deferred.await(releaseModule);

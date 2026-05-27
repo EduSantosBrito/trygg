@@ -287,6 +287,7 @@ export interface HtmlProps extends CommonProps, EventProps {
   readonly target?: string;
   readonly rel?: string;
   readonly download?: string | boolean;
+  readonly crossOrigin?: "anonymous" | "use-credentials";
 
   // Meta elements
   readonly content?: string;
@@ -305,6 +306,7 @@ export interface HtmlProps extends CommonProps, EventProps {
   readonly height?: string | number;
   readonly tabIndex?: number;
   readonly title?: string;
+  readonly dateTime?: string;
   readonly role?: string;
 
   // Document-level attributes

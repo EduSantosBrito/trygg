@@ -19,7 +19,7 @@ const incidents = Resource.make(
       return yield* client.incidents.list();
     }),
   { key: "incidents.list" },
-).provide(ApiClientLive);
+).pipe(Component.provide(ApiClientLive));
 ```
 
 ## Added

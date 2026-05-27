@@ -49,10 +49,6 @@ import {
 import { CurrentRouteQuery } from "./route.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
 
-const routeComponentWrapperIdentity = Symbol("trygg/router/OutletRenderer.component");
-const routeLayoutWrapperIdentity = Symbol("trygg/router/OutletRenderer.layout");
-const routeErrorWrapperIdentity = Symbol("trygg/router/OutletRenderer.error");
-
 export interface RouteRenderIdentity {
   readonly path: string;
 }
@@ -131,40 +127,48 @@ const isStaleRouteRender = (routeIdentity: RouteRenderIdentity | undefined) =>
 const wrapElementWithFiberRefs = (
   element: ElementType,
   wrapRun: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+  wrapperInputs: unknown,
 ): ElementType => {
   switch (element._tag) {
     case "Component":
       return Element.fromEffect(
         Effect.suspend(() =>
           wrapRun(element.run()).pipe(
-            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun, wrapperInputs)),
             unsafeEraseR,
           ),
         ),
         {
           key: element.key ?? undefined,
           identity: element.identity ?? element.run,
-          inputs: element.inputs,
+          inputs: { element: element.inputs, wrapper: wrapperInputs },
         },
       );
     case "Provide":
-      return provideElement(element.context, wrapElementWithFiberRefs(element.child, wrapRun));
+      return provideElement(
+        element.context,
+        wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
+      );
     case "Intrinsic":
       return Element.Intrinsic({
         tag: element.tag,
         props: element.props,
-        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+        children: element.children.map((child) =>
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
+        ),
         key: element.key,
       });
     case "Fragment":
       return Element.Fragment({
-        children: element.children.map((child) => wrapElementWithFiberRefs(child, wrapRun)),
+        children: element.children.map((child) =>
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
+        ),
       });
     case "Portal":
       return Element.Portal({
         target: element.target,
         children: mapChildInputElements(element.children, (child) =>
-          wrapElementWithFiberRefs(child, wrapRun),
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
         ),
       });
     case "KeyedList":
@@ -174,21 +178,21 @@ const wrapElementWithFiberRefs = (
         renderFn: (item, index) =>
           element
             .renderFn(item, index)
-            .pipe(Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun))),
+            .pipe(Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun, wrapperInputs))),
       });
     case "ErrorBoundaryElement":
       if (typeof element.fallback === "function") {
         const fallback = element.fallback;
         return Element.ErrorBoundaryElement({
-          child: wrapElementWithFiberRefs(element.child, wrapRun),
-          fallback: (cause) => wrapElementWithFiberRefs(fallback(cause), wrapRun),
+          child: wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
+          fallback: (cause) => wrapElementWithFiberRefs(fallback(cause), wrapRun, wrapperInputs),
           onError: element.onError,
         });
       }
 
       return Element.ErrorBoundaryElement({
-        child: wrapElementWithFiberRefs(element.child, wrapRun),
-        fallback: wrapElementWithFiberRefs(element.fallback, wrapRun),
+        child: wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
+        fallback: wrapElementWithFiberRefs(element.fallback, wrapRun, wrapperInputs),
         onError: element.onError,
       });
     default:
@@ -501,10 +505,19 @@ export function renderComponent(
 
         const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
-        return provideElement(capturedContext, wrapElementWithFiberRefs(element, withRouteContext));
+        const wrapperInputs = {
+          params,
+          query: decodedQuery,
+          routeIdentity,
+          wrappedIdentity: component,
+        };
+        return provideElement(
+          capturedContext,
+          wrapElementWithFiberRefs(element, withRouteContext, wrapperInputs),
+        );
       }).pipe(unsafeEraseR),
       {
-        identity: routeComponentWrapperIdentity,
+        identity: component,
         inputs: { params, query: decodedQuery, routeIdentity, wrappedIdentity: component },
       },
     );
@@ -557,13 +570,20 @@ export function renderLayout(
 
         const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
+        const wrapperInputs = {
+          child,
+          params,
+          query: decodedQuery,
+          routeIdentity,
+          wrappedIdentity: layout,
+        };
         return provideElement(
           capturedContext,
-          wrapElementWithFiberRefs(element, withLayoutContext),
+          wrapElementWithFiberRefs(element, withLayoutContext, wrapperInputs),
         );
       }).pipe(unsafeEraseR),
       {
-        identity: routeLayoutWrapperIdentity,
+        identity: layout,
         inputs: { child, params, query: decodedQuery, routeIdentity, wrappedIdentity: layout },
       },
     );
@@ -608,13 +628,14 @@ export function renderError(
           Effect.gen(function* () {
             const capturedContext = yield* Effect.context<unknown>();
             const element = yield* effect;
+            const wrapperInputs = { cause, path, wrappedIdentity: errorComp };
             return provideElement(
               capturedContext,
-              wrapElementWithFiberRefs(element, withErrorContext),
+              wrapElementWithFiberRefs(element, withErrorContext, wrapperInputs),
             );
           }).pipe(unsafeEraseR),
           {
-            identity: routeErrorWrapperIdentity,
+            identity: errorComp,
             inputs: { cause, path, wrappedIdentity: errorComp },
           },
         );

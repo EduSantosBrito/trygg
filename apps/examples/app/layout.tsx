@@ -117,4 +117,4 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).provide(ApiClientLive);
+}).pipe(Component.provide(ApiClientLive));

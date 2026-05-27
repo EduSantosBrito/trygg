@@ -6,7 +6,13 @@
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { Effect } from "effect";
-import { Component, Portal, Signal, type ComponentProps } from "trygg";
+import {
+  Component,
+  Portal,
+  Signal,
+  type ComponentProps,
+  type Element as TryggElement,
+} from "trygg";
 import type { Element as HastElement, Text as HastText, RootContent, Root as HastRoot } from "hast";
 
 import { getTheme, type Theme } from "../lib/theme";
@@ -307,7 +313,7 @@ export function hastChildToJsx(node: HastNode, key: number, options: HastRenderO
         const matches = isStringLiteral || isJsxText ? [] : [...text.matchAll(pattern)];
         if (matches.length > 0) {
           const prefix = options.tooltipIdPrefix ?? "code-tip";
-          const parts: Array<JSX.Element> = [];
+          const parts: Array<TryggElement> = [];
           let lastIndex = 0;
           let partIndex = 0;
           for (const m of matches) {

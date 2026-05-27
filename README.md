@@ -33,7 +33,7 @@ const Greeting = Component.gen(function* () {
   const theme = yield* Theme
   const name = yield* Signal.make("world")
   return <h1 style={{ color: theme.primary }}>Hello, {name}!</h1>
-}).provide(themeLayer)
+}).pipe(Component.provide(themeLayer))
 ```
 
 ## Features

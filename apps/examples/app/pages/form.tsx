@@ -164,6 +164,6 @@ const FormPage = Component.gen(function* () {
       )}
     </div>
   );
-}).provide(defaultFormTheme);
+}).pipe(Component.provide(defaultFormTheme));
 
 export default FormPage;

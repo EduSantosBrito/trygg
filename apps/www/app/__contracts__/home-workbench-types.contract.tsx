@@ -77,7 +77,7 @@ const users = Resource.make(
 const UsersPage = Component.gen(function* () {
   const state = yield* Resource.fetch(users);
   return <UserList state={state} />;
-}).provide(ApiClientLive);
+}).pipe(Component.provide(ApiClientLive));
 
 // ---------------------------------------------------------------------------
 // Type assertions — the tooltips in home.tsx claim these signatures.
@@ -133,7 +133,7 @@ type _UserListR = AssertTrue<
   >
 >;
 
-// `.provide(ApiClientLive)` should remove ApiClient from R.
+// `.pipe(Component.provide(ApiClientLive))` should remove ApiClient from R.
 type _UsersPageDoesNotRequireApiClient = AssertTrue<
   Types.Equals<
     typeof UsersPage extends Component.Type<infer _P, infer _E, infer R> ? R : never,

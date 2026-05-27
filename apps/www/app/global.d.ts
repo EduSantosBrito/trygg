@@ -7,6 +7,11 @@ declare module "*.md?raw" {
   export default content;
 }
 
+declare module "*.tsx?raw" {
+  const content: string;
+  export default content;
+}
+
 declare module "*.css";
 
 interface ImportMeta {

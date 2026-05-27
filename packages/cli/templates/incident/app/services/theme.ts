@@ -129,9 +129,9 @@ const make = (fallback: ThemeMode): Layer.Layer<AppTheme> =>
     AppTheme,
     Effect.gen(function* () {
       const initialPreference = yield* readStoredPreference;
-      const preference = Signal.makeSync<ThemePreference>(initialPreference);
+      const preference = yield* Signal.make<ThemePreference>(initialPreference);
       const initialMode = yield* resolveMode(initialPreference, fallback);
-      const mode = Signal.makeSync<ThemeMode>(initialMode);
+      const mode = yield* Signal.make<ThemeMode>(initialMode);
 
       const setPreference = (next: ThemePreference): Effect.Effect<void> =>
         Effect.gen(function* () {

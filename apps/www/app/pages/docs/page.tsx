@@ -1,6 +1,5 @@
 import { Component, Signal } from "trygg";
 import * as Router from "trygg/router";
-
 import { docsHeadings } from "../../content/headings";
 import { sidebarGroups } from "../../content/sidebar";
 
