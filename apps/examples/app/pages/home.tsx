@@ -23,8 +23,8 @@ const features = [
   {
     title: "Theme (DI)",
     path: "/theme",
-    description: "Dependency injection with Component.provide, swappable layers",
-    concepts: ["Context.Service", "Layer.succeed", "Component.provide", "Runtime switching"],
+    description: "Dependency injection with Component.provide and scoped signal stores",
+    concepts: ["Context.Service", "Layer.effect", "Component.provide", "Scoped state"],
   },
   {
     title: "Form Validation",

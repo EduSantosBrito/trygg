@@ -876,7 +876,6 @@ const loaderDefinition = (
   querySchema: undefined,
   renderStrategy: undefined,
   scrollStrategy: undefined,
-  layers: [],
 });
 
 describe("Outlet - Lazy loader (resolveComponent)", () => {

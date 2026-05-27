@@ -146,6 +146,8 @@ const ValidatedForm = Component.gen(function* () {
 
 For dependency injection, children `yield*` services and parents decide where to provide them. Each `.pipe(Component.provide(layer))` narrows the remaining `R`; by the time an app reaches `mount`, the root effect must have `R = never`.
 
+A provided component owns a mounted provider boundary. Trygg acquires that layer once when the provided component mounts, reuses the provider scope while the component key and layer identity stay stable, and finalizes the scope on unmount. If the component key changes or a different layer instance is provided, Trygg treats that as replacement: the old provider finalizes and the replacement boundary acquires a fresh scope. Keep interactive state inside scoped services/signals provided by a stable boundary instead of swapping provider layers during render.
+
 Complex trees often need multiple interdependent services. Define services with `Context.Tag`, build layers that depend on other layers with `Layer.provideMerge`, and let the type system enforce that every requirement is satisfied before `mount`:
 
 ```tsx

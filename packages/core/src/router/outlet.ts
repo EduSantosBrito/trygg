@@ -66,7 +66,7 @@ import {
   type RouteParams,
 } from "./types.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
-import { unsafeBuildContext, unsafeEraseR } from "../internal/unsafe.js";
+import { unsafeEraseR } from "../internal/unsafe.js";
 
 const outletRuntimeIdentity = Symbol("trygg/router/Outlet.runtime");
 const outletErrorBoundaryIdentity = Symbol("trygg/router/Outlet.error-boundary");
@@ -701,7 +701,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Sub-effects for processRoute (closures capturing outletEffect scope)
     // -------------------------------------------------------------------------
 
-    /** Resolve component + layouts, stack root-to-leaf, provide service layers. */
+    /** Resolve component + layouts and stack root-to-leaf. */
     const buildRouteElement = (
       match: RouteMatch,
       decodedParams: Record<string, unknown>,
@@ -800,16 +800,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         );
       });
 
-      const allLayers = [
-        ...match.route.ancestors.flatMap((a) => (a !== undefined ? a.definition.layers : [])),
-        ...match.route.definition.layers,
-      ];
-
-      return allLayers.length > 0
-        ? Effect.flatMap(unsafeBuildContext<unknown>(allLayers), (services) =>
-            Effect.provide(renderBase, services),
-          )
-        : renderBase;
+      return renderBase;
     };
 
     /** Wrap render effect with nearest-wins error boundary. */
