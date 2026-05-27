@@ -21,13 +21,14 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Result, Scope } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Result, Scope } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
 import { Element, text } from "../element.js";
 import * as Component from "../component.js";
+import * as ContractTrace from "../../contract/trace.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
 
@@ -154,6 +155,29 @@ describe("Signal.make ownership", () => {
     }),
   );
 
+  it.effect("should fail signal creation without an owning scope", () =>
+    Effect.gen(function* () {
+      // Test: should reject orphaned signal state when no Effect scope exists.
+      // Scope: verifies Signal.make cannot silently create module-lifetime state.
+      // Assertion: creation fails with SignalScopeError and the make operation.
+      const exit = yield* unsafeEraseR(
+        Signal.make("orphan").pipe(Effect.updateContext(Context.omit(Scope.Scope)), Effect.exit),
+      );
+
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.findErrorOption(exit.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) {
+          assert.instanceOf(error.value, Signal.SignalScopeError);
+          if (error.value instanceof Signal.SignalScopeError) {
+            assert.strictEqual(error.value.operation, "make");
+          }
+        }
+      }
+    }),
+  );
+
   scoped("should fail disposed signal access after owner scope closes", () =>
     Effect.gen(function* () {
       // Test: should fail user reads after signal owner disposal.
@@ -172,6 +196,28 @@ describe("Signal.make ownership", () => {
           assert.instanceOf(defect.success, Signal.SignalDisposedError);
         }
       }
+    }),
+  );
+
+  scoped("should trace signal disposal and disposed access", () =>
+    Effect.gen(function* () {
+      // Test: should emit lifecycle trace records for create, dispose, and stale access.
+      // Scope: verifies observability ICD events are produced, not just the error value.
+      // Assertion: ContractTrace records the signal event family in order for one signal.
+      const collector = yield* ContractTrace.createInMemoryCollector("signal-disposal");
+
+      yield* ContractTrace.withCollector(
+        Effect.gen(function* () {
+          const scope = yield* Scope.make();
+          const signal = yield* Signal.make("owned").pipe(Scope.provide(scope));
+          yield* Scope.close(scope, Exit.void);
+          yield* Signal.peek(signal).pipe(Effect.exit);
+        }),
+        collector,
+      );
+
+      const events = (yield* collector.snapshot).map((record) => record.event.event);
+      assert.deepStrictEqual(events, ["signal.create", "signal.dispose", "signal.disposed_access"]);
     }),
   );
 });
