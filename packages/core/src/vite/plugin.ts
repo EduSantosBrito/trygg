@@ -58,7 +58,10 @@ import {
 import {
   InvalidBuildOutputCombination,
   makeBuildArtifactPlanner,
+  makeGeneratedArtifactPlanner,
+  type BuildArtifactOperation,
   type BuildPlanDiagnostic,
+  type GeneratedArtifactPlan,
 } from "./build-artifact-planner.js";
 // BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
@@ -1557,6 +1560,12 @@ interface PluginFilesService {
   readonly regenerateGeneratedRouteTypes: (
     paths: PluginFilePaths,
   ) => Effect.Effect<void, PluginFileSystemError>;
+  readonly writeClientEntryFiles: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<void, PluginFileSystemError>;
+  readonly executeArtifactOperations: (
+    operations: ReadonlyArray<BuildArtifactOperation>,
+  ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeBuildEntryFiles: (
     paths: PluginFilePaths,
     options: { readonly output: Output; readonly platform: Platform },
@@ -1730,6 +1739,48 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
         writeGeneratedRouteTypes,
         regenerateGeneratedRouteTypes: (paths) =>
           writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
+        writeClientEntryFiles: (paths) =>
+          Effect.gen(function* () {
+            const entryPath = generatedEntryPath(paths);
+            const hasEntry = yield* pathExists(entryPath);
+            const routesFile = yield* routesFilePath(paths);
+
+            if (!hasEntry || routesFile !== undefined) {
+              yield* writeEntryFile(paths);
+            }
+
+            yield* writeGeneratedRouteTypes(paths);
+          }),
+        executeArtifactOperations: (operations) =>
+          Effect.forEach(
+            operations,
+            (operation) => {
+              switch (operation._tag) {
+                case "WriteFile":
+                  return writeFileSafe(operation.path, operation.contents);
+                case "RemoveFile":
+                  return pathExists(operation.path).pipe(
+                    Effect.flatMap((exists) =>
+                      exists
+                        ? fs.remove(operation.path).pipe(
+                            Effect.mapError(
+                              (cause) =>
+                                new PluginFileSystemError({
+                                  operation: "remove",
+                                  path: operation.path,
+                                  cause,
+                                }),
+                            ),
+                          )
+                        : Effect.void,
+                    ),
+                  );
+                case "RunNestedBuild":
+                  return Effect.void;
+              }
+            },
+            { discard: true },
+          ),
         writeBuildEntryFiles: (paths, options) =>
           Effect.gen(function* () {
             const entryPath = generatedEntryPath(paths);
@@ -2174,6 +2225,7 @@ export const makeBuildOutput = ({
   serverPlatform,
 }: BuildOutputDeps): BuildOutputService => {
   const planner = makeBuildArtifactPlanner({ failOnWarnings: false });
+  const generatedArtifactPlanner = makeGeneratedArtifactPlanner({ includeCleanupOperations: true });
   const emitDiagnostic = (diagnostic: BuildPlanDiagnostic) =>
     diagnostic._tag === "Warning" ? Effect.logWarning(diagnostic.message) : Effect.void;
   const validatePlan = (input: {
@@ -2190,6 +2242,35 @@ export const makeBuildOutput = ({
           PluginValidationError.invalidStructure(error.diagnostic.message, error.input.appDir),
         ),
       ),
+    );
+  const planArtifacts = (input: {
+    readonly output: Output;
+    readonly platform: Platform;
+    readonly hasApi: boolean;
+    readonly appDir: string;
+    readonly generatedDir: string;
+  }) =>
+    Effect.gen(function* () {
+      const validation = yield* validatePlan(input);
+      return yield* generatedArtifactPlanner.planArtifacts(validation).pipe(
+        Effect.mapError((error) =>
+          PluginValidationError.invalidStructure(
+            `Failed to plan build artifacts during ${error.operation}`,
+            input.appDir,
+          ),
+        ),
+      );
+    });
+  const hasOperation = (
+    plan: GeneratedArtifactPlan,
+    tag: BuildArtifactOperation["_tag"],
+    path: string,
+  ) =>
+    plan.operations.some(
+      (operation) =>
+        operation._tag === tag &&
+        "path" in operation &&
+        nodePath.resolve(operation.path) === nodePath.resolve(path),
     );
 
   return {
@@ -2208,8 +2289,11 @@ export const makeBuildOutput = ({
         }
 
         const hasApi = yield* files.appApiExists(paths);
-        yield* validatePlan({ appDir, generatedDir, output, platform, hasApi });
-        yield* files.writeBuildEntryFiles(paths, { output, platform });
+        const artifactPlan = yield* planArtifacts({ appDir, generatedDir, output, platform, hasApi });
+        yield* files.writeClientEntryFiles(paths);
+        yield* files.executeArtifactOperations(
+          artifactPlan.operations.filter((operation) => operation._tag !== "RunNestedBuild"),
+        );
       }),
     closeBundle: ({ appDir, generatedDir, config, output, platform }) =>
       config.command !== "build"
@@ -2217,9 +2301,9 @@ export const makeBuildOutput = ({
         : Effect.gen(function* () {
             const paths = { appDir, generatedDir };
             const hasApi = yield* files.appApiExists(paths);
-            yield* validatePlan({ appDir, generatedDir, output, platform, hasApi });
+            const artifactPlan = yield* planArtifacts({ appDir, generatedDir, output, platform, hasApi });
 
-            if (output === "static" && platform === "cloudflare") {
+            if (hasOperation(artifactPlan, "WriteFile", nodePath.join(generatedDir, "worker-entry.js"))) {
               const internalShellDir = nodePath.join(config.root, "dist", GENERATED_DIR);
               const internalShellPath = nodePath.join(internalShellDir, "index.html");
               const publicShellPath = nodePath.join(config.root, "dist", "index.html");
@@ -2260,7 +2344,10 @@ export const makeBuildOutput = ({
               return;
             }
 
-            if (output !== "server") {
+            const nestedBuild = artifactPlan.operations.find(
+              (operation) => operation._tag === "RunNestedBuild" && operation.name === "production-server",
+            );
+            if (nestedBuild === undefined) {
               return;
             }
 

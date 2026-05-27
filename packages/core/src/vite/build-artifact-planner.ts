@@ -12,6 +12,40 @@ import { Data, Effect, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 import type { Output, Platform } from "../config.js";
 
+const generatedPath = (generatedDir: string, fileName: string): string =>
+  `${generatedDir.replace(/\/$/, "")}/${fileName}`;
+
+const generateHtmlTemplate = (): string => `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script type="module" src="/.trygg/entry.tsx"></script>
+  </head>
+  <body></body>
+</html>`;
+
+const renderCloudflareStaticWorkerEntryModule = (): string =>
+  `export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+
+    if (pathname.includes(".") && !pathname.startsWith("/api/")) {
+      return env.ASSETS.fetch(request);
+    }
+
+    const assetResponse = await env.ASSETS.fetch(request);
+    if (assetResponse.status !== 404) {
+      return assetResponse;
+    }
+
+    return env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
+  },
+};
+`;
+
 export type BuildOutputMode = Output;
 export type BuildPlatform = Platform;
 
@@ -112,4 +146,99 @@ export class BuildArtifactPlanner extends Context.Service<
     configInput: BuildArtifactPlannerConfig,
   ): Layer.Layer<BuildArtifactPlanner> =>
     Layer.succeed(BuildArtifactPlanner, makeBuildArtifactPlanner(configInput));
+}
+
+export type BuildArtifactOperation =
+  | { readonly _tag: "WriteFile"; readonly path: string; readonly contents: string }
+  | { readonly _tag: "RemoveFile"; readonly path: string }
+  | { readonly _tag: "RunNestedBuild"; readonly name: string; readonly configFile: string };
+
+export interface GeneratedArtifactPlan {
+  readonly validation: BuildOutputValidationPlan;
+  readonly operations: ReadonlyArray<BuildArtifactOperation>;
+  readonly diagnostics: ReadonlyArray<BuildPlanDiagnostic>;
+}
+
+export class BuildArtifactPlanningError extends Data.TaggedError("BuildArtifactPlanningError")<{
+  readonly operation: string;
+  readonly cause: unknown;
+}> {}
+
+export const GeneratedArtifactPlannerConfigInput = Schema.Struct({
+  includeCleanupOperations: Schema.Boolean,
+});
+
+type GeneratedArtifactPlannerConfig = typeof GeneratedArtifactPlannerConfigInput.Type;
+
+export interface GeneratedArtifactPlannerShape {
+  readonly planArtifacts: (
+    validation: BuildOutputValidationPlan,
+  ) => Effect.Effect<GeneratedArtifactPlan, BuildArtifactPlanningError>;
+  readonly renderOperationSummary: (
+    plan: GeneratedArtifactPlan,
+  ) => Effect.Effect<ReadonlyArray<string>>;
+}
+
+export const makeGeneratedArtifactPlanner = (
+  configInput: GeneratedArtifactPlannerConfig,
+): GeneratedArtifactPlannerShape => {
+  const config = GeneratedArtifactPlannerConfigInput.make(configInput);
+
+  return {
+    planArtifacts: Effect.fn("GeneratedArtifactPlanner.planArtifacts")(function* (validation) {
+      const { generatedDir, output, platform } = validation.input;
+      const workerPath = generatedPath(generatedDir, "worker-entry.js");
+      const operations: Array<BuildArtifactOperation> = [
+        {
+          _tag: "WriteFile",
+          path: generatedPath(generatedDir, "index.html"),
+          contents: generateHtmlTemplate(),
+        },
+      ];
+
+      if (output === "static" && platform === "cloudflare") {
+        operations.push({
+          _tag: "WriteFile",
+          path: workerPath,
+          contents: renderCloudflareStaticWorkerEntryModule(),
+        });
+      } else if (config.includeCleanupOperations) {
+        operations.push({ _tag: "RemoveFile", path: workerPath });
+      }
+
+      if (output === "server") {
+        operations.push({
+          _tag: "RunNestedBuild",
+          name: "production-server",
+          configFile: generatedPath(generatedDir, "server-entry.ts"),
+        });
+      }
+
+      return { validation, operations, diagnostics: validation.diagnostics };
+    }),
+    renderOperationSummary: Effect.fn("GeneratedArtifactPlanner.renderOperationSummary")(
+      function* (plan) {
+        return plan.operations.map((operation) => {
+          switch (operation._tag) {
+            case "WriteFile":
+              return `write ${operation.path}`;
+            case "RemoveFile":
+              return `remove ${operation.path}`;
+            case "RunNestedBuild":
+              return `run ${operation.name} from ${operation.configFile}`;
+          }
+        });
+      },
+    ),
+  };
+};
+
+export class GeneratedArtifactPlanner extends Context.Service<
+  GeneratedArtifactPlanner,
+  GeneratedArtifactPlannerShape
+>()("trygg/GeneratedArtifactPlanner") {
+  static readonly layer = (
+    configInput: GeneratedArtifactPlannerConfig,
+  ): Layer.Layer<GeneratedArtifactPlanner> =>
+    Layer.succeed(GeneratedArtifactPlanner, makeGeneratedArtifactPlanner(configInput));
 }
