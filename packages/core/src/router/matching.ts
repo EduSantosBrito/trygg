@@ -26,6 +26,12 @@ import type { RoutesManifest } from "./routes.js";
 import type { RenderStrategy } from "./render-strategy.js";
 import type { ScrollStrategy } from "./scroll-strategy.js";
 import type { ComponentInput, RouteParams } from "./types.js";
+import {
+  compileRoutePathPattern,
+  compareCompiledRoutePathPatterns,
+  matchCompiledRoutePathPattern,
+  type CompiledRoutePathPattern,
+} from "./path-pattern.js";
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
@@ -137,9 +143,9 @@ export class RouteMatcher extends Context.Service<RouteMatcher, RouteMatcherShap
       RouteMatcher,
       Effect.gen(function* () {
         const resolved = yield* resolveRoutes(manifest);
-        const sorted = sortRoutesForMatching(resolved);
+        const matcher = yield* makeLinearMatcher(resolved);
         return {
-          match: (path: string) => Effect.succeed(linearMatch(sorted, path)),
+          match: matcher.match,
           routes: Effect.succeed(resolved),
         };
       }),
@@ -147,10 +153,16 @@ export class RouteMatcher extends Context.Service<RouteMatcher, RouteMatcherShap
 
   /** Create a RouteMatcher Layer from resolved routes using linear scan (for testing). */
   static readonly test = (routes: ReadonlyArray<ResolvedRoute>): LayerType<RouteMatcher> =>
-    Layer.succeed(RouteMatcher, {
-      match: (path: string) => Effect.succeed(linearMatch(routes, path)),
-      routes: Effect.succeed(routes),
-    });
+    Layer.effect(
+      RouteMatcher,
+      Effect.gen(function* () {
+        const matcher = yield* makeLinearMatcher(routes);
+        return {
+          match: matcher.match,
+          routes: Effect.succeed(routes),
+        };
+      }),
+    );
 }
 
 // =============================================================================
@@ -234,143 +246,53 @@ const resolvePath = (path: string | typeof IndexMarker, parentPath: string): str
 };
 
 // =============================================================================
-// Segment Parsing
+// Path Pattern Matching
 // =============================================================================
 
-/** @internal */
-interface PathSegment {
-  readonly type: "static" | "param" | "wildcard" | "catchAllRequired";
-  readonly value: string;
+interface CompiledRouteMatcherEntry {
+  readonly route: ResolvedRoute;
+  readonly pattern: CompiledRoutePathPattern;
 }
 
-/** @internal */
-const parsePattern = (pattern: string): { segments: PathSegment[]; paramNames: string[] } => {
-  const segments: PathSegment[] = [];
-  const paramNames: string[] = [];
-
-  const parts = pattern
-    .replace(/^\/|\/$/g, "")
-    .split("/")
-    .filter(Boolean);
-
-  for (const part of parts) {
-    if (part.startsWith(":") && part.endsWith("*")) {
-      const name = part.slice(1, -1);
-      segments.push({ type: "wildcard", value: name });
-      paramNames.push(name);
-    } else if (part.startsWith(":") && part.endsWith("+")) {
-      const name = part.slice(1, -1);
-      segments.push({ type: "catchAllRequired", value: name });
-      paramNames.push(name);
-    } else if (part.startsWith(":")) {
-      const name = part.slice(1);
-      segments.push({ type: "param", value: name });
-      paramNames.push(name);
-    } else {
-      segments.push({ type: "static", value: part });
-    }
-  }
-
-  return { segments, paramNames };
-};
-
-/** @internal */
-const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
-  let score = 0;
-  for (const segment of segments) {
-    if (segment.type === "static") {
-      score += 3;
-    } else if (segment.type === "param") {
-      score += 2;
-    } else if (segment.type === "catchAllRequired") {
-      score += 1.5;
-    } else if (segment.type === "wildcard") {
-      score += 1;
-    }
-  }
-  score += segments.length * 0.1;
-  return score;
-};
-
-/** @internal */
-const sortRoutesForMatching = (
+const compileRoutesForMatching = (
   routes: ReadonlyArray<ResolvedRoute>,
-): ReadonlyArray<ResolvedRoute> =>
-  [...routes].sort((a, b) => {
-    const aSegments = parsePattern(a.path).segments;
-    const bSegments = parsePattern(b.path).segments;
-    if (aSegments.length !== bSegments.length) {
-      return bSegments.length - aSegments.length;
-    }
-    return scoreRoute(bSegments) - scoreRoute(aSegments);
-  });
+): Effect.Effect<ReadonlyArray<CompiledRouteMatcherEntry>> =>
+  Effect.forEach(routes, (route) =>
+    Effect.map(compileRoutePathPattern(route.path), (pattern) => ({ route, pattern })).pipe(
+      Effect.orDie,
+    ),
+  );
 
-/**
- * Linear scan match function for testing.
- * @internal
- */
-const linearMatch = (
-  routes: ReadonlyArray<ResolvedRoute>,
+const sortCompiledRoutesForMatching = (
+  routes: ReadonlyArray<CompiledRouteMatcherEntry>,
+): ReadonlyArray<CompiledRouteMatcherEntry> =>
+  [...routes].sort((left, right) =>
+    compareCompiledRoutePathPatterns(left.pattern, right.pattern),
+  );
+
+const linearMatchCompiled = (
+  routes: ReadonlyArray<CompiledRouteMatcherEntry>,
   path: string,
 ): Option.Option<RouteMatch> => {
-  const normalizedPath = path.split("?")[0] ?? path;
-  const pathParts = normalizedPath
-    .replace(/^\/|\/$/g, "")
-    .split("/")
-    .filter(Boolean);
-
   for (const route of routes) {
-    const { segments } = parsePattern(route.path);
-    const params: RouteParams = {};
-    let matched = true;
-
-    if (segments.length === 0 && pathParts.length === 0) {
-      return Option.some({ route, params });
-    }
-
-    let pathIdx = 0;
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      if (seg === undefined) {
-        matched = false;
-        break;
-      }
-
-      if (seg.type === "static") {
-        if (pathParts[pathIdx] !== seg.value) {
-          matched = false;
-          break;
-        }
-        pathIdx++;
-      } else if (seg.type === "param") {
-        const part = pathParts[pathIdx];
-        if (part === undefined) {
-          matched = false;
-          break;
-        }
-        params[seg.value] = part;
-        pathIdx++;
-      } else if (seg.type === "wildcard") {
-        params[seg.value] = pathParts.slice(pathIdx).join("/");
-        pathIdx = pathParts.length;
-      } else if (seg.type === "catchAllRequired") {
-        const rest = pathParts.slice(pathIdx).join("/");
-        if (rest === "") {
-          matched = false;
-          break;
-        }
-        params[seg.value] = rest;
-        pathIdx = pathParts.length;
-      }
-    }
-
-    if (matched && pathIdx === pathParts.length) {
-      return Option.some({ route, params });
+    const match = matchCompiledRoutePathPattern(route.pattern, path);
+    if (Option.isSome(match)) {
+      return Option.some({ route: route.route, params: match.value.params });
     }
   }
 
   return Option.none();
 };
+
+const makeLinearMatcher = (
+  routes: ReadonlyArray<ResolvedRoute>,
+): Effect.Effect<{ readonly match: (path: string) => Effect.Effect<Option.Option<RouteMatch>> }> =>
+  Effect.map(compileRoutesForMatching(routes), (compiled) => {
+    const sorted = sortCompiledRoutesForMatching(compiled);
+    return {
+      match: (path: string) => Effect.succeed(linearMatchCompiled(sorted, path)),
+    };
+  });
 
 // =============================================================================
 // Middleware Collection & Execution
@@ -714,10 +636,11 @@ export interface SyncMatcher {
  * @since 1.0.0
  */
 export const createMatcher = (manifest: RoutesManifest): Effect.Effect<SyncMatcher> =>
-  Effect.map(resolveRoutes(manifest), (resolved) => {
-    const sorted = sortRoutesForMatching(resolved);
+  Effect.gen(function* () {
+    const resolved = yield* resolveRoutes(manifest);
+    const compiled = sortCompiledRoutesForMatching(yield* compileRoutesForMatching(resolved));
     return {
-      match: (path) => linearMatch(sorted, path),
+      match: (path) => linearMatchCompiled(compiled, path),
       routes: resolved,
     };
   });
