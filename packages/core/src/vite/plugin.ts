@@ -55,6 +55,11 @@ import {
   PluginBootstrapError as PluginBootstrapErrorImpl,
   PluginFileSystemError as PluginFileSystemErrorImpl,
 } from "./errors.js";
+import {
+  InvalidBuildOutputCombination,
+  makeBuildArtifactPlanner,
+  type BuildPlanDiagnostic,
+} from "./build-artifact-planner.js";
 // BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
 // =============================================================================
@@ -2136,7 +2141,7 @@ interface BuildOutputService {
   ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
   readonly closeBundle: (
     input: BuildOutputCloseInput,
-  ) => Effect.Effect<void, PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
 }
 
 interface BuildOutputDeps {
@@ -2167,102 +2172,110 @@ export const makeBuildOutput = ({
   fileSystem,
   files,
   serverPlatform,
-}: BuildOutputDeps): BuildOutputService => ({
-  buildStart: ({ appDir, generatedDir, config, output, platform }) =>
-    Effect.gen(function* () {
-      const paths = { appDir, generatedDir };
-      const apiPath = files.appApiPath(paths);
+}: BuildOutputDeps): BuildOutputService => {
+  const planner = makeBuildArtifactPlanner({ failOnWarnings: false });
+  const emitDiagnostic = (diagnostic: BuildPlanDiagnostic) =>
+    diagnostic._tag === "Warning" ? Effect.logWarning(diagnostic.message) : Effect.void;
+  const validatePlan = (input: {
+    readonly output: Output;
+    readonly platform: Platform;
+    readonly hasApi: boolean;
+    readonly appDir: string;
+    readonly generatedDir: string;
+  }) =>
+    planner.validateOutput(input).pipe(
+      Effect.tap((plan) => Effect.forEach(plan.diagnostics, emitDiagnostic, { discard: true })),
+      Effect.catchTag("InvalidBuildOutputCombination", (error: InvalidBuildOutputCombination) =>
+        Effect.fail(
+          PluginValidationError.invalidStructure(error.diagnostic.message, error.input.appDir),
+        ),
+      ),
+    );
 
-      yield* validateApiPlatform(apiPath, platform).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.tapError(logApiValidationError),
-      );
+  return {
+    buildStart: ({ appDir, generatedDir, config, output, platform }) =>
+      Effect.gen(function* () {
+        const paths = { appDir, generatedDir };
+        const apiPath = files.appApiPath(paths);
 
-      if (config.command !== "build") {
-        return;
-      }
-
-      if (output === "server" && platform === "cloudflare") {
-        return yield* PluginValidationError.invalidStructure(
-          'Cloudflare server output is not supported yet. Use platform: "node" or platform: "bun" for output: "server".',
-          appDir,
+        yield* validateApiPlatform(apiPath, platform).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.tapError(logApiValidationError),
         );
-      }
 
-      yield* files.writeBuildEntryFiles(paths, { output, platform });
+        if (config.command !== "build") {
+          return;
+        }
 
-      const hasApi = yield* files.appApiExists(paths);
-      if (hasApi && output === "static" && platform === "cloudflare") {
-        return yield* PluginValidationError.invalidStructure(
-          'app/api.ts is not supported with platform: "cloudflare" and output: "static". Use output: "server" for API routes.',
-          apiPath,
-        );
-      }
+        const hasApi = yield* files.appApiExists(paths);
+        yield* validatePlan({ appDir, generatedDir, output, platform, hasApi });
+        yield* files.writeBuildEntryFiles(paths, { output, platform });
+      }),
+    closeBundle: ({ appDir, generatedDir, config, output, platform }) =>
+      config.command !== "build"
+        ? Effect.void
+        : Effect.gen(function* () {
+            const paths = { appDir, generatedDir };
+            const hasApi = yield* files.appApiExists(paths);
+            yield* validatePlan({ appDir, generatedDir, output, platform, hasApi });
 
-      if (hasApi && output === "static") {
-        yield* Effect.logWarning(
-          '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
-        );
-      }
-    }),
-  closeBundle: ({ appDir, generatedDir, config, output, platform }) =>
-    config.command !== "build"
-      ? Effect.void
-      : output === "static" && platform === "cloudflare"
-        ? Effect.gen(function* () {
-            const internalShellDir = nodePath.join(config.root, "dist", GENERATED_DIR);
-            const internalShellPath = nodePath.join(internalShellDir, "index.html");
-            const publicShellPath = nodePath.join(config.root, "dist", "index.html");
-            const shell = yield* fileSystem.readFileString(internalShellPath).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new PluginFileSystemError({
-                    operation: "read",
-                    path: internalShellPath,
-                    cause,
-                  }),
-              ),
-            );
-
-            yield* fileSystem.writeFileString(publicShellPath, shell).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new PluginFileSystemError({
-                    operation: "write",
-                    path: publicShellPath,
-                    cause,
-                  }),
-              ),
-            );
-            yield* removeFileIfExists(internalShellPath).pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-            );
-            yield* fileSystem.remove(internalShellDir, { recursive: true }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new PluginFileSystemError({
-                    operation: "remove",
-                    path: internalShellDir,
-                    cause,
-                  }),
-              ),
-            );
-          })
-        : output !== "server"
-          ? Effect.void
-          : Effect.gen(function* () {
-              const paths = { appDir, generatedDir };
-              const serverEntryPath = yield* files
-                .writeProductionServerEntry(paths)
-                .pipe(Effect.provideService(ServerPlatform, serverPlatform));
-
-              yield* Effect.logInfo("Building production server...");
-              yield* buildServer(serverEntryPath, config);
-              yield* Effect.logInfo("Server build complete").pipe(
-                Effect.annotateLogs("style", "success"),
+            if (output === "static" && platform === "cloudflare") {
+              const internalShellDir = nodePath.join(config.root, "dist", GENERATED_DIR);
+              const internalShellPath = nodePath.join(internalShellDir, "index.html");
+              const publicShellPath = nodePath.join(config.root, "dist", "index.html");
+              const shell = yield* fileSystem.readFileString(internalShellPath).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new PluginFileSystemError({
+                      operation: "read",
+                      path: internalShellPath,
+                      cause,
+                    }),
+                ),
               );
-            }),
-});
+
+              yield* fileSystem.writeFileString(publicShellPath, shell).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new PluginFileSystemError({
+                      operation: "write",
+                      path: publicShellPath,
+                      cause,
+                    }),
+                ),
+              );
+              yield* removeFileIfExists(internalShellPath).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+              );
+              yield* fileSystem.remove(internalShellDir, { recursive: true }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new PluginFileSystemError({
+                      operation: "remove",
+                      path: internalShellDir,
+                      cause,
+                    }),
+                ),
+              );
+              return;
+            }
+
+            if (output !== "server") {
+              return;
+            }
+
+            const serverEntryPath = yield* files
+              .writeProductionServerEntry(paths)
+              .pipe(Effect.provideService(ServerPlatform, serverPlatform));
+
+            yield* Effect.logInfo("Building production server...");
+            yield* buildServer(serverEntryPath, config);
+            yield* Effect.logInfo("Server build complete").pipe(
+              Effect.annotateLogs("style", "success"),
+            );
+          }),
+  };
+};
 
 const viteServerBuild = (
   serverEntryPath: string,
