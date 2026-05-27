@@ -129,6 +129,21 @@ export {
 } from "./matching.js";
 export type { ResolvedRoute, RouteMatch, RouteMatcherShape, SyncMatcher } from "./matching.js";
 
+// Route Path Pattern
+export {
+  RoutePathPattern,
+  compileRoutePathPattern,
+  compareCompiledRoutePathPatterns,
+  matchCompiledRoutePathPattern,
+  InvalidRoutePathPattern,
+  RoutePathPatternConfigInput,
+} from "./path-pattern.js";
+export type {
+  RoutePathSegment,
+  CompiledRoutePathPattern,
+  RoutePathPatternMatch,
+} from "./path-pattern.js";
+
 // Route Builder
 export {
   make as routeMake,

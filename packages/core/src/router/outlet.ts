@@ -49,6 +49,12 @@ import { get as getRouter, CurrentOutletChild } from "./service.js";
 import { runPrefetch } from "./prefetch.js";
 import { parsePath } from "./utils.js";
 import {
+  compileRoutePathPattern,
+  compareCompiledRoutePathPatterns,
+  type CompiledRoutePathPattern,
+  type RoutePathSegment,
+} from "./path-pattern.js";
+import {
   BoundaryResolver,
   AsyncLoader,
   renderComponent,
@@ -77,16 +83,9 @@ const outletLazyLeafIdentity = Symbol("trygg/router/Outlet.lazy-leaf");
 // =============================================================================
 
 /** @internal */
-interface PathSegment {
-  readonly type: "static" | "param" | "wildcard" | "catchAllRequired";
-  readonly value: string;
-}
-
-/** @internal */
 interface CompiledRoute {
   readonly resolved: ResolvedRoute;
-  readonly segments: ReadonlyArray<PathSegment>;
-  readonly score: number;
+  readonly pattern: CompiledRoutePathPattern;
 }
 
 /** @internal */
@@ -104,29 +103,6 @@ interface TrieMatchResult {
 }
 
 /** @internal */
-const parsePattern = (pattern: string): ReadonlyArray<PathSegment> => {
-  const segments: Array<PathSegment> = [];
-  const parts = pattern
-    .replace(/^\/|\/$/g, "")
-    .split("/")
-    .filter(Boolean);
-
-  for (const part of parts) {
-    if (part.startsWith(":") && part.endsWith("*")) {
-      segments.push({ type: "wildcard", value: part.slice(1, -1) });
-    } else if (part.startsWith(":") && part.endsWith("+")) {
-      segments.push({ type: "catchAllRequired", value: part.slice(1, -1) });
-    } else if (part.startsWith(":")) {
-      segments.push({ type: "param", value: part.slice(1) });
-    } else {
-      segments.push({ type: "static", value: part });
-    }
-  }
-
-  return segments;
-};
-
-/** @internal */
 const createTrieNode = (): TrieNode => ({
   staticChildren: new Map(),
   paramChild: undefined,
@@ -135,43 +111,28 @@ const createTrieNode = (): TrieNode => ({
 });
 
 /** @internal */
-const scoreRoute = (segments: ReadonlyArray<PathSegment>): number => {
-  let score = 0;
-  for (const segment of segments) {
-    if (segment.type === "static") {
-      score += 3;
-    } else if (segment.type === "param") {
-      score += 2;
-    } else if (segment.type === "catchAllRequired") {
-      score += 1.5;
-    } else if (segment.type === "wildcard") {
-      score += 1;
-    }
-  }
-  score += segments.length * 0.1;
-  return score;
-};
+const segmentName = (segment: Extract<RoutePathSegment, { readonly _tag: "Param" | "Wildcard" | "CatchAllRequired" }>): string => segment.name;
 
 /** @internal */
 const insertIntoTrie = (root: TrieNode, route: CompiledRoute): void => {
   let current = root;
 
-  for (const segment of route.segments) {
-    if (segment.type === "static") {
+  for (const segment of route.pattern.segments) {
+    if (segment._tag === "Static") {
       let child = current.staticChildren.get(segment.value);
       if (child === undefined) {
         child = createTrieNode();
         current.staticChildren.set(segment.value, child);
       }
       current = child;
-    } else if (segment.type === "param") {
+    } else if (segment._tag === "Param") {
       if (current.paramChild === undefined) {
-        current.paramChild = { node: createTrieNode(), name: segment.value };
+        current.paramChild = { node: createTrieNode(), name: segmentName(segment) };
       }
       current = current.paramChild.node;
-    } else if (segment.type === "wildcard" || segment.type === "catchAllRequired") {
+    } else if (segment._tag === "Wildcard" || segment._tag === "CatchAllRequired") {
       if (current.wildcardChild === undefined) {
-        current.wildcardChild = { node: createTrieNode(), name: segment.value };
+        current.wildcardChild = { node: createTrieNode(), name: segmentName(segment) };
       }
       current = current.wildcardChild.node;
       break;
@@ -192,11 +153,11 @@ const walkTrie = (
 
   if (pathIndex >= pathParts.length) {
     for (const route of node.routes) {
-      const lastSegment = route.segments[route.segments.length - 1];
+      const lastSegment = route.pattern.segments[route.pattern.segments.length - 1];
       if (
-        lastSegment?.type !== "wildcard" &&
-        lastSegment?.type !== "catchAllRequired" &&
-        route.segments.length === pathIndex
+        lastSegment?._tag !== "Wildcard" &&
+        lastSegment?._tag !== "CatchAllRequired" &&
+        route.pattern.segments.length === pathIndex
       ) {
         results.push({ route, params: { ...params } });
       }
@@ -204,8 +165,8 @@ const walkTrie = (
     if (node.wildcardChild !== undefined) {
       const newParams = { ...params, [node.wildcardChild.name]: "" };
       for (const route of node.wildcardChild.node.routes) {
-        const lastSeg = route.segments[route.segments.length - 1];
-        if (lastSeg?.type === "wildcard") {
+        const lastSeg = route.pattern.segments[route.pattern.segments.length - 1];
+        if (lastSeg?._tag === "Wildcard") {
           results.push({ route, params: { ...newParams } });
         }
       }
@@ -230,8 +191,8 @@ const walkTrie = (
     const rest = pathParts.slice(pathIndex).join("/");
     const newParams = { ...params, [node.wildcardChild.name]: rest };
     for (const route of node.wildcardChild.node.routes) {
-      const lastSeg = route.segments[route.segments.length - 1];
-      if (lastSeg?.type !== "catchAllRequired" || rest !== "") {
+      const lastSeg = route.pattern.segments[route.pattern.segments.length - 1];
+      if (lastSeg?._tag !== "CatchAllRequired" || rest !== "") {
         results.push({ route, params: { ...newParams } });
       }
     }
@@ -243,18 +204,18 @@ const walkTrie = (
 /** @internal */
 export const buildTrieMatcher = (
   resolved: ReadonlyArray<ResolvedRoute>,
-): ((path: string) => Option.Option<RouteMatch>) => {
-  const compiled = resolved.map((route): CompiledRoute => {
-    const segments = parsePattern(route.path);
-    return { resolved: route, segments, score: scoreRoute(segments) };
-  });
+): Effect.Effect<(path: string) => Option.Option<RouteMatch>> =>
+  Effect.gen(function* () {
+    const compiled = yield* Effect.forEach(resolved, (route) =>
+      Effect.map(compileRoutePathPattern(route.path), (pattern): CompiledRoute => ({
+        resolved: route,
+        pattern,
+      })).pipe(Effect.orDie),
+    );
 
-  const sorted = [...compiled].sort((a, b) => {
-    if (a.segments.length !== b.segments.length) {
-      return b.segments.length - a.segments.length;
-    }
-    return b.score - a.score;
-  });
+    const sorted = [...compiled].sort((a, b) =>
+      compareCompiledRoutePathPatterns(a.pattern, b.pattern),
+    );
 
   const root = createTrieNode();
   for (const route of sorted) {
@@ -271,19 +232,16 @@ export const buildTrieMatcher = (
     const matches = walkTrie(root, pathParts, 0, {});
     if (matches.length === 0) return Option.none();
 
-    const sortedMatches = [...matches].sort((a, b) => {
-      if (a.route.segments.length !== b.route.segments.length) {
-        return b.route.segments.length - a.route.segments.length;
-      }
-      return b.route.score - a.route.score;
-    });
+    const sortedMatches = [...matches].sort((a, b) =>
+      compareCompiledRoutePathPatterns(a.route.pattern, b.route.pattern),
+    );
 
     const best = sortedMatches[0];
     if (best === undefined) return Option.none();
 
     return Option.some({ route: best.route.resolved, params: best.params });
   };
-};
+});
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -581,7 +539,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
     if (Option.isNone(cachedMatcher) || manifestChanged) {
       const resolved = yield* resolveRoutes(manifest);
-      const matchFn = buildTrieMatcher(resolved);
+      const matchFn = yield* buildTrieMatcher(resolved);
       const shape: RouteMatcherShape = {
         match: (path) => Effect.succeed(matchFn(path)),
         routes: Effect.succeed(resolved),
