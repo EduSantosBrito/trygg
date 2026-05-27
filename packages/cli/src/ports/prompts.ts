@@ -4,35 +4,53 @@
  * Effect-based wrapper for @clack/prompts
  * @since 1.0.0
  */
-import { Data, Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // === Error Types ===
 
-export class PromptCancelledError extends Data.TaggedError("PromptCancelledError")<{
-  readonly message: string;
-}> {
+export class PromptCancelledError extends Schema.TaggedErrorClass<PromptCancelledError>()(
+  "PromptCancelledError",
+  {
+    message: Schema.String,
+  },
+) {
   static readonly default = new PromptCancelledError({ message: "Prompt cancelled" });
 }
 
-export class InvalidProjectNameError extends Data.TaggedError("InvalidProjectNameError")<{
-  readonly name: string;
-}> {}
+export class InvalidProjectNameError extends Schema.TaggedErrorClass<InvalidProjectNameError>()(
+  "InvalidProjectNameError",
+  {
+    name: Schema.String,
+  },
+) {}
 
-export class InvalidTemplateError extends Data.TaggedError("InvalidTemplateError")<{
-  readonly template: string;
-}> {}
+export class InvalidTemplateError extends Schema.TaggedErrorClass<InvalidTemplateError>()(
+  "InvalidTemplateError",
+  {
+    template: Schema.String,
+  },
+) {}
 
-export class TemplateNotFoundError extends Data.TaggedError("TemplateNotFoundError")<{
-  readonly template: string;
-  readonly path: string;
-}> {}
+export class TemplateNotFoundError extends Schema.TaggedErrorClass<TemplateNotFoundError>()(
+  "TemplateNotFoundError",
+  {
+    template: Schema.String,
+    path: Schema.String,
+  },
+) {}
 
-export class DirectoryExistsError extends Data.TaggedError("DirectoryExistsError")<{
-  readonly path: string;
-}> {}
+export class DirectoryExistsError extends Schema.TaggedErrorClass<DirectoryExistsError>()(
+  "DirectoryExistsError",
+  {
+    path: Schema.String,
+  },
+) {}
 
-export class InstallFailedError extends Data.TaggedError("InstallFailedError")<{}> {}
+export class InstallFailedError extends Schema.TaggedErrorClass<InstallFailedError>()(
+  "InstallFailedError",
+  {},
+) {}
 
 // === Prompt Option Types ===
 
@@ -43,13 +61,13 @@ export interface TextOptions {
   readonly validate?: (value: string) => string | undefined;
 }
 
-export interface SelectOption<T> {
+export interface SelectOption<T extends string> {
   readonly value: T;
   readonly label: string;
   readonly hint?: string;
 }
 
-export interface SelectOptions<T> {
+export interface SelectOptions<T extends string> {
   readonly message: string;
   readonly options: ReadonlyArray<SelectOption<T>>;
   readonly initialValue?: T;
@@ -64,8 +82,19 @@ export interface ConfirmOptions {
 
 export interface PromptsService {
   readonly text: (options: TextOptions) => Effect.Effect<string, PromptCancelledError>;
-  readonly select: <T>(options: SelectOptions<T>) => Effect.Effect<T, PromptCancelledError>;
+  readonly select: <T extends string>(
+    options: SelectOptions<T>,
+  ) => Effect.Effect<T, PromptCancelledError>;
   readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
 }
 
-export class Prompts extends Context.Service<Prompts, PromptsService>()("@trygg/Prompts") {}
+export class Prompts extends Context.Service<
+  Prompts,
+  {
+    readonly text: (options: TextOptions) => Effect.Effect<string, PromptCancelledError>;
+    readonly select: <T extends string>(
+      options: SelectOptions<T>,
+    ) => Effect.Effect<T, PromptCancelledError>;
+    readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
+  }
+>()("trygg/Prompts") {}

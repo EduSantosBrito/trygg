@@ -6,88 +6,134 @@
  * Rules:
  * - Every function MUST have a SAFETY comment explaining the invariant
  * - Runtime-effectful operations use Debug.log for observability
- * - This is the ONLY file where `as` casts are permitted
+ * - Callers enter through named helpers instead of inline assertions
  */
-import { Effect, Layer, Context, Scope } from "effect";
+import { Context, Data, Effect, Layer, Predicate, Scope } from "effect";
 import * as Match from "effect/Match";
 import * as Debug from "../debug/debug.js";
 import type { Component } from "../primitives/component.js";
-import type { Element } from "../primitives/element.js";
-import type { Signal } from "../primitives/signal.js";
+import type { Element, ElementWithRequirements } from "../primitives/element.js";
 import type { ResourceState } from "../primitives/resource.js";
+import type { Signal } from "../primitives/signal.js";
+
+type KeyedListElement = Extract<Element, { readonly _tag: "KeyedList" }>;
+type ComponentElement = Extract<Element, { readonly _tag: "Component" }>;
+type ComponentCallProps<Props> = [Props] extends [never] ? {} : Props;
+
+const KeyedListData = Data.TaggedClass("KeyedList")<{
+  readonly source: unknown;
+  readonly renderFn: unknown;
+  readonly keyFn: unknown;
+}>;
+
+const isComponentElement = (element: Element): element is ComponentElement =>
+  Predicate.isTagged(element, "Component");
 
 // =============================================================================
 // Layer Merging
 // =============================================================================
 
 /**
- * Merge heterogeneous layers stored as Layer.Any[].
+ * Merge heterogeneous layers stored in an array.
  *
- * SAFETY: Layer.mergeAll at runtime merges Context maps regardless of types.
- * Type-level tracking was erased when layers entered Array<Layer.Any>.
- * Callers guarantee correctness via Component.provide() type signatures
- * which validate each layer individually before accumulation.
+ * SAFETY: Layer.merge at runtime merges Context maps regardless of output types.
+ * Type-level tracking was erased when layers entered storage. Callers guarantee
+ * correctness via Component.provide() type signatures which validate each layer
+ * individually before accumulation.
  */
-export const unsafeMergeLayers = (
-  layers: ReadonlyArray<Layer.Any>,
-): Effect.Effect<Layer.Any, never, never> =>
-  Effect.gen(function* () {
-    yield* Debug.log({
-      event: "unsafe.mergeLayers",
-      layer_count: layers.length,
-    });
-    if (layers.length === 0) return Layer.empty;
-    const [first, second, ...rest] = layers;
-    if (first === undefined) return Layer.empty;
-    if (second === undefined) return first;
-    const mergeAll = Layer.mergeAll as (...ls: ReadonlyArray<Layer.Any>) => Layer.Any;
-    return mergeAll(first, second, ...rest);
+export const unsafeMergeLayers: (
+  layers: ReadonlyArray<Layer.Layer<never, unknown, never>>,
+) => Effect.Effect<Layer.Layer<never, unknown, never>, never, never> = Effect.fn(
+  "unsafe.mergeLayers",
+)(function* (layers: ReadonlyArray<Layer.Layer<never, unknown, never>>) {
+  yield* Debug.log({
+    event: "unsafe.mergeLayers",
+    layer_count: layers.length,
   });
+
+  const [first, second, ...rest] = layers;
+  if (first === undefined) return Layer.empty;
+  if (second === undefined) return first;
+
+  let merged = Layer.merge(first, second);
+  for (const layer of rest) {
+    merged = Layer.merge(merged, layer);
+  }
+  return merged;
+});
 
 // =============================================================================
 // Context Extraction
 // =============================================================================
 
+const unsafeBuildContextImpl = Effect.fn("unsafe.buildContext")(function* (
+  layers: ReadonlyArray<Layer.Layer<never, unknown, never>>,
+) {
+  yield* Debug.log({
+    event: "unsafe.buildContext",
+    layer_count: layers.length,
+  });
+
+  if (layers.length === 0) {
+    return Context.makeUnsafe<never>(new Map());
+  }
+
+  const merged = yield* unsafeMergeLayers(layers);
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope;
+      return yield* Layer.buildWithScope(merged, scope);
+    }),
+  );
+});
+
 /**
  * Build a context from heterogeneous layers.
  *
- * SAFETY: Layers were validated at .provide() call sites.
- * This function is the runtime resolution of those typed promises.
- * The generic A is a phantom representing the accumulated service types.
+ * SAFETY: Layers were validated at .provide() call sites. This function is the
+ * runtime resolution of those typed promises. The generic A is a phantom
+ * representing the accumulated service types.
  */
-export const unsafeBuildContext = <A>(
-  layers: ReadonlyArray<Layer.Any>,
-): Effect.Effect<Context.Context<A>, never, never> =>
-  Effect.gen(function* () {
-    yield* Debug.log({
-      event: "unsafe.buildContext",
-      layer_count: layers.length,
-    });
-    if (layers.length === 0) {
-      return Context.empty() as Context.Context<A>;
-    }
-    const merged = yield* unsafeMergeLayers(layers);
-    return yield* Effect.scoped(Layer.build(merged as Parameters<typeof Layer.build>[0]));
-  }) as Effect.Effect<Context.Context<A>, never, never>;
+export function unsafeBuildContext<A>(
+  layers: ReadonlyArray<Layer.Layer<never, unknown, never>>,
+): Effect.Effect<Context.Context<A>, never, never>;
+export function unsafeBuildContext(
+  layers: ReadonlyArray<Layer.Layer<never, unknown, never>>,
+): Effect.Effect<Context.Context<never>, unknown, never> {
+  return unsafeBuildContextImpl(layers);
+}
+
+const unsafeBuildProviderContextImpl = Effect.fn("unsafe.buildProviderContext")(function* <E, R>(
+  layer: Layer.Layer<never, E, R>,
+  scope: Scope.Scope,
+  parentContext: Context.Context<R> | null,
+) {
+  const build = Effect.gen(function* () {
+    const memoMap = yield* Layer.makeMemoMap;
+    return yield* Layer.buildWithMemoMap(layer, memoMap, scope);
+  });
+  return yield* parentContext === null ? build : Effect.provide(build, parentContext);
+});
 
 /**
  * Build one provider layer into an explicit lifecycle scope.
  *
- * SAFETY: Provider layers are stored as Layer.Any at the element boundary after
- * public Component.provide typing has validated the layer. The returned Context
- * is widened because renderer context propagation is intentionally untyped.
+ * SAFETY: Provider layers are stored at the element boundary after public
+ * Component.provide typing has validated the layer. The returned Context is
+ * widened because renderer context propagation is intentionally untyped.
  */
-export const unsafeBuildProviderContext = (
-  layer: Layer.Layer<never, unknown, unknown>,
+export function unsafeBuildProviderContext<E, R>(
+  layer: Layer.Layer<never, E, R>,
   scope: Scope.Scope,
-  parentContext: Context.Context<unknown> | null,
-): Effect.Effect<Context.Context<unknown>, unknown, unknown> => {
-  const build = Effect.gen(function* () {
-    const memoMap = yield* Layer.makeMemoMap;
-    return yield* Layer.buildWithMemoMap(layer, memoMap, scope);
-  }) as Effect.Effect<Context.Context<unknown>, unknown, unknown>;
-  return parentContext === null ? build : Effect.provide(build, parentContext);
-};
+  parentContext: Context.Context<R> | null,
+): Effect.Effect<Context.Context<unknown>, E, R>;
+export function unsafeBuildProviderContext<E, R>(
+  layer: Layer.Layer<never, E, R>,
+  scope: Scope.Scope,
+  parentContext: Context.Context<R> | null,
+): Effect.Effect<Context.Context<never>, E, R> {
+  return unsafeBuildProviderContextImpl(layer, scope, parentContext);
+}
 
 // =============================================================================
 // Component Tagging
@@ -97,12 +143,13 @@ export const unsafeBuildProviderContext = (
  * Tag a function with component metadata to produce Component.Type.
  *
  * SAFETY: Object.assign produces the correct structural shape at runtime.
- * TypeScript can't verify callable interfaces + Object.assign = interface match
- * because callable interfaces require the function signature to be part of the
- * object type, which Object.assign's return type doesn't encode.
+ * TypeScript cannot verify callable interfaces + Object.assign because callable
+ * interfaces require the function signature to be part of the object type.
  */
-export const unsafeTagCallable = <T>(fn: Function, metadata: Record<string, unknown>): T =>
-  Object.assign(fn, metadata) as T;
+export function unsafeTagCallable<T>(fn: Function, metadata: object): T;
+export function unsafeTagCallable(fn: Function, metadata: object): unknown {
+  return Object.assign(fn, metadata);
+}
 
 /**
  * Construct a KeyedList element across Signal invariance boundaries.
@@ -111,30 +158,33 @@ export const unsafeTagCallable = <T>(fn: Function, metadata: Record<string, unkn
  * renderer. The renderer feeds values produced by `source` back into `renderFn`
  * and `keyFn`, so the item type remains correlated with `T` at runtime.
  */
-export const unsafeMakeKeyedListElement = <T, E>(
+export function unsafeMakeKeyedListElement<T, E, R>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => Effect.Effect<Element, E, unknown>,
+  renderFn: (item: T, index: number) => Effect.Effect<Element, E, R>,
   keyFn: (item: T, index: number) => string | number,
-): Element =>
-  ({
-    _tag: "KeyedList",
-    source,
-    renderFn,
-    keyFn,
-  }) as Element;
+): KeyedListElement & ElementWithRequirements<R>;
+export function unsafeMakeKeyedListElement(
+  source: unknown,
+  renderFn: unknown,
+  keyFn: unknown,
+): unknown {
+  return new KeyedListData({ source, renderFn, keyFn });
+}
 
 /**
  * Narrow Record<string, unknown> to ElementProps.
  *
  * SAFETY: The record was built by iterating JSX props and filtering out
  * 'children' and 'key'. The remaining entries match ElementProps structurally,
- * but TS can't verify this because ElementProps uses template literal index
+ * but TS cannot verify this because ElementProps uses template literal index
  * signatures (data-*, aria-*) rather than a general string index.
  */
-export const unsafeAsElementProps = (
+export function unsafeAsElementProps(
   record: Record<string, unknown>,
-): import("../primitives/element.js").ElementProps =>
-  record as import("../primitives/element.js").ElementProps;
+): import("../primitives/element.js").ElementProps;
+export function unsafeAsElementProps(record: Record<string, unknown>): unknown {
+  return record;
+}
 
 // =============================================================================
 // Resource Registry
@@ -144,14 +194,15 @@ export const unsafeAsElementProps = (
  * Extract typed signal from registry entry.
  *
  * SAFETY: The registry guarantees that a key created from Resource<A, E, R>
- * always maps to a Signal<ResourceState<A, E>>. The unknown→typed narrowing
- * is sound because the registry key is the type-level proof. Signal is
- * invariant (backed by SubscriptionRef), so this cast cannot be expressed
- * via variance alone.
+ * always maps to a Signal<ResourceState<A, E>>. The unknown→typed narrowing is
+ * sound because the registry key is the type-level proof.
  */
-export const unsafeEntrySignal = <A, E>(
+export function unsafeEntrySignal<A, E>(
   state: Signal<ResourceState<unknown, unknown>>,
-): Signal<ResourceState<A, E>> => state as Signal<ResourceState<A, E>>;
+): Signal<ResourceState<A, E>>;
+export function unsafeEntrySignal(state: Signal<ResourceState<unknown, unknown>>): unknown {
+  return state;
+}
 
 // =============================================================================
 // Generic Narrowing
@@ -162,21 +213,24 @@ export const unsafeEntrySignal = <A, E>(
  *
  * SAFETY: The params object was constructed field-by-field from typed sources
  * (Signal.get or static values). The caller guarantees the shape matches P.
- * TypeScript can't verify this because the object was built dynamically.
  */
-export const unsafeAsParams = <P>(record: Record<string, unknown>): P => record as unknown as P;
+export function unsafeAsParams<P>(record: Record<string, unknown>): P;
+export function unsafeAsParams(record: Record<string, unknown>): unknown {
+  return record;
+}
 
 /**
  * Narrow a squashed error value from unknown to E.
  *
- * SAFETY: The error was extracted via Cause.squash from a Cause produced by
- * an Effect<A, E, R>. For typed failures (Fail variants), the squashed value
- * IS of type E. For defects/interruptions, Cause.squash may return a non-E
- * value — but the surrounding catchAllCause provides a safety net for
- * unrecoverable errors. The unknown originates from type erasure at the
- * RegistryEntry boundary, not from runtime uncertainty.
+ * SAFETY: The error was extracted via Cause.squash from a Cause produced by an
+ * Effect<A, E, R>. For typed failures (Fail variants), the squashed value is of
+ * type E. For defects/interruptions, the surrounding catchAllCause provides a
+ * safety net for unrecoverable errors.
  */
-export const unsafeAsError = <E>(error: unknown): E => error as E;
+export function unsafeAsError<E>(error: unknown): E;
+export function unsafeAsError(error: unknown): unknown {
+  return error;
+}
 
 // =============================================================================
 // Function Union Narrowing
@@ -185,12 +239,14 @@ export const unsafeAsError = <E>(error: unknown): E => error as E;
 /**
  * Call a function union as a no-arg function.
  *
- * SAFETY: Used in Resource.make overload implementation where the
- * key discriminant (string vs function) correlates with the factory
- * arity (no-args vs with-params). TypeScript can't narrow correlated
- * unions. At runtime, JS ignores extra arity.
+ * SAFETY: Used in Resource.make overload implementation where the key
+ * discriminant correlates with factory arity. At runtime, JS ignores extra
+ * arity.
  */
-export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
+export function unsafeCallNoArgs<R>(fn: Function): R;
+export function unsafeCallNoArgs(fn: Function): unknown {
+  return fn();
+}
 
 // =============================================================================
 // Effect Context Erasure
@@ -199,11 +255,13 @@ export const unsafeCallNoArgs = <R>(fn: Function): R => (fn as () => R)();
 /**
  * Narrow a service map to a subset of its services.
  *
- * SAFETY: Context<A | B> contains all services for both A and B.
- * Narrowing to Context<A> is sound because the services are still there.
+ * SAFETY: Context<A | B> contains all services for both A and B. Narrowing to
+ * Context<A> is sound because the services are still there.
  */
-export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Context<R> =>
-  ctx as unknown as Context.Context<R>;
+export function unsafeNarrowContext<R, S>(ctx: Context.Context<S>): Context.Context<R>;
+export function unsafeNarrowContext(ctx: unknown): unknown {
+  return ctx;
+}
 
 /**
  * Widen a specific service map to unknown for untyped boundaries.
@@ -211,8 +269,10 @@ export const unsafeNarrowContext = <R, S>(ctx: Context.Context<S>): Context.Cont
  * SAFETY: Context<R> contains runtime services regardless of R phantom.
  * Widening to unknown only erases compile-time detail.
  */
-export const unsafeWidenContext = <R>(ctx: Context.Context<R>): Context.Context<unknown> =>
-  ctx as unknown as Context.Context<unknown>;
+export function unsafeWidenContext<R>(ctx: Context.Context<R>): Context.Context<unknown>;
+export function unsafeWidenContext(ctx: unknown): unknown {
+  return ctx;
+}
 
 // =============================================================================
 // Overloaded Function Dispatch
@@ -221,28 +281,33 @@ export const unsafeWidenContext = <R>(ctx: Context.Context<R>): Context.Context<
 /**
  * Cast a function implementation to a specific overloaded callable type.
  *
- * SAFETY: Used for overloaded function implementations where TypeScript
- * cannot verify that a single implementation matches multiple generic
- * overload signatures. The caller ensures runtime correctness through
- * discriminant checks (typeof, _tag, etc.) in the implementation body.
- * Only the overload signatures are visible to callers — the implementation
- * type is erased.
+ * SAFETY: Used for overloaded function implementations where TypeScript cannot
+ * verify that a single implementation matches multiple generic overload
+ * signatures. The caller ensures runtime correctness through discriminant
+ * checks in the implementation body.
  */
-export const unsafeAsOverload = <T>(fn: Function): T => fn as T;
+export function unsafeAsOverload<T>(fn: unknown): T;
+export function unsafeAsOverload(fn: unknown): unknown {
+  return fn;
+}
 
 /**
- * Build a typed exhaustive `_tag` dispatcher from Effect Match.
+ * Build a typed exhaustive tag dispatcher from Effect Match.
  *
  * SAFETY: Callers provide one handler per tag through mapped types. Effect's
  * Match.tagsExhaustive performs the runtime dispatch; this helper only bridges
  * its highly generic return type back to the caller-selected result type.
  */
-export const unsafeTagsExhaustive = <State extends { readonly _tag: string }, Result>(handlers: {
+export function unsafeTagsExhaustive<State extends { readonly _tag: string }, Result>(handlers: {
   readonly [Tag in State["_tag"] & string]: (
     state: Extract<State, { readonly _tag: Tag }>,
   ) => Result;
-}): ((state: State) => Result) =>
-  Match.type<State>().pipe(Match.tagsExhaustive(handlers as any)) as (state: State) => Result;
+}): (state: State) => Result;
+export function unsafeTagsExhaustive(
+  handlers: Record<string, (state: { readonly _tag: string }) => unknown>,
+): unknown {
+  return Match.type<{ readonly _tag: string }>().pipe(Match.tagsExhaustive(handlers));
+}
 
 // =============================================================================
 // Effect Requirements Erasure
@@ -251,14 +316,14 @@ export const unsafeTagsExhaustive = <State extends { readonly _tag: string }, Re
 /**
  * Erase the R (requirements) type from an Effect.
  *
- * SAFETY: The caller guarantees all required services are available
- * in the current fiber context. Used at Element type boundaries where
- * Component.run() returns R = unknown (Element union type erasure)
- * but services were provided at mount/render time.
+ * SAFETY: The caller guarantees all required services are available in the
+ * current fiber context. Used at Element type boundaries where Component.run()
+ * returns erased requirements but services were provided at mount/render time.
  */
-export const unsafeEraseR = <A, E>(
-  effect: Effect.Effect<A, E, unknown>,
-): Effect.Effect<A, E, never> => effect as Effect.Effect<A, E, never>;
+export function unsafeEraseR<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never>;
+export function unsafeEraseR<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+  return effect;
+}
 
 /**
  * Run a component while restoring its erased error type.
@@ -268,20 +333,20 @@ export const unsafeEraseR = <A, E>(
  * stores _runFn as unknown on the structural interface, so callers that still
  * know E can safely recover it here.
  */
-export const unsafeRunComponent = <Props, E>(
-  component: Component.Type<Props, E, unknown>,
-  props: [Props] extends [never] ? {} : Props,
-): Effect.Effect<Element, E, never> => {
-  const runFn = component._runFn;
-  if (runFn !== undefined) {
-    return unsafeEraseR(runFn(props)) as Effect.Effect<Element, E, never>;
-  }
+export function unsafeRunComponent<Props, E, R>(
+  component: Component.Type<Props, E, R>,
+  props: ComponentCallProps<Props>,
+): Effect.Effect<Element, E, never>;
+export function unsafeRunComponent<Props, E, R>(
+  component: Component.Type<Props, E, R>,
+  props: ComponentCallProps<Props>,
+): Effect.Effect<Element, unknown, never> {
   const element = component(props);
-  if (element._tag === "Component") {
-    return unsafeEraseR(element.run()) as Effect.Effect<Element, E, never>;
+  if (isComponentElement(element)) {
+    return unsafeEraseR(element.run());
   }
   return Effect.succeed(element);
-};
+}
 
 // =============================================================================
 // Route Params Narrowing
@@ -291,14 +356,17 @@ export const unsafeRunComponent = <Props, E>(
  * Narrow a generic `RouteParams` Effect to a route-specific params type.
  *
  * SAFETY: The Outlet sets `CurrentRouteParams` FiberRef to the matched route's
- * params before running the route component. The generic `Record<string, string>`
- * return type of `FiberRef.get` is narrowed to the route-specific params type
- * derived from the path pattern (e.g. `{ id: string }` for `/users/:id`).
- * The caller guarantees the path parameter matches the current route.
+ * params before running the route component. The caller guarantees the path
+ * parameter matches the current route.
  */
-export const unsafeNarrowParams = <P>(
+export function unsafeNarrowParams<P>(
   effect: Effect.Effect<Record<string, string>>,
-): Effect.Effect<P> => effect as unknown as Effect.Effect<P>;
+): Effect.Effect<P>;
+export function unsafeNarrowParams(
+  effect: Effect.Effect<Record<string, string>>,
+): Effect.Effect<Record<string, string>> {
+  return effect;
+}
 
 // =============================================================================
 // Middleware Requirements Erasure
@@ -308,25 +376,30 @@ export const unsafeNarrowParams = <P>(
  * Erase requirements from middleware effects for sequential execution.
  *
  * SAFETY: Middleware effects have their requirements provided at the route
- * level via `Route.provide()`. By the time `runMiddlewareChain` executes,
- * all services are available in the fiber context. The `R` type parameter
- * is erased so the chain can be iterated uniformly.
+ * level via `Route.provide()`. By the time the middleware chain executes, all
+ * services are available in the fiber context.
  */
-export const unsafeEraseMiddlewareR = (
-  effect: Effect.Effect<void, unknown, unknown>,
-): Effect.Effect<void, unknown, never> => effect as Effect.Effect<void, unknown, never>;
+export function unsafeEraseMiddlewareR<R>(
+  effect: Effect.Effect<void, unknown, R>,
+): Effect.Effect<void, unknown, never>;
+export function unsafeEraseMiddlewareR<R>(
+  effect: Effect.Effect<void, unknown, R>,
+): Effect.Effect<void, unknown, R> {
+  return effect;
+}
 
 // =============================================================================
 // Tagged Error Field Extraction
 // =============================================================================
 
 /**
- * Extract known fields from a tagged error after `_tag` discrimination.
+ * Extract known fields from a tagged error after tag discrimination.
  *
- * SAFETY: The caller has already checked `error._tag` matches the expected
- * tag (e.g. `"RouterRedirect"`). The error object is structurally guaranteed
- * to have the extracted fields by the `Data.TaggedError` / `Schema.TaggedError`
- * constructor. TypeScript cannot prove this after `Cause.squash` since the
- * error type is widened to `unknown`.
+ * SAFETY: The caller has already checked the error tag matches the expected
+ * constructor. The error object is structurally guaranteed to have the extracted
+ * fields by the tagged error constructor.
  */
-export const unsafeExtractFields = <T>(error: object): T => error as unknown as T;
+export function unsafeExtractFields<T>(error: object): T;
+export function unsafeExtractFields(error: object): unknown {
+  return error;
+}

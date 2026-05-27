@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Predicate } from "effect";
 
 import * as Component from "../../primitives/component.js";
 import { Element, getKey, text } from "../../primitives/element.js";
@@ -33,8 +33,8 @@ describe("JsxBuilder.build", () => {
         7,
       );
 
-      assert.strictEqual(element._tag, "Intrinsic");
-      if (element._tag !== "Intrinsic") {
+      assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
+      if (!Predicate.isTagged(element, "Intrinsic")) {
         return assert.fail("Expected Intrinsic element");
       }
 
@@ -44,10 +44,10 @@ describe("JsxBuilder.build", () => {
       assert.strictEqual(element.children.length, 2);
 
       const [firstChild, secondChild] = element.children;
-      assert.strictEqual(firstChild?._tag, "Text");
-      assert.strictEqual(secondChild?._tag, "Text");
+      assert.isTrue(Predicate.isTagged(firstChild, "Text"));
+      assert.isTrue(Predicate.isTagged(secondChild, "Text"));
 
-      if (firstChild?._tag !== "Text" || secondChild?._tag !== "Text") {
+      if (!Predicate.isTagged(firstChild, "Text") || !Predicate.isTagged(secondChild, "Text")) {
         return assert.fail("Expected text children");
       }
 
@@ -63,8 +63,8 @@ describe("JsxBuilder.build", () => {
       // Assertion: returns a component element shell, keeps the provided props, and preserves the explicit key.
       const element = yield* JsxBuilder.build(BuilderComponent, { message: "hello" }, 3);
 
-      assert.strictEqual(element._tag, "Component");
-      if (element._tag !== "Component") {
+      assert.isTrue(Predicate.isTagged(element, "Component"));
+      if (!Predicate.isTagged(element, "Component")) {
         return assert.fail("Expected Component element");
       }
 
@@ -80,22 +80,23 @@ describe("JsxBuilder.build", () => {
         // Test: should preserve safe props and explicit key while malformed jsx-only props throw.
         // Scope: guards the shared builder against hostile JavaScript prop objects without relying on the public sync runtime wrapper.
         // Assertion: keeps readable props, drops throwing children/key reads, and still returns a normal intrinsic element.
+        const context = yield* Effect.context<never>();
         const element = yield* JsxBuilder.build(
           "div",
           {
             id: "root",
             get children() {
-              throw new Error("boom-children");
+              return Effect.runSyncWith(context)(Effect.fail("boom-children"));
             },
             get key() {
-              throw new Error("boom-key");
+              return Effect.runSyncWith(context)(Effect.fail("boom-key"));
             },
           },
           7,
         );
 
-        assert.strictEqual(element._tag, "Intrinsic");
-        if (element._tag !== "Intrinsic") {
+        assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
+        if (!Predicate.isTagged(element, "Intrinsic")) {
           return assert.fail("Expected Intrinsic element");
         }
 
@@ -122,7 +123,7 @@ describe("JsxBuilder.build", () => {
 
         const error = Cause.squash(exit.cause);
         if (!(error instanceof InvalidJsxComponentInput)) {
-          return assert.fail(`Expected typed invalid-component error but got ${String(error)}`);
+          return assert.fail("Expected typed invalid-component error");
         }
 
         assert.strictEqual(error.reason, "plain-function");
@@ -147,7 +148,7 @@ describe("JsxBuilder.build", () => {
 
       const error = Cause.squash(exit.cause);
       if (!(error instanceof InvalidJsxComponentInput)) {
-        return assert.fail(`Expected typed invalid-component error but got ${String(error)}`);
+        return assert.fail("Expected typed invalid-component error");
       }
 
       assert.strictEqual(error.reason, "effect");

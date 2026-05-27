@@ -1,6 +1,5 @@
-import { it } from "@effect/vitest";
+import { it, type TestContext, type TestOptions } from "@effect/vitest";
 import { Effect, Scope } from "effect";
-import type { TestContext, TestOptions } from "vitest";
 
 export const scoped = <A, E>(
   name: string,

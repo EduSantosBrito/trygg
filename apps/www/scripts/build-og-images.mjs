@@ -12,6 +12,8 @@
  */
 
 import { Resvg } from "@resvg/resvg-js";
+import { Effect, ManagedRuntime } from "effect";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import sharp from "sharp";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -56,6 +58,23 @@ function cachedFileName(family, weight) {
   return `${family.replace(/\+/g, "-")}-${weight}.ttf`;
 }
 
+const fetchText = Effect.fn("buildOgImages.fetchText")(function* (url, options) {
+  const response = yield* HttpClient.get(url, options);
+  return yield* response.text;
+});
+
+const fetchBytesIfOk = Effect.fn("buildOgImages.fetchBytesIfOk")(function* (url) {
+  const response = yield* HttpClient.get(url);
+  if (response.status < 200 || response.status >= 300) {
+    return undefined;
+  }
+  const buffer = yield* response.arrayBuffer;
+  return Buffer.from(buffer);
+});
+
+const httpRuntime = ManagedRuntime.make(FetchHttpClient.layer);
+const runHttp = (effect) => httpRuntime.runPromise(effect);
+
 async function ensureFontCache() {
   await mkdir(FONTS_DIR, { recursive: true });
 
@@ -75,14 +94,13 @@ async function ensureFontCache() {
 
   for (const [family, weight] of missing) {
     const familyUrl = `https://fonts.googleapis.com/css2?family=${family}:wght@${weight}&display=swap`;
-    const perFaceCss = await (
-      await fetch(familyUrl, { headers: { "User-Agent": LEGACY_UA } })
-    ).text();
+    const perFaceCss = await runHttp(
+      fetchText(familyUrl, { headers: { "User-Agent": LEGACY_UA } }),
+    );
     const url = perFaceCss.match(/url\(([^)]+)\)/)?.[1];
     if (!url) continue;
-    const fontResp = await fetch(url);
-    if (!fontResp.ok) continue;
-    const buf = Buffer.from(await fontResp.arrayBuffer());
+    const buf = await runHttp(fetchBytesIfOk(url));
+    if (buf === undefined) continue;
     const fileName = cachedFileName(family, weight);
     const filePath = join(FONTS_DIR, fileName);
     await writeFile(filePath, buf);
@@ -91,7 +109,7 @@ async function ensureFontCache() {
 
   const finalFiles = (await readdir(FONTS_DIR)).filter((f) => f.endsWith(".ttf"));
   if (finalFiles.length === 0) {
-    throw new Error("No fonts downloaded — Google Fonts may have changed.");
+    await Effect.runPromise(Effect.fail("No fonts downloaded — Google Fonts may have changed."));
   }
   return finalFiles.map((f) => join(FONTS_DIR, f));
 }
@@ -149,7 +167,16 @@ async function main() {
   console.log("\n◆ Done.");
 }
 
-main().catch((err) => {
-  console.error("\n✗ OG build failed:", err);
-  process.exitCode = 1;
-});
+await Effect.runPromise(
+  Effect.tryPromise({
+    try: main,
+    catch: (error) => error,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        console.error("\n✗ OG build failed:", error);
+        process.exitCode = 1;
+      }),
+    ),
+  ),
+);

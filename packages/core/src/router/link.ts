@@ -42,7 +42,7 @@
  * @since 1.0.0
  * @module trygg/router/link
  */
-import { Duration, Effect, Fiber } from "effect";
+import { Cause, Duration, Effect, Fiber } from "effect";
 import * as Signal from "../primitives/signal.js";
 import {
   Element,
@@ -53,7 +53,7 @@ import {
 
 import * as Debug from "../debug/debug.js";
 import * as ContractTrace from "../contract/trace.js";
-import { get as getRouter, Router } from "./service.js";
+import { get as getRouter } from "./service.js";
 import { buildPath } from "./utils.js";
 import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
 import { buildPathWithParams } from "./types.js";
@@ -219,168 +219,166 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
 
   // Create the effect that builds the link element
   // Requires Router service from parent context
-  const run = (): Effect.Effect<Element, never, Router> =>
-    Effect.gen(function* () {
-      // Build resolved path (substitute params if provided)
-      const resolvedPath = params ? yield* buildPathWithParams(to, params).pipe(Effect.orDie) : to;
+  const run = Effect.gen(function* () {
+    // Build resolved path (substitute params if provided)
+    const resolvedPath = params ? yield* buildPathWithParams(to, params) : to;
 
-      // Build full href with query string
-      const href = yield* buildPath(resolvedPath, queryParams);
+    // Build full href with query string
+    const href = yield* buildPath(resolvedPath, queryParams);
 
-      const router = yield* getRouter;
+    const router = yield* getRouter;
 
-      // Capture component scope — ties prefetch fibers to component lifecycle.
-      // Always set inside a component render. If somehow null (should not happen),
-      // prefetch handlers become no-ops via the guard below.
-      const prefetchScope = yield* Signal.CurrentComponentScope;
+    // Capture component scope — ties prefetch fibers to component lifecycle.
+    // Always set inside a component render. If somehow null (should not happen),
+    // prefetch handlers become no-ops via the guard below.
+    const prefetchScope = yield* Signal.CurrentComponentScope;
 
-      // F-001: Prefetch state and handlers
-      let prefetchTriggered = false;
-      let hoverFiber: Fiber.Fiber<void, never> | null = null;
+    // F-001: Prefetch state and handlers
+    let prefetchTriggered = false;
+    let hoverFiber: Fiber.Fiber<void, never> | null = null;
 
-      // Trigger prefetch once (guarded by flag)
-      const triggerPrefetch = (
-        trigger: "render" | "intent_hover" | "intent_focus",
-      ): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          if (prefetchTriggered) return;
-          prefetchTriggered = true;
-          yield* Debug.log({
-            event: "router.prefetch.trigger",
-            path: href,
-            trigger,
-          });
-          yield* router.prefetch(href);
-        });
-
-      // Pointer move handler — 50ms debounce via scoped fiber.
-      // Uses forkIn(componentScope) so the fiber is tied to the component
-      // lifecycle: auto-interrupted on unmount, no floating fibers.
-      const handlePointerMove =
-        prefetch === "intent" && prefetchScope !== null
-          ? Effect.fnUntraced(function* () {
-              if (prefetchTriggered) return;
-              // Cancel pending hover fiber before starting a new one
-              if (hoverFiber !== null) {
-                yield* Fiber.interrupt(hoverFiber);
-              }
-              const fiber = yield* Effect.forkIn(
-                Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
-                  Effect.flatMap(() => triggerPrefetch("intent_hover")),
-                ),
-                prefetchScope,
-              );
-              hoverFiber = fiber;
-            })
-          : undefined;
-
-      // Mouse leave handler - interrupt pending prefetch fiber
-      const handleMouseLeave =
-        prefetch === "intent"
-          ? Effect.fnUntraced(function* () {
-              if (hoverFiber !== null) {
-                yield* Fiber.interrupt(hoverFiber);
-                hoverFiber = null;
-              }
-            })
-          : undefined;
-
-      // Focus handler - immediate prefetch (accessibility)
-      const handleFocus =
-        prefetch === "intent"
-          ? Effect.fnUntraced(function* () {
-              if (prefetchTriggered) return;
-              yield* triggerPrefetch("intent_focus");
-            })
-          : undefined;
-
-      // Click handler - prevents default and uses router
-      // NOTE: We capture `router` from the closure instead of calling getRouter again,
-      // because event handlers run in forked fibers that don't inherit FiberRef values.
-      const handleClick = Effect.fnUntraced(function* (event: Event) {
-        // Don't intercept if modifier keys are pressed (open in new tab, etc.)
-        if (event instanceof MouseEvent) {
-          if (event.metaKey || event.ctrlKey || event.shiftKey) {
-            yield* Debug.log({
-              event: "router.link.click",
-              to_path: resolvedPath,
-              reason: "modifier key pressed, allowing default",
-            });
-            return;
-          }
-        }
-
-        yield* Debug.log({
-          event: "router.link.click",
-          to_path: resolvedPath,
-          ...(replace !== undefined ? { replace } : {}),
-        });
-
-        event.preventDefault();
-        yield* ContractTrace.emit({
-          event: "event.preventDefault",
-          level: "semantic",
-          payload: { eventType: event.type, target: resolvedPath },
-        });
-        const options = {
-          ...(replace !== undefined ? { replace } : {}),
-          ...(queryParams !== undefined ? { query: queryParams } : {}),
-        };
-        yield* router
-          .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
-          .pipe(
-            Effect.catchCause((cause) =>
-              ContractTrace.emit({
-                event: "effect.error.ignored",
-                level: "semantic",
-                payload: {
-                  owner: "router.link",
-                  operation: "navigate",
-                  cause: String(cause),
-                },
-              }),
-            ),
-          );
+    // Trigger prefetch once (guarded by flag)
+    const triggerPrefetch = Effect.fnUntraced(function* (
+      trigger: "render" | "intent_hover" | "intent_focus",
+    ) {
+      if (prefetchTriggered) return;
+      prefetchTriggered = true;
+      yield* Debug.log({
+        event: "router.prefetch.trigger",
+        path: href,
+        trigger,
       });
+      yield* router.prefetch(href);
+    });
 
-      // F-001: Trigger prefetch immediately for "render" strategy
-      if (prefetch === "render") {
-        if (prefetchScope !== null) {
-          yield* Effect.forkIn(
-            Effect.yieldNow.pipe(Effect.flatMap(() => triggerPrefetch("render"))),
-            prefetchScope,
-          );
-        } else {
-          yield* triggerPrefetch("render");
+    // Pointer move handler — 50ms debounce via scoped fiber.
+    // Uses forkIn(componentScope) so the fiber is tied to the component
+    // lifecycle: auto-interrupted on unmount, no floating fibers.
+    const handlePointerMove =
+      prefetch === "intent" && prefetchScope !== null
+        ? Effect.fnUntraced(function* () {
+            if (prefetchTriggered) return;
+            // Cancel pending hover fiber before starting a new one
+            if (hoverFiber !== null) {
+              yield* Fiber.interrupt(hoverFiber);
+            }
+            const fiber = yield* Effect.forkIn(
+              Effect.sleep(Duration.millis(PREFETCH_HOVER_DELAY_MS)).pipe(
+                Effect.flatMap(() => triggerPrefetch("intent_hover")),
+              ),
+              prefetchScope,
+            );
+            hoverFiber = fiber;
+          })
+        : undefined;
+
+    // Mouse leave handler - interrupt pending prefetch fiber
+    const handleMouseLeave =
+      prefetch === "intent"
+        ? Effect.fnUntraced(function* () {
+            if (hoverFiber !== null) {
+              yield* Fiber.interrupt(hoverFiber);
+              hoverFiber = null;
+            }
+          })
+        : undefined;
+
+    // Focus handler - immediate prefetch (accessibility)
+    const handleFocus =
+      prefetch === "intent"
+        ? Effect.fnUntraced(function* () {
+            if (prefetchTriggered) return;
+            yield* triggerPrefetch("intent_focus");
+          })
+        : undefined;
+
+    // Click handler - prevents default and uses router
+    // NOTE: We capture `router` from the closure instead of calling getRouter again,
+    // because event handlers run in forked fibers that don't inherit FiberRef values.
+    const handleClick = Effect.fnUntraced(function* (event: Event) {
+      // Don't intercept if modifier keys are pressed (open in new tab, etc.)
+      if (event instanceof MouseEvent) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) {
+          yield* Debug.log({
+            event: "router.link.click",
+            to_path: resolvedPath,
+            reason: "modifier key pressed, allowing default",
+          });
+          return;
         }
       }
 
-      // Build props for the anchor element
-      const anchorProps: ElementProps = {
-        href,
-        onClick: handleClick,
-        ...(className ? { className } : {}),
-        ...(handlePointerMove ? { onPointerMove: handlePointerMove } : {}),
-        ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
-        ...(handleFocus ? { onFocus: handleFocus } : {}),
-        // F-001: Viewport prefetch uses data attributes + global observer
-        ...(prefetch === "viewport"
-          ? {
-              "data-trygg-prefetch": "viewport",
-              "data-trygg-prefetch-path": href,
-            }
-          : {}),
-        // Forward data-* and aria-* attributes to <a>
-        ...forwarded,
+      yield* Debug.log({
+        event: "router.link.click",
+        to_path: resolvedPath,
+        ...(replace !== undefined ? { replace } : {}),
+      });
+
+      event.preventDefault();
+      yield* ContractTrace.emit({
+        event: "event.preventDefault",
+        level: "semantic",
+        payload: { eventType: event.type, target: resolvedPath },
+      });
+      const options = {
+        ...(replace !== undefined ? { replace } : {}),
+        ...(queryParams !== undefined ? { query: queryParams } : {}),
       };
-
-      const childElements = yield* Element.fromChildren(children);
-
-      return intrinsic("a", anchorProps, childElements);
+      yield* router
+        .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
+        .pipe(
+          Effect.catchCause((cause) =>
+            ContractTrace.emit({
+              event: "effect.error.ignored",
+              level: "semantic",
+              payload: {
+                owner: "router.link",
+                operation: "navigate",
+                cause: Cause.pretty(cause),
+              },
+            }),
+          ),
+        );
     });
 
+    // F-001: Trigger prefetch immediately for "render" strategy
+    if (prefetch === "render") {
+      if (prefetchScope !== null) {
+        yield* Effect.forkIn(
+          Effect.yieldNow.pipe(Effect.flatMap(() => triggerPrefetch("render"))),
+          prefetchScope,
+        );
+      } else {
+        yield* triggerPrefetch("render");
+      }
+    }
+
+    // Build props for the anchor element
+    const anchorProps: ElementProps = {
+      href,
+      onClick: handleClick,
+      ...(className ? { className } : {}),
+      ...(handlePointerMove ? { onPointerMove: handlePointerMove } : {}),
+      ...(handleMouseLeave ? { onMouseLeave: handleMouseLeave } : {}),
+      ...(handleFocus ? { onFocus: handleFocus } : {}),
+      // F-001: Viewport prefetch uses data attributes + global observer
+      ...(prefetch === "viewport"
+        ? {
+            "data-trygg-prefetch": "viewport",
+            "data-trygg-prefetch-path": href,
+          }
+        : {}),
+      // Forward data-* and aria-* attributes to <a>
+      ...forwarded,
+    };
+
+    const childElements = yield* Element.fromChildren(children);
+
+    return intrinsic("a", anchorProps, childElements);
+  });
+
   // Return a component element that will execute the effect when rendered
-  return Element.fromEffect(Effect.suspend(run), { identity: linkRuntimeIdentity, inputs: props });
+  return Element.fromEffect(run, { identity: linkRuntimeIdentity, inputs: props });
 }
 
 // Define the Link component type with Component.Type properties.
@@ -392,12 +390,15 @@ interface LinkComponent {
 }
 
 // Apply Component.Type properties to Link function.
+const linkTag: LinkComponent["_tag"] = "EffectComponent";
+const linkLayers: LinkComponent["_layers"] = [];
+const linkDisplayName: LinkComponent["_displayName"] = "Link";
 const linkComponent: LinkComponent = Object.assign(
   <Path extends RoutePath>(props: LinkProps<Path>): Element => LinkImpl(props),
   {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<unknown>,
-    _displayName: "Link" as const,
+    _tag: linkTag,
+    _layers: linkLayers,
+    _displayName: linkDisplayName,
   },
 );
 

@@ -19,7 +19,7 @@
  * @since 1.0.0
  * @module trygg/router/routes
  */
-import { Option } from "effect";
+import { Data, Option } from "effect";
 import * as Context from "effect/Context";
 import type { RouteComponent, ComponentInput } from "./types.js";
 import type { RouteBuilder, RouteDefinition } from "./route.js";
@@ -112,36 +112,37 @@ export interface RoutesCollection {
 // Implementation
 // =============================================================================
 
+const RoutesCollectionData = Data.TaggedClass("RoutesCollection");
+
 /** @internal */
-const makeCollection = (manifest: RoutesManifest): RoutesCollection => ({
-  _tag: "RoutesCollection",
+const makeCollection = (manifest: RoutesManifest): RoutesCollection =>
+  new RoutesCollectionData({
+    add: (route) =>
+      makeCollection({
+        ...manifest,
+        routes: [...manifest.routes, route.definition],
+      }),
 
-  add: (route) =>
-    makeCollection({
-      ...manifest,
-      routes: [...manifest.routes, route.definition],
-    }),
+    notFound: (component) =>
+      makeCollection({
+        ...manifest,
+        notFound: component,
+      }),
 
-  notFound: (component) =>
-    makeCollection({
-      ...manifest,
-      notFound: component,
-    }),
+    forbidden: (component) =>
+      makeCollection({
+        ...manifest,
+        forbidden: component,
+      }),
 
-  forbidden: (component) =>
-    makeCollection({
-      ...manifest,
-      forbidden: component,
-    }),
+    error: (component) =>
+      makeCollection({
+        ...manifest,
+        error: component,
+      }),
 
-  error: (component) =>
-    makeCollection({
-      ...manifest,
-      error: component,
-    }),
-
-  manifest,
-});
+    manifest,
+  });
 
 // =============================================================================
 // Public API

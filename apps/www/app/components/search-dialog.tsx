@@ -45,57 +45,56 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
     o ? "search-dialog search-dialog--open" : "search-dialog",
   );
 
-  const close = Effect.gen(function* () {
+  const close = Effect.fn("SearchDialog.close")(function* () {
     yield* Signal.set(open, false);
     yield* Signal.set(query, "");
     yield* Signal.set(activeIndex, 0);
   });
 
-  const selectAndClose = (href: string) =>
-    Effect.gen(function* () {
-      yield* close;
-      yield* Effect.sync(() => {
-        window.location.href = href;
-      });
+  const selectAndClose = Effect.fn("SearchDialog.selectAndClose")(function* (href: string) {
+    yield* close();
+    yield* Effect.sync(() => {
+      window.location.href = href;
     });
+  });
 
-  const handleKeyDown = (e: Event): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      if (!(e instanceof KeyboardEvent)) return;
-      const ke = e;
-      if (ke.key === "Escape") {
-        yield* close;
-        return;
-      }
-      const idx = yield* Signal.peek(activeIndex);
-      const items = yield* Signal.peek(results);
-      if (ke.key === "ArrowDown") {
-        ke.preventDefault();
-        yield* Signal.set(activeIndex, Math.min(idx + 1, items.length - 1));
-        return;
-      }
-      if (ke.key === "ArrowUp") {
-        ke.preventDefault();
-        yield* Signal.set(activeIndex, Math.max(idx - 1, 0));
-        return;
-      }
-      if (ke.key === "Enter") {
-        ke.preventDefault();
-        const item = items[idx];
-        if (item) yield* selectAndClose(item.href);
-      }
-    });
+  const handleKeyDown = Effect.fn("SearchDialog.handleKeyDown")(function* (e: Event) {
+    if (!(e instanceof KeyboardEvent)) return;
+    const ke = e;
+    if (ke.key === "Escape") {
+      yield* close();
+      return;
+    }
+    const idx = yield* Signal.peek(activeIndex);
+    const items = yield* Signal.peek(results);
+    if (ke.key === "ArrowDown") {
+      ke.preventDefault();
+      yield* Signal.set(activeIndex, Math.min(idx + 1, items.length - 1));
+      return;
+    }
+    if (ke.key === "ArrowUp") {
+      ke.preventDefault();
+      yield* Signal.set(activeIndex, Math.max(idx - 1, 0));
+      return;
+    }
+    if (ke.key === "Enter") {
+      ke.preventDefault();
+      const item = items[idx];
+      if (item) yield* selectAndClose(item.href);
+    }
+  });
 
-  const handleInput = (e: Event): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const target = e.target;
-      if (!(target instanceof HTMLInputElement)) return;
-      yield* Signal.set(query, target.value);
-      yield* Signal.set(activeIndex, 0);
-    });
+  const handleInput = Effect.fn("SearchDialog.handleInput")(function* (e: Event) {
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    yield* Signal.set(query, target.value);
+    yield* Signal.set(activeIndex, 0);
+  });
+
+  const resultInputs: readonly [typeof results, typeof activeIndex] = [results, activeIndex];
 
   // Results list derived from both results and activeIndex
-  const resultsList = yield* Signal.deriveAll([results, activeIndex] as const, (items, ai) =>
+  const resultsList = yield* Signal.deriveAll(resultInputs, (items, ai) =>
     items.length === 0 ? (
       <p className="search-dialog__empty">No results</p>
     ) : (
@@ -125,7 +124,7 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
         type="button"
         className="search-dialog__backdrop"
         aria-label="Close search"
-        onClick={() => close}
+        onClick={() => close()}
       />
       <div className="search-dialog__panel" onKeyDown={handleKeyDown}>
         <input

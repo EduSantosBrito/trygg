@@ -6,37 +6,39 @@
  * Internally acquires a runtime, creates a sync listener that forks the handler,
  * and registers a finalizer that removes the listener.
  */
-import { Data, Effect, Layer, Scope } from "effect";
+import { Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class EventTargetError extends Data.TaggedError("EventTargetError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class EventTargetError extends Schema.TaggedErrorClass<EventTargetError>()(
+  "EventTargetError",
+  {
+    operation: Schema.String,
+    cause: Schema.Unknown,
+  },
+) {}
 
 // =============================================================================
 // Service interface
 // =============================================================================
 
 export interface EventTargetService {
-  readonly on: <E extends Event>(
+  readonly on: (
     target: EventTarget,
     event: string,
-    handler: (e: E) => Effect.Effect<void>,
+    handler: (event: Event) => Effect.Effect<void>,
   ) => Effect.Effect<void, never, Scope.Scope>;
-}
-
-// =============================================================================
-// Test-only interface (extends base with dispatch)
-// =============================================================================
-
-export interface TestEventTargetService extends EventTargetService {
   readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
 }
+
+// =============================================================================
+// Test-only alias retained for tests that name the test service surface.
+// =============================================================================
+
+export interface TestEventTargetService extends EventTargetService {}
 
 // =============================================================================
 // Tag
@@ -44,12 +46,27 @@ export interface TestEventTargetService extends EventTargetService {
 
 export interface PlatformEventTarget extends Context.Service<
   PlatformEventTarget,
-  EventTargetService
+  {
+    readonly on: (
+      target: EventTarget,
+      event: string,
+      handler: (event: Event) => Effect.Effect<void>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
+  }
 > {}
 
-export const PlatformEventTarget = Context.Service<PlatformEventTarget, EventTargetService>(
-  "trygg/platform/EventTarget",
-);
+export const PlatformEventTarget = Context.Service<
+  PlatformEventTarget,
+  {
+    readonly on: (
+      target: EventTarget,
+      event: string,
+      handler: (event: Event) => Effect.Effect<void>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
+  }
+>("trygg/platform/EventTarget");
 
 // =============================================================================
 // Browser layer
@@ -64,7 +81,7 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
         const services = yield* Effect.context();
         const listener = (e: Event) => {
           Effect.runForkWith(services)(
-            Effect.forkIn(handler(e as never), scope, { startImmediately: true }),
+            Effect.forkIn(handler(e), scope, { startImmediately: true }),
           );
         };
         yield* Effect.sync(() => {
@@ -76,6 +93,10 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
           }),
         );
       }),
+    dispatch: (target, _event, data) =>
+      Effect.sync(() => {
+        target.dispatchEvent(data);
+      }),
   }),
 );
 
@@ -83,47 +104,51 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<PlatformEventTarget> = Layer.effect(
-  PlatformEventTarget,
-  Effect.sync(() => {
-    const handlers = new Map<string, Array<(e: Event) => Effect.Effect<void>>>();
+export const test: Layer.Layer<PlatformEventTarget> = Layer.sync(PlatformEventTarget, () => {
+  const handlers = new Map<string, Array<(e: Event) => Effect.Effect<void>>>();
+  const targetIds = new WeakMap<EventTarget, string>();
+  let nextTargetId = 0;
 
-    const makeKey = (target: EventTarget, event: string): string => {
-      // Use a simple identity scheme for test targets
-      const id = Reflect.get(target, "__testId") ?? "default";
-      return `${String(id)}:${event}`;
-    };
+  const makeKey = (target: EventTarget, event: string): string => {
+    const existing = targetIds.get(target);
+    if (existing !== undefined) {
+      return `${existing}:${event}`;
+    }
+    const id = `target-${nextTargetId}`;
+    nextTargetId += 1;
+    targetIds.set(target, id);
+    return `${id}:${event}`;
+  };
 
-    const service: TestEventTargetService = {
-      on: (target, event, handler) =>
-        Effect.gen(function* () {
-          const key = makeKey(target, event);
-          const existing = handlers.get(key) ?? [];
-          existing.push(handler as (e: Event) => Effect.Effect<void>);
-          handlers.set(key, existing);
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              const list = handlers.get(key);
-              if (list !== undefined) {
-                const idx = list.indexOf(handler as (e: Event) => Effect.Effect<void>);
-                if (idx >= 0) {
-                  list.splice(idx, 1);
-                }
+  const service: TestEventTargetService = {
+    on: (target, event, handler) =>
+      Effect.gen(function* () {
+        const key = makeKey(target, event);
+        const existing = handlers.get(key) ?? [];
+        existing.push(handler);
+        handlers.set(key, existing);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            const list = handlers.get(key);
+            if (list !== undefined) {
+              const idx = list.indexOf(handler);
+              if (idx >= 0) {
+                list.splice(idx, 1);
               }
-            }),
-          );
-        }),
+            }
+          }),
+        );
+      }),
 
-      dispatch: (target, event, data) =>
-        Effect.gen(function* () {
-          const key = makeKey(target, event);
-          const list = handlers.get(key) ?? [];
-          for (const h of list) {
-            yield* h(data);
-          }
-        }),
-    };
+    dispatch: (target, event, data) =>
+      Effect.gen(function* () {
+        const key = makeKey(target, event);
+        const list = handlers.get(key) ?? [];
+        for (const h of list) {
+          yield* h(data);
+        }
+      }),
+  };
 
-    return PlatformEventTarget.of(service);
-  }),
-);
+  return PlatformEventTarget.of(service);
+});

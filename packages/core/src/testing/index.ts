@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/testing
  */
-import { Data, Duration, Effect, Layer, Option, Schedule, Scope } from "effect";
+import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Scope } from "effect";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import { Element, isElement } from "../primitives/element.js";
 import { browserLayer, Renderer } from "../primitives/renderer.js";
@@ -107,10 +107,13 @@ export interface TestRenderResult {
  * @public
  * @since 1.0.0
  */
-export class ElementNotFoundError extends Data.TaggedError("ElementNotFoundError")<{
-  readonly queryType: string;
-  readonly query: string;
-}> {
+export class ElementNotFoundError extends Schema.TaggedErrorClass<ElementNotFoundError>()(
+  "ElementNotFoundError",
+  {
+    queryType: Schema.String,
+    query: Schema.String,
+  },
+) {
   override get message() {
     return `Unable to find element by ${this.queryType}: "${this.query}"`;
   }
@@ -128,13 +131,13 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
   const findByText = (text: string): HTMLElement | null => {
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, {
       acceptNode(node) {
-        const element = node as HTMLElement;
-        if (element.children.length === 0) {
-          return element.textContent?.trim() === text
+        if (!(node instanceof HTMLElement)) return NodeFilter.FILTER_SKIP;
+        if (node.children.length === 0) {
+          return node.textContent?.trim() === text
             ? NodeFilter.FILTER_ACCEPT
             : NodeFilter.FILTER_SKIP;
         }
-        for (const child of Array.from(element.childNodes)) {
+        for (const child of Array.from(node.childNodes)) {
           if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim() === text) {
             return NodeFilter.FILTER_ACCEPT;
           }
@@ -143,7 +146,7 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
       },
     });
     const node = walker.nextNode();
-    return node ? (node as HTMLElement) : null;
+    return node instanceof HTMLElement ? node : null;
   };
 
   const findByTestId = (testId: string): HTMLElement | null =>
@@ -205,8 +208,8 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
   ): Effect.Effect<ReadonlyArray<T>> =>
     Effect.sync(() => Array.from(container.querySelectorAll<T>(selector)));
 
-  const getByText = (text: string): Effect.Effect<HTMLElement, ElementNotFoundError> =>
-    Effect.gen(function* () {
+  const getByText: (text: string) => Effect.Effect<HTMLElement, ElementNotFoundError> =
+    Effect.fnUntraced(function* (text) {
       const result = yield* queryByText(text);
       if (Option.isNone(result)) {
         return yield* new ElementNotFoundError({ queryType: "text", query: text });
@@ -214,8 +217,8 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
       return result.value;
     });
 
-  const getByTestId = (testId: string): Effect.Effect<HTMLElement, ElementNotFoundError> =>
-    Effect.gen(function* () {
+  const getByTestId: (testId: string) => Effect.Effect<HTMLElement, ElementNotFoundError> =
+    Effect.fnUntraced(function* (testId) {
       const result = yield* queryByTestId(testId);
       if (Option.isNone(result)) {
         return yield* new ElementNotFoundError({ queryType: "testId", query: testId });
@@ -223,8 +226,8 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
       return result.value;
     });
 
-  const getByRole = (role: string): Effect.Effect<HTMLElement, ElementNotFoundError> =>
-    Effect.gen(function* () {
+  const getByRole: (role: string) => Effect.Effect<HTMLElement, ElementNotFoundError> =
+    Effect.fnUntraced(function* (role) {
       const result = yield* queryByRole(role);
       if (Option.isNone(result)) {
         return yield* new ElementNotFoundError({ queryType: "role", query: role });
@@ -235,13 +238,13 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
   const querySelector = <T extends HTMLElement = HTMLElement>(
     selector: string,
   ): Effect.Effect<T, ElementNotFoundError> =>
-    Effect.gen(function* () {
-      const result = container.querySelector<T>(selector);
-      if (!result) {
-        return yield* new ElementNotFoundError({ queryType: "selector", query: selector });
-      }
-      return result;
-    });
+    Effect.sync(() => container.querySelector<T>(selector)).pipe(
+      Effect.flatMap((result) =>
+        result === null
+          ? Effect.fail(new ElementNotFoundError({ queryType: "selector", query: selector }))
+          : Effect.succeed(result),
+      ),
+    );
 
   const queryBySelector = <T extends HTMLElement = HTMLElement>(
     selector: string,
@@ -427,16 +430,24 @@ export const type = (
  * @public
  * @since 1.0.0
  */
-export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")<{
-  readonly timeout: number;
-  readonly lastError: unknown;
-}> {
+export class WaitForTimeoutError extends Schema.TaggedErrorClass<WaitForTimeoutError>()(
+  "WaitForTimeoutError",
+  {
+    timeout: Schema.Number,
+    lastError: Schema.Unknown,
+  },
+) {
   override get message() {
-    const errorMsg =
-      this.lastError instanceof Error ? this.lastError.message : String(this.lastError);
-    return `waitFor timed out after ${this.timeout}ms: ${errorMsg}`;
+    return `waitFor timed out after ${this.timeout}ms: ${Cause.pretty(Cause.fail(this.lastError))}`;
   }
 }
+
+class WaitForAttemptError extends Schema.TaggedErrorClass<WaitForAttemptError>()(
+  "WaitForAttemptError",
+  {
+    cause: Schema.Unknown,
+  },
+) {}
 
 /**
  * Wait for a condition to become true.
@@ -457,29 +468,37 @@ export class WaitForTimeoutError extends Data.TaggedError("WaitForTimeoutError")
  * @public
  * @since 1.0.0
  */
-export const waitFor = <T>(
+export const waitFor: <T>(
+  fn: () => T,
+  options?: { timeout?: number; interval?: number },
+) => Effect.Effect<T, WaitForTimeoutError> = Effect.fn("waitFor")(function* <T>(
   fn: () => T,
   options: { timeout?: number; interval?: number } = {},
-): Effect.Effect<T, WaitForTimeoutError> => {
+) {
   const { timeout = 1000, interval = 50 } = options;
   const maxRetries = Math.ceil(timeout / interval);
 
   // Track the last error for the timeout message
-  let lastError: unknown = new Error("Condition never checked");
+  let lastError: unknown = "Condition never checked";
   let result: Option.Option<T> = Option.none();
 
   // Try the function, storing result/error
-  const attempt = Effect.sync(() => {
-    try {
-      const value = fn();
-      result = Option.some(value);
-      return true; // success
-    } catch (e) {
-      lastError = e;
-      result = Option.none();
-      return false; // keep retrying
-    }
-  });
+  const attempt = Effect.try({
+    try: fn,
+    catch: (cause) => new WaitForAttemptError({ cause }),
+  }).pipe(
+    Effect.match({
+      onFailure: (error) => {
+        lastError = error.cause;
+        result = Option.none();
+        return false;
+      },
+      onSuccess: (value) => {
+        result = Option.some(value);
+        return true;
+      },
+    }),
+  );
 
   // Schedule: retry at interval, max retries based on timeout
   const schedule = Schedule.both(
@@ -487,24 +506,22 @@ export const waitFor = <T>(
     Schedule.recurs(maxRetries),
   );
 
-  return Effect.gen(function* () {
-    // Run with retries until success or schedule exhausted
-    yield* attempt.pipe(
-      Effect.repeat({
-        schedule,
-        until: (success) => success,
-      }),
-      Effect.ignore,
-    );
+  // Run with retries until success or schedule exhausted
+  yield* attempt.pipe(
+    Effect.repeat({
+      schedule,
+      until: (success) => success,
+    }),
+    Effect.asVoid,
+  );
 
-    // Check final result
-    if (Option.isSome(result)) {
-      return result.value;
-    }
+  // Check final result
+  if (Option.isSome(result)) {
+    return result.value;
+  }
 
-    return yield* new WaitForTimeoutError({ timeout, lastError });
-  });
-};
+  return yield* new WaitForTimeoutError({ timeout, lastError });
+});
 
 /**
  * Input accepted by `render`.

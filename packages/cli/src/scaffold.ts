@@ -53,64 +53,67 @@ const getPlatformLayer = (platform: "node" | "bun"): Layer.Layer<PlatformConfig>
  * Copies app/, styles.css, and public/ from the template, then generates
  * config files (package.json, tsconfig, vite.config, etc.).
  */
-export const scaffoldProject = (targetDir: string, options: ProjectOptions, templatesDir: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const templateDir = path.join(templatesDir, options.template);
+export const scaffoldProject = Effect.fn("Cli.scaffoldProject")(function* (
+  targetDir: string,
+  options: ProjectOptions,
+  templatesDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const templateDir = path.join(templatesDir, options.template);
 
-    // 1. Validate template exists
-    const templateExists = yield* fs.exists(templateDir);
-    if (!templateExists) {
-      return yield* new TemplateNotFoundError({ template: options.template, path: templateDir });
-    }
+  // 1. Validate template exists
+  const templateExists = yield* fs.exists(templateDir);
+  if (!templateExists) {
+    return yield* new TemplateNotFoundError({ template: options.template, path: templateDir });
+  }
 
-    // 2. Create target directory
-    yield* fs.makeDirectory(targetDir, { recursive: true });
+  // 2. Create target directory
+  yield* fs.makeDirectory(targetDir, { recursive: true });
 
-    // 3. Copy app/ from template
-    yield* copyDir(fs, path.join(templateDir, "app"), path.join(targetDir, "app"));
+  // 3. Copy app/ from template
+  yield* copyDir(fs, path.join(templateDir, "app"), path.join(targetDir, "app"));
 
-    // 4. Generate API client type declarations if template exports an API
-    const apiFilePath = path.join(templateDir, "app", "api.ts");
-    const apiFileExists = yield* fs.exists(apiFilePath);
-    if (apiFileExists) {
-      yield* fs.makeDirectory(path.join(targetDir, ".trygg"), { recursive: true });
-      const apiClientTypes = yield* generateApiClientTypes({
-        apiTypeImportPath: "../app/api",
-      });
-      yield* fs.writeFileString(path.join(targetDir, ".trygg", "api.d.ts"), apiClientTypes);
-    }
-
-    // 5. Copy styles.css
-    yield* fs.copyFile(path.join(templateDir, "styles.css"), path.join(targetDir, "styles.css"));
-
-    // 6. Copy public/ assets
-    yield* copyDir(fs, path.join(templateDir, "public"), path.join(targetDir, "public"));
-
-    // 7. Generate package.json with platform-specific configuration
-    const platformLayer = getPlatformLayer(options.platform);
-    const packageJson = yield* generatePackageJson({
-      name: options.name,
-      output: options.output,
-    }).pipe(Effect.provide(platformLayer));
-    yield* fs.writeFileString(path.join(targetDir, "package.json"), packageJson);
-
-    // 8. Generate vite.config.ts
-    const viteConfig = yield* generateViteConfig({
-      platform: options.platform,
-      output: options.output,
+  // 4. Generate API client type declarations if template exports an API
+  const apiFilePath = path.join(templateDir, "app", "api.ts");
+  const apiFileExists = yield* fs.exists(apiFilePath);
+  if (apiFileExists) {
+    yield* fs.makeDirectory(path.join(targetDir, ".trygg"), { recursive: true });
+    const apiClientTypes = yield* generateApiClientTypes({
+      apiTypeImportPath: "../app/api",
     });
-    yield* fs.writeFileString(path.join(targetDir, "vite.config.ts"), viteConfig);
+    yield* fs.writeFileString(path.join(targetDir, ".trygg", "api.d.ts"), apiClientTypes);
+  }
 
-    // 9. Generate tsconfig.json
-    const tsconfig = yield* generateTsConfig();
-    yield* fs.writeFileString(path.join(targetDir, "tsconfig.json"), tsconfig);
+  // 5. Copy styles.css
+  yield* fs.copyFile(path.join(templateDir, "styles.css"), path.join(targetDir, "styles.css"));
 
-    // 10. Generate .gitignore
-    const gitignore = yield* generateGitignore();
-    yield* fs.writeFileString(path.join(targetDir, ".gitignore"), gitignore);
+  // 6. Copy public/ assets
+  yield* copyDir(fs, path.join(templateDir, "public"), path.join(targetDir, "public"));
 
-    // 11. Generate .oxlintrc.json
-    const oxlintConfig = yield* generateOxlintConfig();
-    yield* fs.writeFileString(path.join(targetDir, ".oxlintrc.json"), oxlintConfig);
+  // 7. Generate package.json with platform-specific configuration
+  const platformLayer = getPlatformLayer(options.platform);
+  const packageJson = yield* generatePackageJson({
+    name: options.name,
+    output: options.output,
+  }).pipe(Effect.provide(platformLayer));
+  yield* fs.writeFileString(path.join(targetDir, "package.json"), packageJson);
+
+  // 8. Generate vite.config.ts
+  const viteConfig = yield* generateViteConfig({
+    platform: options.platform,
+    output: options.output,
   });
+  yield* fs.writeFileString(path.join(targetDir, "vite.config.ts"), viteConfig);
+
+  // 9. Generate tsconfig.json
+  const tsconfig = yield* generateTsConfig;
+  yield* fs.writeFileString(path.join(targetDir, "tsconfig.json"), tsconfig);
+
+  // 10. Generate .gitignore
+  const gitignore = yield* generateGitignore;
+  yield* fs.writeFileString(path.join(targetDir, ".gitignore"), gitignore);
+
+  // 11. Generate .oxlintrc.json
+  const oxlintConfig = yield* generateOxlintConfig;
+  yield* fs.writeFileString(path.join(targetDir, ".oxlintrc.json"), oxlintConfig);
+});

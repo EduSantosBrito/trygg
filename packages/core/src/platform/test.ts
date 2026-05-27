@@ -9,7 +9,7 @@ import { History, test as historyTest } from "./history.js";
 import { SessionStorage, LocalStorage, sessionStorageTest, localStorageTest } from "./storage.js";
 import { Scroll, test as scrollTest } from "./scroll.js";
 import { PlatformEventTarget, test as eventTargetTest } from "./event-target.js";
-import { Observer, test as observerTest } from "./observer.js";
+import { Observer, TestObserver, test as observerTest } from "./observer.js";
 import { Idle, test as idleTest } from "./idle.js";
 
 export const test = (
@@ -23,6 +23,7 @@ export const test = (
   | Scroll
   | PlatformEventTarget
   | Observer
+  | TestObserver
   | Idle
 > =>
   Layer.mergeAll(

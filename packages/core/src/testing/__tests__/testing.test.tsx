@@ -4,7 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../effect-vitest.js";
-import { Cause, Effect, Exit, Fiber, Option, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Predicate, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import {
   click,
@@ -18,6 +18,26 @@ import {
 } from "../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { Renderer } from "../../primitives/renderer.js";
+
+class TestWaitForError extends Schema.TaggedErrorClass<TestWaitForError>()("TestWaitForError", {
+  reason: Schema.String,
+}) {}
+
+const failWaitFor = (reason: string): never => assert.fail(reason);
+
+const requireInputElement = (element: HTMLElement, testId: string): HTMLInputElement => {
+  if (element instanceof HTMLInputElement) {
+    return element;
+  }
+  return assert.fail(`Expected ${testId} to be an HTMLInputElement`);
+};
+
+const requireTextAreaElement = (element: HTMLElement, testId: string): HTMLTextAreaElement => {
+  if (element instanceof HTMLTextAreaElement) {
+    return element;
+  }
+  return assert.fail(`Expected ${testId} to be an HTMLTextAreaElement`);
+};
 
 describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -251,7 +271,7 @@ describe("Testing Utilities", () => {
         const result = yield* render(<div>Existing</div>);
 
         const exit = yield* Effect.exit(result.getByText("Not found"));
-        assert.strictEqual(exit._tag, "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
 
@@ -264,7 +284,7 @@ describe("Testing Utilities", () => {
         );
 
         const exit = yield* Effect.exit(result.getByText("Hello"));
-        assert.strictEqual(exit._tag, "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
 
@@ -335,7 +355,7 @@ describe("Testing Utilities", () => {
         const result = yield* render(<div>No testid</div>);
 
         const exit = yield* Effect.exit(result.getByTestId("missing"));
-        assert.strictEqual(exit._tag, "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
 
@@ -527,7 +547,7 @@ describe("Testing Utilities", () => {
         const result = yield* render(<div>No role</div>);
 
         const exit = yield* Effect.exit(result.getByRole("button"));
-        assert.strictEqual(exit._tag, "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
   });
@@ -638,7 +658,7 @@ describe("Testing Utilities", () => {
         const result = yield* render(<div>Content</div>);
 
         const exit = yield* Effect.exit(result.querySelector(".missing"));
-        assert.strictEqual(exit._tag, "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
   });
@@ -692,17 +712,17 @@ describe("Testing Utilities", () => {
   // Scope: ElementNotFoundError
   // ─────────────────────────────────────────────────────────────────────────────
   describe("ElementNotFoundError", () => {
-    it("should include query type and value in message", () => {
+    it("should store query type and value", () => {
       const error = new ElementNotFoundError({ queryType: "text", query: "Hello World" });
 
-      assert.include(error.message, "text");
-      assert.include(error.message, "Hello World");
+      assert.strictEqual(error.queryType, "text");
+      assert.strictEqual(error.query, "Hello World");
     });
 
     it("should have _tag property for pattern matching", () => {
       const error = new ElementNotFoundError({ queryType: "testId", query: "my-button" });
 
-      assert.strictEqual(error._tag, "ElementNotFoundError");
+      assert.isTrue(Predicate.isTagged("ElementNotFoundError")(error));
     });
 
     it("should have correct error name", () => {
@@ -809,7 +829,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
 
         yield* type(input, "Hello World");
 
@@ -827,7 +847,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
         input.addEventListener("input", () => {
           inputEventFired = true;
         });
@@ -848,7 +868,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
         input.addEventListener("change", () => {
           changeEventFired = true;
         });
@@ -867,7 +887,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
 
         yield* type(input, "Input value");
 
@@ -883,7 +903,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const textarea = (yield* result.getByTestId("textarea")) as HTMLTextAreaElement;
+        const textarea = requireTextAreaElement(yield* result.getByTestId("textarea"), "textarea");
 
         yield* type(textarea, "Textarea value");
 
@@ -899,7 +919,7 @@ describe("Testing Utilities", () => {
           </div>,
         );
 
-        const input = (yield* result.getByTestId("input")) as HTMLInputElement;
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
         const typeResult = yield* type(input, "Test");
 
         assert.isUndefined(typeResult);
@@ -928,7 +948,7 @@ describe("Testing Utilities", () => {
           waitFor(
             () => {
               attempts++;
-              if (attempts < 3) throw new Error("Not ready");
+              if (attempts < 3) failWaitFor("Not ready");
               return "done";
             },
             { interval: 20 },
@@ -949,7 +969,7 @@ describe("Testing Utilities", () => {
         const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
-              throw new Error("Always fails");
+              failWaitFor("Always fails");
             },
             { timeout: 100, interval: 20 },
           ),
@@ -959,7 +979,7 @@ describe("Testing Utilities", () => {
         yield* TestClock.adjust(200);
 
         const exit = yield* Fiber.await(fiber);
-        assert.isTrue(exit._tag === "Failure");
+        assert.isTrue(Exit.isFailure(exit));
       }),
     );
 
@@ -972,7 +992,7 @@ describe("Testing Utilities", () => {
           waitFor(
             () => {
               checkCount++;
-              throw new Error("Fails");
+              failWaitFor("Fails");
             },
             { timeout: 200, interval: 50 },
           ),
@@ -998,7 +1018,7 @@ describe("Testing Utilities", () => {
           waitFor(
             () => {
               checkCount++;
-              if (checkCount < 5) throw new Error("Not ready");
+              if (checkCount < 5) failWaitFor("Not ready");
               return true;
             },
             { interval: 20 },
@@ -1021,7 +1041,7 @@ describe("Testing Utilities", () => {
         const fiber = yield* Effect.forkChild(
           waitFor(() => {
             attempts++;
-            if (attempts < 3) throw new Error("Not ready");
+            if (attempts < 3) failWaitFor("Not ready");
             return "success";
           }),
         );
@@ -1049,7 +1069,7 @@ describe("Testing Utilities", () => {
         const fiber = yield* Effect.forkChild(
           waitFor(
             () => {
-              throw new Error("Custom error message");
+              failWaitFor("Custom error message");
             },
             { timeout: 100 },
           ),
@@ -1060,10 +1080,10 @@ describe("Testing Utilities", () => {
 
         const exit = yield* Fiber.await(fiber);
 
-        if (exit._tag === "Failure") {
+        if (Exit.isFailure(exit)) {
           const error = Cause.squash(exit.cause);
           if (error instanceof WaitForTimeoutError) {
-            assert.include(error.message, "Custom error message");
+            assert.include(Cause.pretty(Cause.fail(error)), "Custom error message");
           }
         }
       }),
@@ -1075,26 +1095,35 @@ describe("Testing Utilities", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   describe("WaitForTimeoutError", () => {
     it("should include timeout duration in message", () => {
-      const error = new WaitForTimeoutError({ timeout: 1000, lastError: new Error("last") });
+      const error = new WaitForTimeoutError({
+        timeout: 1000,
+        lastError: new TestWaitForError({ reason: "last" }),
+      });
 
-      assert.include(error.message, "1000ms");
+      assert.include(Cause.pretty(Cause.fail(error)), "1000ms");
     });
 
     it("should have _tag property for pattern matching", () => {
-      const error = new WaitForTimeoutError({ timeout: 500, lastError: new Error("test") });
+      const error = new WaitForTimeoutError({
+        timeout: 500,
+        lastError: new TestWaitForError({ reason: "test" }),
+      });
 
-      assert.strictEqual(error._tag, "WaitForTimeoutError");
+      assert.isTrue(Predicate.isTagged("WaitForTimeoutError")(error));
     });
 
     it("should store lastError property", () => {
-      const lastError = new Error("test error");
+      const lastError = new TestWaitForError({ reason: "test error" });
       const error = new WaitForTimeoutError({ timeout: 500, lastError });
 
       assert.strictEqual(error.lastError, lastError);
     });
 
     it("should store timeout property", () => {
-      const error = new WaitForTimeoutError({ timeout: 750, lastError: new Error("test") });
+      const error = new WaitForTimeoutError({
+        timeout: 750,
+        lastError: new TestWaitForError({ reason: "test" }),
+      });
 
       assert.strictEqual(error.timeout, 750);
     });
@@ -1196,7 +1225,7 @@ describe("Testing Utilities", () => {
             if (checkCount >= 3) {
               status.textContent = "ready";
             }
-            if (status.textContent !== "ready") throw new Error("Not ready");
+            if (status.textContent !== "ready") failWaitFor("Not ready");
             return status.textContent;
           }),
         );

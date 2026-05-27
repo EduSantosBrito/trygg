@@ -1,7 +1,7 @@
 /**
  * Home Page: trygg.dev — Variant A (The Workbench)
  */
-import { Effect, Result, Scope } from "effect";
+import { Effect, Scope } from "effect";
 import { Component, Signal, type ComponentProps, type Element as TryggElement } from "trygg";
 import * as Router from "trygg/router";
 
@@ -25,6 +25,11 @@ const sidebarFiles: ReadonlyArray<{ readonly id: WorkbenchView; readonly label: 
   { id: "step-2", label: "app/pages/users.tsx" },
 ];
 
+const isWorkbenchView = (value: string | null): value is WorkbenchView =>
+  value === "step-0" || value === "step-1" || value === "step-2";
+
+const isTheme = (value: unknown): value is Theme => value === "dark" || value === "light";
+
 const Arrow = Component.gen(function* () {
   return (
     <svg aria-hidden="true" viewBox="0 0 20 20" className="home-arrow">
@@ -47,20 +52,18 @@ const InstallCommand = Component.gen(function* () {
     return "Copy";
   });
 
-  const handleCopy = () =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise(() =>
-        navigator.clipboard.writeText(sections.install.command),
-      ).pipe(Effect.result);
+  const handleCopy = Effect.fnUntraced(function* (_event: Event) {
+    const copied = yield* Effect.tryPromise(() =>
+      navigator.clipboard.writeText(sections.install.command),
+    ).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
 
-      if (Result.isSuccess(result)) {
-        yield* Signal.set(state, "copied");
-      } else {
-        yield* Signal.set(state, "failed");
-      }
-      yield* Effect.sleep("2 seconds");
-      yield* Signal.set(state, "idle");
-    }).pipe(Effect.ignore);
+    yield* Signal.set(state, copied ? "copied" : "failed");
+    yield* Effect.sleep("2 seconds");
+    yield* Signal.set(state, "idle");
+  });
 
   return (
     <div className="home-command" role="group" aria-label="Installation command">
@@ -202,38 +205,37 @@ const SidebarFile = Component.gen(function* (
   });
   const ariaSelected = yield* Signal.derive(active, (view) => (view === id ? "true" : "false"));
 
-  const onKeyDown = (event: Event) =>
-    Effect.gen(function* () {
-      const e = event as KeyboardEvent;
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
-      const current = event.currentTarget as HTMLElement | null;
-      if (current === null) return;
-      const tablist = current.closest('[role="tablist"]');
-      if (tablist === null) return;
-      const tabs = Array.from(tablist.querySelectorAll<HTMLElement>('[role="tab"]'));
-      const index = tabs.indexOf(current);
-      if (index === -1) return;
+  const onKeyDown = Effect.fnUntraced(function* (event: Event) {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    if (current === null) return;
+    const tablist = current.closest('[role="tablist"]');
+    if (tablist === null) return;
+    const tabs = Array.from(tablist.querySelectorAll<HTMLElement>('[role="tab"]'));
+    const index = tabs.indexOf(current);
+    if (index === -1) return;
 
-      let nextIndex: number | null = null;
-      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-        nextIndex = (index + 1) % tabs.length;
-      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-        nextIndex = (index - 1 + tabs.length) % tabs.length;
-      } else if (e.key === "Home") {
-        nextIndex = 0;
-      } else if (e.key === "End") {
-        nextIndex = tabs.length - 1;
-      }
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      nextIndex = (index + 1) % tabs.length;
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + tabs.length) % tabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = tabs.length - 1;
+    }
 
-      if (nextIndex === null) return;
-      e.preventDefault();
-      const nextTab = tabs[nextIndex];
-      if (nextTab === undefined) return;
-      const nextId = nextTab.getAttribute("data-tab-id") as WorkbenchView | null;
-      if (nextId === null) return;
-      nextTab.focus();
-      yield* onSelect(nextId);
-    });
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = tabs[nextIndex];
+    if (nextTab === undefined) return;
+    const nextId = nextTab.getAttribute("data-tab-id");
+    if (!isWorkbenchView(nextId)) return;
+    nextTab.focus();
+    yield* onSelect(nextId);
+  });
 
   return (
     <button
@@ -261,10 +263,11 @@ const StepEditor = Component.gen(function* (
 ) {
   const { stepIndex, highlights, active } = yield* Props;
   const step = sections.seam.steps[stepIndex];
-  if (!step) return <></>;
+  const sidebarFile = sidebarFiles[stepIndex];
+  if (!step || sidebarFile === undefined) return <></>;
 
   const lines = yield* Signal.derive(highlights, (entries) => entries[stepIndex] ?? []);
-  const id = `step-${stepIndex}` as WorkbenchView;
+  const id = sidebarFile.id;
 
   return (
     <EditorPanel id={id} active={active}>
@@ -291,8 +294,8 @@ const Workbench = Component.gen(function* () {
 
   if (typeof window !== "undefined") {
     const syncTheme = (event: Event) => {
-      const detail = (event as CustomEvent<Theme>).detail;
-      Effect.runFork(Signal.set(theme, detail ?? getTheme()));
+      if (!(event instanceof CustomEvent)) return;
+      Effect.runFork(Signal.set(theme, isTheme(event.detail) ? event.detail : getTheme()));
     };
 
     window.addEventListener(THEME_CHANGE_EVENT, syncTheme);
@@ -372,20 +375,23 @@ const Workbench = Component.gen(function* () {
     }
   }
 
-  const highlightedByTheme = yield* Effect.promise(
-    async (): Promise<Record<Theme, ReadonlyArray<ReadonlyArray<HighlightedLine>>>> => {
-      const themes: ReadonlyArray<Theme> = ["dark", "light"];
-      const [dark, light] = await Promise.all(
-        themes.map((entryTheme) =>
-          Promise.all(
-            sections.seam.steps.map((step) => highlightCode(step.code, "tsx", entryTheme)),
-          ),
-        ),
-      );
+  const highlightedByTheme: Record<
+    Theme,
+    ReadonlyArray<ReadonlyArray<HighlightedLine>>
+  > = yield* Effect.gen(function* () {
+    const dark = yield* Effect.forEach(
+      sections.seam.steps,
+      (step) => Effect.promise(() => highlightCode(step.code, "tsx", "dark")),
+      { concurrency: "unbounded" },
+    );
+    const light = yield* Effect.forEach(
+      sections.seam.steps,
+      (step) => Effect.promise(() => highlightCode(step.code, "tsx", "light")),
+      { concurrency: "unbounded" },
+    );
 
-      return { dark, light };
-    },
-  );
+    return { dark, light };
+  });
 
   const highlightedSteps = yield* Signal.derive(
     theme,
@@ -398,20 +404,19 @@ const Workbench = Component.gen(function* () {
     return "app/pages/users.tsx";
   });
 
-  const setView = (view: WorkbenchView) =>
-    Effect.gen(function* () {
-      if (typeof window !== "undefined") {
-        const editor = document.querySelector<HTMLElement>(".home-workbench__editor");
-        if (editor !== null && editor.style.getPropertyValue("--workbench-editor-height") === "") {
-          // First swap: pin the editor's current natural height so the upcoming
-          // CSS transition has an explicit starting point (auto → px doesn't interpolate).
-          const currentHeight = editor.getBoundingClientRect().height;
-          editor.style.setProperty("--workbench-editor-height", `${currentHeight}px`);
-          void editor.offsetHeight;
-        }
+  const setView = Effect.fnUntraced(function* (view: WorkbenchView) {
+    if (typeof window !== "undefined") {
+      const editor = document.querySelector<HTMLElement>(".home-workbench__editor");
+      if (editor !== null && editor.style.getPropertyValue("--workbench-editor-height") === "") {
+        // First swap: pin the editor's current natural height so the upcoming
+        // CSS transition has an explicit starting point (auto → px doesn't interpolate).
+        const currentHeight = editor.getBoundingClientRect().height;
+        editor.style.setProperty("--workbench-editor-height", `${currentHeight}px`);
+        const _forcedReflow = editor.offsetHeight;
       }
-      yield* Signal.set(activeView, view);
-    });
+    }
+    yield* Signal.set(activeView, view);
+  });
 
   return (
     <section className="home-workbench-section" aria-labelledby="hero-title">

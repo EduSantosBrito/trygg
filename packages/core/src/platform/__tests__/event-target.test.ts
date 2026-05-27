@@ -9,7 +9,6 @@ import {
   PlatformEventTarget,
   browser as eventTargetBrowser,
   test as eventTargetTest,
-  type TestEventTargetService,
 } from "../event-target.js";
 
 describe("EventTarget", () => {
@@ -17,7 +16,7 @@ describe("EventTarget", () => {
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
-      const target = { __testId: "btn" } as unknown as EventTarget;
+      const target = new EventTarget();
 
       yield* et.on(target, "click", (_e: Event) =>
         Effect.sync(() => {
@@ -25,7 +24,7 @@ describe("EventTarget", () => {
         }),
       );
 
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
 
       assert.deepStrictEqual(received, ["clicked"]);
     }).pipe(Effect.provide(eventTargetTest)),
@@ -35,7 +34,7 @@ describe("EventTarget", () => {
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
-      const target = { __testId: "multi" } as unknown as EventTarget;
+      const target = new EventTarget();
 
       yield* et.on(target, "click", (_e: Event) =>
         Effect.sync(() => {
@@ -48,7 +47,7 @@ describe("EventTarget", () => {
         }),
       );
 
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
 
       assert.deepStrictEqual(received, ["handler1", "handler2"]);
     }).pipe(Effect.provide(eventTargetTest)),
@@ -58,7 +57,7 @@ describe("EventTarget", () => {
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
-      const target = { __testId: "scoped" } as unknown as EventTarget;
+      const target = new EventTarget();
 
       const scope = yield* Scope.make();
       yield* et
@@ -70,14 +69,14 @@ describe("EventTarget", () => {
         .pipe(Effect.provideService(Scope.Scope, scope));
 
       // Dispatch before close
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
       assert.deepStrictEqual(received, ["clicked"]);
 
       // Close scope
       yield* Scope.close(scope, Exit.void);
 
       // Dispatch after close — handler should be removed
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
       assert.deepStrictEqual(received, ["clicked"]);
     }).pipe(Effect.provide(eventTargetTest)),
   );
@@ -85,9 +84,9 @@ describe("EventTarget", () => {
   it.effect("dispatch to unknown target is no-op", () =>
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
-      const target = { __testId: "unknown" } as unknown as EventTarget;
+      const target = new EventTarget();
       // Should not throw
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
     }).pipe(Effect.provide(eventTargetTest)),
   );
 
@@ -95,7 +94,7 @@ describe("EventTarget", () => {
     Effect.gen(function* () {
       const et = yield* PlatformEventTarget;
       const received: Array<string> = [];
-      const target = { __testId: "events" } as unknown as EventTarget;
+      const target = new EventTarget();
 
       yield* et.on(target, "click", (_e: Event) =>
         Effect.sync(() => {
@@ -108,10 +107,10 @@ describe("EventTarget", () => {
         }),
       );
 
-      yield* (et as TestEventTargetService).dispatch(target, "click", new Event("click"));
+      yield* et.dispatch(target, "click", new Event("click"));
       assert.deepStrictEqual(received, ["click"]);
 
-      yield* (et as TestEventTargetService).dispatch(target, "mouseover", new Event("mouseover"));
+      yield* et.dispatch(target, "mouseover", new Event("mouseover"));
       assert.deepStrictEqual(received, ["click", "mouseover"]);
     }).pipe(Effect.provide(eventTargetTest)),
   );

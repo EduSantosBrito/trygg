@@ -1,11 +1,11 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class NetworkError extends Data.TaggedError("NetworkError")<{
-  readonly url: string;
-  readonly status: number;
-}> {}
+export class NetworkError extends Schema.TaggedErrorClass<NetworkError>()("NetworkError", {
+  url: Schema.String,
+  status: Schema.Number,
+}) {}
 
 export const NetworkErrorDisplay = Component.gen(function* (
   Props: ComponentProps<{ error: NetworkError }>,

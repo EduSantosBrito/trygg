@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 import { incidentsResource, type Incident } from "../resources/incidents";
@@ -11,7 +11,7 @@ interface Command {
   readonly id: string;
   readonly label: string;
   readonly shortcut?: string;
-  readonly action: () => Effect.Effect<void, never, Router.Router>;
+  readonly action: (event?: Event) => Effect.Effect<void, never, Router.Router>;
 }
 
 interface CommandPaletteProps {
@@ -40,46 +40,48 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
   // Derive all incidents from resource
   const allIncidents = yield* Signal.derive(
     incidentsState,
-    (s): ReadonlyArray<Incident> => (s._tag === "Success" ? s.value : []),
+    (s): ReadonlyArray<Incident> => (Predicate.isTagged(s, "Success") ? s.value : []),
   );
+
+  const handleNavigationError = (error: unknown) =>
+    Effect.logWarning("Command palette navigation failed").pipe(
+      Effect.annotateLogs("error", error),
+      Effect.asVoid,
+    );
 
   // Commands list
   const commands: ReadonlyArray<Command> = [
     {
       id: "create-incident",
       label: "Declare incident",
-      action: () =>
-        Effect.gen(function* () {
-          yield* onClose();
-          yield* Router.navigate("/incidents?declare=true");
-        }).pipe(Effect.ignore),
+      action: Effect.fnUntraced(function* (_event?: Event) {
+        yield* onClose();
+        yield* Router.navigate("/incidents?declare=true").pipe(Effect.catch(handleNavigationError));
+      }),
     },
     {
       id: "go-home",
       label: "Go to Home",
-      action: () =>
-        Effect.gen(function* () {
-          yield* onClose();
-          yield* Router.navigate("/");
-        }).pipe(Effect.ignore),
+      action: Effect.fnUntraced(function* (_event?: Event) {
+        yield* onClose();
+        yield* Router.navigate("/").pipe(Effect.catch(handleNavigationError));
+      }),
     },
     {
       id: "go-incidents",
       label: "Go to Incidents",
-      action: () =>
-        Effect.gen(function* () {
-          yield* onClose();
-          yield* Router.navigate("/incidents");
-        }).pipe(Effect.ignore),
+      action: Effect.fnUntraced(function* (_event?: Event) {
+        yield* onClose();
+        yield* Router.navigate("/incidents").pipe(Effect.catch(handleNavigationError));
+      }),
     },
     {
       id: "go-settings",
       label: "Go to Settings",
-      action: () =>
-        Effect.gen(function* () {
-          yield* onClose();
-          yield* Router.navigate("/settings");
-        }).pipe(Effect.ignore),
+      action: Effect.fnUntraced(function* (_event?: Event) {
+        yield* onClose();
+        yield* Router.navigate("/settings").pipe(Effect.catch(handleNavigationError));
+      }),
     },
   ];
 
@@ -131,59 +133,57 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
   yield* Effect.addFinalizer(() => unsubscribeOpen);
 
   // Event handlers
-  const onQueryInput = (event: Event) =>
-    Effect.gen(function* () {
-      const target = event.target;
-      if (target instanceof HTMLInputElement) {
-        yield* Signal.set(query, target.value);
-        yield* Signal.set(activeIndex, 0);
-      }
-    });
+  const onQueryInput = Effect.fnUntraced(function* (event: Event) {
+    const target = event.target;
+    if (target instanceof HTMLInputElement) {
+      yield* Signal.set(query, target.value);
+      yield* Signal.set(activeIndex, 0);
+    }
+  });
 
-  const onKeyDown = (event: Event) =>
-    Effect.gen(function* () {
-      if (!(event instanceof KeyboardEvent)) {
-        return;
-      }
+  const onKeyDown = Effect.fnUntraced(function* (event: Event) {
+    if (!(event instanceof KeyboardEvent)) {
+      return;
+    }
 
-      const total = yield* Signal.peek(totalResults);
-      const current = yield* Signal.peek(activeIndex);
-      const cmds = yield* Signal.peek(filteredCommands);
-      const incs = yield* Signal.peek(filteredIncidents);
+    const total = yield* Signal.peek(totalResults);
+    const current = yield* Signal.peek(activeIndex);
+    const cmds = yield* Signal.peek(filteredCommands);
+    const incs = yield* Signal.peek(filteredIncidents);
 
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          yield* Signal.set(activeIndex, Math.min(current + 1, total - 1));
-          break;
-        case "ArrowUp":
-          event.preventDefault();
-          yield* Signal.set(activeIndex, Math.max(current - 1, 0));
-          break;
-        case "Enter":
-          event.preventDefault();
-          if (current < cmds.length) {
-            const selectedCommand = cmds[current];
-            if (selectedCommand !== undefined) {
-              yield* selectedCommand.action();
-            }
-          } else {
-            const incIndex = current - cmds.length;
-            const selectedIncident = incs[incIndex];
-            if (selectedIncident !== undefined) {
-              yield* onClose();
-              yield* Router.navigate("/incidents/:id", {
-                params: { id: String(selectedIncident.id) },
-              }).pipe(Effect.ignore);
-            }
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        yield* Signal.set(activeIndex, Math.min(current + 1, total - 1));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        yield* Signal.set(activeIndex, Math.max(current - 1, 0));
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (current < cmds.length) {
+          const selectedCommand = cmds[current];
+          if (selectedCommand !== undefined) {
+            yield* selectedCommand.action();
           }
-          break;
-        case "Escape":
-          event.preventDefault();
-          yield* onClose();
-          break;
-      }
-    });
+        } else {
+          const incIndex = current - cmds.length;
+          const selectedIncident = incs[incIndex];
+          if (selectedIncident !== undefined) {
+            yield* onClose();
+            yield* Router.navigate("/incidents/:id", {
+              params: { id: String(selectedIncident.id) },
+            }).pipe(Effect.catch(handleNavigationError));
+          }
+        }
+        break;
+      case "Escape":
+        event.preventDefault();
+        yield* onClose();
+        break;
+    }
+  });
 
   // Handle backdrop click
   const onBackdropClick = (event: Event) => {
@@ -209,11 +209,13 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
     return Effect.void;
   };
 
-  const selectIncident = (incident: Incident) => () =>
-    Effect.gen(function* () {
+  const selectIncident = (incident: Incident) =>
+    Effect.fnUntraced(function* (_event?: Event) {
       yield* onClose();
-      yield* Router.navigate("/incidents/:id", { params: { id: String(incident.id) } });
-    }).pipe(Effect.ignore);
+      yield* Router.navigate("/incidents/:id", { params: { id: String(incident.id) } }).pipe(
+        Effect.catch(handleNavigationError),
+      );
+    });
 
   return (
     <dialog id={DIALOG_ID} className="cmdk-dialog" onClick={onBackdropClick}>
@@ -315,7 +317,9 @@ interface IncidentsSectionProps {
   readonly incidents: Signal.Signal<Incident[]>;
   readonly activeIndex: Signal.Signal<number>;
   readonly baseIndex: Signal.Signal<number>;
-  readonly onSelect: (inc: Incident) => () => Effect.Effect<void, never, Router.Router>;
+  readonly onSelect: (
+    inc: Incident,
+  ) => (event?: Event) => Effect.Effect<void, never, Router.Router>;
 }
 
 const IncidentsSection = Component.gen(function* (Props: ComponentProps<IncidentsSectionProps>) {
@@ -349,7 +353,7 @@ interface IncidentItemProps {
   readonly index: number;
   readonly baseIndex: Signal.Signal<number>;
   readonly activeIndex: Signal.Signal<number>;
-  readonly onSelect: () => Effect.Effect<void, never, Router.Router>;
+  readonly onSelect: (event?: Event) => Effect.Effect<void, never, Router.Router>;
 }
 
 const IncidentItem = Component.gen(function* (Props: ComponentProps<IncidentItemProps>) {

@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/error-boundary
  */
-import { Cause, Data, Effect } from "effect";
+import { Cause, Effect, Predicate, Schema } from "effect";
 import { Component, tagComponent } from "./component.js";
 import { Element, type Element as ElementType } from "./element.js";
 import * as ReactiveMatcher from "./reactive-matcher.js";
@@ -45,9 +45,12 @@ interface ErrorHandler {
  * @public
  * @since 1.0.0
  */
-export class UnhandledErrorsError extends Data.TaggedError("UnhandledErrorsError")<{
-  readonly unhandledTags: ReadonlyArray<string>;
-}> {}
+export class UnhandledErrorsError extends Schema.TaggedErrorClass<UnhandledErrorsError>()(
+  "UnhandledErrorsError",
+  {
+    unhandledTags: Schema.Array(Schema.String),
+  },
+) {}
 
 /**
  * Pipeable matcher for building an error boundary.
@@ -82,23 +85,21 @@ export interface ErrorBoundaryMatcher<
   readonly _handledTags?: HandledTags;
 }
 
-const isTaggedError = (value: unknown): value is { readonly _tag: string } => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  return typeof Reflect.get(value, "_tag") === "string";
-};
+const TaggedError = Schema.Struct({ _tag: Schema.String });
+type TaggedError = Schema.Schema.Type<typeof TaggedError>;
+
+const isTaggedError: (value: unknown) => value is TaggedError = Schema.is(TaggedError);
 
 const isErrorTag = <E, Tag extends ErrorTags<E>>(
   tag: Tag,
   error: unknown,
-): error is ErrorForTag<E, Tag> => isTaggedError(error) && error._tag === tag;
+): error is ErrorForTag<E, Tag> => Predicate.isTagged(error, tag);
 
 const unhandledErrorElement = (cause: Cause.Cause<unknown>): ElementType =>
   Element.fromEffect(
     Effect.gen(function* () {
       const error = Cause.squash(cause);
-      const unhandledTag = isTaggedError(error) ? error._tag : String(error);
+      const unhandledTag = isTaggedError(error) ? error._tag : "UnknownError";
       return yield* new UnhandledErrorsError({
         unhandledTags: [unhandledTag],
       });
@@ -115,9 +116,9 @@ const makeMatcher = <Props, E, R, HandledTags extends string>(
   handlers,
 });
 
-const resolveFallback = (
+const resolveFallback = <EHandler, RHandler>(
   handlers: ReadonlyMap<string, ErrorHandler>,
-  catchAllComponent: Component.Type<{ cause: Cause.Cause<unknown> }, any, any>,
+  catchAllComponent: Component.Type<{ cause: Cause.Cause<unknown> }, EHandler, RHandler>,
   cause: Cause.Cause<unknown>,
 ): ElementType => {
   const error = Cause.squash(cause);
@@ -218,7 +219,7 @@ export const catchAll =
     component: Component.Type<{ cause: Cause.Cause<unknown> }, unknown, RHandler>,
   ) =>
   (
-    self: ErrorBoundaryMatcher<Props, E, R, any>,
+    self: ErrorBoundaryMatcher<Props, E, R, string>,
   ): Effect.Effect<Component.Type<Props, never, R | RHandler>> =>
     Effect.sync(() => {
       const safeComponentRunFn = (

@@ -98,9 +98,9 @@ const toWire = (i: ServiceIncident): Incident => ({
   title: i.title,
   severity: i.severity,
   status: i.status,
-  timeline: i.timeline.map((e) => ({
-    timestamp: e.timestamp.toISOString(),
-    message: e.message,
+  timeline: i.timeline.map(({ timestamp, message }) => ({
+    timestamp: timestamp.toISOString(),
+    message,
   })),
   createdAt: i.createdAt.toISOString(),
 });

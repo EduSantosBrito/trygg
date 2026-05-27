@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/head
  */
-import { Data, Effect, Option, Ref, Scope } from "effect";
+import { Data, Effect, Option, Ref, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import type { ElementProps } from "./element.js";
@@ -87,20 +87,34 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
  * @public
  * @since 1.0.0
  */
-export class HeadStrategy extends Context.Service<HeadStrategy, HeadStrategyService>()(
-  "trygg/HeadStrategy",
-) {
+export type HeadStrategyService = Data.TaggedEnum<{
+  readonly HeadStrategy: { readonly isServer: boolean };
+}>;
+
+const HeadStrategyService = Data.taggedEnum<HeadStrategyService>();
+
+export class HeadStrategy extends Context.Service<
+  HeadStrategy,
+  {
+    readonly _tag: "HeadStrategy";
+    readonly isServer: boolean;
+  }
+>()("trygg/HeadStrategy") {
   /**
    * Head computed server-side (in initial HTML).
    * SEO-optimal — crawlers see head content immediately.
    */
-  static readonly Server: HeadStrategyService = { _tag: "HeadStrategy", isServer: true };
+  static readonly Server: HeadStrategyService = HeadStrategyService.HeadStrategy({
+    isServer: true,
+  });
 
   /**
    * Head computed client-side (after JS loads).
    * For personalization, A/B testing, device-specific tags.
    */
-  static readonly Client: HeadStrategyService = { _tag: "HeadStrategy", isServer: false };
+  static readonly Client: HeadStrategyService = HeadStrategyService.HeadStrategy({
+    isServer: false,
+  });
 }
 
 /**
@@ -119,10 +133,6 @@ export class HeadStrategy extends Context.Service<HeadStrategy, HeadStrategyServ
  * @public
  * @since 1.0.0
  */
-export interface HeadStrategyService {
-  readonly _tag: "HeadStrategy";
-  readonly isServer: boolean;
-}
 
 // =============================================================================
 // Head Entry — Represents a mounted head element
@@ -197,7 +207,7 @@ export const deriveKey = (
         if (typeof property === "string") return Option.some(`meta:property:${property}`);
         const httpEquiv = props["httpEquiv"];
         if (typeof httpEquiv === "string") return Option.some(`meta:http-equiv:${httpEquiv}`);
-        if ("charset" in props) return Option.some("meta:charset");
+        if (props["charset"] !== undefined) return Option.some("meta:charset");
         return Option.none();
       }
       default:
@@ -218,16 +228,17 @@ export const deriveKey = (
  *
  * @internal
  */
-export type HoistAction =
-  | {
-      readonly _tag: "head";
-      readonly props: ElementProps;
-      readonly mount: (node: HTMLElement) => Effect.Effect<void, never, Scope.Scope>;
-    }
-  | {
-      readonly _tag: "document";
-      readonly props: ElementProps;
-    };
+export type HoistAction = Data.TaggedEnum<{
+  readonly head: {
+    readonly props: ElementProps;
+    readonly mount: (node: HTMLElement) => Effect.Effect<void, never, Scope.Scope>;
+  };
+  readonly document: {
+    readonly props: ElementProps;
+  };
+}>;
+
+export const HoistAction = Data.taggedEnum<HoistAction>();
 
 /**
  * Head-owned hoisting seam consumed by the renderer.
@@ -265,7 +276,7 @@ export const makeHeadHoist = (): HeadHoist => ({
       const domProps = props.mode === undefined ? props : stripHeadMode(props);
       const isDocumentMount = yield* getFiberRef(IsDocumentMount);
       if (isDocumentMount && DOCUMENT_TAGS.has(tag)) {
-        return Option.some({ _tag: "document", props: domProps });
+        return Option.some(HoistAction.document({ props: domProps }));
       }
 
       const headService = yield* getFiberRef(CurrentHead);
@@ -274,11 +285,12 @@ export const makeHeadHoist = (): HeadHoist => ({
       }
 
       const key = yield* deriveKey(tag, domProps);
-      return Option.some({
-        _tag: "head",
-        props: domProps,
-        mount: (node) => headService.mount(tag, node, key),
-      });
+      return Option.some(
+        HoistAction.head({
+          props: domProps,
+          mount: (node) => headService.mount(tag, node, key),
+        }),
+      );
     }),
 });
 
@@ -302,11 +314,11 @@ export const makeHeadHoist = (): HeadHoist => ({
  * @public
  * @since 1.0.0
  */
-export class HeadMountError extends Data.TaggedError("HeadMountError")<{
-  readonly tagName: string;
-  readonly key: Option.Option<string>;
-  readonly cause: unknown;
-}> {}
+export class HeadMountError extends Schema.TaggedErrorClass<HeadMountError>()("HeadMountError", {
+  tagName: Schema.String,
+  key: Schema.Unknown,
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * Head service interface.
@@ -362,7 +374,17 @@ export interface HeadService {
  * @public
  * @since 1.0.0
  */
-export interface Head extends Context.Service<Head, HeadService> {}
+export interface Head extends Context.Service<
+  Head,
+  {
+    readonly mount: (
+      tagName: string,
+      node: HTMLElement,
+      key: Option.Option<string>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly entries: Effect.Effect<ReadonlyArray<HeadEntry>>;
+  }
+> {}
 
 /**
  * Service tag for the current head manager.
@@ -380,7 +402,17 @@ export interface Head extends Context.Service<Head, HeadService> {}
  * @public
  * @since 1.0.0
  */
-export const Head = Context.Service<Head, HeadService>("trygg/Head");
+export const Head = Context.Service<
+  Head,
+  {
+    readonly mount: (
+      tagName: string,
+      node: HTMLElement,
+      key: Option.Option<string>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly entries: Effect.Effect<ReadonlyArray<HeadEntry>>;
+  }
+>("trygg/Head");
 
 // =============================================================================
 // Dedup Stack — Stack-based deduplication for keyed head elements
@@ -423,87 +455,87 @@ type DedupStacks = Map<string, Array<DedupEntry>>;
  * @public
  * @since 1.0.0
  */
-export const makeBrowserHead = (): Effect.Effect<HeadService, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const stacks: DedupStacks = new Map();
-    const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
+export const makeBrowserHead = Effect.fn("Head.makeBrowserHead")(function* () {
+  const stacks: DedupStacks = new Map();
+  const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
 
-    const mount: HeadService["mount"] = (tagName, node, key) =>
-      Effect.gen(function* () {
-        const entry: HeadEntry = { tagName, node, key };
+  const mount: HeadService["mount"] = Effect.fn("Head.browserMount")(
+    function* (tagName, node, key) {
+      const entry: HeadEntry = { tagName, node, key };
 
-        if (Option.isSome(key)) {
-          // Keyed element — stack-based dedup
-          const k = key.value;
-          let stack = stacks.get(k);
-          if (stack === undefined) {
-            stack = [];
-            stacks.set(k, stack);
-          }
-
-          // Hide previous visible entry (if any)
-          const prev = stack.length > 0 ? stack[stack.length - 1] : undefined;
-          if (prev !== undefined && !prev.hidden) {
-            prev.node.remove();
-            prev.hidden = true;
-          }
-
-          // Push new entry as visible
-          const dedupEntry: DedupEntry = { node, hidden: false };
-          stack.push(dedupEntry);
-          document.head.appendChild(node);
-
-          // Register cleanup: remove from stack, restore previous
-          yield* Effect.addFinalizer(() =>
-            Effect.gen(function* () {
-              // Remove this entry from stack
-              const currentStack = stacks.get(k);
-              if (currentStack !== undefined) {
-                const idx = currentStack.indexOf(dedupEntry);
-                if (idx !== -1) {
-                  currentStack.splice(idx, 1);
-                }
-
-                // Restore previous (now top of stack)
-                if (currentStack.length > 0) {
-                  const restored = currentStack[currentStack.length - 1];
-                  if (restored !== undefined && restored.hidden) {
-                    restored.hidden = false;
-                    document.head.appendChild(restored.node);
-                  }
-                } else {
-                  stacks.delete(k);
-                }
-              }
-
-              // Remove node from DOM
-              node.remove();
-
-              // Remove from entries ref
-              yield* Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node));
-            }),
-          );
-        } else {
-          // Unkeyed element — just append
-          document.head.appendChild(node);
-
-          // Register cleanup: just remove
-          yield* Effect.addFinalizer(() =>
-            Effect.gen(function* () {
-              node.remove();
-              yield* Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node));
-            }),
-          );
+      if (Option.isSome(key)) {
+        // Keyed element — stack-based dedup
+        const k = key.value;
+        let stack = stacks.get(k);
+        if (stack === undefined) {
+          stack = [];
+          stacks.set(k, stack);
         }
 
-        // Track entry
-        yield* Ref.update(entriesRef, (entries) => [...entries, entry]);
-      });
+        // Hide previous visible entry (if any)
+        const prev = stack.length > 0 ? stack[stack.length - 1] : undefined;
+        if (prev !== undefined && !prev.hidden) {
+          prev.node.remove();
+          prev.hidden = true;
+        }
 
-    const entries: HeadService["entries"] = Ref.get(entriesRef);
+        // Push new entry as visible
+        const dedupEntry: DedupEntry = { node, hidden: false };
+        stack.push(dedupEntry);
+        document.head.appendChild(node);
 
-    return { mount, entries };
-  });
+        // Register cleanup: remove from stack, restore previous
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            // Remove this entry from stack
+            const currentStack = stacks.get(k);
+            if (currentStack !== undefined) {
+              const idx = currentStack.indexOf(dedupEntry);
+              if (idx !== -1) {
+                currentStack.splice(idx, 1);
+              }
+
+              // Restore previous (now top of stack)
+              if (currentStack.length > 0) {
+                const restored = currentStack[currentStack.length - 1];
+                if (restored !== undefined && restored.hidden) {
+                  restored.hidden = false;
+                  document.head.appendChild(restored.node);
+                }
+              } else {
+                stacks.delete(k);
+              }
+            }
+
+            // Remove node from DOM
+            node.remove();
+
+            // Remove from entries ref
+            yield* Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node));
+          }),
+        );
+      } else {
+        // Unkeyed element — just append
+        document.head.appendChild(node);
+
+        // Register cleanup: just remove
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            node.remove();
+            yield* Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node));
+          }),
+        );
+      }
+
+      // Track entry
+      yield* Ref.update(entriesRef, (entries) => [...entries, entry]);
+    },
+  );
+
+  const entries: HeadService["entries"] = Ref.get(entriesRef);
+
+  return { mount, entries };
+});
 
 // =============================================================================
 // Test Head Implementation
@@ -527,24 +559,22 @@ export const makeBrowserHead = (): Effect.Effect<HeadService, never, Scope.Scope
  * @public
  * @since 1.0.0
  */
-export const makeTestHead = (): Effect.Effect<HeadService, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
+export const makeTestHead = Effect.fn("Head.makeTestHead")(function* () {
+  const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
 
-    const mount: HeadService["mount"] = (tagName, node, key) =>
-      Effect.gen(function* () {
-        const entry: HeadEntry = { tagName, node, key };
-        yield* Ref.update(entriesRef, (entries) => [...entries, entry]);
+  const mount: HeadService["mount"] = Effect.fn("Head.testMount")(function* (tagName, node, key) {
+    const entry: HeadEntry = { tagName, node, key };
+    yield* Ref.update(entriesRef, (entries) => [...entries, entry]);
 
-        yield* Effect.addFinalizer(() =>
-          Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node)),
-        );
-      });
-
-    const entries: HeadService["entries"] = Ref.get(entriesRef);
-
-    return { mount, entries };
+    yield* Effect.addFinalizer(() =>
+      Ref.update(entriesRef, (entries) => entries.filter((e) => e.node !== node)),
+    );
   });
+
+  const entries: HeadService["entries"] = Ref.get(entriesRef);
+
+  return { mount, entries };
+});
 
 // =============================================================================
 // FiberRef — Thread Head service through the render tree

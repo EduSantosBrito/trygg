@@ -16,7 +16,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Data, Effect, Exit, Option, Ref } from "effect";
+import { Cause, Effect, Exit, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import * as Router from "../service.js";
 import type { RouteErrorInfo } from "../types.js";
@@ -30,7 +30,9 @@ import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 
 // Tagged error for testing route errors
-class TestRouteError extends Data.TaggedError("TestRouteError")<{ message: string }> {}
+class TestRouteError extends Schema.TaggedErrorClass<TestRouteError>()("TestRouteError", {
+  detail: Schema.String,
+}) {}
 
 // =============================================================================
 // Router.current - Current route state
@@ -344,7 +346,7 @@ describe("Router.link", () => {
   scoped("should append query parameters", () =>
     Effect.gen(function* () {
       const handler = Router.link("/search", { query: { q: "test" } });
-      const mockEvent = { preventDefault: () => {} } as Event;
+      const mockEvent = new Event("click", { cancelable: true });
 
       yield* handler(mockEvent);
 
@@ -521,7 +523,7 @@ describe("Router.currentError", () => {
 
       // Route component that always throws
       const RouteComponent = Component.gen(function* () {
-        return yield* new TestRouteError({ message: "Route error for test" });
+        return yield* new TestRouteError({ detail: "Route error for test" });
       });
 
       // Error component using Component.gen that reads currentError

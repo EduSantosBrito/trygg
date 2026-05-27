@@ -12,7 +12,7 @@
  *
  * The outlet.ts code has explicit workarounds (lines 704, 727) confirming this bug.
  */
-import { describe, effect } from "@effect/vitest";
+import { assert, describe, effect } from "@effect/vitest";
 import { Deferred, Effect, Layer, Context } from "effect";
 import * as Component from "../component.js";
 import { Element } from "../element.js";
@@ -66,11 +66,7 @@ describe("Provide context merging", () => {
       yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
-      yield* Effect.sync(() => {
-        if (value !== "alice") {
-          throw new Error(`Expected "alice" but got "${value}"`);
-        }
-      });
+      assert.strictEqual(value, "alice");
     }),
   );
 
@@ -106,11 +102,7 @@ describe("Provide context merging", () => {
       yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
-      yield* Effect.sync(() => {
-        if (value !== "red") {
-          throw new Error(`Expected "red" but got "${value}"`);
-        }
-      });
+      assert.strictEqual(value, "red");
     }),
   );
 
@@ -149,11 +141,7 @@ describe("Provide context merging", () => {
       yield* Effect.yieldNow;
 
       const value = yield* Deferred.await(result);
-      yield* Effect.sync(() => {
-        if (value !== "alice") {
-          throw new Error(`Expected "alice" but got "${value}"`);
-        }
-      });
+      assert.strictEqual(value, "alice");
     }),
   );
 });

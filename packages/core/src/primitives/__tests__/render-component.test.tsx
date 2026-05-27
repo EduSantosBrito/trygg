@@ -4,7 +4,7 @@ import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import * as ContractTrace from "../../contract/trace.js";
-import { click, render } from "../../testing/index.js";
+import { click, render, type as typeInput } from "../../testing/index.js";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
@@ -26,6 +26,65 @@ describe("render-component", () => {
       assert.strictEqual((yield* getByTestId("label")).textContent, "provided");
     });
   });
+
+  scoped("keeps provider-owned signals out of component hook slots", () =>
+    Effect.gen(function* () {
+      class Store extends Context.Service<Store, { readonly selected: Signal.Signal<string> }>()(
+        "test/ProviderSignal/Store",
+      ) {}
+
+      const StoreLive = Layer.effect(
+        Store,
+        Effect.gen(function* () {
+          const selected = yield* Signal.make("en");
+          return { selected };
+        }).pipe(Effect.annotateLogs("service", "Store")),
+      );
+
+      const App = Component.gen(function* () {
+        const name = yield* Signal.make("World");
+        const store = yield* Store;
+        const nameValue = yield* Signal.get(name);
+        const selected = yield* Signal.get(store.selected);
+
+        return (
+          <div>
+            <input
+              data-testid="name"
+              value={nameValue}
+              onInput={(event) => {
+                const target = event.target;
+                return target instanceof HTMLInputElement
+                  ? Signal.set(name, target.value)
+                  : Effect.void;
+              }}
+            />
+            <button data-testid="locale" onClick={() => Signal.set(store.selected, "es")}>
+              Spanish
+            </button>
+            <span data-testid="greeting">
+              {nameValue}:{selected}
+            </span>
+          </div>
+        );
+      }).pipe(Component.provide(StoreLive));
+
+      const { getByTestId } = yield* render(<App />);
+      assert.strictEqual((yield* getByTestId("greeting")).textContent, "World:en");
+
+      const nameInput = yield* getByTestId("name");
+      if (!(nameInput instanceof HTMLInputElement)) {
+        return assert.fail("Expected name input to be an HTMLInputElement");
+      }
+      yield* typeInput(nameInput, "Trygg");
+      yield* TestClock.adjust(20);
+      assert.strictEqual((yield* getByTestId("greeting")).textContent, "Trygg:en");
+
+      yield* click(yield* getByTestId("locale"));
+      yield* TestClock.adjust(20);
+      assert.strictEqual((yield* getByTestId("greeting")).textContent, "Trygg:es");
+    }),
+  );
 
   scoped("subscribes to signals and re-renders on change", () =>
     Effect.gen(function* () {
@@ -131,7 +190,7 @@ describe("render-component", () => {
             }),
           );
           return { value: "label" };
-        }),
+        }).pipe(Effect.annotateLogs("service", "Label")),
       );
 
       const LabelView = Component.gen(function* () {
@@ -188,7 +247,7 @@ describe("render-component", () => {
               }),
             );
             return { value };
-          }),
+          }).pipe(Effect.annotateLogs("service", "Label")),
         );
 
       const FirstLive = makeLabelLayer("first");
@@ -249,7 +308,7 @@ describe("render-component", () => {
             return yield* Effect.fail("provider failed");
           }
           return { label: "ready" };
-        }),
+        }).pipe(Effect.annotateLogs("service", "FlakyService")),
       );
 
       const Risky = Component.gen(function* () {
@@ -367,23 +426,32 @@ describe("render-component", () => {
           childCountWhenFirstSeen.push(node.childElementCount);
           return;
         }
-        if (node.nodeType === 11) {
-          const section = (node as DocumentFragment).querySelector("[data-marker='second']");
+        if (node instanceof DocumentFragment) {
+          const section = node.querySelector("[data-marker='second']");
           if (section !== null) {
             childCountWhenFirstSeen.push(section.childElementCount);
           }
         }
       };
-      const originalAppendChild = container.appendChild.bind(container);
-      const originalInsertBefore = container.insertBefore.bind(container);
-      container.appendChild = (<T extends Node>(newNode: T): T => {
+      const originalAppendChild = container.appendChild;
+      const originalInsertBefore = container.insertBefore;
+      const patchedAppendChild: typeof container.appendChild = function <T extends Node>(
+        newNode: T,
+      ): T {
         recordSection(newNode);
-        return originalAppendChild(newNode) as T;
-      }) as typeof container.appendChild;
-      container.insertBefore = (<T extends Node>(newNode: T, refNode: Node | null): T => {
+        originalAppendChild.call(container, newNode);
+        return newNode;
+      };
+      const patchedInsertBefore: typeof container.insertBefore = function <T extends Node>(
+        newNode: T,
+        refNode: Node | null,
+      ): T {
         recordSection(newNode);
-        return originalInsertBefore(newNode, refNode) as T;
-      }) as typeof container.insertBefore;
+        originalInsertBefore.call(container, newNode, refNode);
+        return newNode;
+      };
+      container.appendChild = patchedAppendChild;
+      container.insertBefore = patchedInsertBefore;
 
       yield* Signal.set(which, "second");
       yield* TestClock.adjust(20);

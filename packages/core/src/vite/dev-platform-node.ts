@@ -5,7 +5,7 @@
  * Uses SSR-loaded handler factory for @effect/platform layer composition,
  * ensuring Router.Live identity matches between plugin and user code.
  */
-import { Effect, FileSystem, Layer, Option, Ref, Schema, Scope } from "effect";
+import { Effect, FileSystem, Layer, Match, Option, Ref, Schema, Scope } from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -39,6 +39,7 @@ const ApiUnavailableBody = Schema.fromJsonString(
     message: Schema.String,
   }),
 );
+const encodeApiUnavailableBody = Schema.encodeEffect(ApiUnavailableBody);
 
 // =============================================================================
 // Internal State
@@ -47,7 +48,7 @@ const ApiUnavailableBody = Schema.fromJsonString(
 interface HandlerState {
   readonly handler: Option.Option<(req: IncomingMessage, res: ServerResponse) => void>;
   readonly dispose: Option.Option<Effect.Effect<void>>;
-  readonly lastError: Option.Option<unknown>;
+  readonly lastError: Option.Option<ApiInitError>;
 }
 
 const emptyState: HandlerState = {
@@ -66,16 +67,16 @@ const emptyState: HandlerState = {
  * which was SSR-loaded from the same module graph as the user's api.ts.
  * @internal
  */
-const initHandler = (
+const initHandler: (
   state: Ref.Ref<HandlerState>,
   options: DevApiOptions,
-): Effect.Effect<void, ApiInitError, Scope.Scope> =>
-  Effect.gen(function* () {
+) => Effect.Effect<void, ApiInitError, Scope.Scope> = Effect.fn("NodeDevPlatform.initHandler")(
+  function* (state, options) {
     // Dispose previous handler
     const current = yield* Ref.get(state);
     yield* Option.match(current.dispose, {
       onNone: () => Effect.void,
-      onSome: (dispose) => dispose.pipe(Effect.ignore),
+      onSome: (dispose) => dispose,
     });
 
     // Load API module
@@ -138,7 +139,8 @@ const initHandler = (
       dispose: Option.some(result.value.dispose),
       lastError: Option.none(),
     });
-  });
+  },
+);
 
 // =============================================================================
 // Node DevPlatform Implementation
@@ -150,84 +152,89 @@ export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSyste
       const nodeFs = yield* importNodeFileSystem;
       const fileSystemLayer = nodeFs.layer;
 
-      const makeApi = (
+      const makeApi: (
         options: DevApiOptions,
-      ): Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> =>
-        Effect.gen(function* () {
-          const context = yield* Effect.context<never>();
-          const state = yield* Ref.make<HandlerState>(emptyState);
+      ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> = Effect.fn(
+        "NodeDevPlatform.makeApi",
+      )(function* (options) {
+        const context = yield* Effect.context<never>();
+        const state = yield* Ref.make<HandlerState>(emptyState);
 
-          yield* initHandler(state, options);
-          yield* Effect.addFinalizer(() =>
-            Effect.gen(function* () {
-              const current = yield* Ref.get(state);
-              yield* Option.match(current.dispose, {
-                onNone: () => Effect.void,
-                onSome: (dispose) => dispose,
+        yield* initHandler(state, options);
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(state);
+            yield* Option.match(current.dispose, {
+              onNone: () => Effect.void,
+              onSome: (dispose) => dispose,
+            });
+            yield* Ref.set(state, emptyState);
+          }),
+        );
+
+        const middleware: Connect.NextHandleFunction = (req, res, next) => {
+          if (!req.url?.startsWith("/api/")) {
+            return next();
+          }
+
+          const effect = Effect.gen(function* () {
+            yield* Debug.log({
+              event: "api.request.received",
+              method: req.method ?? "GET",
+              url: req.url ?? "",
+            });
+
+            const currentState = yield* Ref.get(state);
+
+            if (Option.isNone(currentState.handler)) {
+              const errorMessage = Option.match(currentState.lastError, {
+                onNone: () => "Check console for errors",
+                onSome: (error) =>
+                  Match.value(error).pipe(
+                    Match.tag("ApiInitError", ({ message }) => message),
+                    Match.exhaustive,
+                  ),
               });
-              yield* Ref.set(state, emptyState);
-            }),
-          );
-
-          const middleware: Connect.NextHandleFunction = (req, res, next) => {
-            if (!req.url?.startsWith("/api/")) {
-              return next();
+              yield* options.onError(new ApiInitError({ message: "Handler not available" }));
+              const body = yield* encodeApiUnavailableBody({
+                error: "API handler not available",
+                message: errorMessage,
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ApiInitError({ message: "Failed to encode error response", cause }),
+                ),
+              );
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(body);
+              return;
             }
 
-            const effect = Effect.gen(function* () {
-              yield* Debug.log({
-                event: "api.request.received",
-                method: req.method ?? "GET",
-                url: req.url ?? "",
-              });
+            currentState.handler.value(req, res);
+          });
 
-              const currentState = yield* Ref.get(state);
+          Effect.runPromiseWith(context)(effect).catch((_error: unknown) => {
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.end("Internal Server Error");
+            }
+          });
+        };
 
-              if (Option.isNone(currentState.handler)) {
-                const errorMessage = Option.match(currentState.lastError, {
-                  onNone: () => "Check console for errors",
-                  onSome: (e) => (e instanceof Error ? e.message : String(e)),
-                });
-                yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-                const body = yield* Schema.encodeEffect(ApiUnavailableBody)({
-                  error: "API handler not available",
-                  message: errorMessage,
-                }).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ApiInitError({ message: "Failed to encode error response", cause }),
-                  ),
-                );
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(body);
-                return;
-              }
-
-              currentState.handler.value(req, res);
+        return {
+          middleware,
+          reload: initHandler(state, options),
+          dispose: Effect.gen(function* () {
+            const current = yield* Ref.get(state);
+            yield* Option.match(current.dispose, {
+              onNone: () => Effect.void,
+              onSome: (dispose) => dispose,
             });
-
-            void Effect.runPromiseWith(context)(effect).catch((_error: unknown) => {
-              if (!res.headersSent) {
-                res.statusCode = 500;
-                res.end("Internal Server Error");
-              }
-            });
-          };
-
-          return {
-            middleware,
-            reload: initHandler(state, options),
-            dispose: Effect.gen(function* () {
-              const current = yield* Ref.get(state);
-              yield* Option.match(current.dispose, {
-                onNone: () => Effect.void,
-                onSome: (dispose) => dispose,
-              });
-              yield* Ref.set(state, emptyState);
-            }),
-          };
-        });
+            yield* Ref.set(state, emptyState);
+          }),
+        };
+      });
 
       const service: DevPlatformService = {
         fileSystemLayer,

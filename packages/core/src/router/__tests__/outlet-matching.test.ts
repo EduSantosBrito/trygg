@@ -20,27 +20,12 @@ import * as Router from "../service.js";
 import * as Signal from "../../primitives/signal.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
-
-// Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
-
 // Dummy components
-const Comp = makeComp();
-const Layout = makeComp();
-const CompA = makeComp();
-const CompB = makeComp();
-const CompC = makeComp();
+const Comp: RouteComponent = Effect.succeed(empty);
+const Layout: RouteComponent = Effect.succeed(empty);
+const CompA: RouteComponent = Effect.succeed(empty);
+const CompB: RouteComponent = Effect.succeed(empty);
+const CompC: RouteComponent = Effect.succeed(empty);
 
 // =============================================================================
 // resolveRoutes - Path resolution

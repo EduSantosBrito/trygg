@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Context, Effect, Option, Scope } from "effect";
 import {
   makeRenderContextTransaction,
+  type RenderContextForkRequest,
   type RenderContextSnapshot,
 } from "../render-context-transaction.js";
 import * as SafeUrl from "../../security/safe-url.js";
@@ -10,50 +11,57 @@ import { unsafeWidenContext } from "../../internal/unsafe.js";
 
 class Message extends Context.Service<Message, { readonly value: string }>()("test/Message") {}
 
-const traceEventsFor = <E, R>(
+const traceEventsFor = Effect.fn("RenderContextTransactionTest.traceEventsFor")(function* <E, R>(
   effect: Effect.Effect<void, E, R>,
-): Effect.Effect<ReadonlyArray<ContractTrace.ContractTraceRecord>, E, R> =>
-  Effect.gen(function* () {
-    const collector = yield* ContractTrace.createInMemoryCollector("render-context-transaction");
-    yield* ContractTrace.withCollector(effect, collector);
-    return yield* collector.snapshot;
-  });
+) {
+  const collector = yield* ContractTrace.createInMemoryCollector("render-context-transaction");
+  yield* ContractTrace.withCollector(effect, collector);
+  return yield* collector.snapshot;
+});
 
 const eventNames = (
   records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
-): ReadonlyArray<ContractTrace.ContractTraceEventName> => records.map((record) => record.event.event);
+): ReadonlyArray<ContractTrace.ContractTraceEventName> =>
+  records.map((record) => record.event.event);
 
-const makeSnapshot = async (): Promise<RenderContextSnapshot> => {
-  const scope = await Effect.runPromise(Scope.make());
+const makeSnapshot: Effect.Effect<RenderContextSnapshot> = Effect.gen(function* () {
+  const scope = yield* Scope.make();
   const services = unsafeWidenContext(Context.make(Message, { value: "root" }));
   return { services, scope, safeUrlConfig: SafeUrl.defaultConfig };
-};
+});
+
+const SCOPE_OWNERS: ReadonlyArray<RenderContextForkRequest["scopeOwner"]> = [
+  "provider",
+  "signal",
+  "portal",
+  "boundary",
+];
 
 describe("RenderContextTransaction", () => {
-  it("runs event handlers with the captured service context and scope", async () => {
-    const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: false });
-    const snapshot = await makeSnapshot();
+  it.effect("runs event handlers with the captured service context and scope", () =>
+    Effect.gen(function* () {
+      const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: false });
+      const snapshot = yield* makeSnapshot;
 
-    const value = await Effect.runPromise(
-      transaction.runEventHandler(
+      const value = yield* transaction.runEventHandler(
         snapshot,
         Effect.gen(function* () {
           const message = yield* Message;
           yield* Effect.addFinalizer(() => Effect.void);
           return message.value;
         }),
-      ),
-    );
+      );
 
-    expect(value).toBe("root");
-  });
+      assert.strictEqual(value, "root");
+    }),
+  );
 
-  it("emits scoped fork and scope close lifecycle traces", async () => {
-    const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
-    const parent = await makeSnapshot();
+  it.effect("emits scoped fork and scope close lifecycle traces", () =>
+    Effect.gen(function* () {
+      const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
+      const parent = yield* makeSnapshot;
 
-    const records = await Effect.runPromise(
-      traceEventsFor(
+      const records = yield* traceEventsFor(
         Effect.gen(function* () {
           const child = yield* transaction.forkContext({
             parent,
@@ -62,60 +70,56 @@ describe("RenderContextTransaction", () => {
           });
           yield* transaction.finalizeOwnedScope(child);
         }),
-      ),
-    );
+      );
 
-    expect(eventNames(records)).toEqual(["effect.fork.scoped", "effect.scope.close"]);
-    expect(records[0]?.event.payload).toMatchObject({ owner: "component" });
-  });
+      assert.deepStrictEqual(eventNames(records), ["effect.fork.scoped", "effect.scope.close"]);
+      assert.deepStrictEqual(records[0]?.event.payload, { owner: "component" });
+    }),
+  );
 
-  it("finalizes provider, signal, portal, and boundary owned scopes", async () => {
-    const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
-    const parent = await makeSnapshot();
-    const finalized: Array<string> = [];
+  it.effect("finalizes provider, signal, portal, and boundary owned scopes", () =>
+    Effect.gen(function* () {
+      const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
+      const parent = yield* makeSnapshot;
+      const finalized: Array<string> = [];
 
-    for (const scopeOwner of ["provider", "signal", "portal", "boundary"] as const) {
-      const child = await Effect.runPromise(
-        transaction.forkContext({
+      for (const scopeOwner of SCOPE_OWNERS) {
+        const child = yield* transaction.forkContext({
           parent,
           additionalServices: Option.none(),
           scopeOwner,
-        }),
-      );
-      await Effect.runPromise(
-        Effect.addFinalizer(() => Effect.sync(() => finalized.push(scopeOwner))).pipe(
+        });
+        yield* Effect.addFinalizer(() => Effect.sync(() => finalized.push(scopeOwner))).pipe(
           Scope.provide(child.scope),
-        ),
-      );
-      await Effect.runPromise(transaction.finalizeOwnedScope(child));
-    }
+        );
+        yield* transaction.finalizeOwnedScope(child);
+      }
 
-    expect(finalized).toEqual(["provider", "signal", "portal", "boundary"]);
-  });
+      assert.deepStrictEqual(finalized, ["provider", "signal", "portal", "boundary"]);
+    }),
+  );
 
-  it("forks and finalizes owned render scopes with additional services", async () => {
-    const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: false });
-    const parent = await makeSnapshot();
-    const additional = unsafeWidenContext(Context.make(Message, { value: "child" }));
+  it.effect("forks and finalizes owned render scopes with additional services", () =>
+    Effect.gen(function* () {
+      const transaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: false });
+      const parent = yield* makeSnapshot;
+      const additional = unsafeWidenContext(Context.make(Message, { value: "child" }));
 
-    const child = await Effect.runPromise(
-      transaction.forkContext({
+      const child = yield* transaction.forkContext({
         parent,
         additionalServices: Option.some(additional),
         scopeOwner: "component",
-      }),
-    );
-    const value = await Effect.runPromise(
-      transaction.runEventHandler(
+      });
+      const value = yield* transaction.runEventHandler(
         child,
         Effect.gen(function* () {
           const message = yield* Message;
           return message.value;
         }),
-      ),
-    );
+      );
 
-    expect(value).toBe("child");
-    await Effect.runPromise(transaction.finalizeOwnedScope(child));
-  });
+      assert.strictEqual(value, "child");
+      yield* transaction.finalizeOwnedScope(child);
+    }),
+  );
 });

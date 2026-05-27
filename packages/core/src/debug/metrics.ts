@@ -596,7 +596,7 @@ export interface MetricsSink {
    * Export a metrics snapshot.
    * Called periodically or on-demand.
    */
-  readonly export: (snapshot: MetricsSnapshot) => Effect.Effect<void>;
+  readonly export: (snapshot: MetricsSnapshot) => Effect.Effect<void, unknown>;
 }
 
 /**
@@ -617,7 +617,7 @@ export interface MetricsSink {
  */
 export const createSink = (
   name: string,
-  exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void>,
+  exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void, unknown>,
 ): MetricsSink => ({ name, export: exportFn });
 
 /**

@@ -1,10 +1,10 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class UnknownError extends Data.TaggedError("UnknownError")<{
-  readonly cause: unknown;
-}> {}
+export class UnknownError extends Schema.TaggedErrorClass<UnknownError>()("UnknownError", {
+  cause: Schema.Unknown,
+}) {}
 
 export const UnknownErrorDisplay = Component.gen(function* (
   Props: ComponentProps<{ error: UnknownError }>,

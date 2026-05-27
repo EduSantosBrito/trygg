@@ -21,7 +21,7 @@
  * @since 1.0.0
  * @module trygg/router/scroll-strategy
  */
-import { Layer } from "effect";
+import { Data, Layer } from "effect";
 import * as Context from "effect/Context";
 
 /**
@@ -41,9 +41,7 @@ import * as Context from "effect/Context";
  * @public
  * @since 1.0.0
  */
-export interface ScrollAuto {
-  readonly _tag: "Auto";
-}
+export type ScrollAuto = Data.TaggedEnum.Value<ScrollStrategyType, "Auto">;
 
 /**
  * None — no scroll management. For tabs, modals, or routes where scroll should not change.
@@ -60,9 +58,7 @@ export interface ScrollAuto {
  * @public
  * @since 1.0.0
  */
-export interface ScrollNone {
-  readonly _tag: "None";
-}
+export type ScrollNone = Data.TaggedEnum.Value<ScrollStrategyType, "None">;
 
 /**
  * Union of all scroll strategies. Extend when adding new variants.
@@ -80,17 +76,22 @@ export interface ScrollNone {
  * @public
  * @since 1.0.0
  */
-export type ScrollStrategyType = ScrollAuto | ScrollNone;
+export type ScrollStrategyType = Data.TaggedEnum<{
+  readonly Auto: {};
+  readonly None: {};
+}>;
+
+export const ScrollStrategyType = Data.taggedEnum<ScrollStrategyType>();
 
 /**
  * ScrollStrategy service key.
  * @since 1.0.0
  */
 /** @internal */
-const autoStrategy: ScrollAuto = { _tag: "Auto" };
+const autoStrategy: ScrollAuto = ScrollStrategyType.Auto();
 
 /** @internal */
-const noneStrategy: ScrollNone = { _tag: "None" };
+const noneStrategy: ScrollNone = ScrollStrategyType.None();
 
 /**
  * ScrollStrategy service key — controls scroll position management per route.
@@ -113,9 +114,10 @@ const noneStrategy: ScrollNone = { _tag: "None" };
  * @public
  * @since 1.0.0
  */
-export class ScrollStrategy extends Context.Service<ScrollStrategy, ScrollStrategyType>()(
-  "trygg/ScrollStrategy",
-) {
+export class ScrollStrategy extends Context.Service<
+  ScrollStrategy,
+  { readonly _tag: "Auto" } | { readonly _tag: "None" }
+>()("trygg/ScrollStrategy") {
   /**
    * Auto scroll management:
    * - New navigation: scroll to top

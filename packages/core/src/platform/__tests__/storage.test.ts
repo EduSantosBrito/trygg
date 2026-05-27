@@ -8,6 +8,9 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer, Schema } from "effect";
 import { SessionStorage, LocalStorage, sessionStorageTest, localStorageTest } from "../storage.js";
 
+const PointJson = Schema.fromJsonString(Schema.Struct({ x: Schema.Number, y: Schema.Number }));
+const encodePointJson = Schema.encodeEffect(PointJson);
+
 describe("SessionStorage", () => {
   it.effect("get returns null for missing key", () =>
     Effect.gen(function* () {
@@ -76,10 +79,7 @@ describe("SessionStorage", () => {
   it.effect("stores JSON-serialized objects", () =>
     Effect.gen(function* () {
       const storage = yield* SessionStorage;
-      const PointJson = Schema.fromJsonString(
-        Schema.Struct({ x: Schema.Number, y: Schema.Number }),
-      );
-      const data = yield* Schema.encodeEffect(PointJson)({ x: 100, y: 200 });
+      const data = yield* encodePointJson({ x: 100, y: 200 });
       yield* storage.set("scroll:page-1", data);
       const result = yield* storage.get("scroll:page-1");
       assert.strictEqual(result, data);

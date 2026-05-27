@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, layer } from "@effect/vitest";
+import { assert, describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { click, renderElement, testLayer, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -26,11 +26,12 @@ describe("Docs chrome", () => {
       Effect.gen(function* () {
         const result = yield* renderElement(<DocsSidebar />);
 
-        expect(result.container.textContent).toContain("Start");
-        expect(result.container.textContent).toContain("Docs home");
-        expect(result.container.textContent).toContain("Getting started");
-        expect(result.container.textContent).toContain("Core model");
-        expect(result.container.querySelector('a[href="/docs/components"]')?.textContent).toBe(
+        assert.include(result.container.textContent, "Start");
+        assert.include(result.container.textContent, "Docs home");
+        assert.include(result.container.textContent, "Getting started");
+        assert.include(result.container.textContent, "Core model");
+        assert.strictEqual(
+          result.container.querySelector('a[href="/docs/components"]')?.textContent,
           "Components",
         );
       }),
@@ -42,7 +43,7 @@ describe("Docs chrome", () => {
 
         const active = result.container.querySelector('a[href="/docs/getting-started"]');
 
-        expect(active?.classList.contains("docs-sidebar__link--active")).toBe(true);
+        assert.isTrue(active?.classList.contains("docs-sidebar__link--active"));
       }),
     );
 
@@ -53,7 +54,8 @@ describe("Docs chrome", () => {
 
         yield* click(button);
 
-        expect(result.container.querySelector(".docs-drawer--open")?.textContent).toContain(
+        assert.include(
+          result.container.querySelector(".docs-drawer--open")?.textContent,
           "Getting started",
         );
       }),
@@ -68,12 +70,12 @@ describe("Docs chrome", () => {
         const drawerLink = result.container.querySelector(
           '.docs-drawer a[href="/docs/getting-started"]',
         );
-        expect(drawerLink).not.toBeNull();
+        assert.isNotNull(drawerLink);
         if (drawerLink instanceof HTMLElement) {
           yield* click(drawerLink);
         }
 
-        expect(result.container.querySelector(".docs-drawer--open")).toBeNull();
+        assert.isNull(result.container.querySelector(".docs-drawer--open"));
       }),
     );
 
@@ -81,7 +83,10 @@ describe("Docs chrome", () => {
       Effect.gen(function* () {
         const result = yield* renderElement(<DocsLayout />);
 
-        expect(result.container.querySelector('footer a[href="/docs"]')?.textContent).toBe("Docs");
+        assert.strictEqual(
+          result.container.querySelector('footer a[href="/docs"]')?.textContent,
+          "Docs",
+        );
       }),
     );
 
@@ -90,9 +95,9 @@ describe("Docs chrome", () => {
         const result = yield* renderElement(<DocsLayout />);
 
         const prevNext = result.container.querySelector(".docs-prev-next");
-        expect(prevNext).not.toBeNull();
-        expect(prevNext?.textContent).toContain("Previous");
-        expect(prevNext?.textContent).toContain("Next");
+        assert.isNotNull(prevNext);
+        assert.include(prevNext?.textContent, "Previous");
+        assert.include(prevNext?.textContent, "Next");
       }),
     );
 
@@ -101,8 +106,8 @@ describe("Docs chrome", () => {
         const result = yield* renderElement(<DocsSidebar />);
 
         const groupHeaders = result.container.querySelectorAll(".docs-sidebar__group-header");
-        expect(groupHeaders.length).toBeGreaterThan(0);
-        expect(groupHeaders[0]?.textContent).toContain("Start");
+        assert.isAbove(groupHeaders.length, 0);
+        assert.include(groupHeaders[0]?.textContent, "Start");
       }),
     );
   });
@@ -116,11 +121,11 @@ describe("Docs chrome", () => {
         const signalsLink = result.container.querySelector('a[href="/docs/signals"]');
         const initialElementsLink = result.container.querySelector('a[href="/docs/elements"]');
 
-        expect(signalsLink).not.toBeNull();
-        expect(initialElementsLink?.classList.contains("docs-sidebar__link--active")).toBe(true);
-        expect(signalsLink?.classList.contains("docs-sidebar__link--active")).toBe(false);
+        assert.isNotNull(signalsLink);
+        assert.isTrue(initialElementsLink?.classList.contains("docs-sidebar__link--active"));
+        assert.isFalse(signalsLink?.classList.contains("docs-sidebar__link--active"));
 
-        expect(signalsLink).toBeInstanceOf(HTMLElement);
+        assert.instanceOf(signalsLink, HTMLElement);
 
         yield* router.navigate("/docs/signals");
 
@@ -128,18 +133,23 @@ describe("Docs chrome", () => {
           const updatedSignalsLink = result.container.querySelector('a[href="/docs/signals"]');
           const updatedElementsLink = result.container.querySelector('a[href="/docs/elements"]');
 
-          if (!updatedSignalsLink?.classList.contains("docs-sidebar__link--active")) {
-            throw new Error("Signals link is not active yet");
-          }
-          if (updatedSignalsLink.getAttribute("aria-current") !== "page") {
-            throw new Error("Signals link does not have aria-current=page yet");
-          }
-          if (updatedElementsLink?.classList.contains("docs-sidebar__link--active")) {
-            throw new Error("Elements link is still active");
-          }
-          if (updatedElementsLink?.hasAttribute("aria-current")) {
-            throw new Error("Elements link still has aria-current");
-          }
+          assert.isTrue(
+            updatedSignalsLink?.classList.contains("docs-sidebar__link--active"),
+            "Signals link is not active yet",
+          );
+          assert.strictEqual(
+            updatedSignalsLink?.getAttribute("aria-current"),
+            "page",
+            "Signals link does not have aria-current=page yet",
+          );
+          assert.isFalse(
+            updatedElementsLink?.classList.contains("docs-sidebar__link--active"),
+            "Elements link is still active",
+          );
+          assert.isFalse(
+            updatedElementsLink?.hasAttribute("aria-current"),
+            "Elements link still has aria-current",
+          );
         });
       }),
     );
@@ -150,7 +160,7 @@ describe("Docs chrome", () => {
       Effect.gen(function* () {
         const result = yield* renderElement(<Footer />);
 
-        expect(result.container.querySelector('a[href="/docs"]')?.textContent).toBe("Docs");
+        assert.strictEqual(result.container.querySelector('a[href="/docs"]')?.textContent, "Docs");
       }),
     );
   });

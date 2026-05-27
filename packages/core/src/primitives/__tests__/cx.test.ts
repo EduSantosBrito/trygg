@@ -9,12 +9,14 @@
  * - Signal inputs (returns reactive Signal<string>)
  */
 import { assert, describe, effect } from "@effect/vitest";
-import { Data, Effect, Exit, Scope } from "effect";
+import { Effect, Exit, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 import { cx } from "../cx.js";
 
-class ExpectedSignal extends Data.TaggedError("ExpectedSignal")<{ readonly got: string }> {}
+class ExpectedSignal extends Schema.TaggedErrorClass<ExpectedSignal>()("ExpectedSignal", {
+  got: Schema.String,
+}) {}
 
 /** Narrow cx result to Signal, failing if static string */
 const expectSignal = (value: string | Signal.Signal<string>) =>

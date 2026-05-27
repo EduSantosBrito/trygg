@@ -21,9 +21,11 @@ import {
   Equal,
   Exit,
   Hash,
-  Pipeable,
+  Option,
+  Predicate,
   Ref,
   Result,
+  Schema,
   Scope,
   SubscriptionRef,
 } from "effect";
@@ -31,8 +33,12 @@ import * as Context from "effect/Context";
 import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
 import * as ContractTrace from "../contract/trace.js";
-import type { Element } from "./element.js";
-import { type Component } from "./component.js";
+import {
+  Element as ElementConstructor,
+  type Element,
+  type ElementWithRequirements,
+} from "./element.js";
+import { tagComponent, type Component } from "./component.js";
 import {
   unsafeMakeKeyedListElement,
   unsafeRunComponent,
@@ -49,9 +55,9 @@ import * as ReactiveMatcher from "./reactive-matcher.js";
  * @since 1.0.0
  * @internal
  */
-export class SignalInitError extends Data.TaggedError("SignalInitError")<{
-  readonly message: string;
-}> {}
+export class SignalInitError extends Schema.TaggedErrorClass<SignalInitError>()("SignalInitError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Error raised when a signal is created without an owning Effect scope.
@@ -69,10 +75,13 @@ export class SignalInitError extends Data.TaggedError("SignalInitError")<{
  * @public
  * @since 1.0.0
  */
-export class SignalScopeError extends Data.TaggedError("SignalScopeError")<{
-  readonly operation: "make";
-  readonly message: string;
-}> {}
+export class SignalScopeError extends Schema.TaggedErrorClass<SignalScopeError>()(
+  "SignalScopeError",
+  {
+    operation: Schema.Literal("make"),
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Operation attempted against a disposed signal.
@@ -92,6 +101,14 @@ export class SignalScopeError extends Data.TaggedError("SignalScopeError")<{
  */
 export type SignalDisposedOperation = "get" | "peek" | "set" | "update" | "modify";
 
+const SignalDisposedOperationSchema = Schema.Union([
+  Schema.Literal("get"),
+  Schema.Literal("peek"),
+  Schema.Literal("set"),
+  Schema.Literal("update"),
+  Schema.Literal("modify"),
+]);
+
 /**
  * Error raised when user code accesses a signal after its owner scope closes.
  *
@@ -108,10 +125,20 @@ export type SignalDisposedOperation = "get" | "peek" | "set" | "update" | "modif
  * @public
  * @since 1.0.0
  */
-export class SignalDisposedError extends Data.TaggedError("SignalDisposedError")<{
-  readonly operation: SignalDisposedOperation;
-  readonly signalId: string;
-}> {}
+export class SignalDisposedError extends Schema.TaggedErrorClass<SignalDisposedError>()(
+  "SignalDisposedError",
+  {
+    operation: SignalDisposedOperationSchema,
+    signalId: Schema.String,
+  },
+) {}
+
+class SignalFallbackComputationError extends Schema.TaggedErrorClass<SignalFallbackComputationError>()(
+  "SignalFallbackComputationError",
+  {
+    operation: Schema.Union([Schema.Literal("equals"), Schema.Literal("hash")]),
+  },
+) {}
 
 /**
  * Signal owner category for lifecycle tracing.
@@ -173,14 +200,23 @@ export interface Signal<A> {
   readonly _disposed: Ref.Ref<boolean>;
 }
 
+class SignalImpl<A> extends Data.TaggedClass("Signal")<{
+  readonly _ref: SubscriptionRef.SubscriptionRef<A>;
+  readonly _listeners: Set<SignalListener>;
+  readonly _debugId: string;
+  readonly _owner: SignalOwner;
+  readonly _disposed: Ref.Ref<boolean>;
+}> {}
+
 /**
- * Internal signal storage type - uses any to work around invariance.
+ * Internal signal storage type.
  *
  * @remarks
  * Only used to store heterogeneously typed signals during render-phase tracking.
  * @internal
  */
-type AnySignal = Signal<any>;
+type DynamicSignalValue = ReturnType<typeof JSON.parse>;
+type AnySignal = Signal<DynamicSignalValue>;
 
 type PropsInput<Props> = [Props] extends [never] ? {} : Props;
 
@@ -310,7 +346,7 @@ export const CurrentSignalOwner: Context.Reference<SignalOwner> =
  * @since 1.0.0
  * @internal
  */
-export const makeRenderPhase = Effect.gen(function* () {
+export const makeRenderPhase: Effect.Effect<RenderPhase> = Effect.gen(function* () {
   const signalIndex = yield* Ref.make(0);
   const signals = yield* Ref.make<Array<AnySignal>>([]);
   const accessed = new Set<AnySignal>();
@@ -344,8 +380,8 @@ const traceSignalCreate = <A>(signal: Signal<A>, value: unknown): Effect.Effect<
     },
   });
 
-const disposeSignal = <A>(signal: Signal<A>): Effect.Effect<void> =>
-  Effect.gen(function* () {
+const disposeSignal: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fn("Signal.dispose")(
+  function* <A>(signal: Signal<A>) {
     const wasDisposed = yield* Ref.getAndSet(signal._disposed, true);
     if (wasDisposed) return;
 
@@ -366,86 +402,110 @@ const disposeSignal = <A>(signal: Signal<A>): Effect.Effect<void> =>
         owner: signal._owner,
       },
     });
-  });
+  },
+);
 
-const makeOwnedSignal = <A>(
+const makeOwnedSignal: <A>(
   initial: A,
   owner: SignalOwner,
   ownerScope: Scope.Scope,
   component: string,
-): Effect.Effect<Signal<A>> =>
-  Effect.gen(function* () {
-    const ref = yield* SubscriptionRef.make(initial);
-    const disposed = yield* Ref.make(false);
-    const debugId = Debug.nextSignalId();
-    const signal: Signal<A> = {
-      _tag: "Signal",
-      _ref: ref,
-      _listeners: new Set(),
-      _debugId: debugId,
-      _owner: owner,
-      _disposed: disposed,
-    };
-
-    yield* Scope.addFinalizer(ownerScope, disposeSignal(signal));
-    yield* Debug.log({
-      event: "signal.create",
-      signal_id: debugId,
-      value: initial,
-      component,
-      owner,
-    });
-    yield* traceSignalCreate(signal, initial);
-    return signal;
+) => Effect.Effect<Signal<A>> = Effect.fn("Signal.makeOwned")(function* <A>(
+  initial: A,
+  owner: SignalOwner,
+  ownerScope: Scope.Scope,
+  component: string,
+) {
+  const ref = yield* SubscriptionRef.make(initial);
+  const disposed = yield* Ref.make(false);
+  const debugId = Debug.nextSignalId();
+  const signal: Signal<A> = new SignalImpl({
+    _ref: ref,
+    _listeners: new Set(),
+    _debugId: debugId,
+    _owner: owner,
+    _disposed: disposed,
   });
+
+  yield* Scope.addFinalizer(ownerScope, disposeSignal(signal));
+  yield* Debug.log({
+    event: "signal.create",
+    signal_id: debugId,
+    value: initial,
+    component,
+    owner,
+  });
+  yield* traceSignalCreate(signal, initial);
+  return signal;
+});
 
 const isSignalDisposedCause = (cause: Cause.Cause<unknown>): boolean => {
   const defect = Cause.findDefect(cause);
   return Result.isSuccess(defect) && defect.success instanceof SignalDisposedError;
 };
 
-const ignoreSignalDisposedCause = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A | void, E, R> =>
-  Effect.catchCause(effect, (cause) =>
-    isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
+const ignoreSignalDisposedCause = <A, R>(
+  effect: Effect.Effect<A, SignalDisposedError, R>,
+): Effect.Effect<A | void, never, R> =>
+  effect.pipe(
+    Effect.catchTag("SignalDisposedError", (error) =>
+      ContractTrace.emit({
+        event: "effect.error.ignored",
+        level: "diagnostic",
+        payload: {
+          error: error._tag,
+          signal_id: error.signalId,
+          operation: error.operation,
+        },
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
+    ),
   );
 
-const ensureSignalOpen = <A>(
+const ensureSignalOpen: <A>(
   signal: Signal<A>,
   operation: SignalDisposedOperation,
-): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    const disposed = yield* Ref.get(signal._disposed);
-    if (!disposed) return;
+) => Effect.Effect<void, SignalDisposedError> = Effect.fn("Signal.ensureOpen")(function* <A>(
+  signal: Signal<A>,
+  operation: SignalDisposedOperation,
+) {
+  const disposed = yield* Ref.get(signal._disposed);
+  if (!disposed) return;
 
-    yield* Debug.log({
-      event: "signal.disposed_access",
+  yield* Debug.log({
+    event: "signal.disposed_access",
+    signal_id: signal._debugId,
+    owner: signal._owner,
+    operation,
+  });
+  yield* ContractTrace.emit({
+    event: "signal.disposed_access",
+    level: "semantic",
+    payload: {
       signal_id: signal._debugId,
       owner: signal._owner,
       operation,
-    });
-    yield* ContractTrace.emit({
-      event: "signal.disposed_access",
-      level: "semantic",
-      payload: {
-        signal_id: signal._debugId,
-        owner: signal._owner,
-        operation,
-      },
-    });
-    yield* Metrics.recordDisposedSignalAccess;
-    return yield* Effect.die(new SignalDisposedError({ operation, signalId: signal._debugId }));
+    },
   });
+  yield* Metrics.recordDisposedSignalAccess;
+  return yield* new SignalDisposedError({ operation, signalId: signal._debugId });
+});
 
-const currentOwnerScope = Effect.gen(function* () {
+const currentOwnerScope: () => Effect.Effect<
+  { readonly owner: SignalOwner; readonly scope: Scope.Scope },
+  SignalScopeError
+> = Effect.fn("Signal.currentOwnerScope")(function* () {
   const componentScope = yield* CurrentComponentScope;
   if (componentScope !== null) {
-    return { owner: "component" as const, scope: componentScope };
+    const owner: SignalOwner = "component";
+    return { owner, scope: componentScope };
   }
 
-  const scope = yield* Effect.serviceOption(Scope.Scope);
-  if (scope._tag === "None") {
+  const context = yield* Effect.context<never>();
+  const scope = Context.getOption(context, Scope.Scope);
+  if (Option.isNone(scope)) {
     return yield* new SignalScopeError({
       operation: "make",
       message:
@@ -457,21 +517,23 @@ const currentOwnerScope = Effect.gen(function* () {
   return { owner, scope: scope.value };
 });
 
-const valuesEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return Equal.equals(left, right);
-  } catch {
-    return Object.is(left, right);
-  }
-};
+const valuesEqual: (left: unknown, right: unknown) => Effect.Effect<boolean> = Effect.fn(
+  "Signal.valuesEqual",
+)(function* (left: unknown, right: unknown) {
+  return yield* Effect.try({
+    try: () => Equal.equals(left, right),
+    catch: () => new SignalFallbackComputationError({ operation: "equals" }),
+  }).pipe(Effect.catch(() => Effect.succeed(Object.is(left, right))));
+});
 
-const valueHash = (value: unknown): number => {
-  try {
-    return Hash.hash(value);
-  } catch {
-    return Hash.hash(String(value));
-  }
-};
+const valueHash: (value: unknown) => Effect.Effect<number> = Effect.fn("Signal.valueHash")(
+  function* (value: unknown) {
+    return yield* Effect.try({
+      try: () => Hash.hash(value),
+      catch: () => new SignalFallbackComputationError({ operation: "hash" }),
+    }).pipe(Effect.catch(() => Effect.succeed(Hash.hash(String(value)))));
+  },
+);
 
 /**
  * Create a new Signal with an initial value.
@@ -504,7 +566,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>, SignalScopeError>
   "Signal.make",
 )(function* <A>(initial: A) {
   const phase = yield* CurrentRenderPhase;
-  const ownerScope = yield* currentOwnerScope;
+  const ownerScope = yield* currentOwnerScope();
 
   if (phase === null) {
     return yield* makeOwnedSignal(initial, ownerScope.owner, ownerScope.scope, "standalone");
@@ -569,9 +631,9 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>, SignalScopeError>
  * @public
  * @since 1.0.0
  */
-export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal.get")(function* <
-  A,
->(signal: Signal<A>) {
+export const get: <A>(signal: Signal<A>) => Effect.Effect<A, SignalDisposedError> = Effect.fn(
+  "Signal.get",
+)(function* <A>(signal: Signal<A>) {
   yield* ensureSignalOpen(signal, "get");
   // Track this signal as accessed - subscribes component to changes
   const phase = yield* CurrentRenderPhase;
@@ -614,9 +676,9 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal
  * @public
  * @since 1.0.0
  */
-export const peek: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signal.peek")(function* <
-  A,
->(signal: Signal<A>) {
+export const peek: <A>(signal: Signal<A>) => Effect.Effect<A, SignalDisposedError> = Effect.fn(
+  "Signal.peek",
+)(function* <A>(signal: Signal<A>) {
   yield* ensureSignalOpen(signal, "peek");
   yield* Debug.log({
     event: "signal.peek",
@@ -641,13 +703,13 @@ export const peek: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fn("Signa
  * @public
  * @since 1.0.0
  */
-export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effect.fn("Signal.set")(
-  function* <A>(signal: Signal<A>, value: A) {
+export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void, SignalDisposedError> =
+  Effect.fn("Signal.set")(function* <A>(signal: Signal<A>, value: A) {
     yield* ensureSignalOpen(signal, "set");
     const prevValue = yield* SubscriptionRef.get(signal._ref);
 
     // Skip update if value is unchanged (prevents unnecessary re-renders)
-    if (valuesEqual(prevValue, value)) {
+    if (yield* valuesEqual(prevValue, value)) {
       yield* Debug.log({
         event: "signal.set.skipped",
         signal_id: signal._debugId,
@@ -668,8 +730,7 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
     // Record signal update metric
     yield* Metrics.recordSignalUpdate;
     yield* notifyListeners(signal);
-  },
-);
+  });
 
 /**
  * Update the value of a signal using a function and notify listeners.
@@ -686,15 +747,19 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
  * @public
  * @since 1.0.0
  */
-export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<void> = Effect.fn(
-  "Signal.update",
-)(function* <A>(signal: Signal<A>, f: (a: A) => A) {
+export const update: <A>(
+  signal: Signal<A>,
+  f: (a: A) => A,
+) => Effect.Effect<void, SignalDisposedError> = Effect.fn("Signal.update")(function* <A>(
+  signal: Signal<A>,
+  f: (a: A) => A,
+) {
   yield* ensureSignalOpen(signal, "update");
   const prevValue = yield* SubscriptionRef.get(signal._ref);
   const newValue = f(prevValue);
 
   // Skip update if value is unchanged (prevents unnecessary re-renders)
-  if (valuesEqual(prevValue, newValue)) {
+  if (yield* valuesEqual(prevValue, newValue)) {
     yield* Debug.log({
       event: "signal.update.skipped",
       signal_id: signal._debugId,
@@ -732,7 +797,10 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
  * @public
  * @since 1.0.0
  */
-export const modify = <A, B>(signal: Signal<A>, f: (a: A) => readonly [B, A]): Effect.Effect<B> =>
+export const modify = <A, B>(
+  signal: Signal<A>,
+  f: (a: A) => readonly [B, A],
+): Effect.Effect<B, SignalDisposedError> =>
   ensureSignalOpen(signal, "modify").pipe(
     Effect.flatMap(() => SubscriptionRef.modify(signal._ref, f)),
     Effect.tap(() => notifyListeners(signal)),
@@ -787,16 +855,16 @@ export function derive<A, B>(
   source: Signal<A>,
   f: (a: A) => B,
   options: DeriveOptions,
-): Effect.Effect<Signal<B>>;
+): Effect.Effect<Signal<B>, SignalDisposedError>;
 export function derive<A, B>(
   source: Signal<A>,
   f: (a: A) => B,
-): Effect.Effect<Signal<B>, never, Scope.Scope>;
+): Effect.Effect<Signal<B>, SignalDisposedError, Scope.Scope>;
 export function derive<A, B>(
   source: Signal<A>,
   f: (a: A) => B,
   options?: DeriveOptions,
-): Effect.Effect<Signal<B>, never, Scope.Scope> {
+): Effect.Effect<Signal<B>, SignalDisposedError, Scope.Scope> {
   return Effect.gen(function* () {
     const renderScope = yield* CurrentRenderScope;
     // Get scope from options or from render scope
@@ -870,37 +938,37 @@ export function deriveAll<A, B>(
   sources: readonly [Signal<A>],
   f: (a: A) => B,
   options?: DeriveOptions,
-): Effect.Effect<Signal<B>, never, Scope.Scope>;
+): Effect.Effect<Signal<B>, SignalDisposedError, Scope.Scope>;
 export function deriveAll<A, B, R>(
   sources: readonly [Signal<A>, Signal<B>],
   f: (a: A, b: B) => R,
   options?: DeriveOptions,
-): Effect.Effect<Signal<R>, never, Scope.Scope>;
+): Effect.Effect<Signal<R>, SignalDisposedError, Scope.Scope>;
 export function deriveAll<A, B, C, R>(
   sources: readonly [Signal<A>, Signal<B>, Signal<C>],
   f: (a: A, b: B, c: C) => R,
   options?: DeriveOptions,
-): Effect.Effect<Signal<R>, never, Scope.Scope>;
+): Effect.Effect<Signal<R>, SignalDisposedError, Scope.Scope>;
 export function deriveAll<A, B, C, D, R>(
   sources: readonly [Signal<A>, Signal<B>, Signal<C>, Signal<D>],
   f: (a: A, b: B, c: C, d: D) => R,
   options?: DeriveOptions,
-): Effect.Effect<Signal<R>, never, Scope.Scope>;
+): Effect.Effect<Signal<R>, SignalDisposedError, Scope.Scope>;
 export function deriveAll<A, B, C, D, E, R>(
   sources: readonly [Signal<A>, Signal<B>, Signal<C>, Signal<D>, Signal<E>],
   f: (a: A, b: B, c: C, d: D, e: E) => R,
   options?: DeriveOptions,
-): Effect.Effect<Signal<R>, never, Scope.Scope>;
+): Effect.Effect<Signal<R>, SignalDisposedError, Scope.Scope>;
 export function deriveAll<A, B, C, D, E, F, R>(
   sources: readonly [Signal<A>, Signal<B>, Signal<C>, Signal<D>, Signal<E>, Signal<F>],
   f: (a: A, b: B, c: C, d: D, e: E, f_: F) => R,
   options?: DeriveOptions,
-): Effect.Effect<Signal<R>, never, Scope.Scope>;
+): Effect.Effect<Signal<R>, SignalDisposedError, Scope.Scope>;
 export function deriveAll(
   sources: ReadonlyArray<Signal<unknown>>,
   f: (...values: ReadonlyArray<unknown>) => unknown,
   options?: DeriveOptions,
-): Effect.Effect<Signal<unknown>, never, Scope.Scope> {
+): Effect.Effect<Signal<unknown>, SignalDisposedError, Scope.Scope> {
   return Effect.gen(function* () {
     const renderScope = yield* CurrentRenderScope;
     const scope = options?.scope ?? renderScope ?? (yield* Effect.scope);
@@ -928,7 +996,7 @@ export function deriveAll(
       const values = yield* readAll();
       const newValue = f(...values);
       const prevValue = yield* peek(derivedSignal);
-      if (!valuesEqual(prevValue, newValue)) {
+      if (!(yield* valuesEqual(prevValue, newValue))) {
         yield* set(derivedSignal, newValue);
       }
     });
@@ -978,7 +1046,7 @@ export function deriveAll(
  * @since 1.0.0
  */
 export const isSignal = (value: unknown): value is Signal<unknown> =>
-  typeof value === "object" && value !== null && "_tag" in value && value._tag === "Signal";
+  Predicate.isTagged(value, "Signal");
 
 /**
  * Notify all listeners that a signal has changed.
@@ -1218,32 +1286,26 @@ const makeSuspendMatcher = <Props, E, R, HasPending extends boolean, HasFailure 
   };
 };
 
-const makeTextElement = (content: string): SuspendElement =>
-  ({ _tag: "Text", content }) satisfies Extract<SuspendElement, { readonly _tag: "Text" }>;
+const makeTextElement = (content: string): SuspendElement => ElementConstructor.Text({ content });
 
 const makeSignalElement = (signal: Signal<Element>): SuspendElement =>
-  ({
-    _tag: "SignalElement",
-    signal,
-    onSwap: undefined,
-  }) satisfies Extract<SuspendElement, { readonly _tag: "SignalElement" }>;
+  ElementConstructor.SignalElement({ signal, onSwap: undefined });
 
 const makeComponentElement = <E, R>(
   run: () => Effect.Effect<SuspendElement, E, R>,
 ): SuspendElement =>
-  ({
-    _tag: "Component",
+  ElementConstructor.Component({
     run,
     key: null,
     identity: undefined,
     inputs: undefined,
     provider: null,
-  }) satisfies Extract<SuspendElement, { readonly _tag: "Component" }>;
+  });
 
 const isEffectComponentLike = (
   value: unknown,
 ): value is Component.Type<unknown, unknown, unknown> =>
-  typeof value === "function" && value !== null && Reflect.get(value, "_tag") === "EffectComponent";
+  Predicate.isTagged(value, "EffectComponent") && typeof value === "function";
 
 const isPendingComponent = <R>(handler: PendingHandler<R>): handler is PendingComponentHandler<R> =>
   isEffectComponentLike(handler);
@@ -1369,170 +1431,168 @@ export const on =
  * @public
  * @since 1.0.0
  */
-export const exhaustive = <Props, E, R>(
+export const exhaustive: <Props, E, R>(
   self: SuspendMatcher<Props, E, R, true, true>,
-): Effect.Effect<SuspendedComponent<Props, E, R>, SignalScopeError> =>
-  Effect.gen(function* () {
-    const pending = self.pending;
-    const failure = self.failure;
+) => Effect.Effect<SuspendedComponent<Props, E, R>, SignalScopeError> = Effect.fn(
+  "Signal.suspend.exhaustive",
+)(function* <Props, E, R>(self: SuspendMatcher<Props, E, R, true, true>) {
+  const pending = self.pending;
+  const failure = self.failure;
 
-    if (pending === undefined || failure === undefined) {
-      const unavailableSignal = yield* make(makeTextElement("Signal.suspend unavailable"));
-      return unsafeTagCallable<SuspendedComponent<Props, E, R>>(
-        (_props: PropsInput<Props>) =>
-          makeComponentElement(() =>
-            Effect.die(
-              new SignalInitError({
-                message: "Signal.suspend exhaustive requires Pending and Failure handlers",
-              }),
-            ),
+  if (pending === undefined || failure === undefined) {
+    const unavailableSignal = yield* make(makeTextElement("Signal.suspend unavailable"));
+    const unavailableComponent = tagComponent<Props, PropsInput<Props>, SignalInitError, R>(
+      (_props: PropsInput<Props>) =>
+        makeComponentElement(() =>
+          Effect.fail(
+            new SignalInitError({
+              message: "Signal.suspend exhaustive requires Pending and Failure handlers",
+            }),
           ),
-        {
-          _tag: "EffectComponent",
-          _layers: self.component._layers,
-          _signal: unavailableSignal,
-          pipe() {
-            return Pipeable.pipeArguments(this, arguments);
-          },
-        },
-      );
-    }
-
-    const initialSignal = yield* make<SuspendElement>(renderPending(pending, null));
-
-    const runFn = (props: PropsInput<Props>): Effect.Effect<Element, never, R> =>
-      Effect.gen(function* () {
-        const componentScope = yield* CurrentComponentScope;
-        const scope = componentScope ?? (yield* Scope.make());
-        const owner: SignalOwner = componentScope === null ? "effect" : "component";
-        const cache = new Map<string, SuspendElement>();
-        const viewSignal = yield* makeOwnedSignal(
-          renderPending(pending, null),
-          owner,
-          scope,
-          "suspend",
-        );
-        const renderPhase = yield* makeRenderPhase;
-
-        let requestId = 0;
-        let isRunning = false;
-        let subscriptionCleanups: Array<Effect.Effect<void>> = [];
-
-        const computeDepKey = (accessed: Set<AnySignal>): Effect.Effect<string> =>
-          Effect.gen(function* () {
-            if (accessed.size === 0) return "";
-            const entries: Array<[string, number]> = [];
-            for (const signal of accessed) {
-              const value = yield* ignoreSignalDisposedCause(peek(signal));
-              entries.push([signal._debugId, valueHash(value)]);
-            }
-            entries.sort((a, b) => a[0].localeCompare(b[0]));
-            return entries.map(([id, valueHash]) => `${id}:${valueHash}`).join("|");
-          });
-
-        const cleanupSubscriptions = Effect.fn("Signal.suspend.cleanup")(function* () {
-          const oldCleanups = subscriptionCleanups;
-          subscriptionCleanups = [];
-          for (const cleanup of oldCleanups) {
-            yield* cleanup;
-          }
-        });
-
-        const refreshRef = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-
-        const setView = (element: SuspendElement): Effect.Effect<void> =>
-          ignoreSignalDisposedCause(set(viewSignal, element));
-
-        const subscribeToSignals = Effect.fn("Signal.suspend.subscribe")(function* (
-          signals: Set<AnySignal>,
-        ) {
-          yield* cleanupSubscriptions();
-          if (signals.size === 0) return;
-
-          for (const signal of signals) {
-            const unsubscribe = yield* subscribe(signal, () =>
-              Ref.get(refreshRef).pipe(Effect.flatMap((refresh) => refresh)),
-            );
-            subscriptionCleanups.push(unsubscribe);
-          }
-        });
-
-        const runRender = (runId: number): Effect.Effect<void> =>
-          Effect.gen(function* () {
-            yield* resetRenderPhase(renderPhase);
-            const exit = yield* Effect.exit(
-              Effect.provideService(
-                unsafeRunComponent(self.component, props),
-                CurrentRenderPhase,
-                renderPhase,
-              ).pipe(Effect.withSpan("Signal.suspend.render")),
-            );
-
-            const latestRequest = requestId;
-            if (runId !== latestRequest) {
-              yield* runRender(latestRequest);
-              return;
-            }
-
-            const depKey = yield* computeDepKey(renderPhase.accessed);
-            if (Exit.isSuccess(exit)) {
-              cache.set(depKey, exit.value);
-              yield* setView(exit.value);
-            } else {
-              const stale = cache.get(depKey) ?? null;
-              yield* setView(renderFailure(failure, exit.cause, stale));
-            }
-
-            yield* subscribeToSignals(renderPhase.accessed);
-
-            const nextRequest = requestId;
-            if (runId !== nextRequest) {
-              yield* runRender(nextRequest);
-            }
-          });
-
-        const refresh: Effect.Effect<void> = Effect.gen(function* () {
-          requestId += 1;
-          const runId = requestId;
-          const peekDepKey = yield* computeDepKey(renderPhase.accessed);
-          const stale = cache.get(peekDepKey) ?? null;
-          yield* setView(renderPending(pending, stale));
-
-          if (isRunning) return;
-          isRunning = true;
-          yield* Effect.forkIn(
-            runRender(runId).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  isRunning = false;
-                }),
-              ),
-            ),
-            scope,
-          );
-        }).pipe(Effect.withSpan("Signal.suspend.refresh"));
-
-        yield* Ref.set(refreshRef, refresh);
-
-        yield* Scope.addFinalizer(scope, cleanupSubscriptions());
-        yield* refresh;
-        yield* ignoreSignalDisposedCause(set(initialSignal, makeSignalElement(viewSignal)));
-        return makeSignalElement(viewSignal);
-      });
-
-    const suspendedComponent = (props: PropsInput<Props>): SuspendElement =>
-      makeComponentElement(() => runFn(props));
-
-    return unsafeTagCallable<SuspendedComponent<Props, E, R>>(suspendedComponent, {
-      _tag: "EffectComponent",
-      _layers: self.component._layers,
-      _runFn: runFn,
-      _signal: initialSignal,
-      pipe() {
-        return Pipeable.pipeArguments(this, arguments);
-      },
+        ),
+      self.component._layers,
+    );
+    return unsafeTagCallable<SuspendedComponent<Props, E, R>>(unavailableComponent, {
+      _signal: unavailableSignal,
     });
+  }
+
+  const initialSignal = yield* make<SuspendElement>(renderPending(pending, null));
+
+  const runFn: (props: PropsInput<Props>) => Effect.Effect<Element, never, R> = Effect.fn(
+    "Signal.suspend.run",
+  )(function* (props: PropsInput<Props>) {
+    const componentScope = yield* CurrentComponentScope;
+    const scope = componentScope ?? (yield* Scope.make());
+    const owner: SignalOwner = componentScope === null ? "effect" : "component";
+    const cache = new Map<string, SuspendElement>();
+    const viewSignal = yield* makeOwnedSignal(
+      renderPending(pending, null),
+      owner,
+      scope,
+      "suspend",
+    );
+    const renderPhase = yield* makeRenderPhase;
+
+    let requestId = 0;
+    let isRunning = false;
+    let subscriptionCleanups: Array<Effect.Effect<void>> = [];
+
+    const computeDepKey: (accessed: Set<AnySignal>) => Effect.Effect<string> = Effect.fn(
+      "Signal.suspend.computeDepKey",
+    )(function* (accessed: Set<AnySignal>) {
+      if (accessed.size === 0) return "";
+      const entries: Array<[string, number]> = [];
+      for (const signal of accessed) {
+        const value = yield* ignoreSignalDisposedCause(peek(signal));
+        const hash = yield* valueHash(value);
+        entries.push([signal._debugId, hash]);
+      }
+      entries.sort((a, b) => a[0].localeCompare(b[0]));
+      return entries.map(([id, hash]) => `${id}:${hash}`).join("|");
+    });
+
+    const cleanupSubscriptions = Effect.fn("Signal.suspend.cleanup")(function* () {
+      const oldCleanups = subscriptionCleanups;
+      subscriptionCleanups = [];
+      for (const cleanup of oldCleanups) {
+        yield* cleanup;
+      }
+    });
+
+    const refreshRef = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+
+    const setView = (element: SuspendElement): Effect.Effect<void> =>
+      ignoreSignalDisposedCause(set(viewSignal, element));
+
+    const subscribeToSignals = Effect.fn("Signal.suspend.subscribe")(function* (
+      signals: Set<AnySignal>,
+    ) {
+      yield* cleanupSubscriptions();
+      if (signals.size === 0) return;
+
+      for (const signal of signals) {
+        const unsubscribe = yield* subscribe(signal, () =>
+          Ref.get(refreshRef).pipe(Effect.flatMap((refresh) => refresh)),
+        );
+        subscriptionCleanups.push(unsubscribe);
+      }
+    });
+
+    const runRender: (runId: number) => Effect.Effect<void> = Effect.fn("Signal.suspend.runRender")(
+      function* (runId: number) {
+        yield* resetRenderPhase(renderPhase);
+        const exit = yield* Effect.exit(
+          Effect.provideService(
+            unsafeRunComponent(self.component, props),
+            CurrentRenderPhase,
+            renderPhase,
+          ).pipe(Effect.withSpan("Signal.suspend.render")),
+        );
+
+        const latestRequest = requestId;
+        if (runId !== latestRequest) {
+          yield* runRender(latestRequest);
+          return;
+        }
+
+        const depKey = yield* computeDepKey(renderPhase.accessed);
+        if (Exit.isSuccess(exit)) {
+          cache.set(depKey, exit.value);
+          yield* setView(exit.value);
+        } else {
+          const stale = cache.get(depKey) ?? null;
+          yield* setView(renderFailure(failure, exit.cause, stale));
+        }
+
+        yield* subscribeToSignals(renderPhase.accessed);
+
+        const nextRequest = requestId;
+        if (runId !== nextRequest) {
+          yield* runRender(nextRequest);
+        }
+      },
+    );
+
+    const refresh: () => Effect.Effect<void> = Effect.fn("Signal.suspend.refresh")(function* () {
+      requestId += 1;
+      const runId = requestId;
+      const peekDepKey = yield* computeDepKey(renderPhase.accessed);
+      const stale = cache.get(peekDepKey) ?? null;
+      yield* setView(renderPending(pending, stale));
+
+      if (isRunning) return;
+      isRunning = true;
+      yield* Effect.forkIn(
+        runRender(runId).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              isRunning = false;
+            }),
+          ),
+        ),
+        scope,
+      );
+    });
+
+    yield* Ref.set(refreshRef, refresh().pipe(Effect.withSpan("Signal.suspend.refresh")));
+
+    yield* Scope.addFinalizer(scope, cleanupSubscriptions());
+    yield* refresh().pipe(Effect.withSpan("Signal.suspend.refresh"));
+    yield* ignoreSignalDisposedCause(set(initialSignal, makeSignalElement(viewSignal)));
+    return makeSignalElement(viewSignal);
   });
+
+  const suspendedComponent = tagComponent<Props, PropsInput<Props>, E, R>(
+    (props: PropsInput<Props>): SuspendElement => makeComponentElement(() => runFn(props)),
+    self.component._layers,
+    runFn,
+  );
+
+  return unsafeTagCallable<SuspendedComponent<Props, E, R>>(suspendedComponent, {
+    _signal: initialSignal,
+  });
+});
 
 /**
  * Key type for list items
@@ -1590,19 +1650,19 @@ export interface EachOptions<T> {
  * @public
  * @since 1.0.0
  */
-export type EachRenderResult<E> = Element | Effect.Effect<Element, E, unknown>;
+export type EachRenderResult<E, R = never> = Element | Effect.Effect<Element, E, R>;
 
-type EachFn = <T, E>(
+type EachFn = <T, E, R = never>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => EachRenderResult<E>,
+  renderFn: (item: T, index: number) => EachRenderResult<E, R>,
   options: EachOptions<T>,
-) => Element;
+) => ElementWithRequirements<R>;
 
-const makeKeyedListElement = <T, E>(
+const makeKeyedListElement = <T, E, R>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => EachRenderResult<E>,
+  renderFn: (item: T, index: number) => EachRenderResult<E, R>,
   key: (item: T, index: number) => ItemKey,
-): Element =>
+): ElementWithRequirements<R> =>
   unsafeMakeKeyedListElement(
     source,
     (item, index) => {

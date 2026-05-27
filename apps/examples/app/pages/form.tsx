@@ -1,19 +1,22 @@
-import { Data, Effect, Layer, Match, Option, Result } from "effect";
+import { Effect, Layer, Match, Option, Result, Schema } from "effect";
 import { Signal, Component } from "trygg";
 import { FormTheme } from "../services/form";
 import { FormField } from "../components/form-field";
 import { SuccessMessage } from "../components/form/success-message";
 
 // Typed Validation Errors
-class EmailRequired extends Data.TaggedError("EmailRequired") {}
-class EmailInvalid extends Data.TaggedError("EmailInvalid")<{
-  readonly email: string;
-}> {}
-class PasswordTooShort extends Data.TaggedError("PasswordTooShort")<{
-  readonly minLength: number;
-  readonly actualLength: number;
-}> {}
-class PasswordNoNumber extends Data.TaggedError("PasswordNoNumber") {}
+class EmailRequired extends Schema.TaggedErrorClass<EmailRequired>()("EmailRequired", {}) {}
+class EmailInvalid extends Schema.TaggedErrorClass<EmailInvalid>()("EmailInvalid", {
+  email: Schema.String,
+}) {}
+class PasswordTooShort extends Schema.TaggedErrorClass<PasswordTooShort>()("PasswordTooShort", {
+  minLength: Schema.Number,
+  actualLength: Schema.Number,
+}) {}
+class PasswordNoNumber extends Schema.TaggedErrorClass<PasswordNoNumber>()(
+  "PasswordNoNumber",
+  {},
+) {}
 
 type ValidationError = EmailRequired | EmailInvalid | PasswordTooShort | PasswordNoNumber;
 
@@ -72,57 +75,53 @@ const FormPage = Component.gen(function* () {
 
   const emailValueForDisplay = submittedValue ? yield* Signal.get(email) : "";
 
-  const onEmailChange = (e: Event) =>
-    Effect.gen(function* () {
-      const target = e.target;
-      if (target instanceof HTMLInputElement) {
-        yield* Signal.set(email, target.value);
-        yield* Signal.set(emailError, Option.none());
-      }
-    });
-
-  const onPasswordChange = (e: Event) =>
-    Effect.gen(function* () {
-      const target = e.target;
-      if (target instanceof HTMLInputElement) {
-        yield* Signal.set(password, target.value);
-        yield* Signal.set(passwordError, Option.none());
-      }
-    });
-
-  const onSubmit = (e: Event) =>
-    Effect.gen(function* () {
-      e.preventDefault();
-
-      yield* Signal.set(submitted, false);
+  const onEmailChange = Effect.fnUntraced(function* (e: Event) {
+    const target = e.target;
+    if (target instanceof HTMLInputElement) {
+      yield* Signal.set(email, target.value);
       yield* Signal.set(emailError, Option.none());
+    }
+  });
+
+  const onPasswordChange = Effect.fnUntraced(function* (e: Event) {
+    const target = e.target;
+    if (target instanceof HTMLInputElement) {
+      yield* Signal.set(password, target.value);
       yield* Signal.set(passwordError, Option.none());
+    }
+  });
 
-      const currentEmail = yield* Signal.peek(email);
-      const currentPassword = yield* Signal.peek(password);
+  const onSubmit = Effect.fnUntraced(function* (e: Event) {
+    e.preventDefault();
 
-      const emailResult = yield* validateEmail(currentEmail).pipe(Effect.result);
-      if (Result.isFailure(emailResult)) {
-        yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.failure)));
-        return;
-      }
+    yield* Signal.set(submitted, false);
+    yield* Signal.set(emailError, Option.none());
+    yield* Signal.set(passwordError, Option.none());
 
-      const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.result);
-      if (Result.isFailure(passwordResult)) {
-        yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.failure)));
-        return;
-      }
+    const currentEmail = yield* Signal.peek(email);
+    const currentPassword = yield* Signal.peek(password);
 
-      yield* Signal.set(submitted, true);
-      yield* Effect.log(`Form submitted: email=${emailResult.success}`);
-    });
+    const emailResult = yield* validateEmail(currentEmail).pipe(Effect.result);
+    if (Result.isFailure(emailResult)) {
+      yield* Signal.set(emailError, Option.some(getErrorMessage(emailResult.failure)));
+      return;
+    }
 
-  const resetForm = () =>
-    Effect.gen(function* () {
-      yield* Signal.set(email, "");
-      yield* Signal.set(password, "");
-      yield* Signal.set(submitted, false);
-    });
+    const passwordResult = yield* validatePassword(currentPassword).pipe(Effect.result);
+    if (Result.isFailure(passwordResult)) {
+      yield* Signal.set(passwordError, Option.some(getErrorMessage(passwordResult.failure)));
+      return;
+    }
+
+    yield* Signal.set(submitted, true);
+    yield* Effect.log(`Form submitted: email=${emailResult.success}`);
+  });
+
+  const resetForm = Effect.fnUntraced(function* (_event: Event) {
+    yield* Signal.set(email, "");
+    yield* Signal.set(password, "");
+    yield* Signal.set(submitted, false);
+  });
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">

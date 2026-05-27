@@ -5,7 +5,7 @@ import { FormTheme } from "../../services/form";
 export const SuccessMessage = Component.gen(function* (
   Props: ComponentProps<{
     email: string;
-    onReset: () => Effect.Effect<void>;
+    onReset: (event: Event) => Effect.Effect<void>;
   }>,
 ) {
   const { email, onReset } = yield* Props;

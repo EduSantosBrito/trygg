@@ -29,7 +29,7 @@ export const copy: LandingCopy = {
   primaryCtaHref: "/docs/getting-started",
   secondaryCtaLabel: "Read the docs",
   secondaryCtaHref: "/docs",
-} as const;
+};
 
 export const sections = {
   signature: {
@@ -161,4 +161,4 @@ export default Component.gen(function* () {
       },
     ],
   },
-} as const;
+};

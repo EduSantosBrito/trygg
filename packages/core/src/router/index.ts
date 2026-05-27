@@ -287,7 +287,7 @@ export const Route = {
   current: _currentRoute,
   redirect: _redirect,
   forbidden: _forbidden,
-} as const;
+};
 
 /**
  * Routes namespace - provides `Routes.make()` for route collection.
@@ -311,4 +311,4 @@ export const Route = {
  */
 export const Routes = {
   make: _routesMake,
-} as const;
+};

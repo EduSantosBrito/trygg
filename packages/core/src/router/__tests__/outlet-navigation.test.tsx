@@ -19,74 +19,56 @@
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import { Deferred, Effect, Fiber, Layer, Ref, SubscriptionRef } from "effect";
+import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Components from "../../primitives/component.js";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
-import { render, renderElement } from "../../testing/index.js";
+import { render, renderElement, type as typeInput } from "../../testing/index.js";
 import { browserLayer, Renderer } from "../../primitives/renderer.js";
 import { text, signalElement } from "../../primitives/element.js";
 import { Element } from "../../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
-import type { RouteComponent } from "../types.js";
+import type { NavigationError, RouteComponent } from "../types.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
-import type { Any as AnyLayer, Layer as LayerType } from "effect/Layer";
+import type { Layer as LayerType } from "effect/Layer";
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
 /** Create a RouteComponent that renders a div with data-testid */
-const identifiableComp = (testId: string, content: string): RouteComponent => {
-  const fn = () =>
-    Element.fromEffect(
-      Effect.succeed(
-        Element.Intrinsic({
-          tag: "div",
-          props: { "data-testid": testId },
-          children: [text(content)],
-          key: null,
-        }),
-      ),
-    );
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
+const routeElement = (testId: string, content: string): RouteComponent =>
+  Effect.succeed(
+    Element.Intrinsic({
+      tag: "div",
+      props: { "data-testid": testId },
+      children: [text(content)],
+      key: null,
+    }),
+  );
+
+/** Create a RouteComponent that renders a div with data-testid */
+const identifiableComp = (testId: string, content: string): RouteComponent =>
+  routeElement(testId, content);
 
 /** Create a loading RouteComponent */
-const loadingComp = (): RouteComponent => {
-  const fn = () =>
-    Element.fromEffect(
-      Effect.succeed(
-        Element.Intrinsic({
-          tag: "div",
-          props: { "data-testid": "loading" },
-          children: [text("Loading...")],
-          key: null,
-        }),
-      ),
-    );
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
+const loadingComp = (): RouteComponent => routeElement("loading", "Loading...");
+
+const requireInputElement = (element: globalThis.Element, testId: string): HTMLInputElement => {
+  if (element instanceof HTMLInputElement) {
+    return element;
+  }
+  return assert.fail(`Expected ${testId} to be an HTMLInputElement`);
 };
 
 /** Custom test layer with specified initial path */
-const testLayerAt = (path: string): LayerType<Renderer | Router.Router, Signal.SignalScopeError> =>
+const testLayerAt = (
+  path: string,
+): LayerType<Renderer | Router.Router, NavigationError | Signal.SignalScopeError> =>
   Layer.merge(browserLayer, Router.testLayer(path));
 
 // =============================================================================
@@ -109,8 +91,8 @@ describe("AsyncLoader - view signal during track", () => {
 
       const refreshingRead = yield* Signal.peek(loader.view);
 
-      assert.strictEqual(refreshingRead._tag, "Text");
-      if (refreshingRead._tag === "Text") {
+      assert.isTrue(Element.$is("Text")(refreshingRead));
+      if (Element.$is("Text")(refreshingRead)) {
         assert.strictEqual(
           refreshingRead.content,
           "Loading...",
@@ -135,7 +117,7 @@ describe("AsyncLoader - view signal during track", () => {
       yield* loader.track("users", Effect.succeed(text("Users")));
 
       // Render SignalElement from the refreshing view.
-      const element = signalElement(loader.view as Signal.Signal<Element>);
+      const element = signalElement(loader.view);
       const { container } = yield* renderElement(element);
 
       // Wait for fiber + swap
@@ -152,6 +134,96 @@ describe("AsyncLoader - view signal during track", () => {
         `Should not show Dashboard. DOM: ${container.innerHTML}`,
       );
     }).pipe(Effect.provide(testLayerAt("/"))),
+  );
+});
+
+// =============================================================================
+// Root cause: Outlet component re-renders on route change
+// =============================================================================
+
+describe("Outlet - provided route components", () => {
+  scoped("preserves Component.provide layers while wrapping route fiber refs", () =>
+    Effect.gen(function* () {
+      class RouteTheme extends Context.Service<RouteTheme, { readonly label: string }>()(
+        "test/RouteTheme",
+      ) {}
+
+      const ThemedPage = Components.gen(function* () {
+        const theme = yield* RouteTheme;
+        return <article data-testid="provided-route">{theme.label}</article>;
+      }).pipe(Components.provide(Layer.succeed(RouteTheme, { label: "provided route" })));
+
+      const manifest = Routes.make().add(Route.make("/provided").component(ThemedPage)).manifest;
+      const outlet = Outlet({ routes: manifest });
+      const { container } = yield* renderElement(outlet);
+
+      yield* TestClock.adjust(100);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='provided-route']"),
+        `Provided route should render with its layer. DOM: ${container.innerHTML}`,
+      );
+      assert.include(container.textContent, "provided route");
+    }).pipe(Effect.provide(testLayerAt("/provided"))),
+  );
+
+  scoped("keeps provider-owned route signals out of route component hook slots", () =>
+    Effect.gen(function* () {
+      class RouteStore extends Context.Service<
+        RouteStore,
+        { readonly selected: Signal.Signal<string> }
+      >()("test/RouteStore") {}
+
+      const RouteStoreLive = Layer.effect(
+        RouteStore,
+        Effect.gen(function* () {
+          const selected = yield* Signal.make("en");
+          return { selected };
+        }).pipe(Effect.annotateLogs({ service: "RouteStore" })),
+      );
+
+      const Page = Components.gen(function* () {
+        const name = yield* Signal.make("World");
+        const store = yield* RouteStore;
+        const nameValue = yield* Signal.get(name);
+        const selected = yield* Signal.get(store.selected);
+
+        return (
+          <div>
+            <input
+              data-testid="route-name"
+              value={nameValue}
+              onInput={(event) => {
+                const target = event.target;
+                return target instanceof HTMLInputElement
+                  ? Signal.set(name, target.value)
+                  : Effect.void;
+              }}
+            />
+            <button data-testid="route-locale" onClick={() => Signal.set(store.selected, "es")}>
+              Spanish
+            </button>
+            <span data-testid="route-greeting">
+              {nameValue}:{selected}
+            </span>
+          </div>
+        );
+      }).pipe(Components.provide(RouteStoreLive));
+
+      const manifest = Routes.make().add(Route.make("/provided-state").component(Page)).manifest;
+      const { getByTestId } = yield* renderElement(<Outlet routes={manifest} />);
+      yield* TestClock.adjust(100);
+      assert.strictEqual((yield* getByTestId("route-greeting")).textContent, "World:en");
+
+      const routeNameInput = requireInputElement(yield* getByTestId("route-name"), "route-name");
+      yield* typeInput(routeNameInput, "Trygg");
+      yield* TestClock.adjust(100);
+      assert.strictEqual((yield* getByTestId("route-greeting")).textContent, "Trygg:en");
+
+      (yield* getByTestId("route-locale")).click();
+      yield* TestClock.adjust(100);
+      assert.strictEqual((yield* getByTestId("route-greeting")).textContent, "Trygg:es");
+    }).pipe(Effect.provide(testLayerAt("/provided-state"))),
   );
 });
 
@@ -320,11 +392,11 @@ describe("Outlet - stable identity", () => {
         ).manifest;
         const outlet = Outlet({ routes: manifest });
 
-        assert.strictEqual(outlet._tag, "Component");
+        assert.isTrue(Element.$is("Component")(outlet));
 
         const runtime = yield* outlet.run();
 
-        if (runtime._tag !== "Component") {
+        if (!Element.$is("Component")(runtime)) {
           assert.fail("Expected Outlet runtime to return a component wrapper");
         }
 
@@ -366,15 +438,17 @@ describe("Outlet - stable identity", () => {
       );
 
       const signalBefore = noteSignal;
-      assert.isNotNull(signalBefore);
+      if (signalBefore === null) {
+        return assert.fail("Expected route note signal to be initialized");
+      }
 
-      const inputBefore = (yield* getByTestId("route-note")) as HTMLInputElement;
+      const inputBefore = requireInputElement(yield* getByTestId("route-note"), "route-note");
       assert.strictEqual(inputBefore.value, "hello");
 
       yield* Signal.set(signalBefore, "hello world");
       yield* TestClock.adjust(20);
 
-      const inputAfter = (yield* getByTestId("route-note")) as HTMLInputElement;
+      const inputAfter = requireInputElement(yield* getByTestId("route-note"), "route-note");
 
       assert.strictEqual(cleanupCount, 0);
       assert.strictEqual(inputAfter, inputBefore);
@@ -413,7 +487,7 @@ describe("Outlet - Navigation integration", () => {
         Effect.provide(Router.testLayer("/settings")),
       );
 
-      yield* Effect.promise<void>(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      yield* TestClock.adjust(10);
 
       assert.include(container.textContent ?? "", "Overview");
       assert.strictEqual(container.querySelectorAll("h2").length, 1);
@@ -476,9 +550,7 @@ describe("Outlet - Navigation integration", () => {
         const headings = yield* Signal.make<ReadonlyArray<string>>([]);
         const oldRouteTick = yield* Signal.make(0);
         const newRouteReady = yield* Deferred.make<void>();
-        const flushDom = Effect.promise<void>(
-          () => new Promise((resolve) => setTimeout(resolve, 10)),
-        );
+        const flushDom = TestClock.adjust(10);
         const staleRouteRenders: Array<string> = [];
 
         const currentPathSnapshot = Effect.gen(function* () {
@@ -544,7 +616,7 @@ describe("Outlet - Navigation integration", () => {
         yield* Signal.update(oldRouteTick, (n) => n + 1);
         yield* TestClock.adjust(20);
 
-        yield* Deferred.succeed(newRouteReady, void 0);
+        yield* Deferred.succeed(newRouteReady, undefined);
         yield* TestClock.adjust(100);
 
         assert.isNotNull(
@@ -584,7 +656,7 @@ describe("Outlet - Navigation integration", () => {
       });
 
       const ResourcesPage = Components.gen(function* () {
-        yield* Deferred.succeed(articleStarted, void 0);
+        yield* Deferred.succeed(articleStarted, undefined);
         yield* Deferred.await(articleReady);
         return <article data-testid="resources-page">Resources</article>;
       });
@@ -626,7 +698,7 @@ describe("Outlet - Navigation integration", () => {
         `Resources article should not be visible until its component resolves. DOM: ${container.innerHTML}`,
       );
 
-      yield* Deferred.succeed(articleReady, void 0);
+      yield* Deferred.succeed(articleReady, undefined);
       yield* Fiber.join(mountFiber);
 
       assert.isNotNull(
@@ -663,7 +735,7 @@ describe("Outlet - Navigation integration", () => {
       const LazyResourcesPage = () =>
         Effect.runPromiseWith(context)(
           Effect.gen(function* () {
-            yield* Deferred.succeed(moduleRequested, void 0);
+            yield* Deferred.succeed(moduleRequested, undefined);
             yield* Deferred.await(moduleReady);
             return { default: ResourcesPage };
           }),
@@ -706,9 +778,9 @@ describe("Outlet - Navigation integration", () => {
         `Resources article should not be visible until its lazy module resolves. DOM: ${container.innerHTML}`,
       );
 
-      yield* Deferred.succeed(moduleReady, void 0);
+      yield* Deferred.succeed(moduleReady, undefined);
       yield* Fiber.join(mountFiber);
-      yield* Effect.promise<void>(() => new Promise((resolve) => setTimeout(resolve, 10)));
+      yield* TestClock.adjust(10);
 
       assert.isNotNull(
         container.querySelector("[data-testid='resources-page']"),
@@ -903,7 +975,7 @@ function getSignalElementAnchors(container: HTMLElement): Comment[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
   let node: Node | null;
   while ((node = walker.nextNode()) !== null) {
-    if (node.textContent === "signal-element") anchors.push(node as Comment);
+    if (node instanceof Comment && node.textContent === "signal-element") anchors.push(node);
   }
   return anchors;
 }

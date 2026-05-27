@@ -82,12 +82,14 @@ describe("ResourceState", () => {
 // =============================================================================
 
 describe("Resource.make", () => {
-  it("should create resource with key and fetch effect", () => {
-    const resource = Resource.make(() => Effect.succeed(42), { key: "test:123" });
+  it.effect("should create resource with key and fetch effect", () =>
+    Effect.sync(() => {
+      const resource = Resource.make(() => Effect.succeed(42), { key: "test:123" });
 
-    assert.strictEqual(resource._tag, "Resource");
-    assert.strictEqual(resource.key, "test:123");
-  });
+      assert.strictEqual(resource._tag, "Resource");
+      assert.strictEqual(resource.key, "test:123");
+    }),
+  );
 });
 
 // =============================================================================

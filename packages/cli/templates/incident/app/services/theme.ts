@@ -24,18 +24,19 @@ export type ThemePreference = ThemeMode | "system";
  * Color tokens live in CSS custom properties (styles.css) gated on `[data-theme]`.
  * The renderer subscribes to `mode` on the `<html>` element and updates `data-theme` reactively.
  */
-export interface AppThemeService {
-  /** Reactive theme mode — pass to JSX attributes for fine-grained updates */
-  readonly mode: Signal.Signal<ThemeMode>;
-  /** User preference — explicit theme or system */
-  readonly preference: Signal.Signal<ThemePreference>;
-  /** Set user preference and persist */
-  readonly setPreference: (preference: ThemePreference) => Effect.Effect<void>;
-  /** Toggles between dark/light */
-  readonly toggle: Effect.Effect<void>;
-}
-
-export class AppTheme extends Context.Service<AppTheme, AppThemeService>()("AppTheme") {}
+export class AppTheme extends Context.Service<
+  AppTheme,
+  {
+    /** Reactive theme mode — pass to JSX attributes for fine-grained updates */
+    readonly mode: Signal.Signal<ThemeMode>;
+    /** User preference — explicit theme or system */
+    readonly preference: Signal.Signal<ThemePreference>;
+    /** Set user preference and persist */
+    readonly setPreference: (preference: ThemePreference) => Effect.Effect<void>;
+    /** Toggles between dark/light */
+    readonly toggle: Effect.Effect<void>;
+  }
+>()("trygg/AppTheme") {}
 
 // ---------------------------------------------------------------------------
 // Layers — same Tag, different initial configuration
@@ -50,30 +51,31 @@ const parsePreference = (value: string | null): ThemePreference => {
   return "system";
 };
 
-const readStoredPreference: Effect.Effect<ThemePreference> = Effect.sync(() => {
-  if (typeof localStorage === "undefined") {
-    return "system";
+const readCookie = (key: string): string | null => {
+  if (typeof document === "undefined") {
+    return null;
   }
+  const prefix = `${key}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(prefix));
+  return entry === undefined ? null : decodeURIComponent(entry.slice(prefix.length));
+};
 
-  try {
-    return parsePreference(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return "system";
+const writeCookie = (key: string, value: string): void => {
+  if (typeof document === "undefined") {
+    return;
   }
-});
+  document.cookie = `${key}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+};
+
+const readStoredPreference: Effect.Effect<ThemePreference> = Effect.sync(() =>
+  parsePreference(readCookie(STORAGE_KEY)),
+);
 
 const persistPreference = (preference: ThemePreference): Effect.Effect<void> =>
-  Effect.sync(() => {
-    if (typeof localStorage === "undefined") {
-      return;
-    }
-
-    try {
-      localStorage.setItem(STORAGE_KEY, preference);
-    } catch {
-      return;
-    }
-  });
+  Effect.sync(() => writeCookie(STORAGE_KEY, preference));
 
 const resolveSystemMode = (fallback: ThemeMode): Effect.Effect<ThemeMode> =>
   Effect.sync(() => {
@@ -124,35 +126,36 @@ const subscribeToSystemTheme = (
       }),
   ).pipe(Effect.asVoid);
 
-const make = (fallback: ThemeMode): Layer.Layer<AppTheme> =>
+const make = (fallback: ThemeMode): Layer.Layer<AppTheme, Signal.SignalScopeError> =>
   Layer.effect(
     AppTheme,
     Effect.gen(function* () {
       const initialPreference = yield* readStoredPreference;
-      const preference = yield* Signal.make<ThemePreference>(initialPreference).pipe(Effect.orDie);
+      const preference = yield* Signal.make<ThemePreference>(initialPreference);
       const initialMode = yield* resolveMode(initialPreference, fallback);
-      const mode = yield* Signal.make<ThemeMode>(initialMode).pipe(Effect.orDie);
+      const mode = yield* Signal.make<ThemeMode>(initialMode);
 
-      const setPreference = (next: ThemePreference): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          yield* Signal.set(preference, next);
-          const nextMode = yield* resolveMode(next, fallback);
-          yield* Signal.set(mode, nextMode);
-          yield* persistPreference(next);
-        });
+      const setPreference = Effect.fn("AppTheme.setPreference")(function* (next: ThemePreference) {
+        yield* Signal.set(preference, next);
+        const nextMode = yield* resolveMode(next, fallback);
+        yield* Signal.set(mode, nextMode);
+        yield* persistPreference(next);
+      });
 
       yield* subscribeToSystemTheme(preference, mode);
+
+      const toggle = Effect.gen(function* () {
+        const next: ThemeMode = (yield* Signal.peek(mode)) === "dark" ? "light" : "dark";
+        yield* setPreference(next);
+      }).pipe(Effect.withSpan("AppTheme.toggle"));
 
       return {
         mode,
         preference,
         setPreference,
-        toggle: Effect.gen(function* () {
-          const next: ThemeMode = (yield* Signal.peek(mode)) === "dark" ? "light" : "dark";
-          yield* setPreference(next);
-        }),
+        toggle,
       };
-    }),
+    }).pipe(Effect.annotateLogs({ service: "AppTheme" })),
   );
 
 /** Dark fallback for non-browser environments. */

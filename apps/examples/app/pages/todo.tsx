@@ -41,16 +41,15 @@ const TodoPage = Component.gen(function* () {
       }),
   );
 
-  const addTodo = () =>
-    Effect.gen(function* () {
-      const text = (yield* Signal.peek(inputValue)).trim();
-      if (text === "") return;
+  const addTodo = Effect.fn("TodoPage.addTodo")(function* () {
+    const text = (yield* Signal.peek(inputValue)).trim();
+    if (text === "") return;
 
-      const id = yield* Signal.peek(nextId);
-      yield* Signal.update(todos, (list) => [...list, { id, text, completed: false }]);
-      yield* Signal.update(nextId, (n) => n + 1);
-      yield* Signal.set(inputValue, "");
-    });
+    const id = yield* Signal.peek(nextId);
+    yield* Signal.update(todos, (list) => [...list, { id, text, completed: false }]);
+    yield* Signal.update(nextId, (n) => n + 1);
+    yield* Signal.set(inputValue, "");
+  });
 
   const toggleTodo = (id: number) =>
     Signal.update(todos, (list) =>
@@ -77,84 +76,81 @@ const TodoPage = Component.gen(function* () {
 
   const todoListElement = Signal.each(
     filteredTodos,
-    (todo) =>
-      Effect.gen(function* () {
-        const editText = yield* Signal.make<Option.Option<string>>(Option.none());
-        const editTextValue = yield* Signal.get(editText);
-        const isEditing = Option.isSome(editTextValue);
+    Effect.fn("TodoPage.todoListElement")(function* (todo) {
+      const editText = yield* Signal.make<Option.Option<string>>(Option.none());
+      const editTextValue = yield* Signal.get(editText);
+      const isEditing = Option.isSome(editTextValue);
 
-        const startEditing = () => Signal.set(editText, Option.some(todo.text));
-        const cancelEditing = () => Signal.set(editText, Option.none());
+      const startEditing = () => Signal.set(editText, Option.some(todo.text));
+      const cancelEditing = () => Signal.set(editText, Option.none());
 
-        const saveEditing = () =>
-          Effect.gen(function* () {
-            const text = yield* Signal.peek(editText);
-            if (Option.isSome(text) && text.value.trim() !== "") {
-              yield* updateTodoText(todo.id, text.value.trim());
-            }
-            yield* Signal.set(editText, Option.none());
-          });
+      const saveEditing = Effect.fn("TodoPage.saveEditing")(function* () {
+        const text = yield* Signal.peek(editText);
+        if (Option.isSome(text) && text.value.trim() !== "") {
+          yield* updateTodoText(todo.id, text.value.trim());
+        }
+        yield* Signal.set(editText, Option.none());
+      });
 
-        const onEditInputChange = (e: Event) =>
-          Effect.sync(() => {
-            const target = e.target;
-            if (target instanceof HTMLInputElement) {
-              return target.value;
-            }
-            return "";
-          }).pipe(Effect.flatMap((v) => Signal.set(editText, Option.some(v))));
+      const onEditInputChange = (e: Event) =>
+        Effect.sync(() => {
+          const target = e.target;
+          if (target instanceof HTMLInputElement) {
+            return target.value;
+          }
+          return "";
+        }).pipe(Effect.flatMap((v) => Signal.set(editText, Option.some(v))));
 
-        const onEditKeyDown = (e: Event) =>
-          Effect.gen(function* () {
-            if (e instanceof KeyboardEvent) {
-              if (e.key === "Enter") {
-                yield* saveEditing();
-              } else if (e.key === "Escape") {
-                yield* cancelEditing();
-              }
-            }
-          });
+      const onEditKeyDown = Effect.fn("TodoPage.onEditKeyDown")(function* (e: Event) {
+        if (e instanceof KeyboardEvent) {
+          if (e.key === "Enter") {
+            yield* saveEditing();
+          } else if (e.key === "Escape") {
+            yield* cancelEditing();
+          }
+        }
+      });
 
-        return (
-          <li
-            key={todo.id}
-            className={cx(
-              "flex items-center gap-2 p-2 border-b border-gray-100",
-              todo.completed && "line-through text-gray-400",
-            )}
-          >
+      return (
+        <li
+          key={todo.id}
+          className={cx(
+            "flex items-center gap-2 p-2 border-b border-gray-100",
+            todo.completed && "line-through text-gray-400",
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={todo.completed}
+            onChange={() => toggleTodo(todo.id)}
+            disabled={isEditing}
+          />
+          {isEditing ? (
             <input
-              type="checkbox"
-              checked={todo.completed}
-              onChange={() => toggleTodo(todo.id)}
-              disabled={isEditing}
+              type="text"
+              className="py-2 px-2 text-base border border-gray-300 rounded w-full focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+              value={Option.isSome(editTextValue) ? editTextValue.value : ""}
+              onInput={onEditInputChange}
+              onKeyDown={onEditKeyDown}
+              onBlur={() => saveEditing()}
+              autoFocus={true}
             />
-            {isEditing ? (
-              <input
-                type="text"
-                className="py-2 px-2 text-base border border-gray-300 rounded w-full focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
-                value={Option.isSome(editTextValue) ? editTextValue.value : ""}
-                onInput={onEditInputChange}
-                onKeyDown={onEditKeyDown}
-                onBlur={() => saveEditing()}
-                autoFocus={true}
-              />
-            ) : (
-              <>
-                <span className="flex-1" onDblclick={() => startEditing()}>
-                  {todo.text}
-                </span>
-                <button
-                  className="px-4 py-2 text-base border rounded cursor-pointer transition-colors bg-red-600 border-red-600 text-white hover:bg-red-700"
-                  onClick={() => removeTodo(todo.id)}
-                >
-                  Delete
-                </button>
-              </>
-            )}
-          </li>
-        );
-      }),
+          ) : (
+            <>
+              <span className="flex-1" onDblclick={() => startEditing()}>
+                {todo.text}
+              </span>
+              <button
+                className="px-4 py-2 text-base border rounded cursor-pointer transition-colors bg-red-600 border-red-600 text-white hover:bg-red-700"
+                onClick={() => removeTodo(todo.id)}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </li>
+      );
+    }),
     { key: (todo) => todo.id },
   );
 

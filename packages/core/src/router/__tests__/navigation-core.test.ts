@@ -14,64 +14,70 @@ import {
 import { parsePath } from "../utils.js";
 import * as Router from "../service.js";
 
-const makeCore = (initialPath: string): Effect.Effect<NavigationCoreShape> =>
-  Effect.gen(function* () {
-    const adapter = yield* makeInMemoryNavigationAdapter(initialPath).pipe(Effect.orDie);
-    return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(Effect.orDie);
+const makeCore: (initialPath: string) => Effect.Effect<NavigationCoreShape, NavigationCoreError> =
+  Effect.fn("NavigationCoreTest.makeCore")(function* (initialPath: string) {
+    const adapter = yield* makeInMemoryNavigationAdapter(initialPath);
+    return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
   });
 
-const makeBrowserLikeCore = (initialPath: string): Effect.Effect<NavigationCoreShape> =>
-  Effect.gen(function* () {
-    const historyStack: Array<string> = [initialPath];
-    let index = 0;
-    const adapter: NavigationAdapter = {
-      read: Effect.gen(function* () {
-        const fullPath = historyStack[index] ?? "/";
-        const { path, query } = yield* parsePath(fullPath).pipe(
-          Effect.mapError((cause) => new NavigationCoreError({ operation: "parsePath", cause })),
-        );
-        return { path, query, isPopstate: false, hash: "", scrollKey: `browser-like-${index}` };
-      }),
-      push: (url) =>
-        Effect.sync(() => {
-          historyStack.splice(index + 1);
-          historyStack.push(url);
-          index = historyStack.length - 1;
-        }).pipe(
-          Effect.mapError((cause) => new NavigationCoreError({ operation: "pushState", cause })),
-        ),
-      replace: (url) =>
-        Effect.sync(() => {
-          historyStack[index] = url;
-        }).pipe(
-          Effect.mapError((cause) => new NavigationCoreError({ operation: "replaceState", cause })),
-        ),
-      back: Effect.sync(() => {
-        if (index > 0) index--;
-      }).pipe(Effect.mapError((cause) => new NavigationCoreError({ operation: "back", cause }))),
-      forward: Effect.sync(() => {
-        if (index < historyStack.length - 1) index++;
+const makeBrowserLikeCore: (
+  initialPath: string,
+) => Effect.Effect<NavigationCoreShape, NavigationCoreError> = Effect.fn(
+  "NavigationCoreTest.makeBrowserLikeCore",
+)(function* (initialPath: string) {
+  const historyStack: Array<string> = [initialPath];
+  let index = 0;
+  const adapter: NavigationAdapter = {
+    read: Effect.gen(function* () {
+      const fullPath = historyStack[index] ?? "/";
+      const { path, query } = yield* parsePath(fullPath).pipe(
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "parsePath", cause })),
+      );
+      return { path, query, isPopstate: false, hash: "", scrollKey: `browser-like-${index}` };
+    }),
+    push: (url) =>
+      Effect.sync(() => {
+        historyStack.splice(index + 1);
+        historyStack.push(url);
+        index = historyStack.length - 1;
       }).pipe(
-        Effect.mapError((cause) => new NavigationCoreError({ operation: "forward", cause })),
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "pushState", cause })),
       ),
-    };
-    return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(Effect.orDie);
-  });
+    replace: (url) =>
+      Effect.sync(() => {
+        historyStack[index] = url;
+      }).pipe(
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "replaceState", cause })),
+      ),
+    back: Effect.sync(() => {
+      if (index > 0) index--;
+    }).pipe(Effect.mapError((cause) => new NavigationCoreError({ operation: "back", cause }))),
+    forward: Effect.sync(() => {
+      if (index < historyStack.length - 1) index++;
+    }).pipe(Effect.mapError((cause) => new NavigationCoreError({ operation: "forward", cause }))),
+  };
+  return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
+});
 
-const traceEventsFor = <E>(
-  effect: Effect.Effect<void, E>,
-): Effect.Effect<ReadonlyArray<ContractTrace.ContractTraceRecord>, E> =>
-  Effect.gen(function* () {
-    const collector = yield* ContractTrace.createInMemoryCollector("navigation-core");
-    yield* ContractTrace.withCollector(effect, collector);
-    return yield* collector.snapshot;
-  });
+const traceEventsFor: <E, R>(
+  effect: Effect.Effect<void, E, R>,
+) => Effect.Effect<ReadonlyArray<ContractTrace.ContractTraceRecord>, E, R> = Effect.fn(
+  "NavigationCoreTest.traceEventsFor",
+)(function* <E, R>(effect: Effect.Effect<void, E, R>) {
+  const collector = yield* ContractTrace.createInMemoryCollector("navigation-core");
+  yield* ContractTrace.withCollector(effect, collector);
+  return yield* collector.snapshot;
+});
 
 const eventNames = (
   records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
-): ReadonlyArray<ContractTrace.ContractTraceEventName> => records.map((record) => record.event.event);
+): ReadonlyArray<ContractTrace.ContractTraceEventName> =>
+  records.map((record) => record.event.event);
 
-const runNavigationLaws = (name: string, make: () => Effect.Effect<NavigationCoreShape>): void => {
+const runNavigationLaws = (
+  name: string,
+  make: () => Effect.Effect<NavigationCoreShape, NavigationCoreError>,
+): void => {
   describe(name, () => {
     it.effect("push updates path and query", () =>
       Effect.gen(function* () {
@@ -124,7 +130,9 @@ const runNavigationLaws = (name: string, make: () => Effect.Effect<NavigationCor
 
         assert.isTrue(yield* core.isActive(navigationTarget("/users"), false));
         assert.isFalse(yield* core.isActive(navigationTarget("/users"), true));
-        assert.isTrue(yield* core.isActive(navigationTarget("/users/:id", { params: { id: 42 } }), true));
+        assert.isTrue(
+          yield* core.isActive(navigationTarget("/users/:id", { params: { id: 42 } }), true),
+        );
       }),
     );
 
@@ -156,7 +164,9 @@ describe("NavigationCore semantic traces", () => {
         Effect.gen(function* () {
           const core = yield* makeCore("/dashboard?tab=main");
           yield* core.navigate(navigationTarget("/users", { query: { tab: "details" } }));
-          yield* core.navigate(navigationTarget("/users", { query: { tab: "settings" }, replace: true }));
+          yield* core.navigate(
+            navigationTarget("/users", { query: { tab: "settings" }, replace: true }),
+          );
         }),
       );
 
@@ -223,12 +233,8 @@ describe("NavigationCore semantic traces", () => {
 
       const emitted = yield* traceEventsFor(
         Effect.gen(function* () {
-          const adapter = yield* makeInMemoryNavigationAdapter("/dashboard?tab=main").pipe(
-            Effect.orDie,
-          );
-          const core = yield* makeNavigationCore({ notifyUnchangedQuery: true }, adapter).pipe(
-            Effect.orDie,
-          );
+          const adapter = yield* makeInMemoryNavigationAdapter("/dashboard?tab=main");
+          const core = yield* makeNavigationCore({ notifyUnchangedQuery: true }, adapter);
           yield* core.navigate(navigationTarget("/dashboard", { query: { tab: "main" } }));
         }),
       );
@@ -258,9 +264,7 @@ describe("NavigationCore semantic traces", () => {
         back: Effect.void,
         forward: Effect.void,
       };
-      const core = yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(
-        Effect.orDie,
-      );
+      const core = yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
       const records = yield* traceEventsFor(
         core.navigate(navigationTarget("/broken")).pipe(Effect.result, Effect.asVoid),
       );
@@ -286,23 +290,25 @@ describe("Router.testLayer NavigationCore delegation", () => {
     }).pipe(Effect.provide(Router.testLayer("/dashboard?tab=main"))),
   );
 
-  it.effect("delegates push, replace, back, forward, params, and active checks through the facade", () =>
-    Effect.gen(function* () {
-      const router = yield* Router.Router;
-      yield* router.navigate("/users/:id", { params: { id: 1 }, query: { tab: "main" } });
-      yield* router.navigate("/users/:id/details", { params: { id: 1 } });
-      yield* router.back();
-      assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1");
-      yield* router.forward();
-      assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1/details");
+  it.effect(
+    "delegates push, replace, back, forward, params, and active checks through the facade",
+    () =>
+      Effect.gen(function* () {
+        const router = yield* Router.Router;
+        yield* router.navigate("/users/:id", { params: { id: 1 }, query: { tab: "main" } });
+        yield* router.navigate("/users/:id/details", { params: { id: 1 } });
+        yield* router.back();
+        assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1");
+        yield* router.forward();
+        assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1/details");
 
-      const active = yield* router.isActive("/users/:id", { params: { id: 1 } });
-      assert.isTrue(yield* Signal.get(active));
+        const active = yield* router.isActive("/users/:id", { params: { id: 1 } });
+        assert.isTrue(yield* Signal.get(active));
 
-      yield* router.navigate("/replace-me");
-      yield* router.navigate("/replacement", { replace: true });
-      yield* router.back();
-      assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1/details");
-    }).pipe(Effect.provide(Router.testLayer("/"))),
+        yield* router.navigate("/replace-me");
+        yield* router.navigate("/replacement", { replace: true });
+        yield* router.back();
+        assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1/details");
+      }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });

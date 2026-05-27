@@ -74,13 +74,15 @@ describe("Idle", () => {
       );
 
       yield* Effect.sync(() => {
-        globalThis.requestIdleCallback = ((cb: IdleRequestCallback) => {
+        const requestIdleCallbackStub: typeof requestIdleCallback = (cb) => {
           scheduledRef.current = () => cb({ didTimeout: false, timeRemaining: () => 0 });
           return 1;
-        }) as typeof requestIdleCallback;
-        globalThis.cancelIdleCallback = ((_id: number) => {
+        };
+        const cancelIdleCallbackStub: typeof cancelIdleCallback = (_id) => {
           scheduledRef.current = null;
-        }) as typeof cancelIdleCallback;
+        };
+        globalThis.requestIdleCallback = requestIdleCallbackStub;
+        globalThis.cancelIdleCallback = cancelIdleCallbackStub;
       });
 
       const interrupted = yield* Ref.make(false);

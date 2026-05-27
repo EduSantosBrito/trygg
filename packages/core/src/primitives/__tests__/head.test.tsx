@@ -11,7 +11,7 @@
  * - Test Head: In-memory entry collection
  */
 import { assert, describe, effect } from "@effect/vitest";
-import { Effect, Exit, Option, Scope } from "effect";
+import { Effect, Exit, Option, Predicate, Scope } from "effect";
 import {
   CurrentHead,
   deriveKey,
@@ -154,7 +154,7 @@ describe("HeadHoist", () => {
       assert.isTrue(Option.isSome(action));
       if (Option.isNone(action)) return;
       assert.strictEqual(action.value._tag, "head");
-      if (action.value._tag !== "head") return;
+      if (!Predicate.isTagged(action.value, "head")) return;
 
       const node = document.createElement("title");
       node.textContent = "Mock Renderer";

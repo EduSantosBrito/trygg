@@ -22,9 +22,16 @@ export interface PlatformConfigService {
  * Context tag for PlatformConfig service
  * @since 1.0.0
  */
-export class PlatformConfig extends Context.Service<PlatformConfig, PlatformConfigService>()(
-  "trygg/PlatformConfig",
-) {}
+export class PlatformConfig extends Context.Service<
+  PlatformConfig,
+  {
+    readonly name: "node" | "bun";
+    readonly devScript: string;
+    readonly devDependencies: Readonly<Record<string, string>>;
+    readonly runtimeDependencyName: string;
+    readonly runtimeVersion: string;
+  }
+>()("trygg/PlatformConfig") {}
 
 /**
  * Helper to create platform config

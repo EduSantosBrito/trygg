@@ -1,6 +1,6 @@
 /* @vitest-environment happy-dom */
 
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -11,6 +11,8 @@ import { routes } from "./routes";
 
 const sidebarLinks = sidebarGroups.flatMap((group) => group.links);
 
+const failWait = (message: string): never => assert.fail(message);
+
 const renderRoute = (path: string) =>
   Effect.gen(function* () {
     const result = yield* render(Router.Outlet({ routes: routes.manifest }));
@@ -20,100 +22,94 @@ const renderRoute = (path: string) =>
   }).pipe(Effect.provide(Layer.merge(Router.testLayer(path), DocsHeadingsLive)), Effect.scoped);
 
 describe("docs routes", () => {
-  it("renders the docs landing at /docs", async () => {
-    const { current, result } = await Effect.runPromise(renderRoute("/docs"));
+  it.effect("renders the docs landing at /docs", () =>
+    Effect.gen(function* () {
+      const { current, result } = yield* renderRoute("/docs");
 
-    expect(current.path).toBe("/docs");
-    await Effect.runPromise(waitFor(() => result.container.textContent?.includes("Build UI")));
-  });
+      assert.strictEqual(current.path, "/docs");
+      yield* waitFor(() => result.container.textContent?.includes("Build UI"));
+    }),
+  );
 
-  it("renders getting started", async () => {
-    const { result } = await Effect.runPromise(renderRoute("/docs/getting-started"));
+  it.effect("renders getting started", () =>
+    Effect.gen(function* () {
+      const { result } = yield* renderRoute("/docs/getting-started");
 
-    await Effect.runPromise(
-      waitFor(() => result.container.textContent?.includes("Getting started")),
-    );
-  });
+      yield* waitFor(() => result.container.textContent?.includes("Getting started"));
+    }),
+  );
 
-  it.each(sidebarLinks)("matches docs sidebar link $href", async (link) => {
-    const { current, result } = await Effect.runPromise(renderRoute(link.href));
+  it.effect.each(sidebarLinks)("matches docs sidebar link $href", (link) =>
+    Effect.gen(function* () {
+      const { current, result } = yield* renderRoute(link.href);
 
-    expect(current.path).toBe(link.href);
-    await Effect.runPromise(waitFor(() => result.container.textContent?.includes(link.label)));
-    expect(result.container.textContent).not.toContain("Page not found");
-  });
+      assert.strictEqual(current.path, link.href);
+      yield* waitFor(() => result.container.textContent?.includes(link.label));
+      assert.notInclude(result.container.textContent, "Page not found");
+    }),
+  );
 
-  it("updates the on-this-page rail across docs routes", async () => {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const result = yield* render(Router.Outlet({ routes: routes.manifest }));
+  it.effect("updates the on-this-page rail across docs routes", () =>
+    Effect.gen(function* () {
+      const result = yield* render(Router.Outlet({ routes: routes.manifest }));
 
-          yield* waitFor(() => {
-            const rail = result.container.querySelector(".docs-rail__links");
-            if (!rail?.textContent?.includes("When to use")) {
-              throw new Error("initial topic rail not ready");
-            }
-            return true;
-          });
+      yield* waitFor(() => {
+        const rail = result.container.querySelector(".docs-rail__links");
+        if (!rail?.textContent?.includes("When to use")) {
+          return failWait("initial topic rail not ready");
+        }
+        return true;
+      });
 
-          yield* Router.navigate("/docs/api-types");
+      yield* Router.navigate("/docs/api-types");
 
-          yield* waitFor(() => {
-            const rail = result.container.querySelector(".docs-rail__links");
-            if (!rail?.textContent?.includes("Generated API client")) {
-              throw new Error("topic rail did not update");
-            }
-            return true;
-          });
+      yield* waitFor(() => {
+        const rail = result.container.querySelector(".docs-rail__links");
+        if (!rail?.textContent?.includes("Generated API client")) {
+          return failWait("topic rail did not update");
+        }
+        return true;
+      });
 
-          yield* Router.navigate("/docs");
+      yield* Router.navigate("/docs");
 
-          yield* waitFor(() => {
-            if (!result.container.textContent?.includes("Build UI the Effect way")) {
-              throw new Error("docs landing not ready");
-            }
-            if (result.container.querySelector(".docs-layout--with-rail") !== null) {
-              throw new Error("landing should not reserve the on-this-page rail");
-            }
-            return true;
-          });
-        }).pipe(
-          Effect.provide(Layer.merge(Router.testLayer("/docs/components"), DocsHeadingsLive)),
-        ),
-      ),
-    );
-  });
+      yield* waitFor(() => {
+        if (!result.container.textContent?.includes("Build UI the Effect way")) {
+          return failWait("docs landing not ready");
+        }
+        if (result.container.querySelector(".docs-layout--with-rail") !== null) {
+          return failWait("landing should not reserve the on-this-page rail");
+        }
+        return true;
+      });
+    }).pipe(Effect.provide(Layer.merge(Router.testLayer("/docs/components"), DocsHeadingsLive))),
+  );
 
-  it("does not duplicate docs chrome after sidebar navigation", async () => {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const result = yield* render(Router.Outlet({ routes: routes.manifest }));
+  it.effect("does not duplicate docs chrome after sidebar navigation", () =>
+    Effect.gen(function* () {
+      const result = yield* render(Router.Outlet({ routes: routes.manifest }));
 
-          yield* waitFor(() => {
-            if (!result.container.textContent?.includes("Elements")) {
-              throw new Error("initial docs route not ready");
-            }
-            return true;
-          });
+      yield* waitFor(() => {
+        if (!result.container.textContent?.includes("Elements")) {
+          return failWait("initial docs route not ready");
+        }
+        return true;
+      });
 
-          yield* Router.navigate("/docs/signals");
+      yield* Router.navigate("/docs/signals");
 
-          yield* waitFor(() => {
-            if (!result.container.textContent?.includes("Signals")) {
-              throw new Error("navigated docs route not ready");
-            }
-            return true;
-          });
-          yield* Effect.sleep("100 millis");
+      yield* waitFor(() => {
+        if (!result.container.textContent?.includes("Signals")) {
+          return failWait("navigated docs route not ready");
+        }
+        return true;
+      });
+      yield* Effect.sleep("100 millis");
 
-          expect(result.container.querySelectorAll(".docs-layout")).toHaveLength(1);
-          expect(result.container.querySelectorAll(".docs-layout__sidebar")).toHaveLength(1);
-          expect(result.container.querySelectorAll("footer")).toHaveLength(1);
-          expect(result.container.textContent).not.toContain("Page not found");
-        }).pipe(Effect.provide(Layer.merge(Router.testLayer("/docs/elements"), DocsHeadingsLive))),
-      ),
-    );
-  });
+      assert.strictEqual(result.container.querySelectorAll(".docs-layout").length, 1);
+      assert.strictEqual(result.container.querySelectorAll(".docs-layout__sidebar").length, 1);
+      assert.strictEqual(result.container.querySelectorAll("footer").length, 1);
+      assert.notInclude(result.container.textContent, "Page not found");
+    }).pipe(Effect.provide(Layer.merge(Router.testLayer("/docs/elements"), DocsHeadingsLive))),
+  );
 });

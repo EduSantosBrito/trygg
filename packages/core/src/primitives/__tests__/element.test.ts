@@ -15,7 +15,7 @@
  * - Verify normalization handles edge cases
  */
 import { assert, describe, effect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Data, Effect, Predicate, Schema } from "effect";
 import {
   Element,
   empty,
@@ -30,6 +30,12 @@ import {
   text,
 } from "../element.js";
 import * as Signal from "../signal.js";
+
+class BoomError extends Schema.TaggedErrorClass<BoomError>()("BoomError", {
+  message: Schema.String,
+}) {}
+
+class Custom extends Data.TaggedClass("Custom")<{ readonly value: number }> {}
 
 // =============================================================================
 // intrinsic - HTML element constructor
@@ -119,8 +125,8 @@ describe("Element.fromEffect", () => {
         inputs,
       });
 
-      assert.strictEqual(element._tag, "Component");
-      if (element._tag !== "Component") {
+      assert.isTrue(Predicate.isTagged(element, "Component"));
+      if (!Predicate.isTagged(element, "Component")) {
         return assert.fail("Expected Component element");
       }
 
@@ -135,11 +141,11 @@ describe("Element.fromEffect", () => {
       // Test: should create Component failure element while preserving explicit key metadata.
       // Scope: verifies the convenience failure constructor produces the same component shell shape used by lazy render-time failures.
       // Assertion: returns a Component element immediately and preserves the provided key metadata.
-      const error = new Error("boom");
+      const error = new BoomError({ message: "boom" });
       const element = Element.fail(error, { key: "boom-key" });
 
-      assert.strictEqual(element._tag, "Component");
-      if (element._tag !== "Component") {
+      assert.isTrue(Predicate.isTagged(element, "Component"));
+      if (!Predicate.isTagged(element, "Component")) {
         return assert.fail("Expected Component element");
       }
 
@@ -156,8 +162,8 @@ describe("Element.fromUnknown", () => {
       // Assertion: normalizing a string yields a Text element with the same content.
       const element = yield* Element.fromUnknown("hello");
 
-      assert.strictEqual(element._tag, "Text");
-      if (element._tag !== "Text") {
+      assert.isTrue(Predicate.isTagged(element, "Text"));
+      if (!Predicate.isTagged(element, "Text")) {
         return assert.fail("Expected Text element");
       }
 
@@ -497,19 +503,21 @@ describe("isElement", () => {
     assert.isTrue(isElement(element));
   });
 
-  it("should return true for Component element", () => {
-    const element = Element.Component({
-      run: () => Effect.succeed(text("component")),
-      key: null,
-      identity: undefined,
-      inputs: undefined,
-    });
+  it.effect("should return true for Component element", () =>
+    Effect.sync(() => {
+      const element = Element.Component({
+        run: () => Effect.succeed(text("component")),
+        key: null,
+        identity: undefined,
+        inputs: undefined,
+      });
 
-    assert.isTrue(isElement(element));
-  });
+      assert.isTrue(isElement(element));
+    }),
+  );
 
   it("should return false for plain objects", () => {
-    const obj = { _tag: "Custom", value: 42 };
+    const obj = new Custom({ value: 42 });
 
     assert.isFalse(isElement(obj));
   });
@@ -561,16 +569,18 @@ describe("getKey", () => {
     assert.strictEqual(getKey(element), "my-key");
   });
 
-  it("should return key from Component element", () => {
-    const element = Element.Component({
-      run: () => Effect.succeed(text("comp")),
-      key: "component-key",
-      identity: undefined,
-      inputs: undefined,
-    });
+  it.effect("should return key from Component element", () =>
+    Effect.sync(() => {
+      const element = Element.Component({
+        run: () => Effect.succeed(text("comp")),
+        key: "component-key",
+        identity: undefined,
+        inputs: undefined,
+      });
 
-    assert.strictEqual(getKey(element), "component-key");
-  });
+      assert.strictEqual(getKey(element), "component-key");
+    }),
+  );
 
   it("should return null for unkeyed elements", () => {
     const element = intrinsic("div", {}, []);
@@ -598,18 +608,20 @@ describe("keyed", () => {
     assert.strictEqual(getKey(withKey), "new-key");
   });
 
-  it("should add key to Component element", () => {
-    const original = Element.Component({
-      run: () => Effect.succeed(text("comp")),
-      key: null,
-      identity: undefined,
-      inputs: undefined,
-    });
-    const withKey = keyed("comp-key", original);
+  it.effect("should add key to Component element", () =>
+    Effect.sync(() => {
+      const original = Element.Component({
+        run: () => Effect.succeed(text("comp")),
+        key: null,
+        identity: undefined,
+        inputs: undefined,
+      });
+      const withKey = keyed("comp-key", original);
 
-    assert.strictEqual(withKey._tag, "Component");
-    assert.strictEqual(getKey(withKey), "comp-key");
-  });
+      assert.strictEqual(withKey._tag, "Component");
+      assert.strictEqual(getKey(withKey), "comp-key");
+    }),
+  );
 
   it("should return element unchanged for unsupported types", () => {
     const original = text("text");

@@ -11,7 +11,7 @@
  * - Function union: unsafeCallNoArgs (no-arg factory invocation)
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Layer, Context } from "effect";
+import { Data, Effect, Layer, Context } from "effect";
 
 import {
   unsafeMergeLayers,
@@ -24,8 +24,8 @@ import {
 // Test Services
 // =============================================================================
 
-class ServiceA extends Context.Service<ServiceA, { readonly value: string }>()("ServiceA") {}
-class ServiceB extends Context.Service<ServiceB, { readonly count: number }>()("ServiceB") {}
+class ServiceA extends Context.Service<ServiceA, { readonly value: string }>()("test/ServiceA") {}
+class ServiceB extends Context.Service<ServiceB, { readonly count: number }>()("test/ServiceB") {}
 
 const layerA = Layer.succeed(ServiceA, { value: "alpha" });
 const layerB = Layer.succeed(ServiceB, { count: 42 });
@@ -125,16 +125,19 @@ describe("unsafeTagCallable", () => {
     readonly _meta: number;
   }
 
+  class TestMetadata extends Data.TaggedClass("Test")<{ readonly _meta: number }> {}
+  class XMetadata extends Data.TaggedClass("X") {}
+
   it("should preserve function callability", () => {
     const fn = (x: number): string => `value:${x}`;
-    const tagged = unsafeTagCallable<Tagged>(fn, { _tag: "Test", _meta: 99 });
+    const tagged = unsafeTagCallable<Tagged>(fn, new TestMetadata({ _meta: 99 }));
 
     assert.strictEqual(tagged(5), "value:5");
   });
 
   it("should attach all metadata properties", () => {
     const fn = (x: number): string => `value:${x}`;
-    const tagged = unsafeTagCallable<Tagged>(fn, { _tag: "Test", _meta: 99 });
+    const tagged = unsafeTagCallable<Tagged>(fn, new TestMetadata({ _meta: 99 }));
 
     assert.strictEqual(tagged._tag, "Test");
     assert.strictEqual(tagged._meta, 99);
@@ -142,7 +145,7 @@ describe("unsafeTagCallable", () => {
 
   it("should allow typeof check (remains a function)", () => {
     const fn = (): void => {};
-    const tagged = unsafeTagCallable<{ (): void; _tag: string }>(fn, { _tag: "X" });
+    const tagged = unsafeTagCallable<{ (): void; _tag: string }>(fn, new XMetadata());
 
     assert.strictEqual(typeof tagged, "function");
   });
@@ -159,9 +162,12 @@ describe("unsafeCallNoArgs", () => {
     assert.strictEqual(result, 42);
   });
 
-  it("should call function returning Effect", () => {
-    const factory = () => Effect.succeed("hello");
-    const result = unsafeCallNoArgs<Effect.Effect<string>>(factory);
-    assert.isTrue(Effect.isEffect(result));
-  });
+  it.effect("should call function returning Effect", () =>
+    Effect.sync(() => {
+      const effect = Effect.succeed("hello");
+      const factory = () => effect;
+      const result = unsafeCallNoArgs<Effect.Effect<string>>(factory);
+      assert.isTrue(Effect.isEffect(result));
+    }),
+  );
 });

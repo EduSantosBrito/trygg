@@ -4,10 +4,10 @@ import * as ContractTrace from "../contract/trace.js";
 import type { Element } from "./element.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
 
-export interface RenderTransactionRequest {
+export interface RenderTransactionRequest<R> {
   readonly parent: Node;
   readonly previous: Option.Option<RenderResult>;
-  readonly renderNext: Effect.Effect<RenderResult, unknown, unknown>;
+  readonly renderNext: Effect.Effect<RenderResult, unknown, R>;
   readonly context: RenderContext;
 }
 
@@ -18,16 +18,26 @@ export interface RenderTransactionReconcileRequest {
   readonly context: RenderContext;
 }
 
-export type RenderTransactionOutcome =
-  | { readonly _tag: "Committed"; readonly result: RenderResult }
-  | { readonly _tag: "Reconciled"; readonly result: RenderResult }
-  | { readonly _tag: "NotReconciled"; readonly result: RenderResult }
-  | { readonly _tag: "FailedBeforeCommit"; readonly cause: unknown };
+export type RenderTransactionOutcome = Data.TaggedEnum<{
+  readonly Committed: { readonly result: RenderResult };
+  readonly Reconciled: { readonly result: RenderResult };
+  readonly NotReconciled: { readonly result: RenderResult };
+  readonly FailedBeforeCommit: { readonly cause: unknown };
+}>;
 
-export class RenderTransactionError extends Data.TaggedError("RenderTransactionError")<{
-  readonly phase: "render" | "commit" | "cleanup";
-  readonly cause: unknown;
-}> {}
+export const RenderTransactionOutcome = Data.taggedEnum<RenderTransactionOutcome>();
+
+export class RenderTransactionError extends Schema.TaggedErrorClass<RenderTransactionError>()(
+  "RenderTransactionError",
+  {
+    phase: Schema.Union([
+      Schema.Literal("render"),
+      Schema.Literal("commit"),
+      Schema.Literal("cleanup"),
+    ]),
+    cause: Schema.Unknown,
+  },
+) {}
 
 export const RenderTransactionConfigInput = Schema.Struct({
   emitTraceEvents: Schema.Boolean,
@@ -35,18 +45,21 @@ export const RenderTransactionConfigInput = Schema.Struct({
 
 type RenderTransactionConfig = typeof RenderTransactionConfigInput.Type;
 
+const UnknownRuntimeContext = Context.Service<unknown>(
+  "trygg/RenderTransaction/UnknownRuntimeContext",
+);
+const emptyRuntimeContext = Context.make(UnknownRuntimeContext, undefined);
+
 const emitRenderTrace = (
   enabled: boolean,
   event: ContractTrace.ContractTraceEventName,
   payload: Record<string, unknown>,
 ): Effect.Effect<void> =>
-  enabled
-    ? ContractTrace.emit({ event, level: "semantic", payload }).pipe(Effect.ignore)
-    : Effect.void;
+  enabled ? ContractTrace.emit({ event, level: "semantic", payload }) : Effect.void;
 
 export interface RenderTransactionShape {
-  readonly replace: (
-    request: RenderTransactionRequest,
+  readonly replace: <R>(
+    request: RenderTransactionRequest<R>,
   ) => Effect.Effect<RenderTransactionOutcome, RenderTransactionError>;
   readonly reconcile: (
     request: RenderTransactionReconcileRequest,
@@ -73,9 +86,9 @@ export const makeRenderTransaction = (
         yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
           operation: "replace",
           phase: "render",
-          cause: String(cause),
+          cause: Cause.pretty(rendered.cause),
         });
-        return { _tag: "FailedBeforeCommit", cause };
+        return RenderTransactionOutcome.FailedBeforeCommit({ cause });
       }
 
       yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
@@ -112,14 +125,14 @@ export const makeRenderTransaction = (
         );
       }
 
-      return { _tag: "Committed", result: next };
+      return RenderTransactionOutcome.Committed({ result: next });
     }),
     reconcile: Effect.fn("RenderTransaction.reconcile")(function* (request) {
       yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.start", {
         operation: "reconcile",
       });
       if (request.previous.reconcile === undefined) {
-        return { _tag: "NotReconciled", result: request.previous };
+        return RenderTransactionOutcome.NotReconciled({ result: request.previous });
       }
 
       const reconciled = yield* Effect.exit(
@@ -132,9 +145,9 @@ export const makeRenderTransaction = (
         yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
           operation: "reconcile",
           phase: "render",
-          cause: String(cause),
+          cause: Cause.pretty(reconciled.cause),
         });
-        return { _tag: "FailedBeforeCommit", cause };
+        return RenderTransactionOutcome.FailedBeforeCommit({ cause });
       }
 
       yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
@@ -147,25 +160,31 @@ export const makeRenderTransaction = (
         });
       }
       return reconciled.value
-        ? { _tag: "Reconciled", result: request.previous }
-        : { _tag: "NotReconciled", result: request.previous };
+        ? RenderTransactionOutcome.Reconciled({ result: request.previous })
+        : RenderTransactionOutcome.NotReconciled({ result: request.previous });
     }),
     cleanup: Effect.fn("RenderTransaction.cleanup")(function* (result) {
       yield* emitRenderTrace(config.emitTraceEvents, "signalElement.cleanup", {
         operation: "cleanup",
         reason: "explicit",
       });
-      yield* result.cleanup.pipe(Effect.provide(Context.empty() as Context.Context<unknown>));
+      yield* result.cleanup.pipe(Effect.provide(emptyRuntimeContext));
     }),
   };
 };
 
 export class RenderTransaction extends Context.Service<
   RenderTransaction,
-  RenderTransactionShape
+  {
+    readonly replace: <R>(
+      request: RenderTransactionRequest<R>,
+    ) => Effect.Effect<RenderTransactionOutcome, RenderTransactionError>;
+    readonly reconcile: (
+      request: RenderTransactionReconcileRequest,
+    ) => Effect.Effect<RenderTransactionOutcome>;
+    readonly cleanup: (result: RenderResult) => Effect.Effect<void, unknown>;
+  }
 >()("trygg/RenderTransaction") {
-  static readonly layer = (
-    configInput: RenderTransactionConfig,
-  ): Layer.Layer<RenderTransaction> =>
+  static readonly layer = (configInput: RenderTransactionConfig): Layer.Layer<RenderTransaction> =>
     Layer.succeed(RenderTransaction, makeRenderTransaction(configInput));
 }

@@ -3,8 +3,8 @@
  *
  * @internal
  */
-import { Effect, Exit } from "effect";
-import { click, render, waitFor } from "trygg/testing";
+import { Duration, Effect, Exit, Schedule, Schema } from "effect";
+import { click, render } from "trygg/testing";
 import * as Router from "trygg/router";
 
 import * as ContractTrace from "../../../../packages/core/src/contract/trace.js";
@@ -17,6 +17,21 @@ interface ContractViolation {
   readonly firstDivergenceSeq: number;
   readonly expected: string;
   readonly actual: string;
+}
+
+interface ContractDefinition {
+  readonly name: string;
+  readonly suspectedFiles: ReadonlyArray<string>;
+  readonly laws: ReadonlyArray<{
+    readonly id: string;
+    readonly failureCode: string;
+    readonly description: string;
+    readonly failureHints: ReadonlyArray<string>;
+  }>;
+  readonly scenarios: ReadonlyArray<{
+    readonly name: string;
+    readonly fixedTrace: ReadonlyArray<Record<string, unknown>>;
+  }>;
 }
 
 interface ContractRunOptions {
@@ -37,7 +52,7 @@ const scenarioName = "elements-to-signals-sidebar-click";
 const activeLinkFailureCode = "DOCS_SIDEBAR_ACTIVE_LINK_STALE_AFTER_CLICK";
 const navigationFailureCode = "DOCS_SIDEBAR_CLICK_DID_NOT_NAVIGATE";
 
-export const contract = {
+export const contract: ContractDefinition = {
   name: "docs-sidebar-navigation",
   suspectedFiles: [
     "apps/www/app/components/docs-sidebar.tsx",
@@ -67,10 +82,24 @@ export const contract = {
       ],
     },
   ],
-} as const;
+};
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+class SignalsSidebarLinkNotReady extends Schema.TaggedErrorClass<SignalsSidebarLinkNotReady>()(
+  "SignalsSidebarLinkNotReady",
+  {},
+) {}
+
+const linkRetrySchedule = Schedule.both(Schedule.spaced(Duration.millis(50)), Schedule.recurs(100));
+
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
+
+const findSignalsLink = Effect.fn("findSignalsLink")(function* (container: HTMLElement) {
+  const link = container.querySelector<HTMLAnchorElement>(
+    'nav.docs-sidebar a[href="/docs/signals"]',
+  );
+  if (link === null) return yield* new SignalsSidebarLinkNotReady();
+  return link;
+});
 
 const hrefOf = (element: Element | null): string | null => element?.getAttribute("href") ?? null;
 
@@ -122,16 +151,7 @@ const runScenario = Effect.scoped(
     yield* flushDom(50);
 
     const linkExit = yield* Effect.exit(
-      waitFor(
-        () => {
-          const link = result.container.querySelector<HTMLAnchorElement>(
-            'nav.docs-sidebar a[href="/docs/signals"]',
-          );
-          if (link === null) throw new Error("Signals sidebar link is not ready");
-          return link;
-        },
-        { timeout: 5000, interval: 50 },
-      ),
+      findSignalsLink(result.container).pipe(Effect.retry(linkRetrySchedule)),
     );
 
     const initialCurrent = yield* Router.currentRoute;

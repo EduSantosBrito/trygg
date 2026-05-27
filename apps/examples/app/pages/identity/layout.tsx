@@ -23,17 +23,16 @@ const IdentityLayout = Component.gen(function* () {
       Effect.flatMap(() => Signal.set(linkProbe, "remembered")),
     );
 
-  const compareLinkNode = () =>
-    Effect.gen(function* () {
-      const remembered = yield* Signal.peek(rememberedLink);
-      const current = document.querySelector('[data-testid="identity-link-probe"]');
-      const currentAnchor = current instanceof HTMLAnchorElement ? current : null;
+  const compareLinkNode = Effect.fn("IdentityLayout.compareLinkNode")(function* () {
+    const remembered = yield* Signal.peek(rememberedLink);
+    const current = document.querySelector('[data-testid="identity-link-probe"]');
+    const currentAnchor = current instanceof HTMLAnchorElement ? current : null;
 
-      yield* Signal.set(
-        linkProbe,
-        remembered !== null && remembered === currentAnchor ? "same node" : "replaced",
-      );
-    });
+    yield* Signal.set(
+      linkProbe,
+      remembered !== null && remembered === currentAnchor ? "same node" : "replaced",
+    );
+  });
 
   return (
     <div className="flex flex-col gap-6">

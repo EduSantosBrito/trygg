@@ -8,4 +8,4 @@ export class FormTheme extends Context.Service<
     readonly labelColor: string;
     readonly inputBorder: string;
   }
->()("FormTheme") {}
+>()("examples/FormTheme") {}

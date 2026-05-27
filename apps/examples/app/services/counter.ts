@@ -7,4 +7,4 @@ export class CounterTheme extends Context.Service<
     readonly background: string;
     readonly text: string;
   }
->()("CounterTheme") {}
+>()("examples/CounterTheme") {}

@@ -49,22 +49,29 @@ import { get as getRouter, CurrentOutletChild } from "./service.js";
 import { runPrefetch } from "./prefetch.js";
 import { parsePath } from "./utils.js";
 import {
+  RoutePathSegment,
   compileRoutePathPattern,
   compareCompiledRoutePathPatterns,
   type CompiledRoutePathPattern,
-  type RoutePathSegment,
+  type InvalidRoutePathPattern,
 } from "./path-pattern.js";
 import {
-  BoundaryResolver,
+  AsyncLoadState,
   AsyncLoader,
+  BoundaryResolver,
   renderComponent,
-  renderLayout,
   renderError,
-  type BoundaryResolverShape,
+  renderLayout,
   type AsyncLoaderShape,
+  type BoundaryResolverShape,
 } from "./outlet-services.js";
 import { RenderLoadError } from "./render-strategy.js";
-import { makeRouteActivation, makeRouteActivationBoundary } from "./route-activation.js";
+import {
+  RouteActivationOutcome,
+  RouteActivationRenderIntent,
+  makeRouteActivation,
+  makeRouteActivationBoundary,
+} from "./route-activation.js";
 import type { RouteActivationRequest } from "./route-activation.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
@@ -113,26 +120,31 @@ const createTrieNode = (): TrieNode => ({
 });
 
 /** @internal */
-const segmentName = (segment: Extract<RoutePathSegment, { readonly _tag: "Param" | "Wildcard" | "CatchAllRequired" }>): string => segment.name;
+const segmentName = (
+  segment: Extract<RoutePathSegment, { readonly _tag: "Param" | "Wildcard" | "CatchAllRequired" }>,
+): string => segment.name;
 
 /** @internal */
 const insertIntoTrie = (root: TrieNode, route: CompiledRoute): void => {
   let current = root;
 
   for (const segment of route.pattern.segments) {
-    if (segment._tag === "Static") {
+    if (RoutePathSegment.$is("Static")(segment)) {
       let child = current.staticChildren.get(segment.value);
       if (child === undefined) {
         child = createTrieNode();
         current.staticChildren.set(segment.value, child);
       }
       current = child;
-    } else if (segment._tag === "Param") {
+    } else if (RoutePathSegment.$is("Param")(segment)) {
       if (current.paramChild === undefined) {
         current.paramChild = { node: createTrieNode(), name: segmentName(segment) };
       }
       current = current.paramChild.node;
-    } else if (segment._tag === "Wildcard" || segment._tag === "CatchAllRequired") {
+    } else if (
+      RoutePathSegment.$is("Wildcard")(segment) ||
+      RoutePathSegment.$is("CatchAllRequired")(segment)
+    ) {
       if (current.wildcardChild === undefined) {
         current.wildcardChild = { node: createTrieNode(), name: segmentName(segment) };
       }
@@ -157,8 +169,9 @@ const walkTrie = (
     for (const route of node.routes) {
       const lastSegment = route.pattern.segments[route.pattern.segments.length - 1];
       if (
-        lastSegment?._tag !== "Wildcard" &&
-        lastSegment?._tag !== "CatchAllRequired" &&
+        (lastSegment === undefined ||
+          (!RoutePathSegment.$is("Wildcard")(lastSegment) &&
+            !RoutePathSegment.$is("CatchAllRequired")(lastSegment))) &&
         route.pattern.segments.length === pathIndex
       ) {
         results.push({ route, params: { ...params } });
@@ -168,7 +181,7 @@ const walkTrie = (
       const newParams = { ...params, [node.wildcardChild.name]: "" };
       for (const route of node.wildcardChild.node.routes) {
         const lastSeg = route.pattern.segments[route.pattern.segments.length - 1];
-        if (lastSeg?._tag === "Wildcard") {
+        if (lastSeg !== undefined && RoutePathSegment.$is("Wildcard")(lastSeg)) {
           results.push({ route, params: { ...newParams } });
         }
       }
@@ -194,7 +207,11 @@ const walkTrie = (
     const newParams = { ...params, [node.wildcardChild.name]: rest };
     for (const route of node.wildcardChild.node.routes) {
       const lastSeg = route.pattern.segments[route.pattern.segments.length - 1];
-      if (lastSeg?._tag !== "CatchAllRequired" || rest !== "") {
+      if (
+        lastSeg === undefined ||
+        !RoutePathSegment.$is("CatchAllRequired")(lastSeg) ||
+        rest !== ""
+      ) {
         results.push({ route, params: { ...newParams } });
       }
     }
@@ -204,46 +221,49 @@ const walkTrie = (
 };
 
 /** @internal */
-export const buildTrieMatcher = (
+export const buildTrieMatcher: (
   resolved: ReadonlyArray<ResolvedRoute>,
-): Effect.Effect<(path: string) => Option.Option<RouteMatch>> =>
-  Effect.gen(function* () {
+) => Effect.Effect<(path: string) => Option.Option<RouteMatch>, InvalidRoutePathPattern> =
+  Effect.fn("Outlet.buildTrieMatcher")(function* (resolved: ReadonlyArray<ResolvedRoute>) {
     const compiled = yield* Effect.forEach(resolved, (route) =>
-      Effect.map(compileRoutePathPattern(route.path), (pattern): CompiledRoute => ({
-        resolved: route,
-        pattern,
-      })).pipe(Effect.orDie),
+      Effect.map(
+        compileRoutePathPattern(route.path),
+        (pattern): CompiledRoute => ({
+          resolved: route,
+          pattern,
+        }),
+      ),
     );
 
     const sorted = [...compiled].sort((a, b) =>
       compareCompiledRoutePathPatterns(a.pattern, b.pattern),
     );
 
-  const root = createTrieNode();
-  for (const route of sorted) {
-    insertIntoTrie(root, route);
-  }
+    const root = createTrieNode();
+    for (const route of sorted) {
+      insertIntoTrie(root, route);
+    }
 
-  return (path: string): Option.Option<RouteMatch> => {
-    const normalizedPath = path.split("?")[0] ?? path;
-    const pathParts = normalizedPath
-      .replace(/^\/|\/$/g, "")
-      .split("/")
-      .filter(Boolean);
+    return (path: string): Option.Option<RouteMatch> => {
+      const normalizedPath = path.split("?")[0] ?? path;
+      const pathParts = normalizedPath
+        .replace(/^\/|\/$/g, "")
+        .split("/")
+        .filter(Boolean);
 
-    const matches = walkTrie(root, pathParts, 0, {});
-    if (matches.length === 0) return Option.none();
+      const matches = walkTrie(root, pathParts, 0, {});
+      if (matches.length === 0) return Option.none();
 
-    const sortedMatches = [...matches].sort((a, b) =>
-      compareCompiledRoutePathPatterns(a.route.pattern, b.route.pattern),
-    );
+      const sortedMatches = [...matches].sort((a, b) =>
+        compareCompiledRoutePathPatterns(a.route.pattern, b.route.pattern),
+      );
 
-    const best = sortedMatches[0];
-    if (best === undefined) return Option.none();
+      const best = sortedMatches[0];
+      if (best === undefined) return Option.none();
 
-    return Option.some({ route: best.route.resolved, params: best.params });
-  };
-});
+      return Option.some({ route: best.route.resolved, params: best.params });
+    };
+  });
 
 // =============================================================================
 // Schema Validation for RouteComponent
@@ -260,6 +280,8 @@ const RouteComponentSchema = Schema.declare(
   (u: unknown): u is RouteComponent => Component.isEffectComponent(u) || Effect.isEffect(u),
   { identifier: "RouteComponent" },
 );
+
+const decodeRouteComponent = Schema.decodeUnknownEffect(RouteComponentSchema);
 
 // =============================================================================
 // Lazy Component Loading
@@ -365,8 +387,17 @@ export const buildPrefetchResolver =
               (loader) =>
                 Effect.tryPromise({
                   try: () => loader(),
-                  catch: () => undefined,
-                }).pipe(Effect.ignore),
+                  catch: (cause) => new RenderLoadError({ cause }),
+                }).pipe(
+                  Effect.catchTag("RenderLoadError", (error) =>
+                    Debug.log({
+                      event: "router.prefetch.error",
+                      path,
+                      phase: "load_module",
+                      error_message: String(error.cause),
+                    }),
+                  ),
+                ),
               { concurrency: "unbounded" },
             ).pipe(Effect.asVoid);
 
@@ -427,14 +458,14 @@ const resolveComponent = (
       catch: (cause) => new RenderLoadError({ cause }),
     }).pipe(
       Effect.flatMap((m) =>
-        unsafeEraseR(Schema.decodeUnknownEffect(RouteComponentSchema)(m.default)).pipe(
+        unsafeEraseR(decodeRouteComponent(m.default)).pipe(
           Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
         ),
       ),
     );
   }
   // Direct component (Component.gen result or Effect<Element>)
-  return unsafeEraseR(Schema.decodeUnknownEffect(RouteComponentSchema)(component)).pipe(
+  return unsafeEraseR(decodeRouteComponent(component)).pipe(
     Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
   );
 };
@@ -564,7 +595,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         collectPrefetchTargets,
         isComponentLoader: (component) => isComponentLoader(component),
         loadComponent: (component) => resolveComponent(component),
-        runRoutePrefetch: (path, match, query) =>
+        runRoutePrefetch: (_path, match, query) =>
           Effect.gen(function* () {
             const prefetchFns = match.route.definition.prefetch;
             if (prefetchFns.length === 0) return;
@@ -580,7 +611,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
               params: decodedParamsResult.success,
               query: decodedQueryResult.success,
             });
-            void path;
           }),
         resolveLoading: (match) => boundaries.resolveLoading(match.route),
         resolveError: (match) => boundaries.resolveError(match.route),
@@ -598,9 +628,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     const router = yield* getRouter;
 
     // Register prefetch resolver so router.prefetch() can warm lazy modules
-    const currentMatcher = yield* Ref.get(cachedMatcherRef);
-    if (Option.isSome(currentMatcher)) {
-      void currentMatcher;
+    if (Option.isSome(yield* Ref.get(cachedMatcherRef))) {
       yield* router.outletCoordination.activatePrefetch(routeActivationBoundary.prefetch);
     }
 
@@ -654,7 +682,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       if (swapDeferred !== null) {
         const d = swapDeferred;
         swapDeferred = null;
-        return Deferred.succeed(d, void 0).pipe(Effect.asVoid);
+        return Deferred.succeed(d, undefined).pipe(Effect.asVoid);
       }
       return Effect.void;
     });
@@ -668,13 +696,16 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
      * Set viewSignal and wait for the DOM swap to complete before returning.
      * Uses Deferred (resolved by onSwap) raced against a rAF fallback.
      */
-    const setViewAndAwaitSwap = (element: Element) =>
-      Effect.gen(function* () {
+    const setViewAndAwaitSwap: (
+      element: Element,
+    ) => Effect.Effect<void, Signal.SignalDisposedError> = Effect.fn("Outlet.setViewAndAwaitSwap")(
+      function* (element: Element) {
         const d = yield* Deferred.make<void>();
         swapDeferred = d;
         yield* Signal.set(viewSignal, element);
         yield* Effect.raceFirst(Deferred.await(d), afterFrame);
-      });
+      },
+    );
 
     // Pending scroll intent for AsyncLoader path.
     // Set in processRoute, consumed by loader.view subscription after Ready state.
@@ -688,7 +719,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     let routeEpoch = 0;
 
     const nextActivationId = () => `route-${++routeEpoch}`;
-
 
     /**
      * Process a route: match, middleware, boundaries, render, update view.
@@ -717,7 +747,10 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
             yield* Effect.forkScoped(
               Effect.gen(function* () {
-                const component = yield* routeActivationBoundary.loadComponent(options.request, loader);
+                const component = yield* routeActivationBoundary.loadComponent(
+                  options.request,
+                  loader,
+                );
                 const leafElement = yield* renderComponent(
                   component,
                   decodedParams,
@@ -813,98 +846,102 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       });
 
     /** Get existing AsyncLoader or create + wire subscription. */
-    const getOrCreateAsyncLoader = (loadingComp: ComponentInput) =>
-      Effect.gen(function* () {
-        const current = yield* Ref.get(asyncLoaderRef);
-        if (Option.isSome(current)) return current.value;
+    const getOrCreateAsyncLoader: (
+      loadingComp: ComponentInput,
+    ) => Effect.Effect<AsyncLoaderShape, unknown, never> = Effect.fn(
+      "Outlet.getOrCreateAsyncLoader",
+    )(function* (loadingComp: ComponentInput) {
+      const current = yield* Ref.get(asyncLoaderRef);
+      if (Option.isSome(current)) return current.value;
 
-        const resolvedLoading = yield* resolveComponent(loadingComp);
-        const loadingElement = yield* renderComponent(resolvedLoading, {}, {});
-        const loader = yield* AsyncLoader.make(loadingElement, scope);
-        yield* Ref.set(asyncLoaderRef, Option.some(loader));
+      const resolvedLoading = yield* resolveComponent(loadingComp);
+      const loadingElement = yield* renderComponent(resolvedLoading, {}, {});
+      const loader = yield* AsyncLoader.make(loadingElement, scope);
+      yield* Ref.set(asyncLoaderRef, Option.some(loader));
 
-        // Propagate loader.view -> viewSignal. Deferred scroll is consumed only
-        // once the loader reaches Ready so loading/refreshing frames do not
-        // steal the pending navigation scroll.
-        const _unsubLoader = yield* Signal.subscribe(loader.view, () =>
-          unsafeEraseR(
-            Effect.gen(function* () {
-              const state = yield* SubscriptionRef.get(loader.state._ref);
-              const val = yield* SubscriptionRef.get(loader.view._ref);
-              if (pendingScroll !== null && state._tag === "Ready") {
-                const { activationId, routePath, strategyLayer } = pendingScroll;
-                pendingScroll = null;
-                yield* routeActivation.commitAfterDomSwap(
-                  { activationId, path: routePath },
-                  setViewAndAwaitSwap(val),
-                  applyScroll(strategyLayer),
-                );
-              } else if (pendingScroll !== null) {
-                yield* routeActivation.showLoadingFallback(
-                  { activationId: pendingScroll.activationId, path: pendingScroll.routePath },
-                  Signal.set(viewSignal, val),
-                );
-              } else {
-                yield* Signal.set(viewSignal, val);
-              }
-            }),
-          ),
-        );
-        yield* Scope.addFinalizer(scope, _unsubLoader);
+      // Propagate loader.view -> viewSignal. Deferred scroll is consumed only
+      // once the loader reaches Ready so loading/refreshing frames do not
+      // steal the pending navigation scroll.
+      const _unsubLoader = yield* Signal.subscribe(loader.view, () =>
+        unsafeEraseR(
+          Effect.gen(function* () {
+            const state = yield* SubscriptionRef.get(loader.state._ref);
+            const val = yield* SubscriptionRef.get(loader.view._ref);
+            if (pendingScroll !== null && AsyncLoadState.$is("Ready")(state)) {
+              const { activationId, routePath, strategyLayer } = pendingScroll;
+              pendingScroll = null;
+              yield* routeActivation.commitAfterDomSwap(
+                { activationId, path: routePath },
+                setViewAndAwaitSwap(val),
+                applyScroll(strategyLayer),
+              );
+            } else if (pendingScroll !== null) {
+              yield* routeActivation.showLoadingFallback(
+                { activationId: pendingScroll.activationId, path: pendingScroll.routePath },
+                Signal.set(viewSignal, val),
+              );
+            } else {
+              yield* Signal.set(viewSignal, val);
+            }
+          }),
+        ),
+      );
+      yield* Scope.addFinalizer(scope, _unsubLoader);
 
-        return loader;
-      });
+      return loader;
+    });
 
     /** Commit rendered element: async loader path or direct set + scroll. */
-    const commitView = (
+    const commitView: (
       renderEffect: Effect.Effect<ElementType, unknown, never>,
       match: RouteMatch,
       queryString: string,
       epoch: number,
       activationId: string,
       routePath: string,
-    ) =>
-      Effect.gen(function* () {
-        const nearestLoadingComp = boundaries.resolveLoading(match.route);
+    ) => Effect.Effect<void, unknown, never> = Effect.fn("Outlet.commitView")(function* (
+      renderEffect: Effect.Effect<ElementType, unknown, never>,
+      match: RouteMatch,
+      queryString: string,
+      epoch: number,
+      activationId: string,
+      routePath: string,
+    ) {
+      const nearestLoadingComp = boundaries.resolveLoading(match.route);
 
-        if (Option.isSome(nearestLoadingComp)) {
-          const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
-          const matchKey = buildMatchKey(match, queryString);
-          const strategyLayer = resolveScrollStrategy(match.route);
-          // Defer scroll across loading/refreshing states. `track` forks the
-          // render fiber, so fast loads can already be Ready by the time it
-          // returns; handle that window explicitly after track.
-          pendingScroll = { activationId, routePath, strategyLayer };
-          yield* loader.track(matchKey, renderEffect, { epoch });
-          const currentState = yield* SubscriptionRef.get(loader.state._ref);
-          const currentView = yield* SubscriptionRef.get(loader.view._ref);
-          if (pendingScroll !== null && currentState._tag === "Ready") {
-            pendingScroll = null;
-            yield* routeActivation.commitAfterDomSwap(
-              { activationId, path: routePath },
-              setViewAndAwaitSwap(currentView),
-              applyScroll(strategyLayer),
-            );
-            void epoch;
-          } else {
-            yield* routeActivation.showLoadingFallback(
-              { activationId, path: routePath },
-              Signal.set(viewSignal, currentView),
-            );
-            void currentState;
-            void epoch;
-          }
-        } else {
-          const rendered = yield* renderEffect;
+      if (Option.isSome(nearestLoadingComp)) {
+        const loader = yield* getOrCreateAsyncLoader(nearestLoadingComp.value);
+        const matchKey = buildMatchKey(match, queryString);
+        const strategyLayer = resolveScrollStrategy(match.route);
+        // Defer scroll across loading/refreshing states. `track` forks the
+        // render fiber, so fast loads can already be Ready by the time it
+        // returns; handle that window explicitly after track.
+        pendingScroll = { activationId, routePath, strategyLayer };
+        yield* loader.track(matchKey, renderEffect, { epoch });
+        const currentState = yield* SubscriptionRef.get(loader.state._ref);
+        const currentView = yield* SubscriptionRef.get(loader.view._ref);
+        if (pendingScroll !== null && AsyncLoadState.$is("Ready")(currentState)) {
+          pendingScroll = null;
           yield* routeActivation.commitAfterDomSwap(
             { activationId, path: routePath },
-            setViewAndAwaitSwap(rendered),
-            applyScroll(resolveScrollStrategy(match.route)),
+            setViewAndAwaitSwap(currentView),
+            applyScroll(strategyLayer),
           );
-          void queryString;
-          void epoch;
+        } else {
+          yield* routeActivation.showLoadingFallback(
+            { activationId, path: routePath },
+            Signal.set(viewSignal, currentView),
+          );
         }
-      });
+      } else {
+        const rendered = yield* renderEffect;
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: routePath },
+          setViewAndAwaitSwap(rendered),
+          applyScroll(resolveScrollStrategy(match.route)),
+        );
+      }
+    });
 
     // -------------------------------------------------------------------------
     // processRoute — match, middleware, render, commit
@@ -917,7 +954,6 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const activationId = nextActivationId();
       const epoch = routeEpoch;
       const route = yield* SubscriptionRef.get(router.current._ref);
-      void epoch;
       const activationRequest: RouteActivationRequest = {
         activationId,
         path: route.path,
@@ -926,23 +962,22 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       };
       const activationOutcome = yield* routeActivation.activate(activationRequest);
       const matchOption =
-        activationOutcome._tag === "Committed" && Option.isSome(activationOutcome.match)
+        RouteActivationOutcome.$is("Committed")(activationOutcome) &&
+        Option.isSome(activationOutcome.match)
           ? activationOutcome.match
-          : activationOutcome._tag === "NotFound"
+          : RouteActivationOutcome.$is("NotFound")(activationOutcome)
             ? Option.none()
             : yield* matcher.match(route.path);
 
       // 404
       if (Option.isNone(matchOption)) {
-        const notFoundIntent = yield* routeActivationBoundary.resolveNotFoundBoundary(
-          activationRequest,
-        );
-        const notFoundEl =
-          notFoundIntent._tag === "NotFoundBoundary"
-            ? yield* Effect.flatMap(resolveComponent(notFoundIntent.component), (resolved) =>
-                renderComponent(resolved, {}, {}),
-              )
-            : text("404 - Not Found");
+        const notFoundIntent =
+          yield* routeActivationBoundary.resolveNotFoundBoundary(activationRequest);
+        const notFoundEl = RouteActivationRenderIntent.$is("NotFoundBoundary")(notFoundIntent)
+          ? yield* Effect.flatMap(resolveComponent(notFoundIntent.component), (resolved) =>
+              renderComponent(resolved, {}, {}),
+            )
+          : text("404 - Not Found");
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(notFoundEl),
@@ -958,13 +993,14 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         match,
       );
 
-      if (middlewareIntent._tag === "Redirect") {
-        yield* router.navigate(middlewareIntent.location, {
-          ...(middlewareIntent.replace !== undefined ? { replace: middlewareIntent.replace } : {}),
-        });
+      if (RouteActivationRenderIntent.$is("Redirect")(middlewareIntent)) {
+        yield* router.navigate(
+          middlewareIntent.location,
+          middlewareIntent.replace !== undefined ? { replace: middlewareIntent.replace } : {},
+        );
         return;
       }
-      if (middlewareIntent._tag === "ForbiddenBoundary") {
+      if (RouteActivationRenderIntent.$is("ForbiddenBoundary")(middlewareIntent)) {
         const el = yield* Effect.flatMap(resolveComponent(middlewareIntent.component), (resolved) =>
           renderComponent(resolved, {}, {}),
         );
@@ -975,7 +1011,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         );
         return;
       }
-      if (middlewareIntent._tag === "ErrorBoundary") {
+      if (RouteActivationRenderIntent.$is("ErrorBoundary")(middlewareIntent)) {
         const el = yield* Effect.flatMap(resolveComponent(middlewareIntent.component), (resolved) =>
           renderError(resolved, Cause.fail(middlewareIntent.cause), route.path),
         );
@@ -986,7 +1022,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         );
         return;
       }
-      if (middlewareIntent._tag === "NoBoundary") {
+      if (RouteActivationRenderIntent.$is("NoBoundary")(middlewareIntent)) {
         const el = text(middlewareIntent.cause === "forbidden" ? "403 - Forbidden" : "Error");
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
@@ -1006,17 +1042,16 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           match,
           decodedParamsResult.failure,
         );
-        const el =
-          errorIntent._tag === "ErrorBoundary"
-            ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
-                renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
-              )
-            : yield* Debug.log({
-                event: "router.outlet.error",
-                phase: "decode_params",
-                path: route.path,
-                error: decodedParamsResult.failure,
-              }).pipe(Effect.as(text("Error")));
+        const el = RouteActivationRenderIntent.$is("ErrorBoundary")(errorIntent)
+          ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
+              renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
+            )
+          : yield* Debug.log({
+              event: "router.outlet.error",
+              phase: "decode_params",
+              path: route.path,
+              error: decodedParamsResult.failure,
+            }).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1035,17 +1070,16 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           match,
           decodedQueryResult.failure,
         );
-        const el =
-          errorIntent._tag === "ErrorBoundary"
-            ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
-                renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
-              )
-            : yield* Debug.log({
-                event: "router.outlet.error",
-                phase: "decode_query",
-                path: route.path,
-                error: decodedQueryResult.failure,
-              }).pipe(Effect.as(text("Error")));
+        const el = RouteActivationRenderIntent.$is("ErrorBoundary")(errorIntent)
+          ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
+              renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
+            )
+          : yield* Debug.log({
+              event: "router.outlet.error",
+              phase: "decode_query",
+              path: route.path,
+              error: decodedQueryResult.failure,
+            }).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),

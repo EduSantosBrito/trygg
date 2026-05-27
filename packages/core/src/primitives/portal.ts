@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/portal
  */
-import { Data, Effect, Scope } from "effect";
+import { Effect, Schema, Scope } from "effect";
 import { gen, Component, type ComponentProps } from "./component.js";
 import { type Element, Element as ElementEnum, signalElement, empty } from "./element.js";
 import type { MaybeSignal } from "./element.js";
@@ -36,9 +36,12 @@ import * as Signal from "./signal.js";
  * @public
  * @since 1.0.0
  */
-export class PortalTargetNotFoundError extends Data.TaggedError("PortalTargetNotFoundError")<{
-  readonly target: string;
-}> {
+export class PortalTargetNotFoundError extends Schema.TaggedErrorClass<PortalTargetNotFoundError>()(
+  "PortalTargetNotFoundError",
+  {
+    target: Schema.String,
+  },
+) {
   override get message() {
     return `Portal target not found: ${this.target}`;
   }
@@ -93,14 +96,8 @@ export interface PortalOptions {
 // Internal Helpers
 // =============================================================================
 
-const isSignal = (value: unknown): value is Signal.Signal<unknown> => {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("_tag" in value)) return false;
-  return value._tag === "Signal";
-};
-
 const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<boolean> =>
-  isSignal(value);
+  Signal.isSignal(value);
 
 // =============================================================================
 // Portal.make
@@ -132,72 +129,71 @@ const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<bo
  * @public
  * @since 1.0.0
  */
-export const make = (
+export const make: (
   content: Element,
   options?: PortalOptions,
-): Effect.Effect<
+) => Effect.Effect<
   Component.Type<PortalProps, never, Scope.Scope>,
   PortalTargetNotFoundError,
   Scope.Scope
-> =>
-  Effect.gen(function* () {
-    let resolvedTarget: HTMLElement;
+> = Effect.fn("Portal.make")(function* (content, options) {
+  let resolvedTarget: HTMLElement;
 
-    if (options?.target === undefined) {
-      // Dynamic: create container on document.body
-      const container = document.createElement("div");
-      container.setAttribute("data-portal-container", "");
-      document.body.appendChild(container);
+  if (options?.target === undefined) {
+    // Dynamic: create container on document.body
+    const container = document.createElement("div");
+    container.setAttribute("data-portal-container", "");
+    document.body.appendChild(container);
 
-      // Register cleanup: remove container when scope closes
-      const componentScope = yield* Signal.CurrentComponentScope;
-      const scope = componentScope ?? (yield* Effect.scope);
-      yield* Scope.addFinalizer(
-        scope,
-        Effect.sync(() => {
-          container.remove();
-        }),
-      );
+    // Register cleanup: remove container when scope closes
+    const componentScope = yield* Signal.CurrentComponentScope;
+    const scope = componentScope ?? (yield* Effect.scope);
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => {
+        container.remove();
+      }),
+    );
 
-      resolvedTarget = container;
-    } else if (typeof options.target === "string") {
-      // CSS selector: resolve at creation time
-      const el = document.querySelector(options.target);
-      if (el === null || !(el instanceof HTMLElement)) {
-        return yield* new PortalTargetNotFoundError({ target: options.target });
-      }
-      resolvedTarget = el;
-    } else {
-      // HTMLElement: use directly
-      resolvedTarget = options.target;
+    resolvedTarget = container;
+  } else if (typeof options.target === "string") {
+    // CSS selector: resolve at creation time
+    const el = document.querySelector(options.target);
+    if (el === null || !(el instanceof HTMLElement)) {
+      return yield* new PortalTargetNotFoundError({ target: options.target });
+    }
+    resolvedTarget = el;
+  } else {
+    // HTMLElement: use directly
+    resolvedTarget = options.target;
+  }
+
+  // Capture target for the component closure
+  const target = resolvedTarget;
+
+  // Return a ComponentType that renders content into target
+  return gen(function* (Props: ComponentProps<PortalProps>) {
+    const { visible } = yield* Props;
+
+    // No visible prop → always render into target
+    if (visible === undefined) {
+      return ElementEnum.Portal({ target, children: [content] });
     }
 
-    // Capture target for the component closure
-    const target = resolvedTarget;
-
-    // Return a ComponentType that renders content into target
-    return gen(function* (Props: ComponentProps<PortalProps>) {
-      const { visible } = yield* Props;
-
-      // No visible prop → always render into target
-      if (visible === undefined) {
+    // Static boolean
+    if (!isBooleanSignal(visible)) {
+      if (visible) {
         return ElementEnum.Portal({ target, children: [content] });
       }
+      return empty;
+    }
 
-      // Static boolean
-      if (!isBooleanSignal(visible)) {
-        if (visible) {
-          return ElementEnum.Portal({ target, children: [content] });
-        }
-        return empty;
-      }
+    // Signal<boolean> → derive reactive element
+    const derived = yield* Signal.derive(
+      visible,
+      (show): Element => (show ? ElementEnum.Portal({ target, children: [content] }) : empty),
+    );
 
-      // Signal<boolean> → derive reactive element
-      const derived = yield* Signal.derive(
-        visible,
-        (show): Element => (show ? ElementEnum.Portal({ target, children: [content] }) : empty),
-      );
-
-      return signalElement(derived);
-    });
+    return signalElement(derived);
   });
+});

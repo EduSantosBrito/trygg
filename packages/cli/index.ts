@@ -163,30 +163,33 @@ const create = Command.make(
 
       // Install dependencies
       if (options.install) {
-        const pm = yield* detectPackageManager();
+        const pm = yield* detectPackageManager;
         const installCmd = getInstallCommand(pm);
 
         spinner.start(`Installing dependencies with ${pm}...`);
-        yield* Effect.tryPromise({
-          try: () =>
-            new Promise<void>((resolve, reject) => {
-              const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" });
-              proc.on("close", (code) => {
-                if (code === 0) {
-                  spinner.stop("Dependencies installed");
-                  resolve();
-                } else {
-                  spinner.stop("Failed to install dependencies");
-                  reject(new InstallFailedError());
-                }
-              });
-            }),
-          catch: () => new InstallFailedError(),
+        yield* Effect.callback<void, InstallFailedError>((resume) => {
+          const proc = spawn(installCmd, { cwd: targetDir, shell: true, stdio: "inherit" });
+          const onClose = (code: number | null) => {
+            if (code === 0) {
+              spinner.stop("Dependencies installed");
+              resume(Effect.void);
+            } else {
+              spinner.stop("Failed to install dependencies");
+              resume(Effect.fail(new InstallFailedError()));
+            }
+          };
+          proc.on("close", onClose);
+          return Effect.sync(() => {
+            proc.off("close", onClose);
+            if (!proc.killed) {
+              proc.kill();
+            }
+          });
         });
       }
 
       // Success message
-      const pm = yield* detectPackageManager();
+      const pm = yield* detectPackageManager;
       const runCmd = getRunCommand(pm);
 
       const nextSteps = [];

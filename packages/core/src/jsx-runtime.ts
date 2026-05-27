@@ -13,10 +13,11 @@
 import { Effect } from "effect";
 import {
   Element,
-  type ComponentElementWithRequirements,
   type ElementProps,
   type ElementKey,
+  type ElementWithRequirements,
   type IntrinsicElements as CoreIntrinsicElements,
+  type PropsRequirements,
   empty,
 } from "./primitives/element.js";
 import * as Component from "./primitives/component.js";
@@ -110,12 +111,16 @@ const runJsx = (
  * @public
  * @since 1.0.0
  */
-export function jsx(type: string, props: Record<string, unknown> | null, key?: ElementKey): Element;
+export function jsx<Props extends Record<string, unknown>>(
+  type: string,
+  props: Props | null,
+  key?: ElementKey,
+): ElementWithRequirements<PropsRequirements<Props>>;
 export function jsx<Props extends Record<string, unknown>, E, R>(
   type: ComponentType.Type<Props, E, R>,
   props: Props | null,
   key?: ElementKey,
-): ComponentElementWithRequirements<R>;
+): ElementWithRequirements<R | PropsRequirements<Props>>;
 export function jsx(
   type: JSXElementType,
   props: Record<string, unknown> | null,
@@ -180,7 +185,7 @@ export { InvalidComponentError } from "./primitives/component.js";
 
 // JSX namespace for TypeScript - required for jsxImportSource
 export namespace JSX {
-  export type Element = import("./primitives/element.js").ElementWithRequirements<unknown>;
+  export type Element = import("./primitives/element.js").Element;
 
   export interface IntrinsicAttributes {
     readonly key?: ElementKey;

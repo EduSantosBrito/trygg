@@ -25,7 +25,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.1.18",
     "@types/hast": "^3.0.4",
-    "oxlint": "^1.41.0",
+    "oxlint": "^1.67.0",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.1.18",
     "vite": "^6.0.0"

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { Component, Signal, type ComponentProps } from "trygg";
+import { Component, type ComponentProps } from "trygg";
 
-import { CodeBlock, highlightCode, type HighlightedLine } from "./code-block";
+import { CodeBlock, highlightCode } from "./code-block";
 import type { HeadingEntry } from "../content/headings";
 import { parseMarkdown, parseInline, type Block, type HeadingBlock } from "../lib/markdown";
 
@@ -29,31 +29,20 @@ function renderInline(text: string) {
   });
 }
 
-const ProgressiveCodeBlock = Component.gen(function* (
+const DocsCodeBlock = Component.gen(function* (
   Props: ComponentProps<{
     readonly content: string;
     readonly language?: string;
   }>,
 ) {
   const { content, language } = yield* Props;
-  const lang = language || "tsx";
-  const fallbackLines: ReadonlyArray<HighlightedLine> = content.split("\n").map((line, idx) => ({
-    lineNumber: idx + 1,
-    nodes: [{ type: "text", value: line }],
-  }));
-  const linesSignal = yield* Signal.make<ReadonlyArray<HighlightedLine>>(fallbackLines);
+  const lines = yield* Effect.promise(() => highlightCode(content, language || "tsx"));
 
-  Effect.runFork(
-    Effect.promise(() => highlightCode(content, lang)).pipe(
-      Effect.tap((lines) => Signal.set(linesSignal, lines)),
-    ),
+  return (
+    <div className="docs-article__code-wrapper">
+      <CodeBlock lines={lines} copyText={content} fileType={language || undefined} />
+    </div>
   );
-
-  const codeBlockJsx = yield* Signal.derive(linesSignal, (lines) => (
-    <CodeBlock lines={lines} copyText={content} fileType={language || undefined} />
-  ));
-
-  return <div className="docs-article__code-wrapper">{codeBlockJsx}</div>;
 });
 
 export const DocsArticle = Component.gen(function* (
@@ -115,7 +104,7 @@ export const DocsArticle = Component.gen(function* (
               return <p key={i}>{renderInline(block.text)}</p>;
             case "code":
               return (
-                <ProgressiveCodeBlock
+                <DocsCodeBlock
                   key={i}
                   content={block.content}
                   language={block.language || undefined}

@@ -9,7 +9,7 @@
  *
  * @internal
  */
-import { Effect, Layer, SubscriptionRef } from "effect";
+import { Duration, Effect, Layer, Schema, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
 import { Component, Signal } from "trygg";
 import { click, render, waitFor } from "trygg/testing";
@@ -80,41 +80,45 @@ export const contract = {
       ],
     },
   ],
-} as const;
+};
 
-interface ContractStateService {
-  readonly headings: Signal.Signal<ReadonlyArray<string>>;
-  readonly rerenderTick: Signal.Signal<number>;
-}
+class ContractWaitError extends Schema.TaggedErrorClass<ContractWaitError>()("ContractWaitError", {
+  message: Schema.String,
+}) {}
 
-class ContractState extends Context.Service<ContractState, ContractStateService>()(
-  "www/DocsRouteSettlesState",
-) {}
+const failWait = (message: string): never =>
+  Effect.runSync(Effect.fail(new ContractWaitError({ message })));
+
+class ContractState extends Context.Service<
+  ContractState,
+  {
+    readonly headings: Signal.Signal<ReadonlyArray<string>>;
+    readonly rerenderTick: Signal.Signal<number>;
+  }
+>()("www/DocsRouteSettlesToLatest/ContractState") {}
 
 const ContractStateLive = Layer.effect(
   ContractState,
   Effect.gen(function* () {
-    const headings = yield* Signal.make<ReadonlyArray<string>>([]).pipe(Effect.orDie);
-    const rerenderTick = yield* Signal.make(0).pipe(Effect.orDie);
-    return { headings, rerenderTick } satisfies ContractStateService;
-  }),
+    const headings = yield* Signal.make<ReadonlyArray<string>>([]);
+    const rerenderTick = yield* Signal.make(0);
+    return { headings, rerenderTick };
+  }).pipe(Effect.annotateLogs("service", "ContractState")),
 );
 
 const staleRouteRenders: Array<string> = [];
 const routeRenderLog: Array<string> = [];
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
-const waitForRoutePath = (expectedPath: string) =>
-  Effect.gen(function* () {
-    for (let elapsed = 0; elapsed < 5000; elapsed += 10) {
-      const currentPath = yield* currentPathSnapshot;
-      if (currentPath === expectedPath) return true;
-      yield* flushDom(10);
-    }
-    return false;
-  });
+const waitForRoutePath = Effect.fn("waitForRoutePath")(function* (expectedPath: string) {
+  for (let elapsed = 0; elapsed < 5000; elapsed += 10) {
+    const currentPath = yield* currentPathSnapshot;
+    if (currentPath === expectedPath) return true;
+    yield* flushDom(10);
+  }
+  return false;
+});
 
 const currentPathSnapshot = Effect.gen(function* () {
   const router = yield* Router.get;
@@ -122,20 +126,22 @@ const currentPathSnapshot = Effect.gen(function* () {
   return route.path;
 });
 
-const recordRouteRender = (routeName: "getting-started" | "components", expectedPath: string) =>
-  Effect.gen(function* () {
-    const currentPath = yield* currentPathSnapshot;
-    const line = `${routeName} rendered while router.current=${currentPath}`;
-    routeRenderLog.push(line);
-    yield* ContractTrace.emit({
-      event: "contract.observation",
-      level: "diagnostic",
-      payload: { phase: "route-render", routeName, expectedPath, currentPath },
-    });
-    if (currentPath !== expectedPath) {
-      staleRouteRenders.push(line);
-    }
+const recordRouteRender = Effect.fn("recordRouteRender")(function* (
+  routeName: "getting-started" | "components",
+  expectedPath: string,
+) {
+  const currentPath = yield* currentPathSnapshot;
+  const line = `${routeName} rendered while router.current=${currentPath}`;
+  routeRenderLog.push(line);
+  yield* ContractTrace.emit({
+    event: "contract.observation",
+    level: "diagnostic",
+    payload: { phase: "route-render", routeName, expectedPath, currentPath },
   });
+  if (currentPath !== expectedPath) {
+    staleRouteRenders.push(line);
+  }
+});
 
 const DocsLikeLayout = Component.gen(function* () {
   // This mirrors docs chrome that reads current route for active links. The bug
@@ -283,7 +289,7 @@ const runScenario = Effect.scoped(
     yield* waitFor(
       () => {
         const page = result.container.querySelector("[data-testid='getting-started-page']");
-        if (page === null) throw new Error("Getting started page is not ready");
+        if (page === null) return failWait("Getting started page is not ready");
         return true;
       },
       { timeout: 5000, interval: 50 },
@@ -302,7 +308,7 @@ const runScenario = Effect.scoped(
         const link = result.container.querySelector<HTMLAnchorElement>(
           '.docs-layout__sidebar a[href="/docs/components"]',
         );
-        if (link === null) throw new Error("Components sidebar link is not ready");
+        if (link === null) return failWait("Components sidebar link is not ready");
         return link;
       },
       { timeout: 5000, interval: 50 },

@@ -8,4 +8,4 @@ export class TodoTheme extends Context.Service<
     readonly dangerColor: string;
     readonly primaryColor: string;
   }
->()("TodoTheme") {}
+>()("examples/TodoTheme") {}

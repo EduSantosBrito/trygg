@@ -1,11 +1,18 @@
 import { assert, describe } from "@effect/vitest";
-import { Effect, Exit, Scope } from "effect";
+import { Effect, Exit, Option, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
 import * as Signal from "../signal.js";
+
+class SyntheticReconcileFailure extends Schema.TaggedErrorClass<SyntheticReconcileFailure>()(
+  "SyntheticReconcileFailure",
+  {
+    detail: Schema.String,
+  },
+) {}
 
 describe("render-signal-element", () => {
   scoped("swaps DOM content when signal changes", () =>
@@ -18,7 +25,7 @@ describe("render-signal-element", () => {
       yield* TestClock.adjust(20);
 
       assert.strictEqual((yield* getByTestId("after")).textContent, "after");
-      assert.isTrue((yield* queryByTestId("before"))._tag === "None");
+      assert.isTrue(Option.isNone(yield* queryByTestId("before")));
     }),
   );
 
@@ -83,7 +90,9 @@ describe("render-signal-element", () => {
         if (label === "next") {
           nextRenderAttempts += 1;
           if (nextRenderAttempts === 1) {
-            yield* Effect.die(new Error("synthetic reconcile-only failure"));
+            return yield* new SyntheticReconcileFailure({
+              detail: "synthetic reconcile-only failure",
+            });
           }
         }
 

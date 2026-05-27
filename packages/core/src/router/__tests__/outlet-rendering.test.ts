@@ -12,8 +12,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Effect, Exit, Option, Ref, Schema, Scope } from "effect";
-import type * as LayerTypes from "effect/Layer";
+import { Cause, Effect, Exit, Option, Predicate, Ref, Schema, Scope } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
@@ -21,7 +20,6 @@ import { Outlet } from "../outlet.js";
 import { OutletRenderer } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
 import { Element, text } from "../../primitives/element.js";
-import type { ElementKey } from "../../primitives/element.js";
 import { getFiberRef, setFiberRef } from "../../internal/fiber-ref.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 
@@ -30,40 +28,43 @@ import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 // =============================================================================
 
 /** Create a RouteComponent that renders a text element */
-const textComp = (content: string): RouteComponent => {
-  const fn = () => Element.fromEffect(Effect.succeed(text(content)));
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<LayerTypes.Any>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
+const textComp = (content: string): RouteComponent => Effect.succeed(text(content));
 
 /** Create a layout RouteComponent that reads CurrentOutletChild */
-const layoutComp = (_name: string): RouteComponent => {
-  const fn = () =>
-    Element.fromEffect(
-      Effect.gen(function* () {
-        const childContent = yield* getFiberRef(Router.CurrentOutletChild);
-        if (Option.isSome(childContent)) {
-          yield* setFiberRef(Router.CurrentOutletChild, Option.none());
-          return childContent.value;
-        }
-        return text("empty-layout");
-      }),
-    );
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<LayerTypes.Any>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
+const renderLayoutChild = Effect.fn("outletRendering.renderLayoutChild")(function* () {
+  const childContent = yield* getFiberRef(Router.CurrentOutletChild);
+  if (Option.isSome(childContent)) {
+    yield* setFiberRef(Router.CurrentOutletChild, Option.none());
+    return childContent.value;
+  }
+  return text("empty-layout");
+});
+
+const layoutComp = (_name: string): RouteComponent => renderLayoutChild();
+
+class TestMiddlewareError extends Schema.TaggedErrorClass<TestMiddlewareError>()(
+  "TestMiddlewareError",
+  {
+    message: Schema.String,
+  },
+) {}
+
+class LoaderFailure extends Schema.TaggedErrorClass<LoaderFailure>()("LoaderFailure", {
+  reason: Schema.String,
+}) {}
+
+const decodeNeverDefaultExport = Schema.decodeUnknownPromise(
+  Schema.Struct({ default: Schema.Never }),
+);
+
+type ElementTag = Element["_tag"];
+
+function assertElementTag<Tag extends ElementTag>(
+  element: Element,
+  tag: Tag,
+): asserts element is Extract<Element, { readonly _tag: Tag }> {
+  assert.isTrue(Predicate.isTagged(element, tag));
+}
 
 // =============================================================================
 // Helper: Run outlet effect and extract result element
@@ -75,41 +76,42 @@ const layoutComp = (_name: string): RouteComponent => {
  * (wrapping a unified viewSignal). This helper unwraps both layers to get the
  * actual content element held in the signal.
  */
-type ComponentElement = {
-  readonly _tag: "Component";
+type ComponentElement = Omit<Extract<Element, { readonly _tag: "Component" }>, "run"> & {
   readonly run: () => Effect.Effect<Element, unknown, Router.Router | Scope.Scope>;
-  readonly key: ElementKey | null;
-  readonly identity: unknown;
-  readonly inputs: unknown;
 };
+type SignalElement = Extract<Element, { readonly _tag: "SignalElement" }>;
 
 const isComponentElement = (element: Element): element is ComponentElement =>
-  element._tag === "Component";
+  Element.$is("Component")(element);
 
-const runOutletEffect = (
+const isSignalElement = (element: Element): element is SignalElement =>
+  Element.$is("SignalElement")(element);
+
+const runOutletEffect: (
   outletElement: Element,
-): Effect.Effect<Element, unknown, Router.Router | Scope.Scope> =>
-  Effect.gen(function* () {
-    if (!isComponentElement(outletElement)) {
-      return outletElement;
+) => Effect.Effect<Element, unknown, Router.Router | Scope.Scope> = Effect.fn(
+  "outletRendering.runOutletEffect",
+)(function* (outletElement: Element) {
+  if (!isComponentElement(outletElement)) {
+    return outletElement;
+  }
+
+  const first = yield* outletElement.run();
+
+  if (isComponentElement(first)) {
+    const second = yield* first.run();
+    if (isSignalElement(second)) {
+      return yield* Signal.get(second.signal);
     }
+    return second;
+  }
 
-    const first = yield* outletElement.run();
+  if (isSignalElement(first)) {
+    return yield* Signal.get(first.signal);
+  }
 
-    if (isComponentElement(first)) {
-      const second = yield* first.run();
-      if (second._tag === "SignalElement") {
-        return yield* Signal.get(second.signal);
-      }
-      return second;
-    }
-
-    if (first._tag === "SignalElement") {
-      return yield* Signal.get(first.signal);
-    }
-
-    return first;
-  });
+  return first;
+});
 
 // =============================================================================
 // Outlet Coordination Tests
@@ -146,7 +148,7 @@ describe("Outlet - Coordination", () => {
       yield* runOutletEffect(outlet).pipe(Effect.provideService(Router.Router, wrappedRouter));
 
       const state = yield* wrappedRouter.outletCoordination.prefetchState;
-      assert.strictEqual(state._tag, "Active");
+      assert.isTrue(Predicate.isTagged(state, "Active"));
       assert.strictEqual(yield* Ref.get(activations), 1);
 
       yield* wrappedRouter.prefetch("/lazy");
@@ -174,7 +176,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Without loading component, result is rendered directly as Component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -194,7 +196,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should match /users route and render as Component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -211,8 +213,8 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Without loading component, no async tracker is used
-      assert.notStrictEqual(result._tag, "SignalElement");
-      assert.strictEqual(result._tag, "Component");
+      assert.isFalse(Element.$is("SignalElement")(result));
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -237,7 +239,7 @@ describe("Outlet - Rendering", () => {
 
       // When loading component is defined, outlet uses async tracker.
       // The viewSignal initially holds the loading element (Component).
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -268,7 +270,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Result is a Component (the outermost layout wrapping the inner)
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -285,7 +287,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // No layout -> direct Component element
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -307,7 +309,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // With leaf layout, result is still Component (layout wrapping component)
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -333,7 +335,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // The result is the outermost layout Component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -345,10 +347,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "Child from parent");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "Child from parent");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -389,7 +389,7 @@ describe("Outlet - Rendering", () => {
 
       // With loading component, outlet uses async tracker.
       // The viewSignal initially holds the loading element (Component).
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -413,7 +413,7 @@ describe("Outlet - Rendering", () => {
 
       // Parent's loading should be used. The viewSignal initially holds the
       // parent loading element (Component).
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -430,8 +430,8 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Without loading component, result is direct Component
-      assert.notStrictEqual(result._tag, "SignalElement");
-      assert.strictEqual(result._tag, "Component");
+      assert.isFalse(Element.$is("SignalElement")(result));
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -454,7 +454,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should render the notFound component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -469,10 +469,8 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should render default "404 - Not Found" text
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "404 - Not Found");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "404 - Not Found");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -503,7 +501,7 @@ describe("Outlet - Rendering", () => {
 
   scoped("should render forbidden component when middleware forbids", () =>
     Effect.gen(function* () {
-      const forbidMiddleware = Route.routeForbidden();
+      const forbidMiddleware = Route.routeForbidden;
       const ForbiddenComp = textComp("Access Denied");
       const ProtectedComp = textComp("Protected");
 
@@ -521,13 +519,13 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should render forbidden component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
   scoped("should use root forbidden when route has none", () =>
     Effect.gen(function* () {
-      const forbidMiddleware = Route.routeForbidden();
+      const forbidMiddleware = Route.routeForbidden;
       const RootForbidden = textComp("Root Forbidden");
       const ProtectedComp = textComp("Protected");
 
@@ -542,13 +540,13 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should render root forbidden component
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
   scoped("should render default forbidden text when none defined", () =>
     Effect.gen(function* () {
-      const forbidMiddleware = Route.routeForbidden();
+      const forbidMiddleware = Route.routeForbidden;
       const ProtectedComp = textComp("Protected");
 
       const manifest = Routes.make().add(
@@ -561,10 +559,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "403 - Forbidden");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "403 - Forbidden");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -574,7 +570,9 @@ describe("Outlet - Rendering", () => {
 
   scoped("should render error boundary on middleware error", () =>
     Effect.gen(function* () {
-      const failingMiddleware = Effect.die(new Error("Middleware died"));
+      const failingMiddleware = Effect.fail(
+        new TestMiddlewareError({ message: "Middleware failed" }),
+      );
       const ErrorComp = textComp("Error Occurred");
       const PageComp = textComp("Page");
 
@@ -590,13 +588,13 @@ describe("Outlet - Rendering", () => {
 
       // Middleware errors with non-redirect/non-forbidden are caught by error boundary
       // The runMiddlewareChain catches the error and returns { _tag: "Error" }
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
   scoped("should render default error text when no error boundary defined", () =>
     Effect.gen(function* () {
-      const failingMiddleware = Effect.die(new Error("oops"));
+      const failingMiddleware = Effect.fail(new TestMiddlewareError({ message: "oops" }));
       const PageComp = textComp("Page");
 
       const manifest = Routes.make().add(
@@ -609,10 +607,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "Error");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "Error");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -634,7 +630,7 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "ErrorBoundaryElement");
+      assertElementTag(result, "ErrorBoundaryElement");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -654,10 +650,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "Error");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "Error");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -677,10 +671,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "Error");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "Error");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -693,10 +685,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "No routes configured");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "No routes configured");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -707,10 +697,8 @@ describe("Outlet - Rendering", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "No routes configured");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "No routes configured");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -730,7 +718,7 @@ describe("Outlet - Rendering", () => {
       // First render at /
       const outlet1 = Outlet({ routes: manifest });
       const result1 = yield* runOutletEffect(outlet1);
-      assert.strictEqual(result1._tag, "Component");
+      assertElementTag(result1, "Component");
 
       // Navigate to /about
       const router = yield* Router.Router;
@@ -739,7 +727,7 @@ describe("Outlet - Rendering", () => {
       // Second render at /about (new outlet instance)
       const outlet2 = Outlet({ routes: manifest });
       const result2 = yield* runOutletEffect(outlet2);
-      assert.strictEqual(result2._tag, "Component");
+      assertElementTag(result2, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -765,7 +753,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should match the index route (rendered with layout)
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -787,7 +775,7 @@ describe("Outlet - Rendering", () => {
       const result = yield* runOutletEffect(outlet);
 
       // Should match /settings/profile route
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });
@@ -810,7 +798,7 @@ describe("Outlet - Implicit Manifest", () => {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -830,7 +818,7 @@ describe("Outlet - Implicit Manifest", () => {
       const outlet = Outlet({ routes: propManifest });
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -839,10 +827,8 @@ describe("Outlet - Implicit Manifest", () => {
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
 
-      assert.strictEqual(result._tag, "Text");
-      if (result._tag === "Text") {
-        assert.strictEqual(result.content, "No routes configured");
-      }
+      assertElementTag(result, "Text");
+      assert.strictEqual(result.content, "No routes configured");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });
@@ -860,23 +846,7 @@ describe("Outlet - Implicit Manifest", () => {
 const loaderDefinition = (
   path: string,
   loader: () => Promise<{ readonly default: unknown }>,
-): Route.RouteDefinition => ({
-  _tag: "RouteDefinition",
-  path,
-  component: loader,
-  layout: undefined,
-  loading: undefined,
-  error: undefined,
-  notFound: undefined,
-  forbidden: undefined,
-  middleware: [],
-  prefetch: [],
-  children: [],
-  paramsSchema: undefined,
-  querySchema: undefined,
-  renderStrategy: undefined,
-  scrollStrategy: undefined,
-});
+): Route.RouteDefinition => Route.make(path).component(loader).definition;
 
 describe("Outlet - Lazy loader (resolveComponent)", () => {
   // ---------------------------------------------------------------------------
@@ -898,7 +868,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
 
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -921,14 +891,20 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
       // No error boundary → catchAllCause absorbs inside the route view component.
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
   scoped("should not crash when loader rejects", () =>
     Effect.gen(function* () {
       const manifest: Routes.RoutesManifest = {
-        routes: [loaderDefinition("/fail", () => Promise.reject(new Error("network error")))],
+        routes: [
+          loaderDefinition("/fail", () =>
+            decodeNeverDefaultExport({
+              default: new LoaderFailure({ reason: "network error" }),
+            }),
+          ),
+        ],
         notFound: undefined,
         forbidden: undefined,
         error: undefined,
@@ -940,7 +916,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
       // No error boundary → catchAllCause absorbs inside the route view component.
-      assert.strictEqual(result._tag, "Component");
+      assertElementTag(result, "Component");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 
@@ -969,7 +945,7 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
       const outlet = Outlet({ routes: manifest });
       const result = yield* runOutletEffect(outlet);
       // Error boundary catches the RenderLoadError and returns an explicit boundary wrapper.
-      assert.strictEqual(result._tag, "ErrorBoundaryElement");
+      assertElementTag(result, "ErrorBoundaryElement");
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );
 });
@@ -982,7 +958,8 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
   it.effect("renderComponent fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
       const renderer = yield* OutletRenderer;
-      const exit = yield* renderer.renderComponent("not-a-component" as any, {}).pipe(Effect.exit);
+      // @ts-expect-error exercising runtime validation for invalid route components.
+      const exit = yield* renderer.renderComponent("not-a-component", {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -990,7 +967,7 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
         if (Option.isSome(error)) {
           assert.isTrue(error.value instanceof InvalidRouteComponent);
           if (error.value instanceof InvalidRouteComponent) {
-            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+            assert.isTrue(Predicate.isTagged(error.value, "InvalidRouteComponent"));
           }
         }
       }
@@ -1000,7 +977,8 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
   it.effect("renderLayout fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
       const renderer = yield* OutletRenderer;
-      const exit = yield* renderer.renderLayout(42 as any, text("child"), {}).pipe(Effect.exit);
+      // @ts-expect-error exercising runtime validation for invalid route layouts.
+      const exit = yield* renderer.renderLayout(42, text("child"), {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -1008,7 +986,7 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
         if (Option.isSome(error)) {
           assert.isTrue(error.value instanceof InvalidRouteComponent);
           if (error.value instanceof InvalidRouteComponent) {
-            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+            assert.isTrue(Predicate.isTagged(error.value, "InvalidRouteComponent"));
           }
         }
       }
@@ -1018,7 +996,8 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
   it.effect("renderError fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
       const renderer = yield* OutletRenderer;
-      const exit = yield* renderer.renderError(null as any, Cause.empty, "/test").pipe(Effect.exit);
+      // @ts-expect-error exercising runtime validation for invalid error boundaries.
+      const exit = yield* renderer.renderError(null, Cause.empty, "/test").pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -1026,7 +1005,7 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
         if (Option.isSome(error)) {
           assert.isTrue(error.value instanceof InvalidRouteComponent);
           if (error.value instanceof InvalidRouteComponent) {
-            assert.strictEqual(error.value._tag, "InvalidRouteComponent");
+            assert.isTrue(Predicate.isTagged(error.value, "InvalidRouteComponent"));
           }
         }
       }

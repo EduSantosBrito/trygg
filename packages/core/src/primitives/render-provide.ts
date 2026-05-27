@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 import * as Context from "effect/Context";
 import type { Element } from "./element.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
@@ -7,26 +7,26 @@ interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
 }
 
-interface RenderProvideDeps {
+interface RenderProvideDeps<R> {
   readonly renderElement: (
     element: Element,
     parent: Node,
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
     options: RenderOptions,
-  ) => Effect.Effect<RenderResult, unknown, unknown>;
+  ) => Effect.Effect<RenderResult, unknown, R>;
 }
 
-export const renderProvide = (
+export const renderProvide: <R>(
   providedContext: Context.Context<unknown>,
   child: Element,
   parent: Node,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions,
-  deps: RenderProvideDeps,
-): Effect.Effect<RenderResult, unknown, unknown> =>
-  Effect.gen(function* () {
+  deps: RenderProvideDeps<R>,
+) => Effect.Effect<RenderResult, unknown, R> = Effect.fn("renderProvide")(
+  function* (providedContext, child, parent, renderContext, context, options, deps) {
     const mergedContext =
       context !== null ? Context.merge(context, providedContext) : providedContext;
     const childResult = yield* deps.renderElement(
@@ -44,7 +44,7 @@ export const renderProvide = (
       cleanup: childResult.cleanup,
       reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
         Effect.gen(function* () {
-          if (nextElement._tag !== "Provide" || childResult.reconcile === undefined) {
+          if (!Predicate.isTagged(nextElement, "Provide") || childResult.reconcile === undefined) {
             return false;
           }
 
@@ -56,4 +56,5 @@ export const renderProvide = (
           return yield* childResult.reconcile(nextElement.child, nextMergedContext);
         }),
     };
-  });
+  },
+);

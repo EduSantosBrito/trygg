@@ -1,13 +1,17 @@
-import { Effect } from "effect";
+import { Schema } from "effect";
 import { Signal, Component } from "trygg";
 import * as Router from "trygg/router";
+
+class DemoError extends Schema.TaggedErrorClass<DemoError>()("DemoError", {
+  message: Schema.String,
+}) {}
 
 const ErrorDemoPage = Component.gen(function* () {
   const shouldError = yield* Signal.make(false);
   const willError = yield* Signal.get(shouldError);
 
   if (willError) {
-    yield* Effect.fail(new Error("This is a demo error! The error boundary caught it."));
+    yield* new DemoError({ message: "This is a demo error! The error boundary caught it." });
   }
 
   return (

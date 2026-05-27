@@ -5,17 +5,17 @@
  * Observe DOM visibility and mutations with lifecycle.
  * Auto-disconnects on scope close.
  */
-import { Data, Effect, Layer, Scope } from "effect";
+import { Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class ObserverError extends Data.TaggedError("ObserverError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class ObserverError extends Schema.TaggedErrorClass<ObserverError>()("ObserverError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Types
@@ -44,7 +44,7 @@ export interface ObserverService {
   readonly mutation: (
     target: Node,
     options: MutationObserverInit,
-    handler: (mutations: Array<MutationRecord>) => Effect.Effect<void>,
+    handler: (mutations: ReadonlyArray<MutationRecord>) => Effect.Effect<void>,
   ) => Effect.Effect<void, never, Scope.Scope>;
 }
 
@@ -57,16 +57,71 @@ export interface TestObserverService extends ObserverService {
     el: Element,
     entry?: Partial<IntersectionObserverEntry>,
   ) => Effect.Effect<void>;
-  readonly triggerMutation: (target: Node, mutations: Array<MutationRecord>) => Effect.Effect<void>;
+  readonly triggerMutation: (
+    target: Node,
+    mutations: ReadonlyArray<MutationRecord>,
+  ) => Effect.Effect<void>;
 }
+
+export interface TestObserver extends Context.Service<
+  TestObserver,
+  {
+    readonly triggerIntersection: (
+      el: Element,
+      entry?: Partial<IntersectionObserverEntry>,
+    ) => Effect.Effect<void>;
+    readonly triggerMutation: (
+      target: Node,
+      mutations: ReadonlyArray<MutationRecord>,
+    ) => Effect.Effect<void>;
+  }
+> {}
+
+export const TestObserver = Context.Service<
+  TestObserver,
+  {
+    readonly triggerIntersection: (
+      el: Element,
+      entry?: Partial<IntersectionObserverEntry>,
+    ) => Effect.Effect<void>;
+    readonly triggerMutation: (
+      target: Node,
+      mutations: ReadonlyArray<MutationRecord>,
+    ) => Effect.Effect<void>;
+  }
+>("trygg/platform/TestObserver");
 
 // =============================================================================
 // Tag
 // =============================================================================
 
-export interface Observer extends Context.Service<Observer, ObserverService> {}
+export interface Observer extends Context.Service<
+  Observer,
+  {
+    readonly intersection: (
+      options: IntersectionOptions,
+    ) => Effect.Effect<IntersectionHandle, never, Scope.Scope>;
+    readonly mutation: (
+      target: Node,
+      options: MutationObserverInit,
+      handler: (mutations: ReadonlyArray<MutationRecord>) => Effect.Effect<void>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+  }
+> {}
 
-export const Observer = Context.Service<Observer, ObserverService>("trygg/platform/Observer");
+export const Observer = Context.Service<
+  Observer,
+  {
+    readonly intersection: (
+      options: IntersectionOptions,
+    ) => Effect.Effect<IntersectionHandle, never, Scope.Scope>;
+    readonly mutation: (
+      target: Node,
+      options: MutationObserverInit,
+      handler: (mutations: ReadonlyArray<MutationRecord>) => Effect.Effect<void>,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+  }
+>("trygg/platform/Observer");
 
 // =============================================================================
 // Browser layer
@@ -144,89 +199,85 @@ export const browser: Layer.Layer<Observer> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<Observer> = Layer.effect(
-  Observer,
-  Effect.sync(() => {
-    const intersectionHandlers = new Map<
-      Element,
-      (entry: IntersectionObserverEntry) => Effect.Effect<void>
-    >();
-    const mutationHandlers = new Map<
-      Node,
-      (mutations: Array<MutationRecord>) => Effect.Effect<void>
-    >();
+export const test: Layer.Layer<Observer | TestObserver> = Layer.syncContext(() => {
+  const intersectionHandlers = new Map<
+    Element,
+    (entry: IntersectionObserverEntry) => Effect.Effect<void>
+  >();
+  const mutationHandlers = new Map<
+    Node,
+    (mutations: ReadonlyArray<MutationRecord>) => Effect.Effect<void>
+  >();
 
-    const service: TestObserverService = {
-      intersection: (options) =>
-        Effect.gen(function* () {
-          const handle: IntersectionHandle = {
-            observe: (el) =>
-              Effect.sync(() => {
-                intersectionHandlers.set(el, options.onIntersect);
-              }),
-            unobserve: (el) =>
-              Effect.sync(() => {
+  const observerService: ObserverService = {
+    intersection: (options) =>
+      Effect.gen(function* () {
+        const handle: IntersectionHandle = {
+          observe: (el) =>
+            Effect.sync(() => {
+              intersectionHandlers.set(el, options.onIntersect);
+            }),
+          unobserve: (el) =>
+            Effect.sync(() => {
+              intersectionHandlers.delete(el);
+            }),
+        };
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            // Clean up all registered elements on scope close
+            for (const [el, h] of intersectionHandlers) {
+              if (h === options.onIntersect) {
                 intersectionHandlers.delete(el);
-              }),
-          };
-
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              // Clean up all registered elements on scope close
-              for (const [el, h] of intersectionHandlers) {
-                if (h === options.onIntersect) {
-                  intersectionHandlers.delete(el);
-                }
               }
-            }),
-          );
+            }
+          }),
+        );
 
-          return handle;
-        }),
+        return handle;
+      }),
 
-      mutation: (target, _options, handler) =>
-        Effect.gen(function* () {
-          mutationHandlers.set(target, handler);
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              mutationHandlers.delete(target);
-            }),
-          );
-        }),
+    mutation: (target, _options, handler) =>
+      Effect.gen(function* () {
+        mutationHandlers.set(target, handler);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            mutationHandlers.delete(target);
+          }),
+        );
+      }),
+  };
 
-      triggerIntersection: (el, entry) =>
-        Effect.gen(function* () {
-          const handler = intersectionHandlers.get(el);
-          if (handler !== undefined) {
-            const mockEntry: IntersectionObserverEntry = {
-              target: el,
-              isIntersecting: true,
-              intersectionRatio: 1,
-              boundingClientRect: Object.setPrototypeOf(
-                { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
-                DOMRectReadOnly.prototype,
-              ),
-              intersectionRect: Object.setPrototypeOf(
-                { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 },
-                DOMRectReadOnly.prototype,
-              ),
-              rootBounds: null,
-              time: 0,
-              ...entry,
-            };
-            yield* handler(mockEntry);
-          }
-        }),
+  const testObserverService = TestObserver.of({
+    triggerIntersection: (el, entry) =>
+      Effect.gen(function* () {
+        const handler = intersectionHandlers.get(el);
+        if (handler !== undefined) {
+          const rect = el.getBoundingClientRect();
+          const mockEntry: IntersectionObserverEntry = {
+            target: el,
+            isIntersecting: true,
+            intersectionRatio: 1,
+            boundingClientRect: rect,
+            intersectionRect: rect,
+            rootBounds: null,
+            time: 0,
+            ...entry,
+          };
+          yield* handler(mockEntry);
+        }
+      }),
 
-      triggerMutation: (target, mutations) =>
-        Effect.gen(function* () {
-          const handler = mutationHandlers.get(target);
-          if (handler !== undefined) {
-            yield* handler(mutations);
-          }
-        }),
-    };
+    triggerMutation: (target, mutations) =>
+      Effect.gen(function* () {
+        const handler = mutationHandlers.get(target);
+        if (handler !== undefined) {
+          yield* handler(mutations);
+        }
+      }),
+  });
 
-    return Observer.of(service);
-  }),
-);
+  return Context.make(Observer, Observer.of(observerService)).pipe(
+    Context.add(TestObserver, testObserverService),
+  );
+});

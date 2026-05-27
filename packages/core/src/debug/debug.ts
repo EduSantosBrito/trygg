@@ -11,7 +11,7 @@
  * @module trygg/debug/debug
  */
 
-import { Effect, Layer, Context } from "effect";
+import { Cause, Context, DateTime, Effect, Layer, Schema } from "effect";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 
 /** Base fields for all events */
@@ -638,6 +638,11 @@ type RouterPopstateRemovedEvent = BaseEvent & {
   readonly event: "router.popstate.removed";
 };
 
+type RouterPopstateErrorEvent = BaseEvent & {
+  readonly event: "router.popstate.error";
+  readonly cause: unknown;
+};
+
 type RouterMatcherCompileEvent = BaseEvent & {
   readonly event: "router.matcher.compile";
   readonly route_count: number;
@@ -747,6 +752,12 @@ type RouterViewportObserverRemovedEvent = BaseEvent & {
   readonly event: "router.viewport.observer.removed";
 };
 
+type RouterViewportObserverErrorEvent = BaseEvent & {
+  readonly event: "router.viewport.observer.error";
+  readonly operation: string;
+  readonly cause: unknown;
+};
+
 type RouterOutletStartEvent = BaseEvent & {
   readonly event: "router.outlet.start";
   readonly routes_count: number;
@@ -819,6 +830,11 @@ type RouterScrollSaveEvent = BaseEvent & {
   readonly y: number;
 };
 
+type RouterScrollSaveErrorEvent = BaseEvent & {
+  readonly event: "router.scroll.save.error";
+  readonly cause: unknown;
+};
+
 /** Router outlet error — processRoute catchAllCause */
 type RouterOutletErrorEvent = BaseEvent & {
   readonly event: "router.outlet.error";
@@ -852,7 +868,7 @@ type UnsafeBuildContextEvent = BaseEvent & {
  * @category Debugging
  * @public
  */
-export type DebugEvent =
+type KnownDebugEvent =
   // Signal events
   | SignalCreateEvent
   | SignalGetEvent
@@ -962,6 +978,7 @@ export type DebugEvent =
   | RouterErrorEvent
   | RouterPopstateAddedEvent
   | RouterPopstateRemovedEvent
+  | RouterPopstateErrorEvent
   | RouterMatcherCompileEvent
   | RouterMatcherCachedEvent
   | Router404RenderEvent
@@ -979,6 +996,7 @@ export type DebugEvent =
   | RouterPrefetchViewportEvent
   | RouterViewportObserverAddedEvent
   | RouterViewportObserverRemovedEvent
+  | RouterViewportObserverErrorEvent
   | RouterTrackerInterruptEvent
   | RouterTrackerLoadingEvent
   | RouterTrackerRefreshingEvent
@@ -993,6 +1011,7 @@ export type DebugEvent =
   | RouterScrollTopEvent
   | RouterScrollRestoreEvent
   | RouterScrollSaveEvent
+  | RouterScrollSaveErrorEvent
   // Trace events
   | TraceSpanStartEvent
   | TraceSpanEndEvent
@@ -1015,7 +1034,7 @@ export type DebugEvent =
  * @category Debugging
  * @public
  */
-export type EventType = DebugEvent["event"];
+export type EventType = KnownDebugEvent["event"];
 
 /**
  * Loose input type for log function.
@@ -1038,6 +1057,10 @@ export type LogInput = {
   readonly event: EventType;
   readonly duration_ms?: number;
   // Allow any additional fields
+  readonly [key: string]: unknown;
+};
+
+export type DebugEvent = (KnownDebugEvent | (BaseEvent & LogInput)) & {
   readonly [key: string]: unknown;
 };
 
@@ -1563,32 +1586,37 @@ const resetStyle = "color:inherit;font-weight:400";
 
 const formatDetails = (event: DebugEvent): string => {
   const parts: Array<string> = [];
-  const e: Record<string, unknown> = { ...event };
+  const e = event;
 
-  if ("element_tag" in e) parts.push(`<${e.element_tag}>`);
-  if ("signal_id" in e) parts.push(`${e.signal_id}`);
-  if ("key" in e) parts.push(`key:${e.key}`);
-  if ("accessed_signals" in e) parts.push(`signals:${e.accessed_signals}`);
-  if ("listener_count" in e) parts.push(`listeners:${e.listener_count}`);
-  if ("from_path" in e && "to_path" in e) parts.push(`${e.from_path} → ${e.to_path}`);
-  else if ("path" in e) parts.push(`${e.path}`);
-  if ("route_pattern" in e) parts.push(`${e.route_pattern}`);
-  if ("trigger" in e) parts.push(`trigger:${e.trigger}`);
-  if ("phase" in e) parts.push(`phase:${e.phase}`);
-  if ("current_keys" in e) parts.push(`keys:${e.current_keys}`);
-  if ("total_items" in e) parts.push(`items:${e.total_items}`);
-  if ("moves" in e) parts.push(`moves:${e.moves}`);
-  if ("stable_nodes" in e) parts.push(`stable:${e.stable_nodes}`);
-  if ("move_count" in e && e.move_count !== undefined) parts.push(`move_count:${e.move_count}`);
-  if ("key_order" in e && Array.isArray(e.key_order)) {
+  if (Object.hasOwn(e, "element_tag")) parts.push(`<${e.element_tag}>`);
+  if (Object.hasOwn(e, "signal_id")) parts.push(`${e.signal_id}`);
+  if (Object.hasOwn(e, "key")) parts.push(`key:${e.key}`);
+  if (Object.hasOwn(e, "accessed_signals")) parts.push(`signals:${e.accessed_signals}`);
+  if (Object.hasOwn(e, "listener_count")) parts.push(`listeners:${e.listener_count}`);
+  if (Object.hasOwn(e, "from_path") && Object.hasOwn(e, "to_path")) {
+    parts.push(`${e.from_path} → ${e.to_path}`);
+  } else if (Object.hasOwn(e, "path")) {
+    parts.push(`${e.path}`);
+  }
+  if (Object.hasOwn(e, "route_pattern")) parts.push(`${e.route_pattern}`);
+  if (Object.hasOwn(e, "trigger")) parts.push(`trigger:${e.trigger}`);
+  if (Object.hasOwn(e, "phase")) parts.push(`phase:${e.phase}`);
+  if (Object.hasOwn(e, "current_keys")) parts.push(`keys:${e.current_keys}`);
+  if (Object.hasOwn(e, "total_items")) parts.push(`items:${e.total_items}`);
+  if (Object.hasOwn(e, "moves")) parts.push(`moves:${e.moves}`);
+  if (Object.hasOwn(e, "stable_nodes")) parts.push(`stable:${e.stable_nodes}`);
+  if (Object.hasOwn(e, "move_count") && e.move_count !== undefined) {
+    parts.push(`move_count:${e.move_count}`);
+  }
+  if (Object.hasOwn(e, "key_order") && Array.isArray(e.key_order)) {
     parts.push(`order:[${e.key_order.map(String).join(",")}]`);
   }
-  if ("new_keys" in e && Array.isArray(e.new_keys)) {
+  if (Object.hasOwn(e, "new_keys") && Array.isArray(e.new_keys)) {
     parts.push(`new:[${e.new_keys.map(String).join(",")}]`);
   }
-  if ("reason" in e) parts.push(`${e.reason}`);
-  if ("value" in e) parts.push(`val:${JSON.stringify(e.value)}`);
-  if ("error_message" in e) parts.push(`err:${e.error_message}`);
+  if (Object.hasOwn(e, "reason")) parts.push(`${e.reason}`);
+  if (Object.hasOwn(e, "value")) parts.push(`val:${JSON.stringify(e.value)}`);
+  if (Object.hasOwn(e, "error_message")) parts.push(`err:${e.error_message}`);
 
   return parts.length > 0 ? parts.join("  ") : "";
 };
@@ -1677,21 +1705,37 @@ export const createCollectorPlugin = (name: string, events: DebugEvent[]): Debug
 /**
  * Internal: dispatch event to plugins (sync operation).
  */
-const dispatchToPlugins = (fullEvent: DebugEvent): void => {
-  if (_plugins.size > 0) {
-    for (const plugin of _plugins.values()) {
-      try {
-        plugin.handle(fullEvent);
-      } catch (error) {
+class DebugPluginError extends Schema.TaggedErrorClass<DebugPluginError>()("DebugPluginError", {
+  plugin: Schema.String,
+  cause: Schema.Unknown,
+}) {}
+
+const dispatchToPlugin = Effect.fnUntraced(function* (plugin: DebugPlugin, fullEvent: DebugEvent) {
+  yield* Effect.try({
+    try: () => plugin.handle(fullEvent),
+    catch: (cause) => new DebugPluginError({ plugin: plugin.name, cause }),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
         // Isolate plugin errors - one failing plugin shouldn't break others
-        console.error(`[trygg] Plugin "${plugin.name}" error:`, error);
+        console.error(`[trygg] Plugin "${plugin.name}" error:`, error.cause);
+      }),
+    ),
+  );
+});
+
+const dispatchToPlugins: (fullEvent: DebugEvent) => Effect.Effect<void> = Effect.fnUntraced(
+  function* (fullEvent: DebugEvent) {
+    if (_plugins.size > 0) {
+      for (const plugin of _plugins.values()) {
+        yield* dispatchToPlugin(plugin, fullEvent);
       }
+    } else {
+      // Default: use console plugin when no plugins registered
+      yield* dispatchToPlugin(consolePlugin, fullEvent);
     }
-  } else {
-    // Default: use console plugin when no plugins registered
-    consolePlugin.handle(fullEvent);
-  }
-};
+  },
+);
 
 /**
  * Log a wide event (Effect-based).
@@ -1719,13 +1763,14 @@ export const log: (event: LogInput) => Effect.Effect<void> = Effect.fnUntraced(f
   // Read trace context from references
   const traceContext = yield* getTraceContext;
 
-  const fullEvent = {
-    timestamp: new Date().toISOString(),
+  const timestamp = DateTime.formatIso(yield* DateTime.now);
+  const fullEvent: DebugEvent = {
+    timestamp,
     ...traceContext,
     ...event,
-  } as DebugEvent;
+  };
 
-  dispatchToPlugins(fullEvent);
+  yield* dispatchToPlugins(fullEvent);
 });
 
 /**
@@ -1796,53 +1841,56 @@ export const startSpan: (
  * @public
  * @since 1.0.0
  */
-export const withSpan = <A, E, R>(
+export const withSpan: <A, E, R>(
   name: string,
   effect: Effect.Effect<A, E, R>,
   attributes?: Record<string, unknown>,
-): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
-    const newSpanId = nextSpanId();
-    const previousSpanId = yield* getReference(CurrentSpanId);
-    const previousParentSpanId = yield* getReference(CurrentParentSpanId);
+) => Effect.Effect<A, E, R> = Effect.fn("Debug.withSpan")(function* <A, E, R>(
+  name: string,
+  effect: Effect.Effect<A, E, R>,
+  attributes?: Record<string, unknown>,
+) {
+  const newSpanId = nextSpanId();
+  const previousSpanId = yield* getReference(CurrentSpanId);
+  const previousParentSpanId = yield* getReference(CurrentParentSpanId);
 
-    // Set new span as current
-    yield* setReference(CurrentParentSpanId, previousSpanId);
-    yield* setReference(CurrentSpanId, newSpanId);
+  // Set new span as current
+  yield* setReference(CurrentParentSpanId, previousSpanId);
+  yield* setReference(CurrentSpanId, newSpanId);
 
-    yield* log({
-      event: "trace.span.start",
-      name,
-      ...(attributes !== undefined ? { attributes } : {}),
-    });
-
-    return yield* effect.pipe(
-      Effect.tap(() =>
-        log({
-          event: "trace.span.end",
-          name,
-          status: "ok",
-        }),
-      ),
-      Effect.tapError((error) =>
-        log({
-          event: "trace.span.end",
-          name,
-          status: "error",
-          error: String(error),
-        }),
-      ),
-      Effect.ensuring(
-        Effect.all(
-          [
-            setReference(CurrentSpanId, previousSpanId),
-            setReference(CurrentParentSpanId, previousParentSpanId),
-          ],
-          { discard: true },
-        ),
-      ),
-    );
+  yield* log({
+    event: "trace.span.start",
+    name,
+    ...(attributes !== undefined ? { attributes } : {}),
   });
+
+  return yield* effect.pipe(
+    Effect.tap(() =>
+      log({
+        event: "trace.span.end",
+        name,
+        status: "ok",
+      }),
+    ),
+    Effect.tapError((error) =>
+      log({
+        event: "trace.span.end",
+        name,
+        status: "error",
+        error: Cause.pretty(Cause.fail(error)),
+      }),
+    ),
+    Effect.ensuring(
+      Effect.all(
+        [
+          setReference(CurrentSpanId, previousSpanId),
+          setReference(CurrentParentSpanId, previousParentSpanId),
+        ],
+        { discard: true },
+      ),
+    ),
+  );
+});
 
 /**
  * Measure duration of an effect and log it.
@@ -1861,22 +1909,24 @@ export const withSpan = <A, E, R>(
  * @public
  * @since 1.0.0
  */
-export const measure = <A, E, R>(
+export const measure: <A, E, R>(
   event: LogInput,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
-    if (!shouldLog(event.event)) {
-      return yield* effect;
-    }
+) => Effect.Effect<A, E, R> = Effect.fn("Debug.measure")(function* <A, E, R>(
+  event: LogInput,
+  effect: Effect.Effect<A, E, R>,
+) {
+  if (!shouldLog(event.event)) {
+    return yield* effect;
+  }
 
-    const start = performance.now();
-    const result = yield* effect;
-    const duration_ms = performance.now() - start;
+  const start = performance.now();
+  const result = yield* effect;
+  const duration_ms = performance.now() - start;
 
-    yield* log({ ...event, duration_ms });
-    return result;
-  });
+  yield* log({ ...event, duration_ms });
+  return result;
+});
 
 // --- Layers ---
 

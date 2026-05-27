@@ -10,9 +10,9 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Data, Effect, Layer, Match, Option, Scope } from "effect";
+import { Cause, Effect, Layer, Match, Option, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
-import { Element, type ElementProps } from "./element.js";
+import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Debug from "../debug/debug.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
@@ -39,17 +39,21 @@ import { renderErrorBoundary } from "./render-error-boundary.js";
 export { ComponentAnchorError } from "./render-component.js";
 export { PortalTargetNotFoundError } from "./render-portal.js";
 
+type RuntimeRequirements = unknown;
+
 const emptyContext = unsafeWidenContext(Context.empty());
 
 const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   _renderContext: RenderContext,
   context: Context.Context<unknown> | null,
-): Effect.Effect<A, E, unknown> => (context === null ? effect : Effect.provide(effect, context));
+): Effect.Effect<A, E, RuntimeRequirements> =>
+  context === null ? effect : Effect.provide(effect, context);
 
-export class InvalidEventHandlerError extends Data.TaggedError("InvalidEventHandlerError")<{
-  readonly prop: string;
-}> {
+export class InvalidEventHandlerError extends Schema.TaggedErrorClass<InvalidEventHandlerError>()(
+  "InvalidEventHandlerError",
+  { prop: Schema.String },
+) {
   override get message() {
     return `Invalid event handler for ${this.prop}: expected function returning Effect`;
   }
@@ -84,7 +88,7 @@ const mergeRenderServices = (
   context === null ? renderContext.services : Context.merge(context, renderContext.services);
 
 const runForkInRenderContext = <A, E>(
-  effect: Effect.Effect<A, E, unknown>,
+  effect: Effect.Effect<A, E, RuntimeRequirements>,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): void => {
@@ -128,11 +132,11 @@ export const CurrentRenderContext = Context.Reference<RenderContext | null>(
  */
 export interface RenderResult {
   readonly node: Node;
-  readonly cleanup: Effect.Effect<void, unknown, unknown>;
+  readonly cleanup: Effect.Effect<void, unknown, RuntimeRequirements>;
   readonly reconcile?: (
     nextElement: Element,
     nextContext: Context.Context<unknown> | null,
-  ) => Effect.Effect<boolean, unknown, unknown>;
+  ) => Effect.Effect<boolean, unknown, RuntimeRequirements>;
 }
 
 const normalizeContext = (context: Context.Context<unknown> | null): Context.Context<unknown> =>
@@ -206,7 +210,19 @@ export interface RendererService {
  * @public
  * @since 1.0.0
  */
-export class Renderer extends Context.Service<Renderer, RendererService>()("@trygg/Renderer") {}
+export class Renderer extends Context.Service<
+  Renderer,
+  {
+    readonly mount: (
+      container: HTMLElement,
+      element: Element,
+    ) => Effect.Effect<void, unknown, Scope.Scope>;
+    readonly render: (
+      element: Element,
+      parent: Node,
+    ) => Effect.Effect<RenderResult, unknown, Scope.Scope>;
+  }
+>()("@trygg/Renderer") {}
 
 /**
  * Render a document-level element (html, head, body).
@@ -214,7 +230,7 @@ export class Renderer extends Context.Service<Renderer, RendererService>()("@try
  * Only called when IsDocumentMount FiberRef is true.
  * @internal
  */
-const renderDocumentElement = (
+const renderDocumentElement = Effect.fn("renderDocumentElement")(function* (
   tag: string,
   props: ElementProps,
   children: ReadonlyArray<Element>,
@@ -222,118 +238,106 @@ const renderDocumentElement = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions,
-): Effect.Effect<RenderResult, unknown, unknown> =>
-  Effect.gen(function* () {
-    // Determine which existing DOM node to map to
-    const targetNode =
-      tag === "html" ? document.documentElement : tag === "head" ? document.head : document.body;
+) {
+  // Determine which existing DOM node to map to
+  const targetNode =
+    tag === "html" ? document.documentElement : tag === "head" ? document.head : document.body;
 
-    // For <head>, children are rendered but hoisted by the Head service.
-    // For <html> and <body>, attributes are applied and children are rendered into the target.
-    const renderTarget = tag === "head" ? document.head : targetNode;
+  // For <head>, children are rendered but hoisted by the Head service.
+  // For <html> and <body>, attributes are applied and children are rendered into the target.
+  const renderTarget = tag === "head" ? document.head : targetNode;
 
-    yield* Debug.log({
-      event: "render.document",
-      element_tag: tag,
-      target: targetNode.tagName,
-    });
+  yield* Debug.log({
+    event: "render.document",
+    element_tag: tag,
+    target: targetNode.tagName,
+  });
 
-    // Strip framework-specific 'mode' prop before applying
-    const { mode: _mode, ...domProps } = props;
+  // Strip framework-specific 'mode' prop before applying
+  const { mode: _mode, ...domProps } = props;
 
-    // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
-    const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
-    const signalCleanups: Array<Effect.Effect<void>> = [];
-    if (tag !== "head") {
-      for (const key of Object.keys(domProps)) {
-        if (key === "children" || key === "key") continue;
-        const value = (domProps as Record<string, unknown>)[key];
-        const attrName = key === "className" ? "class" : key === "htmlFor" ? "for" : key;
-        if (Signal.isSignal(value)) {
-          // Signal-valued attribute: fine-grained reactivity on document elements
-          const prev = targetNode.getAttribute(attrName);
-          const initialValue = yield* Signal.get(value);
-          const blocked = applyPropValue(
-            targetNode,
-            key,
-            initialValue,
-            renderContext.safeUrlConfig,
-          );
-          if (Option.isSome(blocked)) {
-            yield* logBlockedSafeUrlAttribute(blocked.value);
-          }
-          appliedAttrs.push({ key: attrName, prev });
-
-          yield* Debug.log({
-            event: "render.document.signal.initial",
-            signal_id: value._debugId,
-            value: initialValue,
-            element_tag: tag,
-            trigger: `prop:${key}`,
-          });
-
-          const unsubscribe = yield* Signal.subscribe(value, () =>
-            Effect.gen(function* () {
-              const newValue = yield* Signal.get(value);
-              yield* Debug.log({
-                event: "render.document.signal.update",
-                signal_id: value._debugId,
-                value: newValue,
-                element_tag: tag,
-                trigger: `prop:${key}`,
-              });
-              const blocked = applyPropValue(
-                targetNode,
-                key,
-                newValue,
-                renderContext.safeUrlConfig,
-              );
-              if (Option.isSome(blocked)) {
-                yield* logBlockedSafeUrlAttribute(blocked.value);
-              }
-            }),
-          );
-          signalCleanups.push(unsubscribe);
-        } else if (typeof value === "string") {
-          const prev = targetNode.getAttribute(attrName);
-          targetNode.setAttribute(attrName, value);
-          appliedAttrs.push({ key: attrName, prev });
+  // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
+  const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
+  const signalCleanups: Array<Effect.Effect<void>> = [];
+  if (tag !== "head") {
+    for (const [key, value] of Object.entries(domProps)) {
+      if (key === "children" || key === "key") continue;
+      const attrName = key === "className" ? "class" : key === "htmlFor" ? "for" : key;
+      if (Signal.isSignal(value)) {
+        // Signal-valued attribute: fine-grained reactivity on document elements
+        const prev = targetNode.getAttribute(attrName);
+        const initialValue = yield* Signal.get(value);
+        const blocked = applyPropValue(targetNode, key, initialValue, renderContext.safeUrlConfig);
+        if (Option.isSome(blocked)) {
+          yield* logBlockedSafeUrlAttribute(blocked.value);
         }
+        appliedAttrs.push({ key: attrName, prev });
+
+        yield* Debug.log({
+          event: "render.document.signal.initial",
+          signal_id: value._debugId,
+          value: initialValue,
+          element_tag: tag,
+          trigger: `prop:${key}`,
+        });
+
+        const unsubscribe = yield* Signal.subscribe(value, () =>
+          Effect.gen(function* () {
+            const newValue = yield* Signal.get(value);
+            yield* Debug.log({
+              event: "render.document.signal.update",
+              signal_id: value._debugId,
+              value: newValue,
+              element_tag: tag,
+              trigger: `prop:${key}`,
+            });
+            const blocked = applyPropValue(targetNode, key, newValue, renderContext.safeUrlConfig);
+            if (Option.isSome(blocked)) {
+              yield* logBlockedSafeUrlAttribute(blocked.value);
+            }
+          }),
+        );
+        signalCleanups.push(unsubscribe);
+      } else if (typeof value === "string") {
+        const prev = targetNode.getAttribute(attrName);
+        targetNode.setAttribute(attrName, value);
+        appliedAttrs.push({ key: attrName, prev });
       }
     }
+  }
 
-    // Render children into the target node
-    const childResults: Array<RenderResult> = [];
-    for (const child of children) {
-      const result = yield* renderElement(child, renderTarget, renderContext, context, options);
-      childResults.push(result);
-    }
+  // Render children into the target node
+  const childResults: Array<RenderResult> = [];
+  for (const child of children) {
+    const result = yield* renderElement(child, renderTarget, renderContext, context, options);
+    childResults.push(result);
+  }
 
-    // Anchor comment for positioning (appended to the target)
-    const anchor = document.createComment(`doc:${tag}`);
-    renderTarget.appendChild(anchor);
+  // Anchor comment for positioning (appended to the target)
+  const anchor = document.createComment(`doc:${tag}`);
+  renderTarget.appendChild(anchor);
 
-    return {
-      node: anchor,
-      cleanup: Effect.gen(function* () {
-        for (const cleanup of signalCleanups) {
-          yield* cleanup;
+  return {
+    node: anchor,
+    cleanup: Effect.gen(function* () {
+      for (const cleanup of signalCleanups) {
+        yield* cleanup;
+      }
+      for (const child of childResults) {
+        yield* child.cleanup;
+      }
+      // Revert applied attributes
+      for (const { key, prev } of appliedAttrs) {
+        if (prev !== null) {
+          targetNode.setAttribute(key, prev);
+        } else {
+          targetNode.removeAttribute(key);
         }
-        for (const child of childResults) {
-          yield* child.cleanup;
-        }
-        // Revert applied attributes
-        for (const { key, prev } of appliedAttrs) {
-          if (prev !== null) {
-            targetNode.setAttribute(key, prev);
-          } else {
-            targetNode.removeAttribute(key);
-          }
-        }
-        anchor.remove();
-      }),
-    };
-  });
+      }
+      anchor.remove();
+    }),
+  };
+});
 
 /**
  * Render an Element to a DOM node
@@ -345,7 +349,7 @@ const renderElement = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
-): Effect.Effect<RenderResult, unknown, unknown> =>
+): Effect.Effect<RenderResult, unknown, RuntimeRequirements> =>
   Match.value(element).pipe(
     Match.tag("Text", ({ content }) =>
       Effect.sync(() => {
@@ -358,7 +362,7 @@ const renderElement = (
           reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.sync(() => {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
-              if (resolved.element._tag !== "Text") {
+              if (!Element.$is("Text")(resolved.element)) {
                 return false;
               }
 
@@ -410,7 +414,7 @@ const renderElement = (
           reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.sync(() => {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
-              if (resolved.element._tag !== "SignalText") {
+              if (!Element.$is("SignalText")(resolved.element)) {
                 return false;
               }
 
@@ -501,83 +505,85 @@ const renderElement = (
  * @public
  * @since 1.0.0
  */
+const makeBrowserRenderer = Effect.fn("Renderer.browserLayer")(function* () {
+  const services = unsafeWidenContext(yield* Effect.context<never>());
+
+  const mountElement = Effect.fn("Renderer.mount")(function* (
+    container: HTMLElement,
+    element: Element,
+  ) {
+    const scope = yield* Effect.scope;
+    const headService = yield* Head.makeBrowserHead();
+
+    // Set Head service for head element hoisting
+    yield* setFiberRef(Head.CurrentHead, headService);
+
+    const methodServices = unsafeWidenContext(yield* Effect.context<never>());
+    const renderServices = Context.merge(services, methodServices);
+    const safeUrlConfig = Context.getOrElse(
+      renderServices,
+      SafeUrl.SafeUrlConfig,
+      () => SafeUrl.defaultConfig,
+    );
+
+    const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
+
+    // Set up render context after renderer-local FiberRefs are installed
+    yield* setFiberRef(CurrentRenderContext, renderContext);
+
+    // Create an anchor comment to mark the mount point
+    // This replaces innerHTML="" clearing - we only manage our own nodes
+    const mountAnchor = document.createComment("trygg-mount");
+    container.appendChild(mountAnchor);
+
+    // Render the element tree - content is inserted before the anchor
+    // by the renderElement function (for Component, Fragment, etc.)
+    // For elements that append directly, they go after existing content
+    const result = yield* Effect.provide(
+      renderElement(element, container, renderContext, null),
+      renderServices,
+    );
+
+    // Move rendered content before the anchor for consistent ordering
+    container.insertBefore(result.node, mountAnchor);
+
+    // Register cleanup on scope finalization using acquireRelease pattern
+    yield* Effect.addFinalizer(() =>
+      Effect.catchCause(
+        Effect.provide(
+          Effect.gen(function* () {
+            yield* result.cleanup;
+            mountAnchor.remove();
+          }),
+          renderServices,
+        ),
+        () => Effect.void,
+      ),
+    );
+  });
+
+  const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
+    const scope = yield* Effect.scope;
+    const methodServices = unsafeWidenContext(yield* Effect.context<never>());
+    const renderServices = Context.merge(services, methodServices);
+    const safeUrlConfig = Context.getOrElse(
+      renderServices,
+      SafeUrl.SafeUrlConfig,
+      () => SafeUrl.defaultConfig,
+    );
+    const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
+    return yield* Effect.provide(
+      renderElement(element, parent, renderContext, null),
+      renderServices,
+    );
+  });
+
+  return Renderer.of({ mount: mountElement, render: renderToParent });
+});
+
 export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
   Renderer,
-  Effect.gen(function* () {
-    const services = unsafeWidenContext(yield* Effect.context<never>());
-
-    const mountElement = Effect.fn("Renderer.mount")(function* (
-      container: HTMLElement,
-      element: Element,
-    ) {
-      const scope = yield* Effect.scope;
-      const headService = yield* Head.makeBrowserHead();
-
-      // Set Head service for head element hoisting
-      yield* setFiberRef(Head.CurrentHead, headService);
-
-      const methodServices = unsafeWidenContext(yield* Effect.context<never>());
-      const renderServices = Context.merge(services, methodServices);
-      const safeUrlConfig = Context.getOrElse(
-        renderServices,
-        SafeUrl.SafeUrlConfig,
-        () => SafeUrl.defaultConfig,
-      );
-
-      const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
-
-      // Set up render context after renderer-local FiberRefs are installed
-      yield* setFiberRef(CurrentRenderContext, renderContext);
-
-      // Create an anchor comment to mark the mount point
-      // This replaces innerHTML="" clearing - we only manage our own nodes
-      const mountAnchor = document.createComment("trygg-mount");
-      container.appendChild(mountAnchor);
-
-      // Render the element tree - content is inserted before the anchor
-      // by the renderElement function (for Component, Fragment, etc.)
-      // For elements that append directly, they go after existing content
-      const result = yield* Effect.provide(
-        renderElement(element, container, renderContext, null),
-        renderServices,
-      );
-
-      // Move rendered content before the anchor for consistent ordering
-      container.insertBefore(result.node, mountAnchor);
-
-      // Register cleanup on scope finalization using acquireRelease pattern
-      yield* Effect.addFinalizer(() =>
-        Effect.catchCause(
-          Effect.provide(
-            Effect.gen(function* () {
-              yield* result.cleanup;
-              mountAnchor.remove();
-            }),
-            renderServices,
-          ),
-          () => Effect.void,
-        ),
-      );
-    });
-
-    const renderToParent = Effect.fn("Renderer.render")(function* (element: Element, parent: Node) {
-      const scope = yield* Effect.scope;
-      const methodServices = unsafeWidenContext(yield* Effect.context<never>());
-      const renderServices = Context.merge(services, methodServices);
-      const safeUrlConfig = Context.getOrElse(
-        renderServices,
-        SafeUrl.SafeUrlConfig,
-        () => SafeUrl.defaultConfig,
-      );
-      const renderContext: RenderContext = { services: renderServices, scope, safeUrlConfig };
-      return yield* Effect.provide(
-        renderElement(element, parent, renderContext, null),
-        renderServices,
-      );
-    });
-
-    return Renderer.of({ mount: mountElement, render: renderToParent });
-  }),
+  makeBrowserRenderer().pipe(Effect.annotateLogs({ service: "Renderer" })),
 );
 
 /**
@@ -604,7 +610,7 @@ export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
  */
 export const render = Effect.fn("render")(function* <E>(
   container: HTMLElement,
-  app: Effect.Effect<Element, E, never>,
+  app: Effect.Effect<ElementWithRequirements<never>, E, never>,
 ) {
   const renderer = yield* Renderer;
 
@@ -627,8 +633,9 @@ export const render = Effect.fn("render")(function* <E>(
  * Check if a value is an Effect
  * @internal
  */
-const isEffectValue = (value: unknown): value is Effect.Effect<Element, unknown, never> =>
-  Effect.isEffect(value);
+const isEffectValue = (
+  value: unknown,
+): value is Effect.Effect<ElementWithRequirements<never>, unknown, never> => Effect.isEffect(value);
 
 /**
  * Mount an app to the DOM
@@ -672,7 +679,7 @@ const isEffectValue = (value: unknown): value is Effect.Effect<Element, unknown,
  */
 export const mount = <E>(
   container: HTMLElement,
-  app: Effect.Effect<Element, E, never> | Element,
+  app: Effect.Effect<ElementWithRequirements<never>, E, never> | ElementWithRequirements<never>,
 ): void => {
   // Normalize to Effect
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);
@@ -725,35 +732,34 @@ export const mount = <E>(
  * @public
  * @since 1.0.0
  */
-export const renderDocument = <E>(
-  app: Effect.Effect<Element, E, never>,
+export const renderDocument = Effect.fn("renderDocument")(function* <E>(
+  app: Effect.Effect<ElementWithRequirements<never>, E, never>,
   options?: { readonly manifest?: RoutesManifest },
-): Effect.Effect<never, E | unknown, Renderer | Scope.Scope> =>
-  Effect.gen(function* () {
-    const renderer = yield* Renderer;
+) {
+  const renderer = yield* Renderer;
 
-    yield* Head.enableDocumentMount;
+  yield* Head.enableDocumentMount;
 
-    // Set routes manifest if provided (enables <Router.Outlet /> without props)
-    if (options?.manifest !== undefined) {
-      const Router = yield* Effect.promise(() => import("../router/index.js"));
-      yield* setFiberRef(Router.CurrentRoutesManifest, Option.some(options.manifest));
-    }
+  // Set routes manifest if provided (enables <Router.Outlet /> without props)
+  if (options?.manifest !== undefined) {
+    const Router = yield* Effect.promise(() => import("../router/index.js"));
+    yield* setFiberRef(Router.CurrentRoutesManifest, Option.some(options.manifest));
+  }
 
-    // Wrap the app Effect in a Component element for reactive re-rendering
-    const componentElement = Element.Component({
-      run: () => app,
-      key: null,
-      identity: renderDocument,
-      inputs: undefined,
-    });
+  // Wrap the app Effect in a Component element for reactive re-rendering
+  const componentElement = Element.Component({
+    run: () => app,
+    key: null,
+    identity: renderDocument,
+    inputs: undefined,
+  });
 
-    // Render into document.body — the root layout's <html>/<body> will map to existing DOM
-    yield* renderer.mount(document.body, componentElement);
+  // Render into document.body — the root layout's <html>/<body> will map to existing DOM
+  yield* renderer.mount(document.body, componentElement);
 
-    // Keep the app running forever - cleanup happens when interrupted
-    return yield* Effect.never;
-  }) as Effect.Effect<never, E | unknown, Renderer | Scope.Scope>;
+  // Keep the app running forever - cleanup happens when interrupted
+  return yield* Effect.never;
+});
 
 /**
  * Mount an app as the document owner.
@@ -789,7 +795,7 @@ export const renderDocument = <E>(
  * @since 1.0.0
  */
 export const mountDocument = <E>(
-  app: Effect.Effect<Element, E, never> | Element,
+  app: Effect.Effect<ElementWithRequirements<never>, E, never> | ElementWithRequirements<never>,
   options?: { readonly manifest?: RoutesManifest },
 ): void => {
   const appEffect = isEffectValue(app) ? app : Effect.succeed(app);

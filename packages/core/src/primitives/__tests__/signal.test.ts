@@ -23,7 +23,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
 import {
   Cause,
-  Data,
+  Clock,
   Deferred,
   Effect,
   Exit,
@@ -32,6 +32,7 @@ import {
   Option,
   Ref,
   Result,
+  Schema,
   Scope,
 } from "effect";
 import * as Context from "effect/Context";
@@ -43,6 +44,14 @@ import * as Component from "../component.js";
 import * as ContractTrace from "../../contract/trace.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
+
+class ListenerError extends Schema.TaggedErrorClass<ListenerError>()("ListenerError", {
+  message: Schema.String,
+}) {}
+
+class RenderError extends Schema.TaggedErrorClass<RenderError>()("RenderError", {
+  message: Schema.String,
+}) {}
 
 const withRenderPhase = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -361,14 +370,14 @@ describe("Signal.set", () => {
 
       yield* Signal.subscribe(signal, () =>
         Effect.gen(function* () {
-          startTimes.push(Date.now());
+          startTimes.push(yield* Clock.currentTimeMillis);
           yield* Deferred.await(latch);
         }),
       ).pipe(Effect.asVoid);
 
       yield* Signal.subscribe(signal, () =>
         Effect.gen(function* () {
-          startTimes.push(Date.now());
+          startTimes.push(yield* Clock.currentTimeMillis);
           yield* Deferred.await(latch);
         }),
       ).pipe(Effect.asVoid);
@@ -395,9 +404,9 @@ describe("Signal.set", () => {
       const signal = yield* Signal.make(0);
       let secondCalled = false;
 
-      yield* Signal.subscribe(signal, () => Effect.die(new Error("Listener 1 error"))).pipe(
-        Effect.asVoid,
-      );
+      yield* Signal.subscribe(signal, () =>
+        Effect.fail(new ListenerError({ message: "Listener 1 error" })),
+      ).pipe(Effect.asVoid);
 
       yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
@@ -477,7 +486,10 @@ describe("Signal.modify", () => {
     Effect.gen(function* () {
       const signal = yield* Signal.make(10);
 
-      const result = yield* Signal.modify(signal, (n) => ["old was " + n, n + 5] as const);
+      const result = yield* Signal.modify(signal, (n): readonly [string, number] => [
+        "old was " + n,
+        n + 5,
+      ]);
 
       assert.strictEqual(result, "old was 10");
       const current = yield* Signal.get(signal);
@@ -496,7 +508,7 @@ describe("Signal.modify", () => {
         }),
       ).pipe(Effect.asVoid);
 
-      yield* Signal.modify(signal, (n) => [n, n + 100] as const);
+      yield* Signal.modify(signal, (n): readonly [number, number] => [n, n + 100]);
       yield* TestClock.adjust(0);
 
       assert.strictEqual(newValue, 100);
@@ -510,13 +522,13 @@ describe("Signal.modify", () => {
 
       const fiber1 = yield* Effect.forEach(
         Array.from({ length: 10 }),
-        () => Signal.modify(signal, (n) => [n, n + 1] as const),
+        () => Signal.modify(signal, (n): readonly [number, number] => [n, n + 1]),
         { discard: false },
       ).pipe(Effect.forkChild);
 
       const fiber2 = yield* Effect.forEach(
         Array.from({ length: 10 }),
-        () => Signal.modify(signal, (n) => [n, n + 1] as const),
+        () => Signal.modify(signal, (n): readonly [number, number] => [n, n + 1]),
         { discard: false },
       ).pipe(Effect.forkChild);
 
@@ -802,11 +814,11 @@ describe("Signal.deriveAll", () => {
       const positive = yield* Signal.deriveAll([a, b], (x, y) => x + y > 0);
 
       let notifyCount = 0;
-      void (yield* Signal.subscribe(positive, () =>
+      yield* Signal.subscribe(positive, () =>
         Effect.sync(() => {
           notifyCount++;
         }),
-      ));
+      ).pipe(Effect.asVoid);
 
       // Both changes still produce a positive sum, so derived value stays true
       yield* Signal.set(a, 10);
@@ -844,7 +856,7 @@ describe("Signal.isSignal", () => {
   );
 
   it("should return false for non-Signal values", () => {
-    assert.isFalse(Signal.isSignal({ _tag: "NotSignal" }));
+    assert.isFalse(Signal.isSignal(text("NotSignal")));
     assert.isFalse(Signal.isSignal({ value: 42 }));
     assert.isFalse(Signal.isSignal([]));
   });
@@ -938,9 +950,9 @@ describe("Signal parallel notification", () => {
       const signal = yield* Signal.make(0);
       let listener2Completed = false;
 
-      yield* Signal.subscribe(signal, () => Effect.die(new Error("Listener error"))).pipe(
-        Effect.asVoid,
-      );
+      yield* Signal.subscribe(signal, () =>
+        Effect.fail(new ListenerError({ message: "Listener error" })),
+      ).pipe(Effect.asVoid);
 
       yield* Signal.subscribe(signal, () =>
         Effect.sync(() => {
@@ -959,9 +971,9 @@ describe("Signal parallel notification", () => {
     Effect.gen(function* () {
       const signal = yield* Signal.make(0);
 
-      yield* Signal.subscribe(signal, () => Effect.die(new Error("Test error"))).pipe(
-        Effect.asVoid,
-      );
+      yield* Signal.subscribe(signal, () =>
+        Effect.fail(new ListenerError({ message: "Test error" })),
+      ).pipe(Effect.asVoid);
 
       yield* Signal.set(signal, 1);
       yield* TestClock.adjust(10);
@@ -1181,8 +1193,7 @@ describe("Signal.suspend", () => {
 
   scoped("should update view signal to Failure on render error", () =>
     Effect.gen(function* () {
-      class RenderError extends Data.TaggedError("RenderError")<{}> {}
-      const comp = mockComponent(Effect.fail(new RenderError()));
+      const comp = mockComponent(Effect.fail(new RenderError({ message: "render failed" })));
 
       const suspended = yield* Signal.suspend(comp).pipe(
         Signal.on("Pending", text("loading")),
@@ -1209,7 +1220,7 @@ describe("Signal.suspend", () => {
   scoped("should accumulate handler requirements in inferred component R", () =>
     Effect.gen(function* () {
       class PendingTheme extends Context.Service<PendingTheme, { readonly label: string }>()(
-        "PendingTheme",
+        "signal.test/PendingTheme",
       ) {}
 
       const PendingView = Component.gen(function* (

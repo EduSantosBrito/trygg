@@ -1,4 +1,4 @@
-import { Effect, Equal, Option } from "effect";
+import { Effect, Equal, Option, Predicate } from "effect";
 import * as Context from "effect/Context";
 import * as SafeUrl from "../security/safe-url.js";
 import * as Debug from "../debug/debug.js";
@@ -22,13 +22,11 @@ export const logBlockedSafeUrlAttribute = ({
     allowed_schemes: allowedSchemes,
   });
 
-export const equalOrChanged = (left: unknown, right: unknown): boolean => {
-  try {
-    return Equal.equals(left, right);
-  } catch {
-    return false;
-  }
-};
+export const equalOrChanged = (left: unknown, right: unknown): boolean =>
+  Option.match(Option.liftThrowable(Equal.equals)(left, right), {
+    onNone: () => false,
+    onSome: (equals) => equals,
+  });
 
 export const resolveReconcileTarget = (
   element: Element,
@@ -37,7 +35,7 @@ export const resolveReconcileTarget = (
   let currentElement: Element = element;
   let currentContext = context;
 
-  while (currentElement._tag === "Provide") {
+  while (Predicate.isTagged(currentElement, "Provide")) {
     currentContext =
       currentContext !== null
         ? Context.merge(currentContext, currentElement.context)

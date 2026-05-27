@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest";
-import { Cause, Data, Effect } from "effect";
+import { Cause, Effect, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
@@ -8,13 +8,15 @@ import type { ComponentProps } from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
 
-class BoundaryError extends Data.TaggedError("BoundaryError")<{ readonly message: string }> {}
+class BoundaryError extends Schema.TaggedErrorClass<BoundaryError>()("BoundaryError", {
+  detail: Schema.String,
+}) {}
 
 describe("render-error-boundary", () => {
   scoped("renders fallback for initial child failure", () =>
     Effect.gen(function* () {
       const Risky = Component.gen(function* () {
-        return yield* new BoundaryError({ message: "boom" });
+        return yield* new BoundaryError({ detail: "boom" });
       });
 
       const Fallback = Component.gen(function* (
@@ -36,7 +38,7 @@ describe("render-error-boundary", () => {
       const fail = yield* Signal.make(false);
       const Risky = Component.gen(function* () {
         if (yield* Signal.get(fail)) {
-          return yield* new BoundaryError({ message: "boom" });
+          return yield* new BoundaryError({ detail: "boom" });
         }
         return <div data-testid="stable">stable</div>;
       });

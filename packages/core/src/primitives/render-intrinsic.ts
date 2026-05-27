@@ -1,4 +1,4 @@
-import { Effect, Fiber, Option, Scope } from "effect";
+import { Effect, Fiber, Option, Predicate, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, getKey, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
@@ -21,14 +21,14 @@ interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
 }
 
-interface RenderIntrinsicDeps {
+interface RenderIntrinsicDeps<E, R> {
   readonly renderElement: (
     element: Element,
     parent: Node,
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
     options: RenderOptions,
-  ) => Effect.Effect<RenderResult, unknown, unknown>;
+  ) => Effect.Effect<RenderResult, E, R>;
   readonly renderDocumentElement: (
     tag: string,
     props: ElementProps,
@@ -37,13 +37,22 @@ interface RenderIntrinsicDeps {
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
     options: RenderOptions,
-  ) => Effect.Effect<RenderResult, unknown, unknown>;
-  readonly runForkInRenderContext: (
-    effect: Effect.Effect<void, unknown, unknown>,
+  ) => Effect.Effect<RenderResult, E, R>;
+  readonly runForkInRenderContext: <E2, R2>(
+    effect: Effect.Effect<void, E2, R2>,
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
   ) => void;
 }
+
+type HeadHoistAction = Extract<Head.HoistAction, { readonly _tag: "head" }>;
+type DocumentHoistAction = Extract<Head.HoistAction, { readonly _tag: "document" }>;
+
+const isHeadHoistAction = (action: Head.HoistAction): action is HeadHoistAction =>
+  Predicate.isTagged(action, "head");
+
+const isDocumentHoistAction = (action: Head.HoistAction): action is DocumentHoistAction =>
+  Predicate.isTagged(action, "document");
 
 const isEventHandler = (value: unknown): value is EventHandler => typeof value === "function";
 
@@ -100,18 +109,19 @@ const clearRemovedProps = (
   }
 };
 
-const applyProps = Effect.fn("applyProps")(function* (
+const applyProps = Effect.fn("applyProps")(function* <E, R>(
   node: globalThis.Element,
   props: ElementProps,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
-  deps: RenderIntrinsicDeps,
+  _deps: RenderIntrinsicDeps<E, R>,
 ) {
   const cleanups: Array<Effect.Effect<void>> = [];
   const contextTransaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
   const eventSnapshot = {
     ...renderContext,
-    services: context === null ? renderContext.services : Context.merge(context, renderContext.services),
+    services:
+      context === null ? renderContext.services : Context.merge(context, renderContext.services),
   };
 
   for (const [key, value] of Object.entries(props)) {
@@ -127,7 +137,7 @@ const applyProps = Effect.fn("applyProps")(function* (
         const fiber = Effect.runForkWith(Context.empty())(
           contextTransaction.runEventHandler(eventSnapshot, value(event)),
         );
-        void Effect.runPromiseWith(Context.empty())(
+        Effect.runForkWith(Context.empty())(
           Scope.addFinalizer(eventSnapshot.scope, Fiber.interrupt(fiber)),
         );
       };
@@ -201,7 +211,7 @@ const applyProps = Effect.fn("applyProps")(function* (
   return cleanups;
 });
 
-export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
+export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* <E, R>(
   tag: string,
   props: ElementProps,
   children: ReadonlyArray<Element>,
@@ -210,11 +220,11 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions,
-  deps: RenderIntrinsicDeps,
+  deps: RenderIntrinsicDeps<E, R>,
 ) {
   const hoist = Head.makeHeadHoist();
   const hoistAction = yield* hoist.maybeHoist(tag, props);
-  if (Option.isSome(hoistAction) && hoistAction.value._tag === "document") {
+  if (Option.isSome(hoistAction) && isDocumentHoistAction(hoistAction.value)) {
     return yield* deps.renderDocumentElement(
       tag,
       hoistAction.value.props,
@@ -233,13 +243,13 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
 
   const domProps = props.mode !== undefined ? omitMode(props) : props;
   const appliedProps =
-    Option.isSome(hoistAction) && hoistAction.value._tag === "head"
+    Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)
       ? hoistAction.value.props
       : domProps;
 
   let currentProps = appliedProps;
   let propCleanups = yield* applyProps(node, currentProps, renderContext, context, deps);
-  const isHeadHoist = Option.isSome(hoistAction) && hoistAction.value._tag === "head";
+  const isHeadHoist = Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value);
   if (!isHeadHoist) parent.appendChild(node);
 
   type ChildSlot = {
@@ -253,35 +263,30 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
   const childrenAnchor = hasKeyedChildren ? document.createComment("children-end") : null;
   if (childrenAnchor !== null) node.appendChild(childrenAnchor);
 
-  const cleanupChildSlot = (slot: ChildSlot) =>
-    Effect.gen(function* () {
-      yield* renderTransaction.cleanup(slot.result);
-      slot.startMarker.remove();
-      slot.endMarker.remove();
-    });
+  const cleanupChildSlot = Effect.fnUntraced(function* (slot: ChildSlot) {
+    yield* renderTransaction.cleanup(slot.result);
+    slot.startMarker.remove();
+    slot.endMarker.remove();
+  });
 
-  const renderChildSlot = (child: Element, childContext: Context.Context<unknown> | null) =>
-    Effect.gen(function* () {
-      const fragment = document.createDocumentFragment();
-      const startMarker = document.createComment("child-start");
-      fragment.appendChild(startMarker);
-      const result = yield* deps.renderElement(
-        child,
-        fragment,
-        renderContext,
-        childContext,
-        options,
-      );
-      const endMarker = document.createComment("child-end");
-      fragment.appendChild(endMarker);
-      if (childrenAnchor === null) {
-        node.appendChild(fragment);
-      } else {
-        node.insertBefore(fragment, childrenAnchor);
-      }
+  const renderChildSlot = Effect.fnUntraced(function* (
+    child: Element,
+    childContext: Context.Context<unknown> | null,
+  ) {
+    const fragment = document.createDocumentFragment();
+    const startMarker = document.createComment("child-start");
+    fragment.appendChild(startMarker);
+    const result = yield* deps.renderElement(child, fragment, renderContext, childContext, options);
+    const endMarker = document.createComment("child-end");
+    fragment.appendChild(endMarker);
+    if (childrenAnchor === null) {
+      node.appendChild(fragment);
+    } else {
+      node.insertBefore(fragment, childrenAnchor);
+    }
 
-      return { key: getKey(child), startMarker, endMarker, result } satisfies ChildSlot;
-    });
+    return { key: getKey(child), startMarker, endMarker, result } satisfies ChildSlot;
+  });
 
   const childResults: Array<RenderResult> = [];
   let childSlots: Array<ChildSlot> = [];
@@ -312,7 +317,7 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
     }
   }
 
-  if (Option.isSome(hoistAction) && hoistAction.value._tag === "head") {
+  if (Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)) {
     if (node instanceof HTMLElement) {
       yield* hoistAction.value.mount(node);
     }
@@ -344,112 +349,110 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* (
       for (const cleanup of propCleanups) yield* cleanup;
       node.remove();
     }),
-    reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
-      Effect.gen(function* () {
-        const resolved = resolveReconcileTarget(nextElement, nextContext);
-        const resolvedNextElement = resolved.element;
-        const resolvedNextContext = resolved.context;
+    reconcile: Effect.fnUntraced(function* (
+      nextElement: Element,
+      nextContext: Context.Context<unknown> | null,
+    ) {
+      const resolved = resolveReconcileTarget(nextElement, nextContext);
+      const resolvedNextElement = resolved.element;
+      const resolvedNextContext = resolved.context;
 
-        if (resolvedNextElement._tag !== "Intrinsic") return false;
-        if (resolvedNextElement.tag !== tag || resolvedNextElement.key !== key) return false;
+      if (!Predicate.isTagged(resolvedNextElement, "Intrinsic")) return false;
+      if (resolvedNextElement.tag !== tag || resolvedNextElement.key !== key) return false;
 
-        const nextProps =
-          resolvedNextElement.props.mode !== undefined
-            ? omitMode(resolvedNextElement.props)
-            : resolvedNextElement.props;
+      const nextProps =
+        resolvedNextElement.props.mode !== undefined
+          ? omitMode(resolvedNextElement.props)
+          : resolvedNextElement.props;
 
-        if (!equalOrChanged(currentProps, nextProps)) {
-          for (const cleanup of propCleanups) yield* cleanup;
-          clearRemovedProps(node, currentProps, nextProps);
-          propCleanups = yield* applyProps(
-            node,
-            nextProps,
-            renderContext,
-            resolvedNextContext,
-            deps,
-          );
-          currentProps = nextProps;
-        }
+      if (!equalOrChanged(currentProps, nextProps)) {
+        for (const cleanup of propCleanups) yield* cleanup;
+        clearRemovedProps(node, currentProps, nextProps);
+        propCleanups = yield* applyProps(node, nextProps, renderContext, resolvedNextContext, deps);
+        currentProps = nextProps;
+      }
 
-        if (!hasKeyedChildren) {
-          if (resolvedNextElement.children.length !== childResults.length) return false;
+      if (!hasKeyedChildren) {
+        if (resolvedNextElement.children.length !== childResults.length) return false;
 
-          for (let index = 0; index < childResults.length; index++) {
-            const childResult = childResults[index];
-            const nextChild = resolvedNextElement.children[index];
-            if (
-              childResult === undefined ||
-              nextChild === undefined ||
-              childResult.reconcile === undefined
-            ) {
-              return false;
-            }
-            const outcome = yield* renderTransaction.reconcile({
-              previous: childResult,
-              nextElement: nextChild,
-              nextContext: resolvedNextContext,
-              context: renderContext,
-            });
-            if (outcome._tag !== "Reconciled") return false;
-          }
-
-          return true;
-        }
-
-        if (childrenAnchor === null) return false;
-
-        const keyedIndices = new Map<string | number, number>();
-        childSlots.forEach((slot, index) => {
-          if (slot.key !== null && !keyedIndices.has(slot.key)) keyedIndices.set(slot.key, index);
-        });
-
-        const usedIndices = new Set<number>();
-        const nextSlots: Array<ChildSlot> = [];
-
-        const tryReuse = (nextChild: Element, slotIndex: number | undefined) =>
-          Effect.gen(function* () {
-            if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
-            const slot = childSlots[slotIndex];
-            if (slot === undefined || slot.result.reconcile === undefined) return false;
-            const outcome = yield* renderTransaction.reconcile({
-              previous: slot.result,
-              nextElement: nextChild,
-              nextContext: resolvedNextContext,
-              context: renderContext,
-            });
-            if (outcome._tag !== "Reconciled") return false;
-            usedIndices.add(slotIndex);
-            nextSlots.push(slot);
-            return true;
-          });
-
-        for (let index = 0; index < resolvedNextElement.children.length; index++) {
+        for (let index = 0; index < childResults.length; index++) {
+          const childResult = childResults[index];
           const nextChild = resolvedNextElement.children[index];
-          if (nextChild === undefined) continue;
-
-          const nextKey = getKey(nextChild);
-          const reused =
-            nextKey !== null
-              ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
-              : yield* tryReuse(nextChild, index);
-          if (!reused) nextSlots.push(yield* renderChildSlot(nextChild, resolvedNextContext));
+          if (
+            childResult === undefined ||
+            nextChild === undefined ||
+            childResult.reconcile === undefined
+          ) {
+            return false;
+          }
+          const outcome = yield* renderTransaction.reconcile({
+            previous: childResult,
+            nextElement: nextChild,
+            nextContext: resolvedNextContext,
+            context: renderContext,
+          });
+          if (!Predicate.isTagged(outcome, "Reconciled")) return false;
         }
 
-        let beforeRef: Node = childrenAnchor;
-        for (let index = nextSlots.length - 1; index >= 0; index--) {
-          const slot = nextSlots[index];
-          if (slot === undefined) continue;
-          moveRange(slot.startMarker, slot.endMarker, beforeRef);
-          beforeRef = slot.startMarker;
-        }
-
-        for (let index = 0; index < childSlots.length; index++) {
-          const slot = childSlots[index];
-          if (slot !== undefined && !usedIndices.has(index)) yield* cleanupChildSlot(slot);
-        }
-
-        childSlots = nextSlots;
         return true;
-      }),
+      }
+
+      if (childrenAnchor === null) return false;
+
+      const keyedIndices = new Map<string | number, number>();
+      childSlots.forEach((slot, index) => {
+        if (slot.key !== null && !keyedIndices.has(slot.key)) keyedIndices.set(slot.key, index);
+      });
+
+      const usedIndices = new Set<number>();
+      const nextSlots: Array<ChildSlot> = [];
+
+      const tryReuse = Effect.fnUntraced(function* (
+        nextChild: Element,
+        slotIndex: number | undefined,
+      ) {
+        if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
+        const slot = childSlots[slotIndex];
+        if (slot === undefined || slot.result.reconcile === undefined) return false;
+        const outcome = yield* renderTransaction.reconcile({
+          previous: slot.result,
+          nextElement: nextChild,
+          nextContext: resolvedNextContext,
+          context: renderContext,
+        });
+        if (!Predicate.isTagged(outcome, "Reconciled")) return false;
+        usedIndices.add(slotIndex);
+        nextSlots.push(slot);
+        return true;
+      });
+
+      for (let index = 0; index < resolvedNextElement.children.length; index++) {
+        const nextChild = resolvedNextElement.children[index];
+        if (nextChild === undefined) continue;
+
+        const nextKey = getKey(nextChild);
+        const reused =
+          nextKey !== null
+            ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
+            : yield* tryReuse(nextChild, index);
+        if (!reused) nextSlots.push(yield* renderChildSlot(nextChild, resolvedNextContext));
+      }
+
+      let beforeRef: Node = childrenAnchor;
+      for (let index = nextSlots.length - 1; index >= 0; index--) {
+        const slot = nextSlots[index];
+        if (slot === undefined) continue;
+        moveRange(slot.startMarker, slot.endMarker, beforeRef);
+        beforeRef = slot.startMarker;
+      }
+
+      for (let index = 0; index < childSlots.length; index++) {
+        const slot = childSlots[index];
+        if (slot !== undefined && !usedIndices.has(index)) yield* cleanupChildSlot(slot);
+      }
+
+      childSlots = nextSlots;
+      return true;
+    }),
   } satisfies RenderResult;
 });

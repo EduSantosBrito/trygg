@@ -7,6 +7,8 @@
  */
 
 import { Resvg } from "@resvg/resvg-js";
+import { Effect, ManagedRuntime } from "effect";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import sharp from "sharp";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -22,6 +24,23 @@ const LEGACY_UA =
 
 const FONT_FAMILIES = ["Space Grotesk", "IBM Plex Sans", "IBM Plex Mono"];
 const DEFAULT_FONT_FAMILY = "IBM Plex Sans";
+
+const fetchText = Effect.fn("buildReadmeHeader.fetchText")(function* (url, options) {
+  const response = yield* HttpClient.get(url, options);
+  return yield* response.text;
+});
+
+const fetchBytesIfOk = Effect.fn("buildReadmeHeader.fetchBytesIfOk")(function* (url) {
+  const response = yield* HttpClient.get(url);
+  if (response.status < 200 || response.status >= 300) {
+    return undefined;
+  }
+  const buffer = yield* response.arrayBuffer;
+  return Buffer.from(buffer);
+});
+
+const httpRuntime = ManagedRuntime.make(FetchHttpClient.layer);
+const runHttp = (effect) => httpRuntime.runPromise(effect);
 
 const TARGET = {
   svg: join(ROOT, ".github/assets/readme-header.svg"),
@@ -51,14 +70,13 @@ async function ensureFontCache() {
   const downloads = [];
   for (const [family, weight] of perWeightRequests) {
     const familyUrl = `https://fonts.googleapis.com/css2?family=${family}:wght@${weight}&display=swap`;
-    const perFaceCss = await (
-      await fetch(familyUrl, { headers: { "User-Agent": LEGACY_UA } })
-    ).text();
+    const perFaceCss = await runHttp(
+      fetchText(familyUrl, { headers: { "User-Agent": LEGACY_UA } }),
+    );
     const url = perFaceCss.match(/url\(([^)]+)\)/)?.[1];
     if (!url) continue;
-    const fontResp = await fetch(url);
-    if (!fontResp.ok) continue;
-    const buf = Buffer.from(await fontResp.arrayBuffer());
+    const buf = await runHttp(fetchBytesIfOk(url));
+    if (buf === undefined) continue;
     const displayFamily = family.replace(/\+/g, " ");
     const fileName = `${displayFamily.replace(/\s+/g, "-")}-${weight}.ttf`;
     const filePath = join(FONTS_DIR, fileName);
@@ -68,7 +86,7 @@ async function ensureFontCache() {
   }
 
   if (downloads.length === 0) {
-    throw new Error("No fonts downloaded — Google Fonts may have changed.");
+    await Effect.runPromise(Effect.fail("No fonts downloaded — Google Fonts may have changed."));
   }
   return downloads;
 }
@@ -121,7 +139,16 @@ async function main() {
   console.log("\n◆ Done.");
 }
 
-main().catch((err) => {
-  console.error("\n✗ Build failed:", err);
-  process.exitCode = 1;
-});
+await Effect.runPromise(
+  Effect.tryPromise({
+    try: main,
+    catch: (error) => error,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        console.error("\n✗ Build failed:", error);
+        process.exitCode = 1;
+      }),
+    ),
+  ),
+);

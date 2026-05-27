@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Deferred, Effect, Layer } from "effect";
+import { Deferred, Duration, Effect, Layer } from "effect";
 import { Element, text } from "../primitives/element.js";
 import { browserLayer } from "../primitives/renderer.js";
 import { renderElement } from "../testing/index.js";
@@ -34,6 +34,13 @@ interface ContractViolation {
   readonly firstDivergenceSeq: number;
   readonly expected: string;
   readonly actual: string;
+}
+
+interface ContractDefinition {
+  readonly name: string;
+  readonly suspectedFiles: ReadonlyArray<string>;
+  readonly laws: ReadonlyArray<ContractLaw>;
+  readonly scenarios: ReadonlyArray<ContractScenarioMetadata>;
 }
 
 interface ContractRunOptions {
@@ -95,7 +102,7 @@ const unchangedQueryMetadata: ContractScenarioMetadata = {
   ],
 };
 
-export const contract = {
+export const contract: ContractDefinition = {
   name: "navigation-latest-route-wins",
   suspectedFiles: [
     "packages/core/src/router/outlet.ts",
@@ -105,7 +112,7 @@ export const contract = {
   ],
   laws: [latestRouteLaw, unchangedQueryLaw],
   scenarios: [stalePreviousRouteMetadata, unchangedQueryMetadata],
-} as const;
+};
 
 const testLayerAt = (path: string) => Layer.merge(browserLayer, Router.testLayer(path));
 
@@ -120,8 +127,7 @@ const routeElement = (testId: string, content: string): Element =>
 const successfulRoute = (testId: string, content: string): RouteComponent =>
   Effect.succeed(routeElement(testId, content));
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
 const visibleLeaf = (container: HTMLElement): "dashboard" | "users" | "loading" | "none" => {
   if (container.querySelector("[data-testid='dashboard']") !== null) return "dashboard";

@@ -1,23 +1,46 @@
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkDocsContract } from "./docs-contract.js";
+import {
+  DocsContractConfigError,
+  DocsContractFileError,
+  checkDocsContract,
+} from "./docs-contract.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../");
 const jsonOnly = process.argv.includes("--json");
-const touchedFiles = (process.env.TRYGG_DOCS_TOUCHED_FILES ?? "")
-  .split("\n")
-  .map((value) => value.trim())
-  .filter((value) => value.length > 0);
+const formatError = (
+  error: Config.ConfigError | DocsContractConfigError | DocsContractFileError,
+): string => {
+  if (error instanceof DocsContractConfigError) {
+    return `Docs contract config error: ${error.detail}`;
+  }
+  if (error instanceof DocsContractFileError) {
+    return `Docs contract file error at ${error.path}: ${error.detail}`;
+  }
+  return "Docs contract config error: unable to read TRYGG_DOCS_TOUCHED_FILES";
+};
 
-const program = checkDocsContract({ packageRoot, touchedFiles });
+const program = Effect.gen(function* () {
+  const touchedFiles = yield* Config.string("TRYGG_DOCS_TOUCHED_FILES").pipe(
+    Config.orElse(() => Config.succeed("")),
+    Config.map((value) =>
+      value
+        .split("\n")
+        .map((file) => file.trim())
+        .filter((file) => file.length > 0),
+    ),
+  );
+
+  return yield* checkDocsContract({ packageRoot, touchedFiles });
+});
 
 const exitCode = await Effect.runPromise(
   program.pipe(
     Effect.match({
       onFailure: (error) => {
-        process.stderr.write(`${error.message}\n`);
+        process.stderr.write(`${formatError(error)}\n`);
         return 1;
       },
       onSuccess: (report) => {

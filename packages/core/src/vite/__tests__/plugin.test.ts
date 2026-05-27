@@ -15,10 +15,12 @@ import {
   FileSystem,
   Layer,
   Logger,
+  Predicate,
   Schema,
   Scope,
 } from "effect";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import type { PlatformError } from "effect/PlatformError";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
@@ -57,34 +59,37 @@ import {
   type ParsedRoute,
   type ViteServerSource,
 } from "../plugin.js";
+import { transformTryggJsxForRequirements } from "../jsx-requirement-transform.js";
 
 /**
  * Create a scoped temporary directory with route files.
  * Cleanup is handled by Effect's Scope (finalizer removes dir on scope close).
  */
-const makeTempDir = (
+const makeTempDir: (
   files: Record<string, string>,
-): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const dir = yield* fs
-      .makeTempDirectory({ directory: process.cwd(), prefix: "trygg-test-" })
-      .pipe(Effect.orDie);
-    yield* Effect.addFinalizer(() => fs.remove(dir, { recursive: true }).pipe(Effect.ignore));
-    yield* Effect.forEach(Object.entries(files), ([filePath, content]) =>
-      Effect.gen(function* () {
-        const fullPath = path.join(dir, filePath);
-        yield* fs.makeDirectory(path.dirname(fullPath), { recursive: true }).pipe(
-          Effect.catchTag("PlatformError", (e) =>
-            e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
-          ),
-          Effect.orDie,
-        );
-        yield* fs.writeFileString(fullPath, content).pipe(Effect.orDie);
-      }),
-    );
-    return dir;
+) => Effect.Effect<string, PlatformError, FileSystem.FileSystem | Scope.Scope> = Effect.fn(
+  "PluginTest.makeTempDir",
+)(function* (files: Record<string, string>) {
+  const fs = yield* FileSystem.FileSystem;
+  const dir = yield* fs.makeTempDirectoryScoped({
+    directory: process.cwd(),
+    prefix: "trygg-test-",
   });
+  yield* Effect.forEach(Object.entries(files), ([filePath, content]) =>
+    Effect.gen(function* () {
+      const fullPath = path.join(dir, filePath);
+      yield* fs
+        .makeDirectory(path.dirname(fullPath), { recursive: true })
+        .pipe(
+          Effect.catchTag("PlatformError", (e) =>
+            Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(e),
+          ),
+        );
+      yield* fs.writeFileString(fullPath, content);
+    }),
+  );
+  return dir;
+});
 
 const STATIC_API_WARNING =
   '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".';
@@ -93,6 +98,18 @@ const PluginFilesTestLayer = makePluginFilesLayer().pipe(Layer.provideMerge(Node
 
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
+
+class BrowserScriptParseError extends Schema.TaggedErrorClass<BrowserScriptParseError>()(
+  "BrowserScriptParseError",
+  { cause: Schema.Unknown },
+) {}
+
+const logTestCleanupError =
+  (operation: string) =>
+  (error: unknown): Effect.Effect<void> =>
+    Effect.logDebug(
+      `[test] cleanup failed during ${operation}: ${Cause.pretty(Cause.fail(error))}`,
+    );
 
 interface HandlerFactoryBoundaryModule {
   readonly makeApiLayer: (
@@ -114,6 +131,40 @@ interface HttpResult {
   readonly body: string;
 }
 
+const requestHttp = (options: {
+  readonly port: number;
+  readonly path: string;
+  readonly headers?: Record<string, string>;
+}): Effect.Effect<HttpResult> =>
+  Effect.promise(
+    () =>
+      new Promise((resolve, reject) => {
+        const req = httpRequest(
+          {
+            headers: options.headers,
+            hostname: "127.0.0.1",
+            path: options.path,
+            port: options.port,
+          },
+          (res) => {
+            const chunks: Array<string> = [];
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => chunks.push(chunk));
+            res.on("end", () => {
+              const contentType = res.headers["content-type"];
+              resolve({
+                body: chunks.join(""),
+                bridgeHeader: Array.isArray(contentType) ? contentType.join(", ") : contentType,
+                status: res.statusCode ?? 0,
+              });
+            });
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      }),
+  );
+
 interface CloudflareStaticWorkerModule {
   readonly default: {
     readonly fetch: (
@@ -130,6 +181,10 @@ const CloudflareStaticWorkerModuleSchema = Schema.Struct({
         typeof u === "function",
     ),
   }),
+});
+
+const DevPlatformLegacyConstructorSchema = Schema.Struct({
+  createDevApi: Schema.optional(Schema.Unknown),
 });
 
 const HandlerFactoryBoundaryModuleSchema = Schema.Struct({
@@ -153,60 +208,150 @@ const HandlerFactoryBoundaryModuleSchema = Schema.Struct({
   ),
 });
 
-const loadHandlerFactoryModule = (): Effect.Effect<
-  HandlerFactoryBoundaryModule,
-  Error,
-  FileSystem.FileSystem | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const root = yield* makeTempDir({
-      "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
-      "app/routes.ts": "export const routes = { manifest: [] }",
-    });
-    const server = yield* Effect.acquireRelease(
-      Effect.promise(() =>
-        createViteServer({
-          root,
-          configFile: false,
-          plugins: [trygg({ platform: "node", output: "server" })],
+const BuildStartHookSchema = Schema.declare(
+  (u: unknown): u is () => Promise<void> => typeof u === "function",
+);
+
+const ConfigResolvedHookSchema = Schema.declare(
+  (
+    u: unknown,
+  ): u is (config: { readonly root: string; readonly command: string }) => Promise<void> =>
+    typeof u === "function",
+);
+
+const CloseBundleHookSchema = Schema.declare(
+  (u: unknown): u is () => Promise<void> => typeof u === "function",
+);
+
+const ResolveIdHookSchema = Schema.declare(
+  (u: unknown): u is (id: string) => string | null => typeof u === "function",
+);
+
+const LoadHookSchema = Schema.declare(
+  (u: unknown): u is (id: string) => Promise<string | null> => typeof u === "function",
+);
+
+const TransformHookSchema = Schema.declare(
+  (u: unknown): u is (code: string, id: string) => Promise<string | null> =>
+    typeof u === "function",
+);
+
+const ConfigHookSchema = Schema.declare(
+  (u: unknown): u is (...args: ReadonlyArray<unknown>) => unknown => typeof u === "function",
+);
+
+const EsbuildConfigSchema = Schema.Struct({
+  esbuild: Schema.Struct({
+    jsx: Schema.String,
+    jsxImportSource: Schema.String,
+  }),
+});
+
+const OptimizeDepsConfigSchema = Schema.Struct({
+  optimizeDeps: Schema.Struct({
+    esbuildOptions: Schema.Struct({
+      jsx: Schema.String,
+      jsxImportSource: Schema.String,
+    }),
+  }),
+});
+
+const BuildOnwarnConfigSchema = Schema.Struct({
+  build: Schema.Struct({
+    rollupOptions: Schema.Struct({
+      onwarn: Schema.declare(
+        (u: unknown): u is (warning: { readonly message?: string }, handler: () => void) => void =>
+          typeof u === "function",
+      ),
+    }),
+  }),
+});
+
+const ConfigEnvironmentHookSchema = Schema.declare(
+  (
+    u: unknown,
+  ): u is (name: string, config: unknown, env: { readonly command: string }) => unknown =>
+    typeof u === "function",
+);
+
+const BuildConfigSchema = Schema.Struct({
+  build: Schema.optional(
+    Schema.Struct({
+      rollupOptions: Schema.optional(
+        Schema.Struct({
+          input: Schema.optional(Schema.Unknown),
         }),
       ),
-      (viteServer) => Effect.promise(() => viteServer.close()).pipe(Effect.ignore),
-    );
-    const rawModule = yield* Effect.promise(() =>
-      server.ssrLoadModule("virtual:trygg/handler-factory"),
-    );
-    return yield* Schema.decodeUnknownEffect(HandlerFactoryBoundaryModuleSchema)(rawModule);
+    }),
+  ),
+});
+
+const decodeCloudflareStaticWorkerModule = Schema.decodeUnknownSync(
+  CloudflareStaticWorkerModuleSchema,
+);
+const decodeDevPlatformLegacyConstructor = Schema.decodeUnknownSync(
+  DevPlatformLegacyConstructorSchema,
+);
+const decodeHandlerFactoryBoundaryModule = Schema.decodeUnknownEffect(
+  HandlerFactoryBoundaryModuleSchema,
+);
+const decodeBuildStartHook = Schema.decodeUnknownEffect(BuildStartHookSchema);
+const decodeBuildStartHookSync = Schema.decodeUnknownSync(BuildStartHookSchema);
+const decodeConfigResolvedHook = Schema.decodeUnknownEffect(ConfigResolvedHookSchema);
+const decodeCloseBundleHook = Schema.decodeUnknownEffect(CloseBundleHookSchema);
+const decodeResolveIdHook = Schema.decodeUnknownEffect(ResolveIdHookSchema);
+const decodeLoadHook = Schema.decodeUnknownEffect(LoadHookSchema);
+const decodeTransformHook = Schema.decodeUnknownEffect(TransformHookSchema);
+const decodeConfigHook = Schema.decodeUnknownSync(ConfigHookSchema);
+const decodeEsbuildConfig = Schema.decodeUnknownSync(EsbuildConfigSchema);
+const decodeOptimizeDepsConfig = Schema.decodeUnknownSync(OptimizeDepsConfigSchema);
+const decodeBuildOnwarnConfig = Schema.decodeUnknownSync(BuildOnwarnConfigSchema);
+const decodeConfigEnvironmentHook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema);
+const decodeBuildConfig = Schema.decodeUnknownSync(BuildConfigSchema);
+
+const assertPromiseRejectsWith: (
+  promiseFactory: () => Promise<unknown>,
+  expected: string,
+) => Effect.Effect<void> = Effect.fn("PluginTest.assertPromiseRejectsWith")(function* (
+  promiseFactory: () => Promise<unknown>,
+  expected: string,
+) {
+  const exit = yield* Effect.tryPromise(promiseFactory).pipe(Effect.exit);
+  assert.isTrue(Exit.isFailure(exit));
+  if (Exit.isFailure(exit)) {
+    assert.include(Cause.pretty(exit.cause), expected);
+  }
+});
+
+const loadHandlerFactoryModule = Effect.gen(function* () {
+  const root = yield* makeTempDir({
+    "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+    "app/routes.ts": "export const routes = { manifest: [] }",
   });
+  const server = yield* Effect.acquireRelease(
+    Effect.promise(() =>
+      createViteServer({
+        root,
+        configFile: false,
+        plugins: [trygg({ platform: "node", output: "server" })],
+      }),
+    ),
+    (viteServer) =>
+      Effect.tryPromise(() => viteServer.close()).pipe(
+        Effect.catchTag("UnknownError", logTestCleanupError("handler factory vite close")),
+      ),
+  );
+  const rawModule = yield* Effect.promise(() =>
+    server.ssrLoadModule("virtual:trygg/handler-factory"),
+  );
+  return yield* decodeHandlerFactoryBoundaryModule(rawModule);
+}).pipe(Effect.withSpan("PluginTest.loadHandlerFactoryModule"));
 
 describe("Vite Plugin", () => {
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: Plugin initialization
   // ─────────────────────────────────────────────────────────────────────────────
   describe("trygg function", () => {
-    const BuildStartHookSchema = Schema.declare(
-      (u: unknown): u is () => Promise<void> => typeof u === "function",
-    );
-
-    const ConfigResolvedHookSchema = Schema.declare(
-      (
-        u: unknown,
-      ): u is (config: { readonly root: string; readonly command: string }) => Promise<void> =>
-        typeof u === "function",
-    );
-
-    const CloseBundleHookSchema = Schema.declare(
-      (u: unknown): u is () => Promise<void> => typeof u === "function",
-    );
-
-    const ResolveIdHookSchema = Schema.declare(
-      (u: unknown): u is (id: string) => string | null => typeof u === "function",
-    );
-
-    const LoadHookSchema = Schema.declare(
-      (u: unknown): u is (id: string) => Promise<string | null> => typeof u === "function",
-    );
-
     it("should return a valid Vite plugin", () => {
       const plugin = trygg();
 
@@ -216,23 +361,56 @@ describe("Vite Plugin", () => {
       assert.isDefined(plugin.config);
     });
 
-    it("should buildStart do not observe partial bootstrap while configResolved has not run", async () => {
-      // Test: should buildStart do not observe partial bootstrap while configResolved has not run
-      // Scope: guards the config-dependent hook boundary so plugin work cannot read uninitialized state.
-      // Assertion: buildStart rejects with PluginBootstrapError instead of crashing with an untyped error.
-      const plugin = trygg();
-      const buildStart = Schema.decodeUnknownSync(BuildStartHookSchema)(plugin.buildStart);
+    scoped("should transform TSX modules through JSX requirement lowering", () =>
+      Effect.gen(function* () {
+        // Test: should transform TSX modules through JSX requirement lowering
+        // Scope: verifies the production plugin hook owns the hidden JSX lowering path.
+        // Assertion: user-authored JSX becomes requirement-preserving runtime calls after config resolution.
+        const root = yield* makeTempDir({
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const transform = yield* decodeTransformHook(plugin.transform);
 
-      try {
-        await buildStart();
-        throw new Error("Expected buildStart to fail before configResolved");
-      } catch (error) {
-        if (!(error instanceof PluginBootstrapError)) {
-          throw error;
-        }
-        assert.strictEqual(error.reason, "NotReady");
-      }
-    });
+        yield* Effect.promise(() => configResolved({ root, command: "serve" }));
+        const output = yield* Effect.promise(() =>
+          transform(
+            `const Child = () => <span />\nexport const App = () => <div><Child /><Child /></div>`,
+            path.join(root, "app", "page.tsx"),
+          ),
+        );
+
+        assert.isString(output);
+        assert.include(output, 'from "trygg/jsx-runtime"');
+        assert.include(output, "__tryggJsx(Child, null)");
+        assert.include(output, '__tryggJsxs("div"');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    it.effect(
+      "should buildStart do not observe partial bootstrap while configResolved has not run",
+      () =>
+        Effect.gen(function* () {
+          // Test: should buildStart do not observe partial bootstrap while configResolved has not run
+          // Scope: guards the config-dependent hook boundary so plugin work cannot read uninitialized state.
+          // Assertion: buildStart rejects with PluginBootstrapError instead of crashing with an untyped error.
+          const plugin = trygg();
+          const buildStart = decodeBuildStartHookSync(plugin.buildStart);
+
+          const exit = yield* Effect.tryPromise(() => buildStart()).pipe(Effect.exit);
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            const error = Cause.squash(exit.cause);
+            if (!(error instanceof PluginBootstrapError)) {
+              return assert.fail(
+                `Expected PluginBootstrapError but got ${Cause.pretty(exit.cause)}`,
+              );
+            }
+            assert.strictEqual(error.reason, "NotReady");
+          }
+        }),
+    );
 
     scoped("should buildStart generate build files after configResolved", () =>
       Effect.gen(function* () {
@@ -253,12 +431,8 @@ export const routes = { manifest: [] }
 `,
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-          plugin.buildStart,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -294,12 +468,8 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-          plugin.buildStart,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -473,10 +643,8 @@ export const routes = { manifest: [] }
           output: "static",
           platform: "cloudflare",
         });
-        yield* fs.makeDirectory(path.join(root, "dist"), { recursive: true }).pipe(Effect.orDie);
-        yield* fs
-          .writeFileString(path.join(root, "dist", "index.html"), generateHtmlTemplate())
-          .pipe(Effect.orDie);
+        yield* fs.makeDirectory(path.join(root, "dist"), { recursive: true });
+        yield* fs.writeFileString(path.join(root, "dist", "index.html"), generateHtmlTemplate());
 
         const workerEntryExists = yield* fs.exists(path.join(generatedDir, "worker-entry.js"));
         const oldSsrEntryExists = yield* fs.exists(path.join(generatedDir, "ssr-entry.js"));
@@ -569,15 +737,16 @@ export const routes = { manifest: [] }
           }),
         );
 
-        if (Exit.isSuccess(exit)) {
-          throw new Error("Expected Cloudflare static API build to fail");
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause);
+          if (!(error instanceof PluginValidationError)) {
+            return assert.fail(
+              `Expected PluginValidationError but got ${Cause.pretty(exit.cause)}`,
+            );
+          }
+          assert.include(error.description, 'output: "server"');
         }
-
-        const error = Cause.squash(exit.cause);
-        if (!(error instanceof PluginValidationError)) {
-          throw new Error(`Expected PluginValidationError but got ${error}`);
-        }
-        assert.include(error.message, 'output: "server"');
       }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
@@ -610,15 +779,16 @@ export const routes = { manifest: [] }
           }),
         );
 
-        if (Exit.isSuccess(exit)) {
-          throw new Error("Expected Cloudflare server build to fail");
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause);
+          if (!(error instanceof PluginValidationError)) {
+            return assert.fail(
+              `Expected PluginValidationError but got ${Cause.pretty(exit.cause)}`,
+            );
+          }
+          assert.include(error.description, "Cloudflare server output is not supported");
         }
-
-        const error = Cause.squash(exit.cause);
-        if (!(error instanceof PluginValidationError)) {
-          throw new Error(`Expected PluginValidationError but got ${error}`);
-        }
-        assert.include(error.message, "Cloudflare server output is not supported");
       }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
     );
 
@@ -676,21 +846,15 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg({ platform: "node", output: "server" });
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-          plugin.buildStart,
-        );
-        const closeBundle = yield* Schema.decodeUnknownEffect(CloseBundleHookSchema)(
-          plugin.closeBundle,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+        const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
         const clientFile = path.join(root, "dist", "client", "client.txt");
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
-        yield* fs.makeDirectory(path.dirname(clientFile), { recursive: true }).pipe(Effect.orDie);
-        yield* fs.writeFileString(clientFile, "client artifact").pipe(Effect.orDie);
+        yield* fs.makeDirectory(path.dirname(clientFile), { recursive: true });
+        yield* fs.writeFileString(clientFile, "client artifact");
 
         yield* Effect.promise(() => closeBundle());
 
@@ -716,15 +880,9 @@ export const routes = { manifest: [] }
             "app/api.ts": "export default {}",
           });
           const plugin = trygg({ platform: "node", output: "server" });
-          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-            plugin.configResolved,
-          );
-          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-            plugin.buildStart,
-          );
-          const closeBundle = yield* Schema.decodeUnknownEffect(CloseBundleHookSchema)(
-            plugin.closeBundle,
-          );
+          const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+          const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+          const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -759,22 +917,25 @@ export const routes = { manifest: [] }
               plugins: [trygg()],
             }),
           ),
-          (viteServer) => Effect.promise(() => viteServer.close()).pipe(Effect.ignore),
+          (viteServer) =>
+            Effect.tryPromise(() => viteServer.close()).pipe(
+              Effect.catchTag("UnknownError", logTestCleanupError("dev server close")),
+            ),
         );
 
         yield* Effect.promise(() => server.listen(0));
         const address = server.httpServer?.address() ?? null;
         if (!isAddressInfo(address)) {
-          throw new Error("Expected Vite dev server to listen on a TCP port");
+          return assert.fail("Expected Vite dev server to listen on a TCP port");
         }
 
         const entry = yield* fs.readFileString(path.join(root, ".trygg", "entry.tsx"));
-        const response = yield* Effect.promise(() =>
-          fetch(`http://127.0.0.1:${address.port}/dashboard?tab=dev`, {
-            headers: { accept: "text/html" },
-          }),
-        );
-        const html = yield* Effect.promise(() => response.text());
+        const response = yield* requestHttp({
+          headers: { accept: "text/html" },
+          path: "/dashboard?tab=dev",
+          port: address.port,
+        });
+        const html = response.body;
 
         assert.strictEqual(response.status, 200);
         assert.include(entry, 'import { routes } from "../app/routes"');
@@ -830,7 +991,7 @@ export const routes = { manifest: [] }
         yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
         const middleware = mounted[0];
         if (middleware === undefined) {
-          return yield* Effect.die(new Error("Expected HTML fallback middleware to mount"));
+          return assert.fail("Expected HTML fallback middleware to mount");
         }
 
         const server = yield* Effect.acquireRelease(
@@ -850,34 +1011,13 @@ export const routes = { manifest: [] }
         );
         const address = server.address();
         if (!isAddressInfo(address)) {
-          return yield* Effect.die(new Error("Expected HTTP server to listen on a TCP port"));
+          return assert.fail("Expected HTTP server to listen on a TCP port");
         }
 
-        const response = yield* Effect.promise<HttpResult>(
-          () =>
-            new Promise((resolve, reject) => {
-              const req = httpRequest(
-                { hostname: "127.0.0.1", port: address.port, path: "/dashboard?tab=dev" },
-                (res) => {
-                  const chunks: Array<string> = [];
-                  res.setEncoding("utf8");
-                  res.on("data", (chunk: string) => chunks.push(chunk));
-                  res.on("end", () => {
-                    const contentType = res.headers["content-type"];
-                    resolve({
-                      status: res.statusCode ?? 0,
-                      bridgeHeader: Array.isArray(contentType)
-                        ? contentType.join(", ")
-                        : contentType,
-                      body: chunks.join(""),
-                    });
-                  });
-                },
-              );
-              req.on("error", reject);
-              req.end();
-            }),
-        );
+        const response = yield* requestHttp({
+          path: "/dashboard?tab=dev",
+          port: address.port,
+        });
 
         assert.strictEqual(response.status, 200);
         assert.strictEqual(response.bridgeHeader, "text/html");
@@ -907,7 +1047,7 @@ export const routes = { manifest: [] }
         yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
         const middleware = mounted[0];
         if (middleware === undefined) {
-          return yield* Effect.die(new Error("Expected HTML fallback middleware to mount"));
+          return assert.fail("Expected HTML fallback middleware to mount");
         }
 
         const server = yield* Effect.acquireRelease(
@@ -927,7 +1067,7 @@ export const routes = { manifest: [] }
         );
         const address = server.address();
         if (!isAddressInfo(address)) {
-          return yield* Effect.die(new Error("Expected HTTP server to listen on a TCP port"));
+          return assert.fail("Expected HTTP server to listen on a TCP port");
         }
 
         const requestStatus = (pathName: string) =>
@@ -1033,19 +1173,19 @@ export const routes = { manifest: [] }
         // Scope: validates the SSR-loaded virtual module contract at the plugin load boundary.
         // Assertion: generated module exports make/from/to/get names and omits superseded create/detect names.
         const plugin = trygg({ platform: "node", output: "server" });
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
         const resolvedId = resolveId("virtual:trygg/handler-factory");
         if (resolvedId === null) {
-          return yield* Effect.die(new Error("Expected handler factory virtual module to resolve"));
+          return assert.fail("Expected handler factory virtual module to resolve");
         }
 
         const code = yield* Effect.promise(() => load(resolvedId));
         if (code === null) {
-          return yield* Effect.die(new Error("Expected handler factory virtual module to load"));
+          return assert.fail("Expected handler factory virtual module to load");
         }
 
-        const mod = yield* loadHandlerFactoryModule();
+        const mod = yield* loadHandlerFactoryModule;
         assert.isFunction(mod.makeApiLayer);
         assert.isFunction(mod.makeWebHandler);
         assert.isFunction(mod.makeNodeHandler);
@@ -1063,12 +1203,12 @@ export const routes = { manifest: [] }
         // Test: should bridge node request and response at handler factory boundary
         // Scope: covers generated Node factory helpers where IncomingMessage/ServerResponse meet web Request/Response.
         // Assertion: body, headers, URL, status, and response headers round-trip through fromNodeRequest/toNodeResponse.
-        const mod = yield* loadHandlerFactoryModule();
+        const mod = yield* loadHandlerFactoryModule;
 
         const server = yield* Effect.acquireRelease(
           Effect.sync(() =>
             createHttpServer((req, res) => {
-              void mod
+              mod
                 .fromNodeRequest(req)
                 .then(async (request) => {
                   const body = await request.text();
@@ -1100,7 +1240,7 @@ export const routes = { manifest: [] }
         );
         const address = server.address();
         if (!isAddressInfo(address)) {
-          return yield* Effect.die(new Error("Expected test HTTP server to listen on a TCP port"));
+          return assert.fail("Expected test HTTP server to listen on a TCP port");
         }
 
         const response = yield* Effect.promise<HttpResult>(
@@ -1154,25 +1294,18 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
         assert.strictEqual(resolved, "\0trygg/api");
 
-        const error = yield* Effect.promise(() =>
-          load(resolved ?? "trygg/api").then(
-            () => new Error("Expected trygg/api import to fail"),
-            (cause) => cause,
-          ),
+        yield* assertPromiseRejectsWith(
+          () => load(resolved ?? "trygg/api"),
+          "app/api.ts must export Api",
         );
-
-        assert.instanceOf(error, Error);
-        assert.include(error.message, "app/api.ts must export Api");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -1187,25 +1320,18 @@ export const routes = { manifest: [] }
           "app/api.ts": "const Api = {}\nexport default {}",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
         assert.strictEqual(resolved, "\0trygg/api");
 
-        const error = yield* Effect.promise(() =>
-          load(resolved ?? "trygg/api").then(
-            () => new Error("Expected trygg/api import to fail"),
-            (cause) => cause,
-          ),
+        yield* assertPromiseRejectsWith(
+          () => load(resolved ?? "trygg/api"),
+          "app/api.ts must export Api",
         );
-
-        assert.instanceOf(error, Error);
-        assert.include(error.message, "app/api.ts must export Api");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -1220,25 +1346,18 @@ export const routes = { manifest: [] }
           "app/api.ts": "export default {}",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
         assert.strictEqual(resolved, "\0trygg/api");
 
-        const error = yield* Effect.promise(() =>
-          load(resolved ?? "trygg/api").then(
-            () => new Error("Expected trygg/api import to fail"),
-            (cause) => cause,
-          ),
+        yield* assertPromiseRejectsWith(
+          () => load(resolved ?? "trygg/api"),
+          "app/api.ts must export Api",
         );
-
-        assert.instanceOf(error, Error);
-        assert.include(error.message, "app/api.ts must export Api");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -1252,9 +1371,7 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
       }).pipe(Effect.provide(NodeFileSystemLayer)),
@@ -1272,17 +1389,14 @@ export const routes = { manifest: [] }
           "app/api.ts": "export const Api = {}",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-          plugin.buildStart,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
-        yield* fs.makeDirectory(path.join(root, ".trygg"), { recursive: true }).pipe(Effect.orDie);
-        yield* fs
-          .writeFileString(path.join(root, ".trygg", "api-types.ts"), "// stale legacy file")
-          .pipe(Effect.orDie);
+        yield* fs.makeDirectory(path.join(root, ".trygg"), { recursive: true });
+        yield* fs.writeFileString(
+          path.join(root, ".trygg", "api-types.ts"),
+          "// stale legacy file",
+        );
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -1312,12 +1426,8 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-          plugin.buildStart,
-        );
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
         yield* Effect.promise(() => configResolved({ root, command: "build" }));
         yield* Effect.promise(() => buildStart());
@@ -1341,12 +1451,8 @@ export const routes = { manifest: [] }
             "app/api.ts": "export default {}",
           });
           const plugin = trygg();
-          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-            plugin.configResolved,
-          );
-          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-            plugin.buildStart,
-          );
+          const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+          const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -1370,19 +1476,14 @@ export const routes = { manifest: [] }
             "app/api.ts": "export default {}",
           });
           // Pre-create a stale api.d.ts
-          yield* fs
-            .makeDirectory(path.join(root, ".trygg"), { recursive: true })
-            .pipe(Effect.orDie);
-          yield* fs
-            .writeFileString(path.join(root, ".trygg", "api.d.ts"), "// stale generated file")
-            .pipe(Effect.orDie);
+          yield* fs.makeDirectory(path.join(root, ".trygg"), { recursive: true });
+          yield* fs.writeFileString(
+            path.join(root, ".trygg", "api.d.ts"),
+            "// stale generated file",
+          );
           const plugin = trygg();
-          const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-            plugin.configResolved,
-          );
-          const buildStart = yield* Schema.decodeUnknownEffect(BuildStartHookSchema)(
-            plugin.buildStart,
-          );
+          const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+          const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
 
           yield* Effect.promise(() => configResolved({ root, command: "build" }));
           yield* Effect.promise(() => buildStart());
@@ -1403,21 +1504,19 @@ export const routes = { manifest: [] }
           "app/api.ts": "export const Api = {}",
         });
         const plugin = trygg({ platform: "node", output: "server" });
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolvedId = resolveId("trygg/api");
         if (resolvedId === null) {
-          return yield* Effect.die(new Error("Expected trygg/api virtual module to resolve"));
+          return assert.fail("Expected trygg/api virtual module to resolve");
         }
 
         const code = yield* Effect.promise(() => load(resolvedId));
         if (code === null) {
-          return yield* Effect.die(new Error("Expected trygg/api virtual module to load"));
+          return assert.fail("Expected trygg/api virtual module to load");
         }
 
         assert.include(
@@ -1440,25 +1539,18 @@ export const routes = { manifest: [] }
           "app/api.ts": 'const message = "export const Api"\nexport default {}',
         });
         const plugin = trygg();
-        const configResolved = yield* Schema.decodeUnknownEffect(ConfigResolvedHookSchema)(
-          plugin.configResolved,
-        );
-        const resolveId = yield* Schema.decodeUnknownEffect(ResolveIdHookSchema)(plugin.resolveId);
-        const load = yield* Schema.decodeUnknownEffect(LoadHookSchema)(plugin.load);
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const resolveId = yield* decodeResolveIdHook(plugin.resolveId);
+        const load = yield* decodeLoadHook(plugin.load);
 
         yield* Effect.promise(() => configResolved({ root, command: "serve" }));
         const resolved = resolveId("trygg/api");
         assert.strictEqual(resolved, "\0trygg/api");
 
-        const error = yield* Effect.promise(() =>
-          load(resolved ?? "trygg/api").then(
-            () => new Error("Expected trygg/api import to fail"),
-            (cause) => cause,
-          ),
+        yield* assertPromiseRejectsWith(
+          () => load(resolved ?? "trygg/api"),
+          "app/api.ts must export Api",
         );
-
-        assert.instanceOf(error, Error);
-        assert.include(error.message, "app/api.ts must export Api");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
   });
@@ -1636,18 +1728,18 @@ mountDocument(<App />, { manifest: routes.manifest })
     it("should render Cloudflare worker root fallback through ASSETS", async () => {
       // Test: should render Cloudflare worker root fallback through ASSETS
       // Scope: covers generated Worker request behavior without Cloudflare runtime internals.
-      // Assertion: / asks ASSETS first, then falls back to public /index.html shell.
+      // Assertion: / asks ASSETS and returns the served shell directly.
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const env = {
         ASSETS: {
           fetch: (request: Request) => {
             const url = new URL(request.url);
             requestedPaths.push(url.pathname);
-            if (url.pathname === "/index.html") {
+            if (url.pathname === "/") {
               return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
             }
             return Promise.resolve(new Response("missing", { status: 404 }));
@@ -1662,7 +1754,7 @@ mountDocument(<App />, { manifest: routes.manifest })
 
       assert.strictEqual(response.status, 200);
       assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/", "/index.html"]);
+      assert.deepStrictEqual(requestedPaths, ["/"]);
     });
 
     it("should render Cloudflare worker deep route fallback through ASSETS", async () => {
@@ -1672,14 +1764,14 @@ mountDocument(<App />, { manifest: routes.manifest })
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const env = {
         ASSETS: {
           fetch: (request: Request) => {
             const url = new URL(request.url);
             requestedPaths.push(url.pathname);
-            if (url.pathname === "/index.html") {
+            if (url.pathname === "/") {
               return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
             }
             return Promise.resolve(new Response("missing", { status: 404 }));
@@ -1696,7 +1788,7 @@ mountDocument(<App />, { manifest: routes.manifest })
 
       assert.strictEqual(response.status, 200);
       assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/index.html"]);
+      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/"]);
     });
 
     it("should render Cloudflare worker preserving successful ASSETS responses", async () => {
@@ -1706,7 +1798,7 @@ mountDocument(<App />, { manifest: routes.manifest })
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const assetResponse = new Response("asset", { status: 201, headers: { "X-Asset": "yes" } });
       const env = {
@@ -1736,7 +1828,7 @@ mountDocument(<App />, { manifest: routes.manifest })
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const env = {
         ASSETS: {
@@ -1763,7 +1855,7 @@ mountDocument(<App />, { manifest: routes.manifest })
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const env = {
         ASSETS: {
@@ -1800,14 +1892,14 @@ mountDocument(<App />, { manifest: routes.manifest })
       const source = renderCloudflareStaticWorkerEntryModule();
       const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
       const rawModule = await import(moduleUrl);
-      const worker = Schema.decodeUnknownSync(CloudflareStaticWorkerModuleSchema)(rawModule);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
       const requestedPaths: Array<string> = [];
       const env = {
         ASSETS: {
           fetch: (request: Request) => {
             const url = new URL(request.url);
             requestedPaths.push(url.pathname);
-            if (url.pathname === "/index.html") {
+            if (url.pathname === "/") {
               return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
             }
             return Promise.resolve(new Response("missing", { status: 404 }));
@@ -1824,7 +1916,47 @@ mountDocument(<App />, { manifest: routes.manifest })
 
       assert.strictEqual(response.status, 200);
       assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/assets", "/index.html"]);
+      assert.deepStrictEqual(requestedPaths, ["/assets", "/"]);
+    });
+
+    it("should render Cloudflare worker SPA fallback that never requests /index.html", async () => {
+      // Regression: with CF assets html_handling="auto-trailing-slash", a request
+      // for /index.html receives a 307 to /, which the worker would propagate as
+      // a top-level redirect and break every non-root document path. The fallback
+      // must target /, which CF resolves to the index shell without redirecting.
+      const source = renderCloudflareStaticWorkerEntryModule();
+      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+      const rawModule = await import(moduleUrl);
+      const worker = decodeCloudflareStaticWorkerModule(rawModule);
+      const requestedPaths: Array<string> = [];
+      const env = {
+        ASSETS: {
+          fetch: (request: Request) => {
+            const url = new URL(request.url);
+            requestedPaths.push(url.pathname);
+            if (url.pathname === "/index.html") {
+              return Promise.resolve(
+                new Response(null, { status: 307, headers: { Location: "/" } }),
+              );
+            }
+            if (url.pathname === "/") {
+              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+            }
+            return Promise.resolve(new Response("missing", { status: 404 }));
+          },
+        },
+      };
+
+      const response = await worker.default.fetch(
+        new Request("https://example.com/docs", {
+          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+        }),
+        env,
+      );
+
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(await response.text(), "<html>shell</html>");
+      assert.notInclude(requestedPaths, "/index.html");
     });
   });
 
@@ -1832,56 +1964,20 @@ mountDocument(<App />, { manifest: routes.manifest })
   // Scope: config hook
   // ─────────────────────────────────────────────────────────────────────────────
   describe("config hook", () => {
-    // Schema for validating the config hook is a callable function
-    const ConfigHookSchema = Schema.declare(
-      (u: unknown): u is (...args: ReadonlyArray<unknown>) => unknown => typeof u === "function",
-    );
-
-    // Schema for the expected esbuild config shape
-    const EsbuildConfigSchema = Schema.Struct({
-      esbuild: Schema.Struct({
-        jsx: Schema.String,
-        jsxImportSource: Schema.String,
-      }),
-    });
-
-    // Schema for the expected optimizeDeps config shape
-    const OptimizeDepsConfigSchema = Schema.Struct({
-      optimizeDeps: Schema.Struct({
-        esbuildOptions: Schema.Struct({
-          jsx: Schema.String,
-          jsxImportSource: Schema.String,
-        }),
-      }),
-    });
-
-    const BuildOnwarnConfigSchema = Schema.Struct({
-      build: Schema.Struct({
-        rollupOptions: Schema.Struct({
-          onwarn: Schema.declare(
-            (
-              u: unknown,
-            ): u is (warning: { readonly message?: string }, handler: () => void) => void =>
-              typeof u === "function",
-          ),
-        }),
-      }),
-    });
-
     it("should set esbuild jsx to automatic mode", () => {
       const plugin = trygg();
-      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      const configHook = decodeConfigHook(plugin.config);
       const result = configHook({}, { command: "serve", mode: "development" });
-      const config = Schema.decodeUnknownSync(EsbuildConfigSchema)(result);
+      const config = decodeEsbuildConfig(result);
       assert.strictEqual(config.esbuild.jsx, "automatic");
       assert.strictEqual(config.esbuild.jsxImportSource, "trygg");
     });
 
     it("should configure optimizeDeps for trygg", () => {
       const plugin = trygg();
-      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      const configHook = decodeConfigHook(plugin.config);
       const result = configHook({}, { command: "serve", mode: "development" });
-      const config = Schema.decodeUnknownSync(OptimizeDepsConfigSchema)(result);
+      const config = decodeOptimizeDepsConfig(result);
       assert.strictEqual(config.optimizeDeps.esbuildOptions.jsx, "automatic");
       assert.strictEqual(config.optimizeDeps.esbuildOptions.jsxImportSource, "trygg");
     });
@@ -1904,7 +2000,7 @@ mountDocument(<App />, { manifest: routes.manifest })
 
     it("should preserve user onwarn for non-trygg warnings", () => {
       const plugin = trygg();
-      const configHook = Schema.decodeUnknownSync(ConfigHookSchema)(plugin.config);
+      const configHook = decodeConfigHook(plugin.config);
       let userWarnings = 0;
       let defaultWarnings = 0;
       const result = configHook(
@@ -1920,7 +2016,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         },
         { command: "build", mode: "production" },
       );
-      const config = Schema.decodeUnknownSync(BuildOnwarnConfigSchema)(result);
+      const config = decodeBuildOnwarnConfig(result);
 
       config.build.rollupOptions.onwarn({ message: "user warning" }, () => {
         defaultWarnings += 1;
@@ -1935,52 +2031,33 @@ mountDocument(<App />, { manifest: routes.manifest })
   // Scope: configEnvironment hook
   // ─────────────────────────────────────────────────────────────────────────────
   describe("configEnvironment hook", () => {
-    const ConfigEnvironmentHookSchema = Schema.declare(
-      (
-        u: unknown,
-      ): u is (name: string, config: unknown, env: { readonly command: string }) => unknown =>
-        typeof u === "function",
-    );
-
-    const BuildConfigSchema = Schema.Struct({
-      build: Schema.optional(
-        Schema.Struct({
-          rollupOptions: Schema.optional(
-            Schema.Struct({
-              input: Schema.optional(Schema.Unknown),
-            }),
-          ),
-        }),
-      ),
-    });
-
     it("should set rollupOptions.input for client builds", () => {
       const plugin = trygg();
-      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const hook = decodeConfigEnvironmentHook(plugin.configEnvironment);
       const result = hook("client", {}, { command: "build" });
-      const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
+      const config = decodeBuildConfig(result);
       assert.deepStrictEqual(config.build?.rollupOptions?.input, { index: ".trygg/index.html" });
     });
 
     it("should not set rollupOptions.input for client in dev mode", () => {
       const plugin = trygg();
-      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const hook = decodeConfigEnvironmentHook(plugin.configEnvironment);
       const result = hook("client", {}, { command: "serve" });
       assert.strictEqual(result, undefined);
     });
 
     it("should not set SSR input for non-Cloudflare static builds", () => {
       const plugin = trygg();
-      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const hook = decodeConfigEnvironmentHook(plugin.configEnvironment);
       const result = hook("ssr", {}, { command: "build" });
       assert.strictEqual(result, undefined);
     });
 
     it("should set Cloudflare static SSR input to worker entry", () => {
       const plugin = trygg({ platform: "cloudflare", output: "static" });
-      const hook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema)(plugin.configEnvironment);
+      const hook = decodeConfigEnvironmentHook(plugin.configEnvironment);
       const result = hook("ssr", {}, { command: "build" });
-      const config = Schema.decodeUnknownSync(BuildConfigSchema)(result);
+      const config = decodeBuildConfig(result);
       assert.strictEqual(config.build?.rollupOptions?.input, ".trygg/worker-entry.js");
     });
   });
@@ -2048,16 +2125,17 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         const exit = yield* Effect.exit(validateApiPlatform(apiPath, "bun"));
 
-        if (Exit.isSuccess(exit)) {
-          throw new Error("Expected failure but got success");
-        }
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause);
+          if (!(error instanceof PluginValidationError)) {
+            return assert.fail(
+              `Expected PluginValidationError but got ${Cause.pretty(exit.cause)}`,
+            );
+          }
 
-        const error = Cause.squash(exit.cause);
-        if (!(error instanceof PluginValidationError)) {
-          throw new Error(`Expected PluginValidationError but got ${error}`);
+          assert.strictEqual(error.reason, "InvalidStructure");
         }
-
-        assert.strictEqual(error.reason, "InvalidStructure");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -2096,8 +2174,10 @@ mountDocument(<App />, { manifest: routes.manifest })
         // Assertion: makeApi is present and the old createDevApi constructor name is absent.
         const devPlatform = yield* DevPlatform;
 
+        const legacyConstructors = decodeDevPlatformLegacyConstructor(devPlatform);
+
         assert.isFunction(devPlatform.makeApi);
-        assert.strictEqual("createDevApi" in devPlatform, false);
+        assert.isUndefined(legacyConstructors.createDevApi);
       }).pipe(Effect.provide(NodeDevPlatformLive)),
     );
 
@@ -2152,7 +2232,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         );
         const address = server.address();
         if (!isAddressInfo(address)) {
-          throw new Error("Expected HTTP server to listen on a TCP port");
+          return assert.fail("Expected HTTP server to listen on a TCP port");
         }
 
         const status = yield* Effect.promise(
@@ -2196,8 +2276,10 @@ mountDocument(<App />, { manifest: routes.manifest })
         const state = yield* PluginApi.loadInitial({
           apiPath: "/app/api.ts",
           hasApi: Effect.succeed(false),
-          loadHandlerFactory: Effect.die(new Error("handler factory should not load")),
-          makeApi: () => Effect.die(new Error("api should not load")),
+          loadHandlerFactory: Effect.fail(
+            new ApiInitError({ message: "handler factory should not load" }),
+          ),
+          makeApi: () => Effect.fail(new ApiInitError({ message: "api should not load" })),
         });
 
         assert.strictEqual(state._tag, "Absent");
@@ -2258,8 +2340,8 @@ mountDocument(<App />, { manifest: routes.manifest })
               };
             }),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
 
         yield* state.handle.reload;
@@ -2332,8 +2414,8 @@ mountDocument(<App />, { manifest: routes.manifest })
             }),
           observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
 
         yield* state.handle.reload.pipe(Effect.exit);
@@ -2383,8 +2465,8 @@ mountDocument(<App />, { manifest: routes.manifest })
             }),
           observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
 
         const first = yield* state.handle.reload.pipe(Effect.forkChild);
@@ -2434,8 +2516,8 @@ mountDocument(<App />, { manifest: routes.manifest })
               dispose: Effect.void,
             }),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
         const api = makePluginApi(state.handle);
         const reload = yield* api
@@ -2460,7 +2542,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         );
         const address = server.address();
         if (!isAddressInfo(address)) {
-          return yield* Effect.die(new Error("Expected test HTTP server to listen on a TCP port"));
+          return assert.fail("Expected test HTTP server to listen on a TCP port");
         }
 
         const status = yield* Effect.promise(
@@ -2577,8 +2659,8 @@ mountDocument(<App />, { manifest: routes.manifest })
               dispose: Effect.void,
             }),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
         const ready = state;
 
@@ -2629,8 +2711,8 @@ mountDocument(<App />, { manifest: routes.manifest })
               dispose: Effect.void,
             }),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
         const ready = state;
 
@@ -2682,8 +2764,8 @@ mountDocument(<App />, { manifest: routes.manifest })
               dispose: Effect.void,
             }),
         });
-        if (state._tag !== "Ready") {
-          return yield* Effect.die(new Error("Expected ready API state"));
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
         }
         const ready = state;
 
@@ -3004,6 +3086,58 @@ mountDocument(<App />, { manifest: routes.manifest })
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Scope: JSX requirement transform
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe("transformTryggJsxForRequirements", () => {
+    it("lowers nested JSX to requirement-preserving runtime calls", () => {
+      const source = `
+import { Component } from "trygg"
+
+const ThemeButton = Component.gen(function* () {
+  return <button>Toggle</button>
+})
+
+const ThemeExample = Component.gen(function* () {
+  return (
+    <div>
+      <ThemeButton />
+      <section className="card">Copy</section>
+    </div>
+  )
+})
+`;
+
+      const result = transformTryggJsxForRequirements(source, "theme.tsx");
+
+      assert.isTrue(result.transformed);
+      assert.include(result.code, 'from "trygg/jsx-runtime"');
+      assert.include(result.code, "__tryggJsx(ThemeButton, null)");
+      assert.include(result.code, '__tryggJsxs("div"');
+      assert.include(result.code, "children:");
+    });
+
+    it("preserves member component tags as expressions", () => {
+      const source = `
+const App = Component.gen(function* () {
+  return <theme.Button />
+})
+`;
+      const result = transformTryggJsxForRequirements(source, "member.tsx");
+
+      assert.include(result.code, "__tryggJsx(theme.Button, null)");
+      assert.notInclude(result.code, '"theme.Button"');
+    });
+
+    it("does not rewrite non-TSX source", () => {
+      const source = `export const value = 1`;
+      const result = transformTryggJsxForRequirements(source, "plain.ts");
+
+      assert.isFalse(result.transformed);
+      assert.strictEqual(result.code, source);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Scope: transformRoutesForBuild
   // ─────────────────────────────────────────────────────────────────────────────
   describe("transformRoutesForBuild", () => {
@@ -3286,20 +3420,41 @@ Route.make("/admin")
   // Scope: API client generated modules
   // ─────────────────────────────────────────────────────────────────────────────
   describe("API client generated modules", () => {
-    it("should render API client runtime module from import path", () => {
-      // Test: should render API client runtime module from import path
-      // Scope: covers the virtual module runtime code generation without Vite or filesystem effects.
-      // Assertion: output imports Api, creates ApiClient, and provides FetchHttpClient.layer.
-      const output = renderApiClientModule({ apiImportPath: "/app/api" });
+    it.effect("should render API client runtime module from import path", () =>
+      Effect.gen(function* () {
+        // Test: should render API client runtime module from import path
+        // Scope: covers the virtual module runtime code generation without Vite or filesystem effects.
+        // Assertion: output imports Api, creates ApiClient, and provides FetchHttpClient.layer.
+        const output = renderApiClientModule({ apiImportPath: "/app/api" });
 
-      assert.include(output, 'import { Api } from "/app/api"');
-      assert.include(output, 'import { HttpApiClient } from "effect/unstable/httpapi"');
-      assert.include(output, 'import { FetchHttpClient } from "effect/unstable/http"');
-      assert.include(output, 'HttpApiClient.make(Api, { baseUrl: "" })');
-      assert.include(output, "export class ApiClient");
-      assert.include(output, "export const ApiClientLive");
-      assert.include(output, "Effect.provide(FetchHttpClient.layer)");
-    });
+        assert.include(output, 'import { Api } from "/app/api"');
+        assert.include(output, 'import { HttpApiClient } from "effect/unstable/httpapi"');
+        assert.include(output, 'import { FetchHttpClient } from "effect/unstable/http"');
+        assert.include(output, 'HttpApiClient.make(Api, { baseUrl: "" })');
+        assert.include(output, 'export class ApiClient extends Context.Service()("ApiClient") {}');
+        assert.notInclude(output, "type ApiClientService");
+        assert.notInclude(output, "Context.Service<ApiClient");
+        assert.include(output, "export const ApiClientLive");
+        assert.include(output, "Effect.provide(FetchHttpClient.layer)");
+
+        const browserScript = output
+          .split("\n")
+          .filter((line) => !line.startsWith("import ") && !line.startsWith("export {"))
+          .join("\n")
+          .replaceAll("export class", "class")
+          .replaceAll("export const", "const");
+
+        const parseExit = yield* Effect.try({
+          try: () => new Function(browserScript),
+          catch: (cause) => new BrowserScriptParseError({ cause }),
+        }).pipe(Effect.exit);
+        if (Exit.isFailure(parseExit)) {
+          assert.fail(
+            `Expected generated runtime module to parse as browser JavaScript: ${Cause.pretty(parseExit.cause)}`,
+          );
+        }
+      }),
+    );
 
     it("should render API client declarations from type import path", () => {
       // Test: should render API client declarations from type import path

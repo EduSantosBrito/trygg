@@ -1,16 +1,17 @@
-import { Data } from "effect";
+import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class ValidationError extends Data.TaggedError("ValidationError")<{
-  readonly field: string;
-  readonly message: string;
-}> {}
+export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("ValidationError", {
+  field: Schema.String,
+  description: Schema.String,
+}) {}
 
 export const ValidationErrorDisplay = Component.gen(function* (
   Props: ComponentProps<{ error: ValidationError }>,
 ) {
   const { error } = yield* Props;
+  const { field, description } = error;
   const theme = yield* ErrorTheme;
 
   return (
@@ -20,9 +21,9 @@ export const ValidationErrorDisplay = Component.gen(function* (
     >
       <h3 className="mt-0">Validation Error</h3>
       <p>
-        Field: <code>{error.field}</code>
+        Field: <code>{field}</code>
       </p>
-      <p>Message: {error.message}</p>
+      <p>Message: {description}</p>
     </div>
   );
 });

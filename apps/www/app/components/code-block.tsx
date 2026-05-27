@@ -5,7 +5,7 @@
  */
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import {
   Component,
   Portal,
@@ -18,6 +18,13 @@ import type { Element as HastElement, Text as HastText, RootContent, Root as Has
 import { getTheme, type Theme } from "../lib/theme";
 
 type HastNode = HastElement | HastText;
+
+class HighlightCodeError extends Schema.TaggedErrorClass<HighlightCodeError>()(
+  "HighlightCodeError",
+  {
+    cause: Schema.Unknown,
+  },
+) {}
 
 // Type guards for HAST nodes
 const isHastElement = (node: RootContent): node is HastElement => node.type === "element";
@@ -157,10 +164,13 @@ const refreshTip = (tip: HTMLElement, trigger: HTMLElement, immediate = false) =
   }
 };
 
+const currentTargetElement = (event: Event): HTMLElement | null =>
+  event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+
 const onTokenActivate = (event: Event) =>
   Effect.sync(() => {
-    const trigger = event.currentTarget as HTMLElement | null;
-    if (!trigger) return;
+    const trigger = currentTargetElement(event);
+    if (trigger === null) return;
     const tipId = trigger.getAttribute("aria-describedby");
     if (!tipId) return;
     const tip = document.getElementById(tipId);
@@ -171,8 +181,8 @@ const onTokenActivate = (event: Event) =>
 
 const onTokenDeactivate = (event: Event) =>
   Effect.sync(() => {
-    const trigger = event.currentTarget as HTMLElement | null;
-    if (!trigger) return;
+    const trigger = currentTargetElement(event);
+    if (trigger === null) return;
     const tipId = trigger.getAttribute("aria-describedby");
     if (!tipId) return;
     const tip = document.getElementById(tipId);
@@ -183,10 +193,10 @@ const onTokenDeactivate = (event: Event) =>
 
 const onTokenKeyDown = (event: Event) =>
   Effect.sync(() => {
-    const e = event as KeyboardEvent;
-    if (e.key !== "Escape") return;
-    const trigger = event.currentTarget as HTMLElement | null;
-    if (!trigger) return;
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key !== "Escape") return;
+    const trigger = currentTargetElement(event);
+    if (trigger === null) return;
     const tipId = trigger.getAttribute("aria-describedby");
     if (!tipId) return;
     const tip = document.getElementById(tipId);
@@ -196,13 +206,13 @@ const onTokenKeyDown = (event: Event) =>
     // Re-show requires a new event (blur + focus, or fresh hover).
     sourceCounts.set(tipId, 0);
     hideTipNow(tip);
-    e.preventDefault();
+    event.preventDefault();
   });
 
 const onTipActivate = (event: Event) =>
   Effect.sync(() => {
-    const tip = event.currentTarget as HTMLElement | null;
-    if (!tip) return;
+    const tip = currentTargetElement(event);
+    if (tip === null) return;
     const trigger = document.querySelector<HTMLElement>(`[aria-describedby="${tip.id}"]`);
     if (!trigger) return;
     incrementSource(tip.id);
@@ -211,8 +221,8 @@ const onTipActivate = (event: Event) =>
 
 const onTipDeactivate = (event: Event) =>
   Effect.sync(() => {
-    const tip = event.currentTarget as HTMLElement | null;
-    if (!tip) return;
+    const tip = currentTargetElement(event);
+    if (tip === null) return;
     const trigger = document.querySelector<HTMLElement>(`[aria-describedby="${tip.id}"]`);
     if (!trigger) return;
     decrementSource(tip.id);
@@ -455,10 +465,18 @@ export function highlightCode(
   const cached = highlightedLinesCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const highlighted = highlightCodeUncached(code, normalizedLang, theme).catch((error: unknown) => {
-    highlightedLinesCache.delete(cacheKey);
-    throw error;
-  });
+  const highlighted = Effect.runPromise(
+    Effect.tryPromise({
+      try: () => highlightCodeUncached(code, normalizedLang, theme),
+      catch: (cause) => new HighlightCodeError({ cause }),
+    }).pipe(
+      Effect.tapError(() =>
+        Effect.sync(() => {
+          highlightedLinesCache.delete(cacheKey);
+        }),
+      ),
+    ),
+  );
   highlightedLinesCache.set(cacheKey, highlighted);
   return highlighted;
 }
@@ -493,15 +511,18 @@ export const CodeBlock = Component.gen(function* (
 
   const dismiss = () => Signal.set(copied, false);
 
-  const handleCopy = Effect.fnUntraced(function* () {
-    if (!copyText) return yield* Effect.void;
+  const handleCopy = Effect.fnUntraced(function* (_event: Event) {
+    if (!copyText) return;
 
-    return yield* Effect.gen(function* () {
-      yield* Effect.tryPromise(() => navigator.clipboard.writeText(copyText));
-      yield* Signal.set(copied, true);
-      yield* Effect.sleep("3 seconds");
-      yield* Signal.set(copied, false);
-    }).pipe(Effect.ignore);
+    const didCopy = yield* Effect.tryPromise(() => navigator.clipboard.writeText(copyText)).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+    if (!didCopy) return;
+
+    yield* Signal.set(copied, true);
+    yield* Effect.sleep("3 seconds");
+    yield* Signal.set(copied, false);
   });
 
   const copyIcon = (

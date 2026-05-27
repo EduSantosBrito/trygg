@@ -1,11 +1,9 @@
 import { Context, Layer } from "effect";
 import { Component, Signal } from "trygg";
 
-interface ThemeService {
-  readonly color: string;
-}
-
-export class Theme extends Context.Service<Theme, ThemeService>()("Theme") {}
+export class Theme extends Context.Service<Theme, { readonly color: string }>()(
+  "www/examples/Theme",
+) {}
 
 const ThemeLive = Layer.succeed(Theme, { color: "#8b5cf6" });
 

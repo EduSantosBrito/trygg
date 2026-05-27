@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit } from "effect";
 import {
   diagnosticCodes,
+  InvalidBuildOutputCombination,
   makeBuildArtifactPlanner,
   type BuildArtifactPlanInput,
 } from "../build-artifact-planner.js";
@@ -18,68 +19,87 @@ const input = (overrides: Partial<BuildArtifactPlanInput>): BuildArtifactPlanInp
 });
 
 describe("BuildArtifactPlanner", () => {
-  it("allows server output for supported platforms", async () => {
-    const plan = await Effect.runPromise(planner.validateOutput(input({ output: "server" })));
+  it.effect("allows server output for supported platforms", () =>
+    Effect.gen(function* () {
+      const plan = yield* planner.validateOutput(input({ output: "server" }));
 
-    expect(plan.mayProceed).toBe(true);
-    expect(plan.diagnostics).toEqual([]);
-  });
+      assert.isTrue(plan.mayProceed);
+      assert.deepStrictEqual(plan.diagnostics, []);
+    }),
+  );
 
-  it("allows deploy-target-neutral static output", async () => {
-    const plan = await Effect.runPromise(
-      planner.validateOutput(input({ output: "static", platform: "node" })),
-    );
+  it.effect("allows deploy-target-neutral static output", () =>
+    Effect.gen(function* () {
+      const plan = yield* planner.validateOutput(input({ output: "static", platform: "node" }));
 
-    expect(plan.mayProceed).toBe(true);
-    expect(plan.diagnostics).toEqual([]);
-  });
+      assert.isTrue(plan.mayProceed);
+      assert.deepStrictEqual(plan.diagnostics, []);
+    }),
+  );
 
-  it("allows Cloudflare static SPA output without API", async () => {
-    const plan = await Effect.runPromise(
-      planner.validateOutput(input({ output: "static", platform: "cloudflare" })),
-    );
+  it.effect("allows Cloudflare static SPA output without API", () =>
+    Effect.gen(function* () {
+      const plan = yield* planner.validateOutput(
+        input({ output: "static", platform: "cloudflare" }),
+      );
 
-    expect(plan.mayProceed).toBe(true);
-    expect(plan.diagnostics).toEqual([]);
-  });
+      assert.isTrue(plan.mayProceed);
+      assert.deepStrictEqual(plan.diagnostics, []);
+    }),
+  );
 
-  it("rejects Cloudflare server output", async () => {
-    const exit = await Effect.runPromiseExit(
-      planner.validateOutput(input({ output: "server", platform: "cloudflare" })),
-    );
+  it.effect("rejects Cloudflare server output", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        planner.validateOutput(input({ output: "server", platform: "cloudflare" })),
+      );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(Cause.squash(exit.cause)).toMatchObject({
-        diagnostic: expect.objectContaining({ code: diagnosticCodes.cloudflareServerUnsupported }),
-      });
-    }
-  });
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof InvalidBuildOutputCombination)) {
+          return assert.fail(
+            `Expected InvalidBuildOutputCombination but got ${Cause.pretty(exit.cause)}`,
+          );
+        }
+        assert.strictEqual(error.diagnostic.code, diagnosticCodes.cloudflareServerUnsupported);
+      }
+    }),
+  );
 
-  it("warns for static API on non-Cloudflare platforms", async () => {
-    const plan = await Effect.runPromise(
-      planner.validateOutput(input({ output: "static", platform: "bun", hasApi: true })),
-    );
+  it.effect("warns for static API on non-Cloudflare platforms", () =>
+    Effect.gen(function* () {
+      const plan = yield* planner.validateOutput(
+        input({ output: "static", platform: "bun", hasApi: true }),
+      );
 
-    expect(plan.mayProceed).toBe(true);
-    expect(plan.diagnostics).toEqual([
-      expect.objectContaining({
-        _tag: "Warning",
-        code: diagnosticCodes.staticApiWarning,
-      }),
-    ]);
-  });
+      assert.isTrue(plan.mayProceed);
+      assert.strictEqual(plan.diagnostics.length, 1);
+      const diagnostic = plan.diagnostics[0];
+      if (diagnostic === undefined) {
+        return assert.fail("Expected one diagnostic");
+      }
+      assert.strictEqual(diagnostic._tag, "Warning");
+      assert.strictEqual(diagnostic.code, diagnosticCodes.staticApiWarning);
+    }),
+  );
 
-  it("errors for Cloudflare static API", async () => {
-    const exit = await Effect.runPromiseExit(
-      planner.validateOutput(input({ output: "static", platform: "cloudflare", hasApi: true })),
-    );
+  it.effect("errors for Cloudflare static API", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        planner.validateOutput(input({ output: "static", platform: "cloudflare", hasApi: true })),
+      );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(Cause.squash(exit.cause)).toMatchObject({
-        diagnostic: expect.objectContaining({ code: diagnosticCodes.cloudflareStaticApiUnsupported }),
-      });
-    }
-  });
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        if (!(error instanceof InvalidBuildOutputCombination)) {
+          return assert.fail(
+            `Expected InvalidBuildOutputCombination but got ${Cause.pretty(exit.cause)}`,
+          );
+        }
+        assert.strictEqual(error.diagnostic.code, diagnosticCodes.cloudflareStaticApiUnsupported);
+      }
+    }),
+  );
 });

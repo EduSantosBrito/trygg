@@ -11,22 +11,15 @@ import * as Context from "effect/Context";
 import * as Route from "../route.js";
 import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
+import * as Component from "../../primitives/component.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
 
 // Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
+const makeComp = (): RouteComponent =>
+  Component.gen(function* () {
+    return empty;
   });
-  return comp as RouteComponent;
-};
 
 // Dummy components for testing - return empty Element
 const component = makeComp();
@@ -290,11 +283,13 @@ describe("Pipeable protocol", () => {
 // =============================================================================
 
 describe("Route is not an Effect", () => {
-  it("should be a data structure not an Effect", () => {
-    const route = Route.make("/about");
+  it.effect("should be a data structure not an Effect", () =>
+    Effect.sync(() => {
+      const route = Route.make("/about");
 
-    assert.isFalse(Effect.isEffect(route));
-  });
+      assert.isFalse(Effect.isEffect(route));
+    }),
+  );
 
   it("should be identifiable as RouteBuilder", () => {
     const route = Route.make("/about");
@@ -315,18 +310,20 @@ describe("Route is not an Effect", () => {
 // =============================================================================
 
 describe("Route middleware", () => {
-  it("should accumulate middleware in order", () => {
-    const m1 = Effect.void;
-    const m2 = Effect.void;
-    const m3 = Effect.void;
+  it.effect("should accumulate middleware in order", () =>
+    Effect.sync(() => {
+      const m1 = Effect.void;
+      const m2 = Effect.void;
+      const m3 = Effect.void;
 
-    const route = Route.make("/admin").middleware(m1).middleware(m2).middleware(m3);
+      const route = Route.make("/admin").middleware(m1).middleware(m2).middleware(m3);
 
-    assert.strictEqual(route.definition.middleware.length, 3);
-    assert.strictEqual(route.definition.middleware[0], m1);
-    assert.strictEqual(route.definition.middleware[1], m2);
-    assert.strictEqual(route.definition.middleware[2], m3);
-  });
+      assert.strictEqual(route.definition.middleware.length, 3);
+      assert.strictEqual(route.definition.middleware[0], m1);
+      assert.strictEqual(route.definition.middleware[1], m2);
+      assert.strictEqual(route.definition.middleware[2], m3);
+    }),
+  );
 });
 
 // =============================================================================
@@ -334,16 +331,22 @@ describe("Route middleware", () => {
 // =============================================================================
 
 describe("Route prefetch", () => {
-  it("should accumulate prefetch functions", () => {
-    const fn1 = () => Effect.succeed("resource1");
-    const fn2 = () => Effect.succeed("resource2");
+  it.effect("should accumulate prefetch functions", () =>
+    Effect.sync(() => {
+      const fn1 = Effect.fnUntraced(function* (_context: unknown) {
+        return "resource1";
+      });
+      const fn2 = Effect.fnUntraced(function* (_context: unknown) {
+        return "resource2";
+      });
 
-    const route = Route.make("/users/:id").prefetch(fn1).prefetch(fn2);
+      const route = Route.make("/users/:id").prefetch(fn1).prefetch(fn2);
 
-    assert.strictEqual(route.definition.prefetch.length, 2);
-    assert.strictEqual(route.definition.prefetch[0], fn1);
-    assert.strictEqual(route.definition.prefetch[1], fn2);
-  });
+      assert.strictEqual(route.definition.prefetch.length, 2);
+      assert.strictEqual(route.definition.prefetch[0], fn1);
+      assert.strictEqual(route.definition.prefetch[1], fn2);
+    }),
+  );
 });
 
 // =============================================================================
@@ -394,7 +397,7 @@ describe("Route.provide", () => {
 
   it("should not store route service layers", () => {
     class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
-      "AuthService",
+      "route-builder.test/AuthService",
     ) {}
     const AuthLive = Layer.succeed(AuthService)({ userId: "test" });
 
@@ -411,12 +414,14 @@ describe("Route.provide", () => {
     assert.strictEqual(route.definition.scrollStrategy, ScrollStrategy.None);
   });
 
-  it("should return a RouteBuilder (not an Effect)", () => {
-    const route = Route.make("/").component(component).pipe(Route.provide(RenderStrategy.Eager));
+  it.effect("should return a RouteBuilder (not an Effect)", () =>
+    Effect.sync(() => {
+      const route = Route.make("/").component(component).pipe(Route.provide(RenderStrategy.Eager));
 
-    assert.strictEqual(route._tag, "RouteBuilder");
-    assert.isFalse(Effect.isEffect(route));
-  });
+      assert.strictEqual(route._tag, "RouteBuilder");
+      assert.isFalse(Effect.isEffect(route));
+    }),
+  );
 
   it("should preserve existing definition fields", () => {
     const route = Route.make("/users/:id")
@@ -430,27 +435,31 @@ describe("Route.provide", () => {
     assert.strictEqual(route.definition.renderStrategy, RenderStrategy.Eager);
   });
 
-  it("should keep middleware requirements on the route", () => {
-    type Equals<X, Y> =
-      (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
+  it.effect("should keep middleware requirements on the route", () =>
+    Effect.sync(() => {
+      type Equals<X, Y> =
+        (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
-    class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
-      "AuthService",
-    ) {}
+      class AuthService extends Context.Service<AuthService, { readonly userId: string }>()(
+        "route-builder.test/AuthService",
+      ) {}
 
-    const requireAuth = Effect.gen(function* () {
-      const auth = yield* AuthService;
-      if (!auth.userId) return yield* Effect.fail("unauthorized");
-    });
+      const requireAuth = Effect.gen(function* () {
+        const auth = yield* AuthService;
+        if (!auth.userId) return yield* Effect.fail("unauthorized");
+      });
 
-    const route = Route.make("/protected")
-      .middleware(requireAuth)
-      .component(component)
-      .pipe(Route.provide(RenderStrategy.Eager));
+      const route = Route.make("/protected")
+        .middleware(requireAuth)
+        .component(component)
+        .pipe(Route.provide(RenderStrategy.Eager));
 
-    type R =
-      typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh> ? R : never;
-    const _check: Equals<R, AuthService> = true;
-    void _check;
-  });
+      type R =
+        typeof route extends Route.RouteBuilder<infer _P, infer R, infer _HC, infer _HCh>
+          ? R
+          : never;
+      const _check: Equals<R, AuthService> = true;
+      assert.isTrue(_check);
+    }),
+  );
 });

@@ -1,11 +1,15 @@
 import { Component, Signal } from "trygg";
 import { AppTheme } from "../services/theme";
 
-const THEME_OPTIONS = [
+const THEME_OPTIONS: ReadonlyArray<{
+  readonly value: "system" | "dark" | "light";
+  readonly label: string;
+  readonly description: string;
+}> = [
   { value: "system", label: "System", description: "Follow your operating system preference" },
   { value: "dark", label: "Dark", description: "Always use dark theme" },
   { value: "light", label: "Light", description: "Always use light theme" },
-] as const;
+];
 
 export default Component.gen(function* () {
   const { mode, preference, setPreference } = yield* AppTheme;

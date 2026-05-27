@@ -16,15 +16,15 @@ import {
 /**
  * Helper to run a clack prompt and handle cancellation
  */
+const isPromptValue = <T>(value: T | symbol): value is T => !clack.isCancel(value);
+
 const runPrompt = <T>(prompt: () => Promise<T | symbol>): Effect.Effect<T, PromptCancelledError> =>
   Effect.tryPromise({
     try: prompt,
     catch: () => PromptCancelledError.default,
   }).pipe(
     Effect.flatMap((result) =>
-      clack.isCancel(result)
-        ? Effect.fail(PromptCancelledError.default)
-        : Effect.succeed(result as T),
+      isPromptValue<T>(result) ? Effect.succeed(result) : Effect.fail(PromptCancelledError.default),
     ),
   );
 
@@ -51,8 +51,8 @@ const buildConfirmOptions = (options: ConfirmOptions): clack.ConfirmOptions => {
 const promptsImpl: PromptsService = {
   text: (options: TextOptions) => runPrompt(() => clack.text(buildTextOptions(options))),
 
-  select: <T>(options: SelectOptions<T>) =>
-    runPrompt<T>(() => {
+  select: <T extends string>(options: SelectOptions<T>) =>
+    runPrompt<string>(() => {
       const clackOpts = options.options.map((opt) => {
         if (opt.hint !== undefined) {
           return { value: opt.value, label: opt.label, hint: opt.hint };
@@ -60,16 +60,23 @@ const promptsImpl: PromptsService = {
         return { value: opt.value, label: opt.label };
       });
 
-      const selectOpts: clack.SelectOptions<T> = {
+      const selectOpts: clack.SelectOptions<string> = {
         message: options.message,
-        options: clackOpts as unknown as clack.SelectOptions<T>["options"],
+        options: clackOpts,
       };
       if (options.initialValue !== undefined) {
         selectOpts.initialValue = options.initialValue;
       }
 
       return clack.select(selectOpts);
-    }),
+    }).pipe(
+      Effect.flatMap((selected) => {
+        const matched = options.options.find((option) => option.value === selected);
+        return matched === undefined
+          ? Effect.fail(PromptCancelledError.default)
+          : Effect.succeed(matched.value);
+      }),
+    ),
 
   confirm: (options: ConfirmOptions) =>
     runPrompt(() => clack.confirm(buildConfirmOptions(options))),

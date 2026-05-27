@@ -41,7 +41,7 @@ function getPortalAnchors(container: Node): Comment[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
   let node: Node | null;
   while ((node = walker.nextNode()) !== null) {
-    if (node.textContent === "portal") anchors.push(node as Comment);
+    if (node instanceof Comment && node.textContent === "portal") anchors.push(node);
   }
   return anchors;
 }
@@ -161,10 +161,12 @@ describe("Portal.make — targeted (HTMLElement)", () => {
 
       // Content should be in target, NOT in the component tree
       const appRoot = container.querySelector("[data-testid='app-root']");
-      assert.isNotNull(appRoot, "App root should exist");
+      if (appRoot === null) {
+        return assert.fail("App root should exist");
+      }
       assert.isNull(
-        appRoot!.querySelector("[data-testid='ported']"),
-        `Content should NOT be in the component tree. App innerHTML: ${appRoot!.innerHTML}`,
+        appRoot.querySelector("[data-testid='ported']"),
+        `Content should NOT be in the component tree. App innerHTML: ${appRoot.innerHTML}`,
       );
       assert.isNotNull(
         target.querySelector("[data-testid='ported']"),
@@ -275,9 +277,12 @@ describe("Portal.make — dynamic (no target)", () => {
 
       // Content should be inside the new container
       const portalContainer = containersAfter[containersAfter.length - 1];
+      if (portalContainer === undefined) {
+        return assert.fail("Expected a portal container");
+      }
       assert.isNotNull(
-        portalContainer!.querySelector("[data-testid='dynamic-content']"),
-        `Content should render inside the dynamic container. Container innerHTML: ${portalContainer!.innerHTML}`,
+        portalContainer.querySelector("[data-testid='dynamic-content']"),
+        `Content should render inside the dynamic container. Container innerHTML: ${portalContainer.innerHTML}`,
       );
     }),
   );
@@ -297,8 +302,11 @@ describe("Portal.make — dynamic (no target)", () => {
       yield* TestClock.adjust(100);
 
       const appRoot = container.querySelector("[data-testid='dynamic-app-root']");
+      if (appRoot === null) {
+        return assert.fail("Dynamic app root should exist");
+      }
       assert.isNull(
-        appRoot!.querySelector("[data-testid='dynamic-ported']"),
+        appRoot.querySelector("[data-testid='dynamic-ported']"),
         `Content should NOT be in the component tree.`,
       );
     }),
@@ -522,17 +530,19 @@ describe("Portal.make — reactivity inside portalled content", () => {
       yield* TestClock.adjust(100);
 
       const el = target.querySelector("[data-testid='reactive-text']");
-      assert.isNotNull(el, "Portal content should render");
-      assert.include(el!.textContent, "Initial");
+      if (el === null) {
+        return assert.fail("Portal content should render");
+      }
+      assert.include(el.textContent, "Initial");
 
       // Update signal → text should change in portal
       yield* Signal.set(message, "Updated");
       yield* TestClock.adjust(100);
 
       assert.include(
-        el!.textContent,
+        el.textContent,
         "Updated",
-        `Text should update reactively inside portal. Content: ${el!.textContent}`,
+        `Text should update reactively inside portal. Content: ${el.textContent}`,
       );
 
       target.remove();
@@ -563,19 +573,23 @@ describe("Portal.make — reactivity inside portalled content", () => {
       yield* TestClock.adjust(100);
 
       const countEl = target.querySelector("[data-testid='count-value']");
-      assert.isNotNull(countEl, "Counter should render in portal");
-      assert.include(countEl!.textContent, "0");
+      if (countEl === null) {
+        return assert.fail("Counter should render in portal");
+      }
+      assert.include(countEl.textContent, "0");
 
       // Click increment button
-      const btn = target.querySelector("[data-testid='increment']") as HTMLButtonElement;
-      assert.isNotNull(btn, "Button should be in portal");
+      const btn = target.querySelector("[data-testid='increment']");
+      if (!(btn instanceof HTMLButtonElement)) {
+        return assert.fail("Button should be in portal");
+      }
       btn.click();
       yield* TestClock.adjust(100);
 
       assert.include(
-        countEl!.textContent,
+        countEl.textContent,
         "1",
-        `Counter should increment inside portal. Content: ${countEl!.textContent}`,
+        `Counter should increment inside portal. Content: ${countEl.textContent}`,
       );
 
       target.remove();
@@ -608,12 +622,14 @@ describe("Portal.make — anchor in original position", () => {
       yield* TestClock.adjust(100);
 
       const anchorParent = container.querySelector("[data-testid='anchor-check']");
-      assert.isNotNull(anchorParent, "Anchor parent should exist");
+      if (anchorParent === null) {
+        return assert.fail("Anchor parent should exist");
+      }
 
-      const anchors = getPortalAnchors(anchorParent!);
+      const anchors = getPortalAnchors(anchorParent);
       assert.isTrue(
         anchors.length > 0,
-        `Should have at least one portal anchor comment. innerHTML: ${anchorParent!.innerHTML}`,
+        `Should have at least one portal anchor comment. innerHTML: ${anchorParent.innerHTML}`,
       );
 
       target.remove();
@@ -740,9 +756,8 @@ describe("Portal.make — return type", () => {
         const MyPortal = yield* Portal.make(<span>Type check</span>, { target });
 
         // Should have the EffectComponent tag
-        assert.strictEqual(
-          (MyPortal as unknown as { _tag: string })._tag,
-          "EffectComponent",
+        assert.isTrue(
+          Component.isEffectComponent(MyPortal),
           "Portal.make should return a ComponentType with _tag EffectComponent",
         );
 

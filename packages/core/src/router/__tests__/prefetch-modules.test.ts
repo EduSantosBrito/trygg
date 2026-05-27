@@ -7,7 +7,6 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
-import type { Any as AnyLayer } from "effect/Layer";
 import { empty } from "../../primitives/element.js";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
@@ -19,20 +18,7 @@ import type { ComponentLoader, RouteComponent } from "../types.js";
 // Helpers
 // =============================================================================
 
-/** Create a dummy RouteComponent (matches Component.Type structural shape) */
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
-
-const TestComp = makeComp();
+const TestComp: RouteComponent = Effect.succeed(empty);
 
 /** Create a tracked loader that records when it's called */
 const trackedLoader =
@@ -87,7 +73,9 @@ describe("Module Prefetch", () => {
 
   it.effect("should ignore failing loaders", () =>
     Effect.gen(function* () {
-      const failingLoader: ComponentLoader = () => Promise.reject(new Error("network error"));
+      const context = yield* Effect.context<never>();
+      const failingLoader: ComponentLoader = () =>
+        Effect.runPromiseWith(context)(Effect.fail("network error"));
 
       const prefetch = yield* buildPrefetch(
         Routes.make().add(Route.make("/broken").component(failingLoader)).manifest,

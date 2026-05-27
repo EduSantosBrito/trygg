@@ -4,6 +4,7 @@
  * Total and non-throwing: malformed/missing frontmatter returns `undefined`;
  * malformed body yields best-effort blocks.
  */
+import { Data } from "effect";
 
 export type ChangelogMeta = {
   readonly title: string;
@@ -11,16 +12,22 @@ export type ChangelogMeta = {
   readonly summary: string;
 };
 
-export type ChangelogBlock =
-  | { readonly _tag: "Heading"; readonly level: 2 | 3 | 4; readonly text: string }
-  | { readonly _tag: "Paragraph"; readonly text: string }
-  | { readonly _tag: "BulletList"; readonly items: ReadonlyArray<string> }
-  | { readonly _tag: "CodeBlock"; readonly language: string; readonly code: string };
+export type ChangelogBlock = Data.TaggedEnum<{
+  readonly Heading: { readonly level: 2 | 3 | 4; readonly text: string };
+  readonly Paragraph: { readonly text: string };
+  readonly BulletList: { readonly items: ReadonlyArray<string> };
+  readonly CodeBlock: { readonly language: string; readonly code: string };
+}>;
 
-export type InlineSegment =
-  | { readonly _tag: "Text"; readonly text: string }
-  | { readonly _tag: "InlineCode"; readonly code: string }
-  | { readonly _tag: "Link"; readonly text: string; readonly href: string };
+export const ChangelogBlock = Data.taggedEnum<ChangelogBlock>();
+
+export type InlineSegment = Data.TaggedEnum<{
+  readonly Text: { readonly text: string };
+  readonly InlineCode: { readonly code: string };
+  readonly Link: { readonly text: string; readonly href: string };
+}>;
+
+export const InlineSegment = Data.taggedEnum<InlineSegment>();
 
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
 
@@ -30,14 +37,14 @@ const parseLinksInText = (text: string): ReadonlyArray<InlineSegment> => {
 
   for (const match of text.matchAll(LINK_RE)) {
     if (match.index > lastIndex) {
-      segments.push({ _tag: "Text", text: text.slice(lastIndex, match.index) });
+      segments.push(InlineSegment.Text({ text: text.slice(lastIndex, match.index) }));
     }
-    segments.push({ _tag: "Link", text: match[1], href: match[2] });
+    segments.push(InlineSegment.Link({ text: match[1], href: match[2] }));
     lastIndex = (match.index ?? 0) + match[0].length;
   }
 
   if (lastIndex < text.length) {
-    segments.push({ _tag: "Text", text: text.slice(lastIndex) });
+    segments.push(InlineSegment.Text({ text: text.slice(lastIndex) }));
   }
 
   return segments;
@@ -50,34 +57,38 @@ export const parseInlineSegments = (text: string): ReadonlyArray<InlineSegment> 
   while (remaining.length > 0) {
     const tick = remaining.indexOf("`");
     if (tick === -1) {
-      segments.push({ _tag: "Text", text: remaining });
+      segments.push(InlineSegment.Text({ text: remaining }));
       break;
     }
 
     if (tick > 0) {
-      segments.push({ _tag: "Text", text: remaining.slice(0, tick) });
+      segments.push(InlineSegment.Text({ text: remaining.slice(0, tick) }));
     }
 
     const end = remaining.indexOf("`", tick + 1);
     if (end === -1) {
       const last = segments[segments.length - 1];
-      if (last && last._tag === "Text") {
-        segments[segments.length - 1] = { _tag: "Text", text: last.text + remaining.slice(tick) };
+      if (last !== undefined && InlineSegment.$is("Text")(last)) {
+        segments[segments.length - 1] = InlineSegment.Text({
+          text: last.text + remaining.slice(tick),
+        });
       } else {
-        segments.push({ _tag: "Text", text: remaining.slice(tick) });
+        segments.push(InlineSegment.Text({ text: remaining.slice(tick) }));
       }
       break;
     }
 
     const code = remaining.slice(tick + 1, end);
     if (code.length > 0) {
-      segments.push({ _tag: "InlineCode", code });
+      segments.push(InlineSegment.InlineCode({ code }));
     }
 
     remaining = remaining.slice(end + 1);
   }
 
-  return segments.flatMap((seg) => (seg._tag === "Text" ? parseLinksInText(seg.text) : [seg]));
+  return segments.flatMap((seg) =>
+    InlineSegment.$is("Text")(seg) ? parseLinksInText(seg.text) : [seg],
+  );
 };
 
 export const resolveChangelogLink = (href: string): string => {
@@ -191,14 +202,24 @@ export const parseChangelogMeta = (raw: string): ChangelogMeta | undefined => {
 // Body blocks
 // =============================================================================
 
+const headingLevel = (marker: string): 2 | 3 | 4 => {
+  if (marker.length === 2) return 2;
+  if (marker.length === 3) return 3;
+  return 4;
+};
+
 const parseHeading = (line: string): ChangelogBlock | undefined => {
   const match = line.match(/^(#{2,4})\s+(.+)$/);
   if (!match) return undefined;
 
-  const level = match[1].length as 2 | 3 | 4;
-  const text = match[2].trim();
+  const marker = match[1];
+  const headingText = match[2];
+  if (marker === undefined || headingText === undefined) return undefined;
 
-  return { _tag: "Heading", level, text };
+  const level = headingLevel(marker);
+  const text = headingText.trim();
+
+  return ChangelogBlock.Heading({ level, text });
 };
 
 const parseBullet = (line: string): string | undefined => {
@@ -209,20 +230,23 @@ const parseBullet = (line: string): string | undefined => {
   return undefined;
 };
 
-type ParseState =
-  | { readonly _tag: "Idle" }
-  | { readonly _tag: "InParagraph"; readonly lines: Array<string> }
-  | { readonly _tag: "InBulletList"; readonly items: Array<string> }
-  | { readonly _tag: "InCodeBlock"; readonly language: string; readonly lines: Array<string> };
+type ParseState = Data.TaggedEnum<{
+  readonly Idle: {};
+  readonly InParagraph: { readonly lines: Array<string> };
+  readonly InBulletList: { readonly items: Array<string> };
+  readonly InCodeBlock: { readonly language: string; readonly lines: Array<string> };
+}>;
+
+const ParseState = Data.taggedEnum<ParseState>();
 
 const flushState = (state: ParseState): ReadonlyArray<ChangelogBlock> => {
   switch (state._tag) {
     case "InParagraph":
-      return [{ _tag: "Paragraph", text: state.lines.join(" ") }];
+      return [ChangelogBlock.Paragraph({ text: state.lines.join(" ") })];
     case "InBulletList":
-      return [{ _tag: "BulletList", items: state.items }];
+      return [ChangelogBlock.BulletList({ items: state.items })];
     case "InCodeBlock":
-      return [{ _tag: "CodeBlock", language: state.language, code: state.lines.join("\n") }];
+      return [ChangelogBlock.CodeBlock({ language: state.language, code: state.lines.join("\n") })];
     default:
       return [];
   }
@@ -233,7 +257,7 @@ export const renderChangelogBody = (raw: string): ReadonlyArray<ChangelogBlock> 
   const lines = body.split("\n");
 
   const blocks: Array<ChangelogBlock> = [];
-  let state: ParseState = { _tag: "Idle" };
+  let state: ParseState = ParseState.Idle();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -241,18 +265,18 @@ export const renderChangelogBody = (raw: string): ReadonlyArray<ChangelogBlock> 
     // Code fence
     const fenceMatch = line.match(/^```(.*)$/);
     if (fenceMatch) {
-      if (state._tag === "InCodeBlock") {
+      if (ParseState.$is("InCodeBlock")(state)) {
         blocks.push(...flushState(state));
-        state = { _tag: "Idle" };
+        state = ParseState.Idle();
       } else {
         blocks.push(...flushState(state));
-        const language = fenceMatch[1].trim();
-        state = { _tag: "InCodeBlock", language: language || "text", lines: [] };
+        const language = fenceMatch[1]?.trim() ?? "";
+        state = ParseState.InCodeBlock({ language: language || "text", lines: [] });
       }
       continue;
     }
 
-    if (state._tag === "InCodeBlock") {
+    if (ParseState.$is("InCodeBlock")(state)) {
       state.lines.push(line);
       continue;
     }
@@ -262,35 +286,35 @@ export const renderChangelogBody = (raw: string): ReadonlyArray<ChangelogBlock> 
     if (heading) {
       blocks.push(...flushState(state));
       blocks.push(heading);
-      state = { _tag: "Idle" };
+      state = ParseState.Idle();
       continue;
     }
 
     // Empty line
     if (line.trim().length === 0) {
       blocks.push(...flushState(state));
-      state = { _tag: "Idle" };
+      state = ParseState.Idle();
       continue;
     }
 
     // Bullet
     const bullet = parseBullet(line);
     if (bullet) {
-      if (state._tag === "InBulletList") {
+      if (ParseState.$is("InBulletList")(state)) {
         state.items.push(bullet);
       } else {
         blocks.push(...flushState(state));
-        state = { _tag: "InBulletList", items: [bullet] };
+        state = ParseState.InBulletList({ items: [bullet] });
       }
       continue;
     }
 
     // Regular text line
-    if (state._tag === "InParagraph") {
+    if (ParseState.$is("InParagraph")(state)) {
       state.lines.push(line.trim());
     } else {
       blocks.push(...flushState(state));
-      state = { _tag: "InParagraph", lines: [line.trim()] };
+      state = ParseState.InParagraph({ lines: [line.trim()] });
     }
   }
 

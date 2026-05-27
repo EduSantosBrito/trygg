@@ -13,7 +13,7 @@ export namespace JSX {
   /**
    * The type returned by JSX expressions
    */
-  export type Element = import("./primitives/element.js").ElementWithRequirements<unknown>;
+  export type Element = import("./primitives/element.js").Element;
 
   /**
    * Props that can be passed to intrinsic elements
@@ -40,7 +40,7 @@ export { JSX };
 
 declare global {
   namespace JSX {
-    type Element = import("./primitives/element.js").ElementWithRequirements<unknown>;
+    type Element = import("./primitives/element.js").Element;
 
     interface IntrinsicAttributes {
       readonly key?: import("./primitives/element.js").ElementKey;

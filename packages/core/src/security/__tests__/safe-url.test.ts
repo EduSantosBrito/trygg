@@ -53,7 +53,7 @@ describe("SafeUrl.validate", () => {
           assert.strictEqual(error?._tag, "UnsafeUrlError");
           assert.strictEqual(error?.reason, "unsafe_scheme");
           assert.strictEqual(error?.scheme, "javascript");
-          assert.include(error?.message, "Unsafe URL scheme");
+          assert.strictEqual(error?.url, "javascript:alert(1)");
         }
 
         const emptyExit = yield* Effect.exit(SafeUrl.validate("   "));
@@ -61,7 +61,7 @@ describe("SafeUrl.validate", () => {
         if (Exit.isFailure(emptyExit)) {
           const error = Option.getOrNull(Cause.findErrorOption(emptyExit.cause));
           assert.strictEqual(error?.reason, "empty_url");
-          assert.include(error?.message, "Empty URL");
+          assert.strictEqual(error?.url, "   ");
         }
       }),
     ),

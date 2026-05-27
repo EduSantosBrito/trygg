@@ -20,9 +20,9 @@
  * @since 1.0.0
  * @module trygg/router/types
  */
-import { Data, Effect, type Cause, type Scope } from "effect";
+import { Effect, Schema, type Cause, type Scope } from "effect";
 import { Component } from "../primitives/component.js";
-import type { Signal } from "../primitives/signal.js";
+import type { Signal, SignalDisposedError } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
 import type { NavigationPrefetchState } from "./navigation-outlet-coordination.js";
@@ -57,10 +57,10 @@ import {
  * @public
  * @since 1.0.0
  */
-export class NavigationError extends Data.TaggedError("NavigationError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class NavigationError extends Schema.TaggedErrorClass<NavigationError>()("NavigationError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * RouteComponent value was neither a Component.Type nor Effect<Element>.
@@ -79,9 +79,12 @@ export class NavigationError extends Data.TaggedError("NavigationError")<{
  * @public
  * @since 1.0.0
  */
-export class InvalidRouteComponent extends Data.TaggedError("InvalidRouteComponent")<{
-  readonly actual: unknown;
-}> {}
+export class InvalidRouteComponent extends Schema.TaggedErrorClass<InvalidRouteComponent>()(
+  "InvalidRouteComponent",
+  {
+    actual: Schema.Unknown,
+  },
+) {}
 
 // ==========================================
 // Route Map (augmented by vite plugin)
@@ -134,9 +137,9 @@ export interface RouteMap {
  * @public
  * @since 1.0.0
  */
-export type RouteComponent =
-  | Component.Type<never, unknown, unknown>
-  | Effect.Effect<Element, unknown, unknown>;
+export type RouteComponent<R = unknown> =
+  | Component.Type<never, unknown, R>
+  | Effect.Effect<Element, unknown, R>;
 
 /**
  * Lazy loader function produced by the vite transform.
@@ -342,20 +345,22 @@ export type TypeSafeLinkProps<Path extends string> =
  * @public
  * @since 1.0.0
  */
-export const buildPathWithParams = <Path extends string>(
+export const buildPathWithParams: <Path extends string>(
   path: Path,
   params: RouteParamsFor<Path>,
-): Effect.Effect<
+) => Effect.Effect<
   string,
   | InvalidRoutePathPattern
   | MissingRoutePathParam
   | UnusedRoutePathParam
   | InvalidRoutePathParamValue
-> =>
-  Effect.gen(function* () {
-    const pattern = yield* compileRoutePathPattern(path);
-    return yield* interpolateCompiledRoutePathPattern(pattern, params);
-  });
+> = Effect.fn("RouterTypes.buildPathWithParams")(function* <Path extends string>(
+  path: Path,
+  params: RouteParamsFor<Path>,
+) {
+  const pattern = yield* compileRoutePathPattern(path);
+  return yield* interpolateCompiledRoutePathPattern(pattern, params);
+});
 
 /**
  * Interpolate params into a path pattern using NavigateOptions.params.
@@ -369,20 +374,22 @@ export const buildPathWithParams = <Path extends string>(
  *
  * @internal
  */
-export const interpolateParams = (
+export const interpolateParams: (
   path: string,
   params: Record<string, string | number>,
-): Effect.Effect<
+) => Effect.Effect<
   string,
   | InvalidRoutePathPattern
   | MissingRoutePathParam
   | UnusedRoutePathParam
   | InvalidRoutePathParamValue
-> =>
-  Effect.gen(function* () {
-    const pattern = yield* compileRoutePathPattern(path);
-    return yield* interpolateCompiledRoutePathPattern(pattern, params);
-  });
+> = Effect.fn("RouterTypes.interpolateParams")(function* (
+  path: string,
+  params: Record<string, string | number>,
+) {
+  const pattern = yield* compileRoutePathPattern(path);
+  return yield* interpolateCompiledRoutePathPattern(pattern, params);
+});
 
 // ==========================================
 // Basic Types
@@ -500,7 +507,7 @@ export interface RouteErrorInfo {
   /** The route path that errored */
   readonly path: string;
   /** Reset effect to retry rendering the route - use in onClick handler */
-  readonly reset: Effect.Effect<void, never, never>;
+  readonly reset: Effect.Effect<void, SignalDisposedError, never>;
 }
 
 /**
@@ -539,13 +546,13 @@ export interface RouterService {
   readonly navigate: (
     path: string,
     options?: NavigateOptions,
-  ) => Effect.Effect<void, NavigationError>;
+  ) => Effect.Effect<void, NavigationError | SignalDisposedError>;
 
   /** Go back in history */
-  readonly back: () => Effect.Effect<void>;
+  readonly back: () => Effect.Effect<void, NavigationError | SignalDisposedError>;
 
   /** Go forward in history */
-  readonly forward: () => Effect.Effect<void>;
+  readonly forward: () => Effect.Effect<void, NavigationError | SignalDisposedError>;
 
   /** Get current route params (type-safe by path pattern) */
   readonly params: <Path extends RoutePath>(path: Path) => Effect.Effect<RouteParamsFor<Path>>;
@@ -567,7 +574,7 @@ export interface RouterService {
   readonly isActive: (
     path: string,
     options?: IsActiveOptions,
-  ) => Effect.Effect<Signal<boolean>, never, Scope.Scope>;
+  ) => Effect.Effect<Signal<boolean>, NavigationError | SignalDisposedError, Scope.Scope>;
 
   /**
    * Prefetch route modules for a path.

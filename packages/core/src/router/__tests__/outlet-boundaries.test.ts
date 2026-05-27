@@ -23,53 +23,25 @@ import {
 } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
 
-// Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
+// Dummy components with identifiable object identities
+const Comp: RouteComponent = Effect.succeed(empty);
+const Layout: RouteComponent = Effect.succeed(empty);
 
-// Helper to create named dummy RouteComponent
-const makeNamedComp = (name: string): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _name: name,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
-
-// Dummy components with identifiable names
-const Comp = makeComp();
-const Layout = makeComp();
-
-// Named boundary components for asserting which one was resolved
-const RootError = makeNamedComp("RootError");
-const ParentError = makeNamedComp("ParentError");
-const ChildError = makeNamedComp("ChildError");
-const RootNotFound = makeNamedComp("RootNotFound");
-const ParentNotFound = makeNamedComp("ParentNotFound");
-const RootForbidden = makeNamedComp("RootForbidden");
-const ParentForbidden = makeNamedComp("ParentForbidden");
-const ChildForbidden = makeNamedComp("ChildForbidden");
-const ParentLoading = makeNamedComp("ParentLoading");
-const ChildLoading = makeNamedComp("ChildLoading");
+// Boundary components for asserting which one was resolved
+const RootError: RouteComponent = Effect.succeed(empty);
+const ParentError: RouteComponent = Effect.succeed(empty);
+const ChildError: RouteComponent = Effect.succeed(empty);
+const RootNotFound: RouteComponent = Effect.succeed(empty);
+const ParentNotFound: RouteComponent = Effect.succeed(empty);
+const RootForbidden: RouteComponent = Effect.succeed(empty);
+const ParentForbidden: RouteComponent = Effect.succeed(empty);
+const ChildForbidden: RouteComponent = Effect.succeed(empty);
+const ParentLoading: RouteComponent = Effect.succeed(empty);
+const ChildLoading: RouteComponent = Effect.succeed(empty);
 
 // Generic error component for routes with .params()/.query() that need coverage
-const ErrorBoundary = makeNamedComp("ErrorBoundary");
+const ErrorBoundary: RouteComponent = Effect.succeed(empty);
 
 // =============================================================================
 // Error Boundary Resolution

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as FileSystem from "effect/FileSystem";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -11,6 +11,33 @@ const TEMPLATES_DIR = path.join(import.meta.dirname, "../../templates");
 const WORKSPACE_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const TRYGG_CORE_ABS = path.join(WORKSPACE_ROOT, "packages/core");
 const WORKSPACE_TEMP_DIR = path.join(WORKSPACE_ROOT, "apps/examples");
+
+class CommandSpawnError extends Schema.TaggedErrorClass<CommandSpawnError>()("CommandSpawnError", {
+  command: Schema.String,
+  cause: Schema.Unknown,
+}) {}
+
+class ExpectedJsonObjectError extends Schema.TaggedErrorClass<ExpectedJsonObjectError>()(
+  "ExpectedJsonObjectError",
+  { label: Schema.String },
+) {}
+
+const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
+const JsonObjectString = Schema.fromJsonString(JsonObject);
+const parseJsonObject = Schema.decodeUnknownEffect(JsonObjectString);
+const encodeJsonObject = Schema.encodeEffect(JsonObjectString);
+const parseTsConfig = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ include: Schema.Array(Schema.String) })),
+);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const requireRecord = (
+  value: unknown,
+  label: string,
+): Effect.Effect<Record<string, unknown>, ExpectedJsonObjectError> =>
+  isRecord(value) ? Effect.succeed(value) : Effect.fail(new ExpectedJsonObjectError({ label }));
 
 const runScaffold = (
   targetDir: string,
@@ -35,42 +62,48 @@ interface CommandResult {
   readonly stderr: string;
 }
 
-const runCommand = (
+const runCommand = Effect.fn("runCommand")(function* (
   cwd: string,
   command: string,
   args: ReadonlyArray<string>,
-): Effect.Effect<CommandResult, Error> =>
-  Effect.promise(
-    () =>
-      new Promise((resolve, reject) => {
-        const proc = spawn(command, args, { cwd, shell: false });
-        let stdout = "";
-        let stderr = "";
+) {
+  return yield* Effect.callback<CommandResult, CommandSpawnError>((resume) => {
+    const proc = spawn(command, args, { cwd, shell: false });
+    let stdout = "";
+    let stderr = "";
 
-        if (proc.stdout) {
-          proc.stdout.on("data", (data: Buffer) => {
-            stdout += data.toString();
-          });
-        }
+    const onStdout = (data: Buffer): void => {
+      stdout += data.toString();
+    };
+    const onStderr = (data: Buffer): void => {
+      stderr += data.toString();
+    };
+    const onClose = (exitCode: number | null): void => {
+      resume(Effect.succeed({ exitCode, stdout, stderr }));
+    };
+    const onError = (cause: Error): void => {
+      resume(Effect.fail(new CommandSpawnError({ command, cause })));
+    };
 
-        if (proc.stderr) {
-          proc.stderr.on("data", (data: Buffer) => {
-            stderr += data.toString();
-          });
-        }
+    proc.stdout?.on("data", onStdout);
+    proc.stderr?.on("data", onStderr);
+    proc.on("close", onClose);
+    proc.on("error", onError);
 
-        proc.on("close", (exitCode) => {
-          resolve({ exitCode, stdout, stderr });
-        });
+    return Effect.sync(() => {
+      proc.stdout?.off("data", onStdout);
+      proc.stderr?.off("data", onStderr);
+      proc.off("close", onClose);
+      proc.off("error", onError);
+      if (!proc.killed) {
+        proc.kill();
+      }
+    });
+  });
+});
 
-        proc.on("error", (error) => {
-          reject(error);
-        });
-      }),
-  );
-
-const checkNoTryggApiImports = (dir: string): Effect.Effect<void, unknown, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
+const checkNoTryggApiImports: (dir: string) => Effect.Effect<void, unknown, FileSystem.FileSystem> =
+  Effect.fn("checkNoTryggApiImports")(function* (dir: string) {
     const fs = yield* FileSystem.FileSystem;
     const entries = yield* fs.readDirectory(dir);
     for (const entry of entries) {
@@ -85,20 +118,24 @@ const checkNoTryggApiImports = (dir: string): Effect.Effect<void, unknown, FileS
     }
   });
 
-const patchPackageJsonForLocalTrygg = (
+const patchPackageJsonForLocalTrygg = Effect.fn("patchPackageJsonForLocalTrygg")(function* (
   targetDir: string,
-): Effect.Effect<void, unknown, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pkgPath = path.join(targetDir, "package.json");
-    const pkgText = yield* fs.readFileString(pkgPath);
-    const pkg = JSON.parse(pkgText);
-    const relativeTryggPath = path.relative(targetDir, TRYGG_CORE_ABS);
-    pkg.dependencies.trygg = "file:" + relativeTryggPath;
-    yield* fs.writeFileString(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-  });
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const pkgPath = path.join(targetDir, "package.json");
+  const pkgText = yield* fs.readFileString(pkgPath);
+  const pkg = yield* parseJsonObject(pkgText);
+  const dependencies = yield* requireRecord(pkg.dependencies, "package.json dependencies");
+  const relativeTryggPath = path.relative(targetDir, TRYGG_CORE_ABS);
+  const patchedPkg = {
+    ...pkg,
+    dependencies: { ...dependencies, trygg: "file:" + relativeTryggPath },
+  };
+  const patchedText = yield* encodeJsonObject(patchedPkg);
+  yield* fs.writeFileString(pkgPath, `${patchedText}\n`);
+});
 
-const bunInstall = (cwd: string): Effect.Effect<CommandResult, Error> =>
+const bunInstall = (cwd: string): Effect.Effect<CommandResult, CommandSpawnError> =>
   runCommand(cwd, "bun", ["install"]);
 
 describe("scaffoldProject", () => {
@@ -107,10 +144,7 @@ describe("scaffoldProject", () => {
       // Scope: verifies incident scaffold produces visible trygg/api declarations.
       // Assertion: .trygg/api.d.ts exists with correct ambient module augmentation.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
+      const targetDir = yield* fs.makeTempDirectoryScoped({ prefix: "trygg-scaffold-test-" });
 
       yield* runScaffold(targetDir, "incident");
 
@@ -138,16 +172,13 @@ describe("scaffoldProject", () => {
       // Scope: verifies generated tsconfig.json makes trygg/api declarations visible to tsc.
       // Assertion: include array contains .trygg/**/*.d.ts.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
+      const targetDir = yield* fs.makeTempDirectoryScoped({ prefix: "trygg-scaffold-test-" });
 
       yield* runScaffold(targetDir, "incident");
 
       const tsconfigPath = path.join(targetDir, "tsconfig.json");
       const tsconfigContent = yield* fs.readFileString(tsconfigPath);
-      const tsconfig = JSON.parse(tsconfigContent);
+      const tsconfig = yield* parseTsConfig(tsconfigContent);
       assert.deepEqual(tsconfig.include, ["app/**/*.ts", "app/**/*.tsx", ".trygg/**/*.d.ts"]);
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
@@ -157,13 +188,10 @@ describe("scaffoldProject", () => {
       // Scope: verifies blank scaffold stays safe as a no-API app.
       // Assertion: no app/api.ts, no .trygg/api.d.ts, no trygg-api.d.ts, and no trygg/api imports.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({
+      const targetDir = yield* fs.makeTempDirectoryScoped({
         directory: WORKSPACE_TEMP_DIR,
         prefix: "trygg-scaffold-test-",
       });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
 
       yield* runScaffold(targetDir, "blank");
 
@@ -188,13 +216,10 @@ describe("scaffoldProject", () => {
       // Scope: verifies the default blank app teaches trygg DI basics.
       // Assertion: generated home page uses Component.gen, a Theme service, and service injection.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({
+      const targetDir = yield* fs.makeTempDirectoryScoped({
         directory: WORKSPACE_TEMP_DIR,
         prefix: "trygg-scaffold-test-",
       });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
 
       yield* runScaffold(targetDir, "blank");
 
@@ -213,13 +238,10 @@ describe("scaffoldProject", () => {
       // Scope: verifies a freshly scaffolded blank app works without any API setup.
       // Assertion: bun run typecheck and bun run build both exit 0.
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({
+      const targetDir = yield* fs.makeTempDirectoryScoped({
         directory: WORKSPACE_TEMP_DIR,
         prefix: "trygg-scaffold-test-",
       });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
 
       yield* runScaffold(targetDir, "blank");
       yield* patchPackageJsonForLocalTrygg(targetDir);
@@ -254,13 +276,10 @@ describe("scaffoldProject", () => {
         // Scope: verifies the generated-client failure mode is preserved for explicit opt-in.
         // Assertion: importing ApiClientLive from trygg/api causes build to fail with the missing-Api message.
         const fs = yield* FileSystem.FileSystem;
-        const targetDir = yield* fs.makeTempDirectory({
+        const targetDir = yield* fs.makeTempDirectoryScoped({
           directory: WORKSPACE_TEMP_DIR,
           prefix: "trygg-scaffold-test-",
         });
-        yield* Effect.addFinalizer(() =>
-          fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-        );
 
         yield* runScaffold(targetDir, "blank");
         yield* patchPackageJsonForLocalTrygg(targetDir);
@@ -293,10 +312,7 @@ describe("scaffoldProject", () => {
   it.effect("blank scaffold home uses Component.gen and Theme service", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
+      const targetDir = yield* fs.makeTempDirectoryScoped({ prefix: "trygg-scaffold-test-" });
 
       yield* runScaffold(targetDir, "blank");
 
@@ -312,10 +328,7 @@ describe("scaffoldProject", () => {
   it.effect("blank scaffold layout provides theme layer", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const targetDir = yield* fs.makeTempDirectory({ prefix: "trygg-scaffold-test-" });
-      yield* Effect.addFinalizer(() =>
-        fs.remove(targetDir, { recursive: true }).pipe(Effect.ignore),
-      );
+      const targetDir = yield* fs.makeTempDirectoryScoped({ prefix: "trygg-scaffold-test-" });
 
       yield* runScaffold(targetDir, "blank");
 

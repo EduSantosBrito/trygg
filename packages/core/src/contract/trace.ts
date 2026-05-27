@@ -10,7 +10,7 @@
  * @see ./trace.docs.md - Source-owned event family and ordering guide
  * @internal
  */
-import { Cause, Effect, Option, Ref } from "effect";
+import { Cause, Effect, Exit, Option, Ref } from "effect";
 import * as Context from "effect/Context";
 
 export type ContractTraceLevel = "semantic" | "cost" | "diagnostic";
@@ -112,8 +112,8 @@ export const CurrentActionId = Context.Reference<Option.Option<string>>(
   { defaultValue: () => Option.none() },
 );
 
-export const createInMemoryCollector = (runId: string): Effect.Effect<ContractTraceCollector> =>
-  Effect.gen(function* () {
+export const createInMemoryCollector: (runId: string) => Effect.Effect<ContractTraceCollector> =
+  Effect.fnUntraced(function* (runId) {
     const recordsRef = yield* Ref.make<ReadonlyArray<ContractTraceRecord>>([]);
     const seqRef = yield* Ref.make(0);
 
@@ -154,38 +154,41 @@ export const withCollector = <A, E, R>(
 ): Effect.Effect<A, E, R> =>
   Effect.provideService(effect, CurrentCollector, Option.some(collector));
 
-export const withAction = <A, E, R>(
+export const withAction: <A, E, R>(
   actionId: string,
   action: Record<string, unknown>,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
-    yield* emit({
-      event: "contract.action.start",
-      level: "semantic",
-      actionId,
-      payload: action,
-    });
+) => Effect.Effect<A, E, R> = Effect.fnUntraced(function* <A, E, R>(
+  actionId: string,
+  action: Record<string, unknown>,
+  effect: Effect.Effect<A, E, R>,
+) {
+  yield* emit({
+    event: "contract.action.start",
+    level: "semantic",
+    actionId,
+    payload: action,
+  });
 
-    const exit = yield* Effect.exit(
-      Effect.provideService(effect, CurrentActionId, Option.some(actionId)),
-    );
+  const exit = yield* Effect.exit(
+    Effect.provideService(effect, CurrentActionId, Option.some(actionId)),
+  );
 
-    if (exit._tag === "Success") {
-      yield* emit({
-        event: "contract.action.end",
-        level: "semantic",
-        actionId,
-        payload: { status: "completed" },
-      });
-      return exit.value;
-    }
-
+  if (Exit.isSuccess(exit)) {
     yield* emit({
       event: "contract.action.end",
       level: "semantic",
       actionId,
-      payload: { status: "failed", cause: Cause.pretty(exit.cause) },
+      payload: { status: "completed" },
     });
-    return yield* Effect.failCause(exit.cause);
+    return exit.value;
+  }
+
+  yield* emit({
+    event: "contract.action.end",
+    level: "semantic",
+    actionId,
+    payload: { status: "failed", cause: Cause.pretty(exit.cause) },
   });
+  return yield* Effect.failCause(exit.cause);
+});

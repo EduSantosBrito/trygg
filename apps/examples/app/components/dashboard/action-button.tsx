@@ -2,23 +2,22 @@ import { Effect } from "effect";
 import { Component, Signal, type ComponentProps } from "trygg";
 import { DashboardTheme, Analytics } from "../../services/dashboard";
 
-export const ActionButton = Component.gen(function* (
-  Props: ComponentProps<{
-    label: string;
-    variant: "primary" | "secondary";
-    onClick: () => Effect.Effect<void, unknown, unknown>;
-  }>,
-) {
+interface ActionButtonProps<R = never, E = never> {
+  readonly label: string;
+  readonly variant: "primary" | "secondary";
+  readonly onClick: () => Effect.Effect<void, E, R>;
+}
+
+export const ActionButton = Component.gen(function* (Props: ComponentProps<ActionButtonProps>) {
   const { label, variant, onClick } = yield* Props;
   const themeStore = yield* DashboardTheme;
   const analytics = yield* Analytics;
   const theme = yield* Signal.get(themeStore.tokens);
 
-  const handleClick = () =>
-    Effect.gen(function* () {
-      yield* analytics.track("button_clicked", { label, variant });
-      yield* onClick();
-    });
+  const handleClick = Effect.fn("ActionButton.handleClick")(function* () {
+    yield* analytics.track("button_clicked", { label, variant });
+    yield* onClick();
+  });
 
   return (
     <button

@@ -10,16 +10,20 @@
  * @since 1.0.0
  * @module trygg/primitives/element
  */
-import { Cause, Data, Effect, Layer, Schema, Scope, SubscriptionRef } from "effect";
+import { Cause, Data, Effect, Layer, Predicate, Schema, Scope, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
+import { unsafeMakeKeyedListElement } from "../internal/unsafe.js";
 import type { Signal } from "./signal.js";
 
 /**
  * Check if a value is an Effect
  * @internal
  */
-export const isEffect = (value: unknown): value is Effect.Effect<Element, unknown, unknown> =>
-  Effect.isEffect(value);
+type RuntimeRequirements = unknown;
+
+export const isEffect = (
+  value: unknown,
+): value is Effect.Effect<Element, unknown, RuntimeRequirements> => Effect.isEffect(value);
 
 /**
  * Key type for list reconciliation.
@@ -68,9 +72,10 @@ export type ElementKey = string | number;
  */
 export type EventHandler<A = void, E = never, R = never> = (event: Event) => Effect.Effect<A, E, R>;
 
-export class InvalidJsxChildError extends Data.TaggedError("InvalidJsxChildError")<{
-  readonly reason: "effect";
-}> {
+export class InvalidJsxChildError extends Schema.TaggedErrorClass<InvalidJsxChildError>()(
+  "InvalidJsxChildError",
+  { reason: Schema.Literal("effect") },
+) {
   override get message() {
     return "Invalid JSX child: raw Effect values are not allowed; wrap in Component.gen";
   }
@@ -81,7 +86,8 @@ export class InvalidJsxChildError extends Data.TaggedError("InvalidJsxChildError
  * Internal existential wrapper around Signal invariance.
  * @internal
  */
-type AnySignal = Signal<any>;
+type DynamicSignalValue = ReturnType<typeof JSON.parse>;
+type AnySignal = Signal<DynamicSignalValue>;
 
 /**
  * Helper type for props that can accept either a value or a Signal
@@ -700,7 +706,7 @@ export type Element = Data.TaggedEnum<{
    * Services must be available in the current context before rendering.
    */
   readonly Component: {
-    readonly run: () => Effect.Effect<Element, unknown, unknown>;
+    readonly run: () => Effect.Effect<Element, unknown, RuntimeRequirements>;
     readonly key: ElementKey | null;
     readonly identity: unknown;
     readonly inputs: unknown;
@@ -725,7 +731,10 @@ export type Element = Data.TaggedEnum<{
    */
   readonly KeyedList: {
     readonly source: Signal<ReadonlyArray<unknown>>;
-    readonly renderFn: (item: unknown, index: number) => Effect.Effect<Element, unknown, unknown>;
+    readonly renderFn: (
+      item: unknown,
+      index: number,
+    ) => Effect.Effect<Element, unknown, RuntimeRequirements>;
     readonly keyFn: (item: unknown, index: number) => string | number;
   };
   /**
@@ -736,7 +745,9 @@ export type Element = Data.TaggedEnum<{
   readonly ErrorBoundaryElement: {
     readonly child: Element;
     readonly fallback: Element | ((cause: Cause.Cause<unknown>) => Element);
-    readonly onError: ((cause: Cause.Cause<unknown>) => Effect.Effect<void, never, unknown>) | null;
+    readonly onError:
+      | ((cause: Cause.Cause<unknown>) => Effect.Effect<void, never, RuntimeRequirements>)
+      | null;
   };
 }>;
 
@@ -745,6 +756,32 @@ export declare const ElementRequirementsSymbol: unique symbol;
 export type ElementWithRequirements<R> = Element & {
   readonly [ElementRequirementsSymbol]?: R;
 };
+
+type ExtractMarkedRequirements<Value> = typeof ElementRequirementsSymbol extends keyof Value
+  ? Value extends { readonly [ElementRequirementsSymbol]?: infer R }
+    ? R
+    : never
+  : never;
+
+type RequirementsOfSingle<Value> = [ExtractMarkedRequirements<Value>] extends [never]
+  ? [Value] extends [Effect.Effect<infer A, unknown, infer R>]
+    ? R | ElementRequirementsOf<A>
+    : [Value] extends [(...args: infer _Args) => infer Return]
+      ? ElementRequirementsOf<Return>
+      : [Value] extends [ReadonlyArray<infer Item>]
+        ? ElementRequirementsOf<Item>
+        : never
+  : ExtractMarkedRequirements<Value>;
+
+export type ElementRequirementsOf<Value> = Value extends unknown
+  ? RequirementsOfSingle<Value>
+  : never;
+
+export type PropsRequirements<Props> = [Props] extends [object]
+  ? {
+      readonly [Key in keyof Props]: ElementRequirementsOf<Props[Key]>;
+    }[keyof Props]
+  : never;
 
 export interface ComponentProvider {
   readonly layer: Layer.Layer<never, unknown, unknown>;
@@ -1107,19 +1144,14 @@ export const portal = (target: HTMLElement | string, children: ElementChildren) 
  * @public
  * @since 1.0.0
  */
-export const keyedList = <T>(
+type KeyedListElement = Extract<Element, { readonly _tag: "KeyedList" }>;
+
+export const keyedList = <T, E, R>(
   source: Signal<ReadonlyArray<T>>,
-  renderFn: (item: T, index: number) => Effect.Effect<Element, unknown, unknown>,
+  renderFn: (item: T, index: number) => Effect.Effect<Element, E, R>,
   keyFn: (item: T, index: number) => string | number,
-) =>
-  Element.KeyedList({
-    source: source as Signal<ReadonlyArray<unknown>>,
-    renderFn: renderFn as (
-      item: unknown,
-      index: number,
-    ) => Effect.Effect<Element, unknown, unknown>,
-    keyFn: keyFn as (item: unknown, index: number) => string | number,
-  });
+): KeyedListElement & ElementWithRequirements<R> =>
+  unsafeMakeKeyedListElement(source, renderFn, keyFn);
 
 /**
  * Empty element singleton (empty fragment).
@@ -1143,11 +1175,7 @@ export const empty: Element = Element.Fragment({ children: [] });
  * Check if a value is a Signal
  * @internal
  */
-const isSignal = (value: unknown): value is Signal<unknown> =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { _tag: unknown })._tag === "Signal";
+const isSignal = (value: unknown): value is Signal<unknown> => Predicate.isTagged(value, "Signal");
 
 /**
  * Check if a value is an `Element`.
@@ -1169,22 +1197,16 @@ const isSignal = (value: unknown): value is Signal<unknown> =>
  * @since 1.0.0
  */
 export const isElement = (value: unknown): value is Element =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  typeof (value as { _tag: unknown })._tag === "string" &&
-  [
-    "Intrinsic",
-    "Text",
-    "SignalText",
-    "SignalElement",
-    "Provide",
-    "Component",
-    "Fragment",
-    "Portal",
-    "KeyedList",
-    "ErrorBoundaryElement",
-  ].includes((value as { _tag: string })._tag);
+  Element.$is("Intrinsic")(value) ||
+  Element.$is("Text")(value) ||
+  Element.$is("SignalText")(value) ||
+  Element.$is("SignalElement")(value) ||
+  Element.$is("Provide")(value) ||
+  Element.$is("Component")(value) ||
+  Element.$is("Fragment")(value) ||
+  Element.$is("Portal")(value) ||
+  Element.$is("KeyedList")(value) ||
+  Element.$is("ErrorBoundaryElement")(value);
 
 /**
  * Create a reactive text element from a Signal
@@ -1219,7 +1241,7 @@ export const signalElement = <A>(
  * @since 1.0.0
  */
 export const isEmpty = (element: Element): boolean =>
-  element._tag === "Fragment" && element.children.length === 0;
+  Element.$is("Fragment")(element) && element.children.length === 0;
 
 /**
  * Get the key from an `Element` if it has one.
@@ -1237,14 +1259,9 @@ export const isEmpty = (element: Element): boolean =>
  * @since 1.0.0
  */
 export const getKey = (element: Element): ElementKey | null => {
-  switch (element._tag) {
-    case "Intrinsic":
-      return element.key;
-    case "Component":
-      return element.key;
-    default:
-      return null;
-  }
+  if (Element.$is("Intrinsic")(element)) return element.key;
+  if (Element.$is("Component")(element)) return element.key;
+  return null;
 };
 
 /**

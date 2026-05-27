@@ -4,16 +4,17 @@
  * Scope: verifies inline markdown parsing contracts for metadata
  * extraction and body block rendering.
  */
-import { describe, it, expect } from "vitest";
-import {
-  parseChangelogMeta,
-  renderChangelogBody,
-  parseChangelogEntries,
-  parseInlineSegments,
-  resolveChangelogLink,
-  type ChangelogBlock,
-} from "./changelog";
+import { assert, describe, it } from "@effect/vitest";
 import fixture from "../../changelogs/2026-04-28-generated-api-client.md?raw";
+import {
+  ChangelogBlock,
+  InlineSegment,
+  parseChangelogEntries,
+  parseChangelogMeta,
+  parseInlineSegments,
+  renderChangelogBody,
+  resolveChangelogLink,
+} from "./changelog";
 
 // =============================================================================
 // parseChangelogMeta
@@ -25,7 +26,7 @@ describe("parseChangelogMeta", () => {
   it("should return undefined when frontmatter is missing", () => {
     const meta = parseChangelogMeta("# Just a heading\n\nSome body text.");
 
-    expect(meta).toBeUndefined();
+    assert.isUndefined(meta);
   });
 
   // Scope: verifies graceful handling of incomplete frontmatter.
@@ -33,7 +34,7 @@ describe("parseChangelogMeta", () => {
   it("should return undefined when a required frontmatter field is missing", () => {
     const meta = parseChangelogMeta("---\ntitle: Hello\n---\n\n## Summary\n\nSomething.");
 
-    expect(meta).toBeUndefined();
+    assert.isUndefined(meta);
   });
 
   // Scope: verifies graceful handling of empty frontmatter values.
@@ -43,7 +44,7 @@ describe("parseChangelogMeta", () => {
       '---\ntitle: ""\nversion: 1.0.0\n---\n\n## Summary\n\nSomething.',
     );
 
-    expect(meta).toBeUndefined();
+    assert.isUndefined(meta);
   });
 
   // Scope: verifies Summary section is required for list/detail metadata.
@@ -51,7 +52,7 @@ describe("parseChangelogMeta", () => {
   it("should return undefined when summary section is missing", () => {
     const meta = parseChangelogMeta("---\ntitle: Hello\nversion: 1.0.0\n---\n");
 
-    expect(meta).toBeUndefined();
+    assert.isUndefined(meta);
   });
 });
 
@@ -66,23 +67,23 @@ describe("renderChangelogBody", () => {
     const blocks = renderChangelogBody(fixture);
 
     const frontmatterLeak = blocks.some(
-      (b) => b._tag === "Paragraph" && (b.text.includes("title:") || b.text.includes("version:")),
+      (block) =>
+        ChangelogBlock.$is("Paragraph")(block) &&
+        (block.text.includes("title:") || block.text.includes("version:")),
     );
-    expect(frontmatterLeak).toBe(false);
+    assert.isFalse(frontmatterLeak);
   });
 
   // Scope: verifies ATX headings are rendered as typed Heading blocks.
   // Assertion: the fixture contains expected headings at correct levels.
   it("should render ATX headings as typed Heading blocks", () => {
     const blocks = renderChangelogBody(fixture);
-    const headings = blocks.filter(
-      (b): b is ChangelogBlock & { _tag: "Heading" } => b._tag === "Heading",
-    );
+    const headings = blocks.filter(ChangelogBlock.$is("Heading"));
 
-    expect(headings.length).toBeGreaterThanOrEqual(4);
-    expect(headings[0]).toEqual({ _tag: "Heading", level: 2, text: "Summary" });
-    expect(headings[1]).toEqual({ _tag: "Heading", level: 2, text: "Added" });
-    expect(headings.some((h) => h.text === "Fixed" && h.level === 2)).toBe(true);
+    assert.isAtLeast(headings.length, 4);
+    assert.deepStrictEqual(headings[0], ChangelogBlock.Heading({ level: 2, text: "Summary" }));
+    assert.deepStrictEqual(headings[1], ChangelogBlock.Heading({ level: 2, text: "Added" }));
+    assert.isTrue(headings.some((heading) => heading.text === "Fixed" && heading.level === 2));
   });
 
   // Scope: verifies consecutive non-empty text lines merge into Paragraph blocks.
@@ -91,8 +92,8 @@ describe("renderChangelogBody", () => {
     const raw = "Line one.\nLine two.\n\nNew paragraph.";
     const blocks = renderChangelogBody(raw);
 
-    expect(blocks[0]).toEqual({ _tag: "Paragraph", text: "Line one. Line two." });
-    expect(blocks[1]).toEqual({ _tag: "Paragraph", text: "New paragraph." });
+    assert.deepStrictEqual(blocks[0], ChangelogBlock.Paragraph({ text: "Line one. Line two." }));
+    assert.deepStrictEqual(blocks[1], ChangelogBlock.Paragraph({ text: "New paragraph." }));
   });
 
   // Scope: verifies bullet list collection.
@@ -101,11 +102,11 @@ describe("renderChangelogBody", () => {
     const raw = "- First\n- Second\n- Third\n";
     const blocks = renderChangelogBody(raw);
 
-    expect(blocks.length).toBe(1);
-    expect(blocks[0]).toEqual({
-      _tag: "BulletList",
-      items: ["First", "Second", "Third"],
-    });
+    assert.strictEqual(blocks.length, 1);
+    assert.deepStrictEqual(
+      blocks[0],
+      ChangelogBlock.BulletList({ items: ["First", "Second", "Third"] }),
+    );
   });
 
   // Scope: verifies fenced code block parsing.
@@ -114,12 +115,11 @@ describe("renderChangelogBody", () => {
     const raw = "```ts\nconst x = 1;\n```\n";
     const blocks = renderChangelogBody(raw);
 
-    expect(blocks.length).toBe(1);
-    expect(blocks[0]).toEqual({
-      _tag: "CodeBlock",
-      language: "ts",
-      code: "const x = 1;",
-    });
+    assert.strictEqual(blocks.length, 1);
+    assert.deepStrictEqual(
+      blocks[0],
+      ChangelogBlock.CodeBlock({ language: "ts", code: "const x = 1;" }),
+    );
   });
 
   // Scope: verifies empty language fallback.
@@ -128,24 +128,23 @@ describe("renderChangelogBody", () => {
     const raw = "```\nplain text\n```\n";
     const blocks = renderChangelogBody(raw);
 
-    expect(blocks[0]).toEqual({
-      _tag: "CodeBlock",
-      language: "text",
-      code: "plain text",
-    });
+    assert.deepStrictEqual(
+      blocks[0],
+      ChangelogBlock.CodeBlock({ language: "text", code: "plain text" }),
+    );
   });
 
   // Scope: verifies mixed content ordering.
   // Assertion: fixture renders headings, bullets, paragraphs, and code blocks in order.
   it("should render fixture blocks in correct order", () => {
     const blocks = renderChangelogBody(fixture);
-    const tags = blocks.map((b) => b._tag);
+    const tags = blocks.map((block) => block._tag);
 
-    expect(tags[0]).toBe("Heading");
-    expect(tags[1]).toBe("Paragraph");
-    expect(tags[2]).toBe("CodeBlock");
-    expect(tags[3]).toBe("Heading");
-    expect(tags[4]).toBe("BulletList");
+    assert.strictEqual(tags[0], "Heading");
+    assert.strictEqual(tags[1], "Paragraph");
+    assert.strictEqual(tags[2], "CodeBlock");
+    assert.strictEqual(tags[3], "Heading");
+    assert.strictEqual(tags[4], "BulletList");
   });
 });
 
@@ -165,10 +164,10 @@ describe("parseChangelogEntries", () => {
 
     const entries = parseChangelogEntries(modules);
 
-    expect(entries.length).toBe(3);
-    expect(entries[0].date).toBe("2026-05-01");
-    expect(entries[1].date).toBe("2026-04-28");
-    expect(entries[2].date).toBe("2026-04-01");
+    assert.strictEqual(entries.length, 3);
+    assert.strictEqual(entries[0]?.date, "2026-05-01");
+    assert.strictEqual(entries[1]?.date, "2026-04-28");
+    assert.strictEqual(entries[2]?.date, "2026-04-01");
   });
 
   // Scope: verifies same-day entries are sorted newest first by semver.
@@ -185,11 +184,10 @@ describe("parseChangelogEntries", () => {
 
     const entries = parseChangelogEntries(modules);
 
-    expect(entries.map((entry) => entry.meta.version)).toEqual([
-      "trygg@0.1.0-canary.2",
-      "trygg@0.1.0-canary.1",
-      "trygg@0.1.0-canary.0",
-    ]);
+    assert.deepStrictEqual(
+      entries.map((entry) => entry.meta.version),
+      ["trygg@0.1.0-canary.2", "trygg@0.1.0-canary.1", "trygg@0.1.0-canary.0"],
+    );
   });
 
   // Scope: verifies name and date extraction from filename.
@@ -202,9 +200,9 @@ describe("parseChangelogEntries", () => {
 
     const entries = parseChangelogEntries(modules);
 
-    expect(entries.length).toBe(1);
-    expect(entries[0].name).toBe("2026-04-28-generated-api-client");
-    expect(entries[0].date).toBe("2026-04-28");
+    assert.strictEqual(entries.length, 1);
+    assert.strictEqual(entries[0]?.name, "2026-04-28-generated-api-client");
+    assert.strictEqual(entries[0]?.date, "2026-04-28");
   });
 
   // Scope: verifies malformed filenames without YYYY-MM-DD prefix are excluded.
@@ -218,8 +216,8 @@ describe("parseChangelogEntries", () => {
 
     const entries = parseChangelogEntries(modules);
 
-    expect(entries.length).toBe(1);
-    expect(entries[0].name).toBe("2026-04-28-valid");
+    assert.strictEqual(entries.length, 1);
+    assert.strictEqual(entries[0]?.name, "2026-04-28-valid");
   });
 
   // Scope: verifies entries with invalid metadata are excluded.
@@ -233,8 +231,8 @@ describe("parseChangelogEntries", () => {
 
     const entries = parseChangelogEntries(modules);
 
-    expect(entries.length).toBe(1);
-    expect(entries[0].name).toBe("2026-04-28-valid");
+    assert.strictEqual(entries.length, 1);
+    assert.strictEqual(entries[0]?.name, "2026-04-28-valid");
   });
 
   // Scope: verifies empty modules return empty array.
@@ -242,7 +240,7 @@ describe("parseChangelogEntries", () => {
   it("should return empty array for empty modules", () => {
     const entries = parseChangelogEntries({});
 
-    expect(entries.length).toBe(0);
+    assert.strictEqual(entries.length, 0);
   });
 });
 
@@ -256,10 +254,10 @@ describe("parseInlineSegments", () => {
   it("should extract inline code segments", () => {
     const segments = parseInlineSegments("foo `bar` baz");
 
-    expect(segments).toEqual([
-      { _tag: "Text", text: "foo " },
-      { _tag: "InlineCode", code: "bar" },
-      { _tag: "Text", text: " baz" },
+    assert.deepStrictEqual(segments, [
+      InlineSegment.Text({ text: "foo " }),
+      InlineSegment.InlineCode({ code: "bar" }),
+      InlineSegment.Text({ text: " baz" }),
     ]);
   });
 
@@ -268,7 +266,7 @@ describe("parseInlineSegments", () => {
   it("should return single Text segment for plain text", () => {
     const segments = parseInlineSegments("hello world");
 
-    expect(segments).toEqual([{ _tag: "Text", text: "hello world" }]);
+    assert.deepStrictEqual(segments, [InlineSegment.Text({ text: "hello world" })]);
   });
 
   // Scope: verifies multiple inline code spans in one text.
@@ -276,12 +274,12 @@ describe("parseInlineSegments", () => {
   it("should handle multiple inline code spans", () => {
     const segments = parseInlineSegments("use `foo` and `bar` together");
 
-    expect(segments).toEqual([
-      { _tag: "Text", text: "use " },
-      { _tag: "InlineCode", code: "foo" },
-      { _tag: "Text", text: " and " },
-      { _tag: "InlineCode", code: "bar" },
-      { _tag: "Text", text: " together" },
+    assert.deepStrictEqual(segments, [
+      InlineSegment.Text({ text: "use " }),
+      InlineSegment.InlineCode({ code: "foo" }),
+      InlineSegment.Text({ text: " and " }),
+      InlineSegment.InlineCode({ code: "bar" }),
+      InlineSegment.Text({ text: " together" }),
     ]);
   });
 
@@ -290,9 +288,9 @@ describe("parseInlineSegments", () => {
   it("should skip empty backtick spans", () => {
     const segments = parseInlineSegments("before `` after");
 
-    expect(segments).toEqual([
-      { _tag: "Text", text: "before " },
-      { _tag: "Text", text: " after" },
+    assert.deepStrictEqual(segments, [
+      InlineSegment.Text({ text: "before " }),
+      InlineSegment.Text({ text: " after" }),
     ]);
   });
 
@@ -301,7 +299,7 @@ describe("parseInlineSegments", () => {
   it("should treat unmatched backtick as text", () => {
     const segments = parseInlineSegments("foo `bar");
 
-    expect(segments).toEqual([{ _tag: "Text", text: "foo `bar" }]);
+    assert.deepStrictEqual(segments, [InlineSegment.Text({ text: "foo `bar" })]);
   });
 
   // Scope: verifies empty string returns empty array.
@@ -309,7 +307,7 @@ describe("parseInlineSegments", () => {
   it("should return empty array for empty string", () => {
     const segments = parseInlineSegments("");
 
-    expect(segments).toEqual([]);
+    assert.deepStrictEqual(segments, []);
   });
 
   // Scope: verifies markdown link extraction.
@@ -319,10 +317,10 @@ describe("parseInlineSegments", () => {
       "see the [API guide](../../../packages/core/src/api/api.docs.md).",
     );
 
-    expect(segments).toEqual([
-      { _tag: "Text", text: "see the " },
-      { _tag: "Link", text: "API guide", href: "../../../packages/core/src/api/api.docs.md" },
-      { _tag: "Text", text: "." },
+    assert.deepStrictEqual(segments, [
+      InlineSegment.Text({ text: "see the " }),
+      InlineSegment.Link({ text: "API guide", href: "../../../packages/core/src/api/api.docs.md" }),
+      InlineSegment.Text({ text: "." }),
     ]);
   });
 
@@ -331,11 +329,11 @@ describe("parseInlineSegments", () => {
   it("should handle inline code and links together", () => {
     const segments = parseInlineSegments("use `Foo` with [docs](doc.md)");
 
-    expect(segments).toEqual([
-      { _tag: "Text", text: "use " },
-      { _tag: "InlineCode", code: "Foo" },
-      { _tag: "Text", text: " with " },
-      { _tag: "Link", text: "docs", href: "doc.md" },
+    assert.deepStrictEqual(segments, [
+      InlineSegment.Text({ text: "use " }),
+      InlineSegment.InlineCode({ code: "Foo" }),
+      InlineSegment.Text({ text: " with " }),
+      InlineSegment.Link({ text: "docs", href: "doc.md" }),
     ]);
   });
 });
@@ -350,7 +348,8 @@ describe("resolveChangelogLink", () => {
   it("should resolve relative repo path to GitHub blob URL", () => {
     const url = resolveChangelogLink("../../../packages/core/src/api/api.docs.md");
 
-    expect(url).toBe(
+    assert.strictEqual(
+      url,
       "https://github.com/EduSantosBrito/trygg/blob/main/packages/core/src/api/api.docs.md",
     );
   });
@@ -360,6 +359,6 @@ describe("resolveChangelogLink", () => {
   it("should pass through external URLs unchanged", () => {
     const url = resolveChangelogLink("https://example.com/doc");
 
-    expect(url).toBe("https://example.com/doc");
+    assert.strictEqual(url, "https://example.com/doc");
   });
 });

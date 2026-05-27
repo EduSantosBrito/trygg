@@ -6,6 +6,7 @@ import {
   matchCompiledRoutePathPattern,
   RoutePathPattern,
   RoutePathInterpolation,
+  RoutePathSegment,
   interpolateCompiledRoutePathPattern,
 } from "../path-pattern.js";
 
@@ -17,11 +18,11 @@ describe("RoutePathPattern", () => {
       const pattern = yield* compile("/docs/:section/:path*/files/:filepath+");
 
       assert.deepStrictEqual(pattern.segments, [
-        { _tag: "Static", value: "docs" },
-        { _tag: "Param", name: "section" },
-        { _tag: "Wildcard", name: "path" },
-        { _tag: "Static", value: "files" },
-        { _tag: "CatchAllRequired", name: "filepath" },
+        RoutePathSegment.Static({ value: "docs" }),
+        RoutePathSegment.Param({ name: "section" }),
+        RoutePathSegment.Wildcard({ name: "path" }),
+        RoutePathSegment.Static({ value: "files" }),
+        RoutePathSegment.CatchAllRequired({ name: "filepath" }),
       ]);
       assert.deepStrictEqual(pattern.paramNames, ["section", "path", "filepath"]);
     }),
@@ -121,7 +122,11 @@ describe("RoutePathPattern", () => {
       const pattern = yield* compile("/users/:id");
       const missing = yield* Effect.exit(interpolateCompiledRoutePathPattern(pattern, {}));
       const unused = yield* Effect.exit(
-        interpolateCompiledRoutePathPattern(pattern, { id: "1", extra: "x" }, { rejectUnusedParams: true }),
+        interpolateCompiledRoutePathPattern(
+          pattern,
+          { id: "1", extra: "x" },
+          { rejectUnusedParams: true },
+        ),
       );
 
       assert.strictEqual(missing._tag, "Failure");

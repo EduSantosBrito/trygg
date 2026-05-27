@@ -1,13 +1,25 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Scope } from "effect";
+import { Data, Effect, Predicate, Scope } from "effect";
 import * as ReactiveMatcher from "../reactive-matcher.js";
 import * as Signal from "../signal.js";
 import { Element, text, type Element as ElementType } from "../element.js";
 
-type TestState =
-  | { readonly _tag: "Idle" }
-  | { readonly _tag: "Ready"; readonly value: number }
-  | { readonly _tag: "Failed"; readonly reason: string };
+type TestState = Data.TaggedEnum<{
+  readonly Idle: {};
+  readonly Ready: { readonly value: number };
+  readonly Failed: { readonly reason: string };
+}>;
+
+const TestState = Data.taggedEnum<TestState>();
+
+type SignalElement = Extract<ElementType, { readonly _tag: "SignalElement" }>;
+type TextElement = Extract<ElementType, { readonly _tag: "Text" }>;
+
+const isSignalElement = (element: ElementType): element is SignalElement =>
+  Predicate.isTagged(element, "SignalElement");
+
+const isTextElement = (element: ElementType): element is TextElement =>
+  Predicate.isTagged(element, "Text");
 
 describe("ReactiveMatcher", () => {
   it("accumulates handlers through pipeable matcher helpers", () => {
@@ -35,14 +47,14 @@ describe("ReactiveMatcher", () => {
       Failed: (state) => `failed:${state.reason}`,
     });
 
-    assert.strictEqual(render({ _tag: "Idle" }), "idle");
-    assert.strictEqual(render({ _tag: "Ready", value: 7 }), "ready:7");
-    assert.strictEqual(render({ _tag: "Failed", reason: "boom" }), "failed:boom");
+    assert.strictEqual(render(TestState.Idle()), "idle");
+    assert.strictEqual(render(TestState.Ready({ value: 7 })), "ready:7");
+    assert.strictEqual(render(TestState.Failed({ reason: "boom" })), "failed:boom");
   });
 
   it.effect("wraps derived matcher output in a reactive element", () =>
     Effect.gen(function* () {
-      const source = yield* Signal.make<TestState>({ _tag: "Idle" });
+      const source = yield* Signal.make<TestState>(TestState.Idle());
       const render = ReactiveMatcher.tagsExhaustive<TestState, ElementType>({
         Idle: () => text("idle"),
         Ready: (state) => text(`ready:${state.value}`),
@@ -54,7 +66,7 @@ describe("ReactiveMatcher", () => {
         TestState,
         Signal.Signal<ElementType>,
         ElementType,
-        never,
+        Signal.SignalDisposedError,
         Scope.Scope
       >(
         source,
@@ -63,19 +75,19 @@ describe("ReactiveMatcher", () => {
         render,
       );
 
-      assert.strictEqual(element._tag, "SignalElement");
-      if (element._tag === "SignalElement") {
+      assert.isTrue(isSignalElement(element));
+      if (isSignalElement(element)) {
         const initial = yield* Signal.get(element.signal);
-        assert.strictEqual(initial._tag, "Text");
-        if (initial._tag === "Text") {
+        assert.isTrue(isTextElement(initial));
+        if (isTextElement(initial)) {
           assert.strictEqual(initial.content, "idle");
         }
 
-        yield* Signal.set(source, { _tag: "Ready", value: 3 });
+        yield* Signal.set(source, TestState.Ready({ value: 3 }));
 
         const updated = yield* Signal.get(element.signal);
-        assert.strictEqual(updated._tag, "Text");
-        if (updated._tag === "Text") {
+        assert.isTrue(isTextElement(updated));
+        if (isTextElement(updated)) {
           assert.strictEqual(updated.content, "ready:3");
         }
       }

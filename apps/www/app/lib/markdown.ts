@@ -23,6 +23,16 @@ export interface ListBlock {
 
 export type Block = HeadingBlock | ParagraphBlock | CodeFenceBlock | ListBlock;
 
+function headingLevel(marker: string): 1 | 2 | 3 {
+  if (marker.length === 1) return 1;
+  if (marker.length === 2) return 2;
+  return 3;
+}
+
+function lineAt(lines: ReadonlyArray<string>, index: number): string {
+  return lines[index] ?? "";
+}
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -38,7 +48,7 @@ export function parseMarkdown(source: string): readonly Block[] {
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i]!;
+    const line = lineAt(lines, i);
 
     if (line.trim() === "") {
       i++;
@@ -47,9 +57,13 @@ export function parseMarkdown(source: string): readonly Block[] {
 
     const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
-      const level = headingMatch[1]!.length as 1 | 2 | 3;
-      const text = headingMatch[2]!.trim();
-      blocks.push({ type: "heading", level, text, id: slugify(text) });
+      const marker = headingMatch[1];
+      const headingText = headingMatch[2];
+      if (marker !== undefined && headingText !== undefined) {
+        const level = headingLevel(marker);
+        const text = headingText.trim();
+        blocks.push({ type: "heading", level, text, id: slugify(text) });
+      }
       i++;
       continue;
     }
@@ -58,8 +72,8 @@ export function parseMarkdown(source: string): readonly Block[] {
       const language = line.slice(3).trim();
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i]!.startsWith("```")) {
-        codeLines.push(lines[i]!);
+      while (i < lines.length && !lineAt(lines, i).startsWith("```")) {
+        codeLines.push(lineAt(lines, i));
         i++;
       }
       if (i < lines.length) i++;
@@ -69,8 +83,8 @@ export function parseMarkdown(source: string): readonly Block[] {
 
     if (line.startsWith("- ")) {
       const items: string[] = [];
-      while (i < lines.length && lines[i]!.startsWith("- ")) {
-        items.push(lines[i]!.slice(2));
+      while (i < lines.length && lineAt(lines, i).startsWith("- ")) {
+        items.push(lineAt(lines, i).slice(2));
         i++;
       }
       blocks.push({ type: "list", items });
@@ -80,12 +94,12 @@ export function parseMarkdown(source: string): readonly Block[] {
     const paraLines: string[] = [];
     while (
       i < lines.length &&
-      lines[i]!.trim() !== "" &&
-      !lines[i]!.match(/^#{1,3}\s/) &&
-      !lines[i]!.startsWith("```") &&
-      !lines[i]!.startsWith("- ")
+      lineAt(lines, i).trim() !== "" &&
+      !lineAt(lines, i).match(/^#{1,3}\s/) &&
+      !lineAt(lines, i).startsWith("```") &&
+      !lineAt(lines, i).startsWith("- ")
     ) {
-      paraLines.push(lines[i]!);
+      paraLines.push(lineAt(lines, i));
       i++;
     }
     if (paraLines.length > 0) {
@@ -111,7 +125,8 @@ export function parseInline(text: string): readonly InlineSegment[] {
     if (match.index > lastIndex) {
       result.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
-    const token = match[0]!;
+    const token = match[0];
+    if (token === undefined) continue;
     if (token.startsWith("`")) {
       result.push({ type: "code", content: token.slice(1, -1) });
     } else {

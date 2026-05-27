@@ -17,17 +17,21 @@
  * - Verify provide propagates to children
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Exit, Layer, Result, Context, Scope } from "effect";
+import { Data, Effect, Exit, Layer, Result, Context, Schema, Scope } from "effect";
 
 // Tagged error for testing component failures
-class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
+class ComponentError extends Schema.TaggedErrorClass<ComponentError>()("ComponentError", {
+  message: Schema.String,
+}) {}
 import * as Component from "../component.js";
 import { unsafeBuildContext } from "../../internal/unsafe.js";
 import { click, render } from "../../testing/index.js";
 import * as Signal from "../signal.js";
 
 // Test service for DI tests
-class TestService extends Context.Service<TestService, { value: string }>()("TestService") {}
+class TestService extends Context.Service<TestService, { value: string }>()(
+  "component.test/TestService",
+) {}
 const testServiceLayer = Layer.succeed(TestService, { value: "test-value" });
 
 // =============================================================================
@@ -243,7 +247,7 @@ describe("Component.provide", () => {
   it.effect("should merge with existing context from parent", () =>
     Effect.gen(function* () {
       class AnotherService extends Context.Service<AnotherService, { other: string }>()(
-        "AnotherService",
+        "component.test/AnotherService",
       ) {}
 
       const Child = Component.gen(function* () {
@@ -268,8 +272,12 @@ describe("Component.provide", () => {
 
   it.effect("should support chaining multiple provides on same component", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Service<ServiceA, { a: string }>()("ServiceA") {}
-      class ServiceB extends Context.Service<ServiceB, { b: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { a: string }>()(
+        "component.test/ServiceA",
+      ) {}
+      class ServiceB extends Context.Service<ServiceB, { b: string }>()(
+        "component.test/ServiceB",
+      ) {}
 
       const MyComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -297,9 +305,9 @@ describe("Component.provide", () => {
           Store,
           {
             readonly count: Signal.Signal<number>;
-            readonly increment: Effect.Effect<void>;
+            readonly increment: Effect.Effect<void, Signal.SignalDisposedError>;
           }
-        >()("Store") {}
+        >()("component.test/Store") {}
 
         const StoreLive = Layer.effect(
           Store,
@@ -315,7 +323,7 @@ describe("Component.provide", () => {
               count,
               increment: Signal.update(count, (value) => value + 1),
             };
-          }),
+          }).pipe(Effect.annotateLogs("service", "Store")),
         );
 
         const StoreView = Component.gen(function* () {
@@ -479,18 +487,23 @@ describe("isEffectComponent", () => {
     assert.isTrue(Component.isEffectComponent(MyComponent));
   });
 
-  it("should return false for arrow functions without _tag", () => {
-    const arrow = () => Effect.succeed("hi");
-    assert.isFalse(Component.isEffectComponent(arrow));
-  });
+  it.effect("should return false for arrow functions without _tag", () =>
+    Effect.sync(() => {
+      const arrow = () => "hi";
+      assert.isFalse(Component.isEffectComponent(arrow));
+    }),
+  );
 
-  it("should return false for Effect objects (have _tag but wrong value)", () => {
-    const eff = Effect.succeed(42);
-    assert.isFalse(Component.isEffectComponent(eff));
-  });
+  it.effect("should return false for Effect objects (have _tag but wrong value)", () =>
+    Effect.sync(() => {
+      const eff = Effect.succeed(42);
+      assert.isFalse(Component.isEffectComponent(eff));
+    }),
+  );
 
   it("should return false for objects with _tag: 'EffectComponent' that are not functions", () => {
-    const fakeComponent = { _tag: "EffectComponent" };
+    class FakeComponent extends Data.TaggedClass("EffectComponent") {}
+    const fakeComponent = new FakeComponent();
     assert.isFalse(Component.isEffectComponent(fakeComponent));
   });
 
@@ -506,16 +519,18 @@ describe("isEffectComponent", () => {
 // Scope: Alternative component creation with explicit type parameter
 
 describe("Component function API", () => {
-  it("should create component with explicit props type", () => {
-    const MyComponent = Component.Component<{ title: string }>()((Props) =>
-      Effect.gen(function* () {
-        const { title } = yield* Props;
-        return <div>{title}</div>;
-      }),
-    );
+  it.effect("should create component with explicit props type", () =>
+    Effect.sync(() => {
+      const MyComponent = Component.Component<{ title: string }>()((Props) =>
+        Effect.gen(function* () {
+          const { title } = yield* Props;
+          return <div>{title}</div>;
+        }),
+      );
 
-    assert.strictEqual(MyComponent._tag, "EffectComponent");
-  });
+      assert.strictEqual(MyComponent._tag, "EffectComponent");
+    }),
+  );
 
   it.effect("should work with props", () =>
     Effect.gen(function* () {
@@ -556,7 +571,7 @@ describe("Component function API", () => {
 describe("Layer Precedence", () => {
   it.effect("should preserve Effect nesting via chaining (inner provision wins)", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { color: string }>()("component.test/Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -573,7 +588,7 @@ describe("Layer Precedence", () => {
   );
 
   it("rejects legacy array provision", () => {
-    class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
+    class Theme extends Context.Service<Theme, { color: string }>()("component.test/Theme") {}
 
     const BlueTheme = Layer.succeed(Theme, { color: "blue" });
     const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -589,7 +604,7 @@ describe("Layer Precedence", () => {
 
   it.effect("should keep fully provided component services nested inside later provision", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Service<Theme, { color: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { color: string }>()("component.test/Theme") {}
 
       const BlueTheme = Layer.succeed(Theme, { color: "blue" });
       const RedTheme = Layer.succeed(Theme, { color: "red" });
@@ -629,8 +644,12 @@ describe("Immutability", () => {
 
   it.effect("should create independent variants from base", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Service<ServiceA, { value: string }>()("ServiceA") {}
-      class ServiceB extends Context.Service<ServiceB, { value: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { value: string }>()(
+        "component.test/ServiceA",
+      ) {}
+      class ServiceB extends Context.Service<ServiceB, { value: string }>()(
+        "component.test/ServiceB",
+      ) {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;
@@ -654,8 +673,12 @@ describe("Immutability", () => {
 
   it.effect("should fail when partial provision leaves unsatisfied services", () =>
     Effect.gen(function* () {
-      class ServiceA extends Context.Service<ServiceA, { value: string }>()("ServiceA") {}
-      class ServiceB extends Context.Service<ServiceB, { value: string }>()("ServiceB") {}
+      class ServiceA extends Context.Service<ServiceA, { value: string }>()(
+        "component.test/ServiceA",
+      ) {}
+      class ServiceB extends Context.Service<ServiceB, { value: string }>()(
+        "component.test/ServiceB",
+      ) {}
 
       const BaseComponent = Component.gen(function* () {
         const a = yield* ServiceA;

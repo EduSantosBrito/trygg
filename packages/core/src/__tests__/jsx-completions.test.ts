@@ -58,8 +58,9 @@ const completionsForTags = (): ReadonlyMap<"div" | "svg", ReadonlySet<string>> =
   };
 
   const service = ts.createLanguageService(host);
+  const tags: ReadonlyArray<"div" | "svg"> = ["div", "svg"];
   return new Map(
-    (["div", "svg"] as const).map((tag) => {
+    tags.map((tag) => {
       const marker = `<${tag} vi`;
       const position = source.indexOf(marker) + marker.length;
       const completions = service.getCompletionsAtPosition(fileName, position, {});

@@ -4,8 +4,7 @@
  */
 import { Effect } from "effect";
 
-export const generateTsConfig = (): Effect.Effect<string> =>
-  Effect.succeed(`{
+export const generateTsConfig: Effect.Effect<string> = Effect.succeed(`{
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ES2022",

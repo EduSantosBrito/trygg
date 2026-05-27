@@ -8,7 +8,7 @@
  */
 
 /** trygg framework version (from packages/core/package.json) */
-export const TRYGG_VERSION = "^0.4.0-canary.1";
+export const TRYGG_VERSION = "^0.5.0-canary.0";
 
 /** Effect ecosystem versions */
 export const EFFECT_VERSION = "^4.0.0-beta.51";
@@ -18,6 +18,6 @@ export const EFFECT_LANGUAGE_SERVICE_VERSION = "^0.77.0";
 /** Dev tooling versions */
 export const TYPESCRIPT_VERSION = "^5.7.0";
 export const VITE_VERSION = "^6.0.0";
-export const OXLINT_VERSION = "^1.41.0";
+export const OXLINT_VERSION = "^1.67.0";
 export const TAILWIND_VERSION = "^4.0.0";
 export const TAILWIND_VITE_VERSION = "^4.0.0";

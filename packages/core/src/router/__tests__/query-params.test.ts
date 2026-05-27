@@ -82,8 +82,8 @@ describe("decodeQuery", () => {
 
       const result = yield* Route.decodeQuery(schema, searchParams, "/search");
 
-      assert.strictEqual((result as Record<string, unknown>).q, "hello");
-      assert.strictEqual((result as Record<string, unknown>).page, undefined);
+      assert.strictEqual(result.q, "hello");
+      assert.strictEqual(result.page, undefined);
     }),
   );
 
@@ -115,8 +115,8 @@ describe("decodeQuery", () => {
 
       const result = yield* Route.decodeQuery(schema, searchParams, "/search");
 
-      assert.strictEqual((result as Record<string, unknown>).q, undefined);
-      assert.strictEqual((result as Record<string, unknown>).page, undefined);
+      assert.strictEqual(result.q, undefined);
+      assert.strictEqual(result.page, undefined);
     }),
   );
 
@@ -129,8 +129,7 @@ describe("decodeQuery", () => {
 
       const result = yield* Route.decodeQuery(schema, searchParams, "/search");
 
-      assert.strictEqual((result as Record<string, unknown>).q, "hello");
-      assert.strictEqual((result as Record<string, unknown>)["extra"], undefined);
+      assert.deepStrictEqual(result, { q: "hello" });
     }),
   );
 

@@ -25,11 +25,11 @@ export const RiskyComponent = Component.gen(function* (
   }
 
   if (shouldFail === "validation") {
-    return yield* new ValidationError({ field: "email", message: "Invalid format" });
+    return yield* new ValidationError({ field: "email", description: "Invalid format" });
   }
 
   if (shouldFail === "unknown") {
-    return yield* new UnknownError({ cause: new Error("Something unexpected happened") });
+    return yield* new UnknownError({ cause: "Something unexpected happened" });
   }
 
   return <SuccessDisplay />;

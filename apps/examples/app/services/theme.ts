@@ -65,5 +65,5 @@ export const ThemeStoreLive = Layer.effect(
           yield* Signal.set(switchLabel, `Switch to ${next === "dark" ? "Light" : "Dark"} Theme`);
         }),
     };
-  }),
+  }).pipe(Effect.annotateLogs({ service: "ThemeStore" })),
 );

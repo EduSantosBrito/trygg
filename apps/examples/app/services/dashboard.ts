@@ -48,7 +48,7 @@ export class DashboardTheme extends Context.Service<
     readonly switchLabel: Signal.Signal<string>;
     readonly toggle: () => Effect.Effect<void>;
   }
->()("DashboardTheme") {}
+>()("examples/dashboard/DashboardTheme") {}
 
 export const DashboardThemeLive = Layer.effect(
   DashboardTheme,
@@ -70,7 +70,7 @@ export const DashboardThemeLive = Layer.effect(
           yield* Signal.set(switchLabel, switchLabelForMode(next));
         }),
     };
-  }),
+  }).pipe(Effect.annotateLogs({ service: "DashboardTheme" })),
 );
 
 export class Analytics extends Context.Service<
@@ -78,7 +78,7 @@ export class Analytics extends Context.Service<
   {
     readonly track: (event: string, data?: Record<string, unknown>) => Effect.Effect<void>;
   }
->()("Analytics") {}
+>()("examples/dashboard/Analytics") {}
 
 export class Logger extends Context.Service<
   Logger,
@@ -86,4 +86,4 @@ export class Logger extends Context.Service<
     readonly info: (message: string) => Effect.Effect<void>;
     readonly warn: (message: string) => Effect.Effect<void>;
   }
->()("Logger") {}
+>()("examples/dashboard/Logger") {}

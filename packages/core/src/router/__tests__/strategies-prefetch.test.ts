@@ -8,89 +8,80 @@ import { Effect, Layer, Ref } from "effect";
 import { runPrefetch } from "../prefetch.js";
 import { RenderStrategy } from "../render-strategy.js";
 import { ScrollStrategy } from "../scroll-strategy.js";
-import { unsafeEraseR } from "../../internal/unsafe.js";
 
 // =============================================================================
 // Phase 6: Prefetch
 // =============================================================================
 
 describe("runPrefetch", () => {
-  it("should run all prefetch effects in parallel", async () => {
-    await Effect.runPromise(
-      unsafeEraseR(
-        Effect.gen(function* () {
-          const log = yield* Ref.make<string[]>([]);
+  it.effect("should run all prefetch effects in parallel", () =>
+    Effect.gen(function* () {
+      const log = yield* Ref.make<string[]>([]);
 
-          const fn1 = () => Ref.update(log, (arr) => [...arr, "first"]).pipe(Effect.as("r1"));
-          const fn2 = () => Ref.update(log, (arr) => [...arr, "second"]).pipe(Effect.as("r2"));
+      const fn1 = (_ctx: unknown) =>
+        Ref.update(log, (arr) => [...arr, "first"]).pipe(Effect.as("r1"));
+      const fn2 = (_ctx: unknown) =>
+        Ref.update(log, (arr) => [...arr, "second"]).pipe(Effect.as("r2"));
 
-          yield* runPrefetch([fn1, fn2], {});
+      yield* runPrefetch([fn1, fn2], {});
 
-          const result = yield* Ref.get(log);
-          // Both should have run (order may vary with concurrency)
-          assert.strictEqual(result.length, 2);
-          assert.isTrue(result.includes("first"));
-          assert.isTrue(result.includes("second"));
-        }),
-      ),
-    );
-  });
+      const result = yield* Ref.get(log);
+      // Both should have run (order may vary with concurrency)
+      assert.strictEqual(result.length, 2);
+      assert.isTrue(result.includes("first"));
+      assert.isTrue(result.includes("second"));
+    }),
+  );
 
-  it("should not fail when prefetch errors", async () => {
-    await Effect.runPromise(
-      unsafeEraseR(
-        Effect.gen(function* () {
-          const fn1 = () => Effect.succeed("ok");
-          const fn2 = () => Effect.fail("prefetch-error");
-          const fn3 = () => Effect.succeed("also-ok");
+  it.effect("should not fail when prefetch errors", () =>
+    Effect.gen(function* () {
+      const fn1 = Effect.fnUntraced(function* (_ctx: unknown) {
+        return "ok";
+      });
+      const fn2 = Effect.fnUntraced(function* (_ctx: unknown) {
+        return yield* Effect.fail("prefetch-error");
+      });
+      const fn3 = Effect.fnUntraced(function* (_ctx: unknown) {
+        return "also-ok";
+      });
 
-          // Should not throw — errors are logged and swallowed
-          yield* runPrefetch([fn1, fn2, fn3], {});
-        }),
-      ),
-    );
-  });
+      // Should not throw — errors are logged and swallowed
+      yield* runPrefetch([fn1, fn2, fn3], {});
+    }),
+  );
 
-  it("should handle empty prefetch list", async () => {
-    await Effect.runPromise(unsafeEraseR(runPrefetch([], {})));
-  });
+  it.effect("should handle empty prefetch list", () => runPrefetch([], {}));
 
-  it("should pass context to prefetch functions", async () => {
-    await Effect.runPromise(
-      unsafeEraseR(
-        Effect.gen(function* () {
-          const received = yield* Ref.make<unknown>(null);
-          const ctx = { params: { id: 123 } };
+  it.effect("should pass context to prefetch functions", () =>
+    Effect.gen(function* () {
+      const received = yield* Ref.make<unknown>(null);
+      const ctx = { params: { id: 123 } };
 
-          const fn = (c: unknown) => Ref.set(received, c).pipe(Effect.as("resource"));
+      const fn = (c: unknown) => Ref.set(received, c).pipe(Effect.as("resource"));
 
-          yield* runPrefetch([fn], ctx);
+      yield* runPrefetch([fn], ctx);
 
-          const result = yield* Ref.get(received);
-          assert.deepStrictEqual(result, ctx);
-        }),
-      ),
-    );
-  });
+      const result = yield* Ref.get(received);
+      assert.deepStrictEqual(result, ctx);
+    }),
+  );
 
-  it("should run multiple prefetches even if one fails", async () => {
-    await Effect.runPromise(
-      unsafeEraseR(
-        Effect.gen(function* () {
-          const counter = yield* Ref.make(0);
+  it.effect("should run multiple prefetches even if one fails", () =>
+    Effect.gen(function* () {
+      const counter = yield* Ref.make(0);
 
-          const fn1 = () => Ref.update(counter, (n) => n + 1).pipe(Effect.as("r1"));
-          const fn2 = () => Effect.fail("error");
-          const fn3 = () => Ref.update(counter, (n) => n + 1).pipe(Effect.as("r3"));
+      const fn1 = (_ctx: unknown) => Ref.update(counter, (n) => n + 1).pipe(Effect.as("r1"));
+      const fn2 = Effect.fnUntraced(function* (_ctx: unknown) {
+        return yield* Effect.fail("error");
+      });
+      const fn3 = (_ctx: unknown) => Ref.update(counter, (n) => n + 1).pipe(Effect.as("r3"));
 
-          yield* runPrefetch([fn1, fn2, fn3], {});
+      yield* runPrefetch([fn1, fn2, fn3], {});
 
-          const count = yield* Ref.get(counter);
-          assert.strictEqual(count, 2); // fn1 and fn3 ran
-        }),
-      ),
-    );
-  });
+      const count = yield* Ref.get(counter);
+      assert.strictEqual(count, 2); // fn1 and fn3 ran
+    }),
+  );
 });
 
 // =============================================================================

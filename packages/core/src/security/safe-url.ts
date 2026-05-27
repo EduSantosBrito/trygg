@@ -13,7 +13,7 @@
  * @since 1.0.0
  * @module trygg/security/safe-url
  */
-import { Data, Effect, Exit, Layer, Option } from "effect";
+import { Effect, Exit, Layer, Match, Option, Schema } from "effect";
 import * as Context from "effect/Context";
 
 /**
@@ -32,25 +32,28 @@ import * as Context from "effect/Context";
  * @public
  * @since 1.0.0
  */
-export class UnsafeUrlError extends Data.TaggedError("UnsafeUrlError")<{
-  readonly url: string;
-  readonly reason: "invalid_url" | "unsafe_scheme" | "empty_url";
-  readonly scheme?: string;
-  readonly allowedSchemes: ReadonlyArray<string>;
-}> {
+export class UnsafeUrlError extends Schema.TaggedErrorClass<UnsafeUrlError>()("UnsafeUrlError", {
+  url: Schema.String,
+  reason: Schema.Literals(["invalid_url", "unsafe_scheme", "empty_url"]),
+  scheme: Schema.optional(Schema.String),
+  allowedSchemes: Schema.Array(Schema.String),
+}) {
   override get message(): string {
-    switch (this.reason) {
-      case "invalid_url":
-        return `Invalid URL: "${this.url}". URL must be a valid absolute or relative URL.`;
-      case "unsafe_scheme":
-        return (
+    return Match.value(this.reason).pipe(
+      Match.when(
+        "invalid_url",
+        () => `Invalid URL: "${this.url}". URL must be a valid absolute or relative URL.`,
+      ),
+      Match.when(
+        "unsafe_scheme",
+        () =>
           `Unsafe URL scheme "${this.scheme}" in "${this.url}". ` +
           `Allowed schemes: ${this.allowedSchemes.join(", ")}. ` +
-          `Provide SafeUrl.SafeUrlConfig.layer or a custom SafeUrlConfig layer to add custom schemes.`
-        );
-      case "empty_url":
-        return `Empty URL is not allowed.`;
-    }
+          `Provide SafeUrl.SafeUrlConfig.layer or a custom SafeUrlConfig layer to add custom schemes.`,
+      ),
+      Match.when("empty_url", () => `Empty URL is not allowed.`),
+      Match.exhaustive,
+    );
   }
 }
 
@@ -85,7 +88,7 @@ export const DEFAULT_ALLOWED_SCHEMES: ReadonlyArray<string> = [
   "sms",
   "blob",
   "data",
-] as const;
+];
 
 /**
  * Configuration for SafeUrl validation.
@@ -129,9 +132,10 @@ export interface SafeUrlConfigService {
  * @public
  * @since 1.0.0
  */
-export class SafeUrlConfig extends Context.Service<SafeUrlConfig, SafeUrlConfigService>()(
-  "@trygg/SafeUrlConfig",
-) {
+export class SafeUrlConfig extends Context.Service<
+  SafeUrlConfig,
+  { readonly allowedSchemes: ReadonlyArray<string> }
+>()("@trygg/SafeUrlConfig") {
   static readonly layer: Layer.Layer<SafeUrlConfig> = Layer.succeed(SafeUrlConfig, {
     allowedSchemes: DEFAULT_ALLOWED_SCHEMES,
   });
@@ -167,20 +171,8 @@ export const defaultConfig: SafeUrlConfigService = {
  * @internal
  */
 const extractScheme = (url: string): Option.Option<string> => {
-  // Try parsing as absolute URL first
-  try {
-    const parsed = new URL(url);
-    return Option.some(parsed.protocol.replace(/:$/, "").toLowerCase());
-  } catch {
-    // Not an absolute URL - check for scheme pattern
-    const schemeMatch = url.match(/^([a-z][a-z0-9+.-]*):/);
-    const scheme = schemeMatch !== null ? schemeMatch[1] : undefined;
-    if (scheme !== undefined) {
-      return Option.some(scheme.toLowerCase());
-    }
-    // Relative URL (no scheme) - allowed
-    return Option.none();
-  }
+  const scheme = url.match(/^([a-z][a-z0-9+.-]*):/)?.[1];
+  return scheme === undefined ? Option.none() : Option.some(scheme.toLowerCase());
 };
 
 // =============================================================================
@@ -326,13 +318,14 @@ export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError, Sa
  * @public
  * @since 1.0.0
  */
-export const validateOption = (
+export const validateOption: (
   url: string,
-): Effect.Effect<Option.Option<string>, never, SafeUrlConfig> =>
-  Effect.gen(function* () {
-    const exit = yield* Effect.exit(validate(url));
-    return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();
-  });
+) => Effect.Effect<Option.Option<string>, never, SafeUrlConfig> = Effect.fn(
+  "SafeUrl.validateOption",
+)(function* (url: string) {
+  const exit = yield* Effect.exit(validate(url));
+  return Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none();
+});
 
 /**
  * Check if a URL is safe.
@@ -351,8 +344,9 @@ export const validateOption = (
  * @public
  * @since 1.0.0
  */
-export const isSafe = (url: string): Effect.Effect<boolean, never, SafeUrlConfig> =>
-  Effect.gen(function* () {
-    const result = yield* validateOption(url);
-    return Option.isSome(result);
-  });
+export const isSafe: (url: string) => Effect.Effect<boolean, never, SafeUrlConfig> = Effect.fn(
+  "SafeUrl.isSafe",
+)(function* (url: string) {
+  const result = yield* validateOption(url);
+  return Option.isSome(result);
+});

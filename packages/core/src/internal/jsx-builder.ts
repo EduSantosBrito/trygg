@@ -1,4 +1,4 @@
-import { Data, Effect, Exit, Match } from "effect";
+import { Effect, Exit, Schema } from "effect";
 
 import * as Component from "../primitives/component.js";
 import { Element, keyed, type ElementKey } from "../primitives/element.js";
@@ -7,11 +7,20 @@ import { unsafeAsElementProps } from "./unsafe.js";
 
 type RuntimeProps = Record<string, unknown>;
 
-export class InvalidJsxComponentInput extends Data.TaggedError("InvalidJsxComponentInput")<{
-  readonly reason: "plain-function" | "effect" | "unknown";
-  readonly displayName?: string | undefined;
-  readonly key: ElementKey | null;
-}> {}
+const InvalidJsxComponentInputReason = Schema.Union([
+  Schema.Literal("plain-function"),
+  Schema.Literal("effect"),
+  Schema.Literal("unknown"),
+]);
+
+export class InvalidJsxComponentInput extends Schema.TaggedErrorClass<InvalidJsxComponentInput>()(
+  "InvalidJsxComponentInput",
+  {
+    reason: InvalidJsxComponentInputReason,
+    displayName: Schema.optional(Schema.String),
+    key: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])),
+  },
+) {}
 
 interface NormalizedJsxInput {
   readonly props: RuntimeProps;
@@ -27,19 +36,21 @@ const isRecord = (value: unknown): value is RuntimeProps =>
   typeof value === "object" && value !== null;
 
 const collectProps = Effect.fn("JsxBuilder.collectProps")(function* (props: RuntimeProps) {
-  const keysExit = yield* Effect.exit(Effect.sync(() => Object.keys(props)));
-  if (Exit.isFailure(keysExit)) {
-    return {} satisfies RuntimeProps;
+  const result: RuntimeProps = {};
+  const keys = yield* Effect.exit(Effect.sync(() => Object.keys(props)));
+
+  if (Exit.isFailure(keys)) {
+    return result;
   }
 
-  const entries = yield* Effect.forEach(keysExit.value, (property) =>
-    Effect.gen(function* () {
-      const valueExit = yield* Effect.exit(Effect.sync(() => Reflect.get(props, property)));
-      return Exit.isSuccess(valueExit) ? ([[property, valueExit.value]] as const) : [];
-    }),
-  );
+  for (const property of keys.value) {
+    const value = yield* Effect.exit(Effect.sync(() => props[property]));
+    if (Exit.isSuccess(value)) {
+      result[property] = value.value;
+    }
+  }
 
-  return Object.fromEntries(entries.flat());
+  return result;
 });
 
 const normalizeInput: (props: unknown, key?: ElementKey) => Effect.Effect<NormalizedJsxInput> =
@@ -93,31 +104,26 @@ const build: (
   function* (type: unknown, props: unknown, key?: ElementKey) {
     const input = yield* normalizeInput(props, key);
 
-    return yield* Match.value(type).pipe(
-      Match.when(
-        (value: unknown): value is string => typeof value === "string",
-        (tag) => buildIntrinsic(tag, input),
-      ),
-      Match.when(Effect.isEffect, (effectValue) =>
-        Effect.fail(
-          new InvalidJsxComponentInput({
-            reason: "effect",
-            displayName: effectValue.constructor?.name,
-            key: input.resolvedKey,
-          }),
-        ),
-      ),
-      Match.when(Component.isEffectComponent, (component) => buildComponent(component, input)),
-      Match.orElse((value: unknown) =>
-        Effect.fail(
-          new InvalidJsxComponentInput({
-            reason: typeof value === "function" ? "plain-function" : "unknown",
-            displayName: typeof value === "function" ? value.name : undefined,
-            key: input.resolvedKey,
-          }),
-        ),
-      ),
-    );
+    if (typeof type === "string") {
+      return yield* buildIntrinsic(type, input);
+    }
+
+    if (Effect.isEffect(type)) {
+      return yield* new InvalidJsxComponentInput({
+        reason: "effect",
+        key: input.resolvedKey,
+      });
+    }
+
+    if (Component.isEffectComponent(type)) {
+      return yield* buildComponent(type, input);
+    }
+
+    return yield* new InvalidJsxComponentInput({
+      reason: typeof type === "function" ? "plain-function" : "unknown",
+      displayName: typeof type === "function" ? type.name : undefined,
+      key: input.resolvedKey,
+    });
   },
 );
 

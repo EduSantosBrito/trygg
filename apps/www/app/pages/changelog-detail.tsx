@@ -1,6 +1,7 @@
 /**
  * Changelog Detail Page — trygg.dev
  */
+import { Data, Match } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 
@@ -19,15 +20,17 @@ import type { HighlightedLine } from "../components/code-block";
 // Precompute rendered blocks (async at module scope)
 // =============================================================================
 
-type RenderedBlock =
-  | { readonly _tag: "Heading"; readonly level: 2 | 3 | 4; readonly text: string }
-  | { readonly _tag: "Paragraph"; readonly text: string }
-  | { readonly _tag: "BulletList"; readonly items: ReadonlyArray<string> }
-  | {
-      readonly _tag: "CodeBlock";
-      readonly language: string;
-      readonly lines: ReadonlyArray<HighlightedLine>;
-    };
+type RenderedBlock = Data.TaggedEnum<{
+  readonly Heading: { readonly level: 2 | 3 | 4; readonly text: string };
+  readonly Paragraph: { readonly text: string };
+  readonly BulletList: { readonly items: ReadonlyArray<string> };
+  readonly CodeBlock: {
+    readonly language: string;
+    readonly lines: ReadonlyArray<HighlightedLine>;
+  };
+}>;
+
+const RenderedBlock = Data.taggedEnum<RenderedBlock>();
 
 type RenderedEntry = {
   readonly name: string;
@@ -38,12 +41,16 @@ type RenderedEntry = {
 
 const renderBlock = async (block: ChangelogBlock): Promise<RenderedBlock> => {
   switch (block._tag) {
+    case "Heading":
+      return RenderedBlock.Heading({ level: block.level, text: block.text });
+    case "Paragraph":
+      return RenderedBlock.Paragraph({ text: block.text });
+    case "BulletList":
+      return RenderedBlock.BulletList({ items: block.items });
     case "CodeBlock": {
       const lines = await highlightCode(block.code, block.language);
-      return { _tag: "CodeBlock", language: block.language, lines };
+      return RenderedBlock.CodeBlock({ language: block.language, lines });
     }
-    default:
-      return block;
   }
 };
 
@@ -69,25 +76,18 @@ const InlineRenderer = Component.gen(function* (Props: ComponentProps<{ readonly
 
   return (
     <>
-      {segments.map((seg, i) => {
-        switch (seg._tag) {
-          case "InlineCode":
-            return <code key={i}>{seg.code}</code>;
-          case "Link":
-            return (
-              <a
-                key={i}
-                href={resolveChangelogLink(seg.href)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {seg.text}
-              </a>
-            );
-          case "Text":
-            return <span key={i}>{seg.text}</span>;
-        }
-      })}
+      {segments.map((seg, i) =>
+        Match.value(seg).pipe(
+          Match.tag("InlineCode", ({ code }) => <code key={i}>{code}</code>),
+          Match.tag("Link", ({ href, text }) => (
+            <a key={i} href={resolveChangelogLink(href)} target="_blank" rel="noopener noreferrer">
+              {text}
+            </a>
+          )),
+          Match.tag("Text", ({ text }) => <span key={i}>{text}</span>),
+          Match.exhaustive,
+        ),
+      )}
     </>
   );
 });
@@ -121,6 +121,17 @@ const ChangelogListItem = Component.gen(function* (
 // Block renderer
 // =============================================================================
 
+const headingTag = (level: 2 | 3 | 4): "h2" | "h3" | "h4" => {
+  switch (level) {
+    case 2:
+      return "h2";
+    case 3:
+      return "h3";
+    case 4:
+      return "h4";
+  }
+};
+
 const BlockRenderer = Component.gen(function* (
   Props: ComponentProps<{ readonly block: RenderedBlock }>,
 ) {
@@ -128,7 +139,7 @@ const BlockRenderer = Component.gen(function* (
 
   switch (block._tag) {
     case "Heading": {
-      const Tag = `h${block.level}` as const;
+      const Tag = headingTag(block.level);
       return <Tag>{block.text}</Tag>;
     }
     case "Paragraph":

@@ -12,7 +12,7 @@
 import { jsx, Fragment, Element, type JSXElementType, type ElementKey } from "./jsx-runtime.js";
 import * as Component from "./primitives/component.js";
 import type { Component as ComponentType } from "./primitives/component.js";
-import type { ComponentElementWithRequirements } from "./primitives/element.js";
+import type { ElementWithRequirements, PropsRequirements } from "./primitives/element.js";
 
 export { jsx, Fragment, Element };
 export type { JSXProps, JSXElementType, ElementProps, ElementKey } from "./jsx-runtime.js";
@@ -47,14 +47,14 @@ interface JSXSource {
  * @public
  * @since 1.0.0
  */
-export function jsxDEV(
+export function jsxDEV<Props extends Record<string, unknown>>(
   type: string,
-  props: Record<string, unknown> | null,
+  props: Props | null,
   key?: ElementKey,
   _isStaticChildren?: boolean,
   _source?: JSXSource,
   _self?: unknown,
-): Element;
+): ElementWithRequirements<PropsRequirements<Props>>;
 export function jsxDEV<Props extends Record<string, unknown>, E, R>(
   type: ComponentType.Type<Props, E, R>,
   props: Props | null,
@@ -62,7 +62,7 @@ export function jsxDEV<Props extends Record<string, unknown>, E, R>(
   _isStaticChildren?: boolean,
   _source?: JSXSource,
   _self?: unknown,
-): ComponentElementWithRequirements<R>;
+): ElementWithRequirements<R | PropsRequirements<Props>>;
 export function jsxDEV(
   type: JSXElementType,
   props: Record<string, unknown> | null,

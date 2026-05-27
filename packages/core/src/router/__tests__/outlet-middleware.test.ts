@@ -11,35 +11,24 @@
  * - Pass-through when all middleware succeed
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect, Option, Ref } from "effect";
+import { Effect, Option, Predicate, Ref, Schema } from "effect";
 import * as Route from "../route.js";
 import { routeRedirect, routeForbidden } from "../route.js";
 import * as Routes from "../routes.js";
 import { createMatcher, collectRouteMiddleware, runRouteMiddleware } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
 
-class TestMiddlewareError extends Data.TaggedError("TestMiddlewareError")<{
-  readonly message: string;
-}> {}
-
-// Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
+class TestMiddlewareError extends Schema.TaggedErrorClass<TestMiddlewareError>()(
+  "TestMiddlewareError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 // Dummy components
-const Comp = makeComp();
-const Layout = makeComp();
+const Comp: RouteComponent = Effect.succeed(empty);
+const Layout: RouteComponent = Effect.succeed(empty);
 
 // =============================================================================
 // collectRouteMiddleware - Ordering
@@ -276,8 +265,8 @@ describe("runRouteMiddleware", () => {
 
       if (Option.isSome(match)) {
         const result = yield* runRouteMiddleware(match.value.route);
-        assert.strictEqual(result._tag, "Redirect");
-        if (result._tag === "Redirect") {
+        assert.isTrue(Predicate.isTagged(result, "Redirect"));
+        if (Predicate.isTagged(result, "Redirect")) {
           assert.strictEqual(result.path, "/login");
           assert.strictEqual(result.replace, false);
         }
@@ -299,8 +288,8 @@ describe("runRouteMiddleware", () => {
 
       if (Option.isSome(match)) {
         const result = yield* runRouteMiddleware(match.value.route);
-        assert.strictEqual(result._tag, "Redirect");
-        if (result._tag === "Redirect") {
+        assert.isTrue(Predicate.isTagged(result, "Redirect"));
+        if (Predicate.isTagged(result, "Redirect")) {
           assert.strictEqual(result.replace, true);
         }
       }
@@ -309,7 +298,7 @@ describe("runRouteMiddleware", () => {
 
   it.effect("should return Forbidden on RouterForbidden failure", () =>
     Effect.gen(function* () {
-      const forbiddenMiddleware = routeForbidden();
+      const forbiddenMiddleware = routeForbidden;
 
       const manifest = Routes.make().add(
         Route.make("/admin").middleware(forbiddenMiddleware).component(Comp),
@@ -382,7 +371,7 @@ describe("runRouteMiddleware", () => {
 
       const forbidMiddleware = Effect.gen(function* () {
         yield* Ref.update(order, (arr) => [...arr, "forbid"]);
-        return yield* routeForbidden();
+        return yield* routeForbidden;
       });
       const logMiddleware = Ref.update(order, (arr) => [...arr, "log"]);
 

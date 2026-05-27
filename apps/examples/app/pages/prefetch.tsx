@@ -7,20 +7,30 @@
  */
 import { Component } from "trygg";
 import * as Router from "trygg/router";
+import type { PrefetchStrategy, RoutePath } from "trygg/router";
 
-const strategies = [
+type PrefetchExample = {
+  readonly label: string;
+  readonly prefetch: PrefetchStrategy;
+  readonly to: RoutePath;
+  readonly linkText: string;
+  readonly description: string;
+  readonly inspect: string;
+};
+
+const strategies: ReadonlyArray<PrefetchExample> = [
   {
     label: "Intent (default)",
-    prefetch: "intent" as const,
-    to: "/counter" as const,
+    prefetch: "intent",
+    to: "/counter",
     linkText: "Counter →",
     description: "Fires on hover (50ms debounce) or focus via JS event handlers.",
     inspect: "Hover over the link → console shows router.prefetch.start event.",
   },
   {
     label: "Viewport",
-    prefetch: "viewport" as const,
-    to: "/todo" as const,
+    prefetch: "viewport",
+    to: "/todo",
     linkText: "Todo List →",
     description: "Fires when the link enters the viewport via IntersectionObserver.",
     inspect:
@@ -28,16 +38,16 @@ const strategies = [
   },
   {
     label: "Render",
-    prefetch: "render" as const,
-    to: "/form" as const,
+    prefetch: "render",
+    to: "/form",
     linkText: "Form →",
     description: "Fires immediately when the Link component renders.",
     inspect: "Console shows router.prefetch.start on page load — no hover needed.",
   },
   {
     label: "Disabled",
-    prefetch: false as const,
-    to: "/theme" as const,
+    prefetch: false,
+    to: "/theme",
     linkText: "Theme →",
     description: "No prefetching.",
     inspect: "No data attributes, no prefetch events on hover or render.",

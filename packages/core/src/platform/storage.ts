@@ -5,18 +5,24 @@
  * Persist and retrieve string key-value pairs.
  * Two Tags: SessionStorage, LocalStorage — same interface, different browser backends.
  */
-import { Data, Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class StorageError extends Data.TaggedError("StorageError")<{
-  readonly operation: "get" | "set" | "remove";
-  readonly key: string;
-  readonly cause: unknown;
-}> {}
+const StorageOperation = Schema.Union([
+  Schema.Literal("get"),
+  Schema.Literal("set"),
+  Schema.Literal("remove"),
+]);
+
+export class StorageError extends Schema.TaggedErrorClass<StorageError>()("StorageError", {
+  operation: StorageOperation,
+  key: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -32,17 +38,41 @@ export interface StorageService {
 // Tags
 // =============================================================================
 
-export interface SessionStorage extends Context.Service<SessionStorage, StorageService> {}
+export interface SessionStorage extends Context.Service<
+  SessionStorage,
+  {
+    readonly get: (key: string) => Effect.Effect<string | null, StorageError>;
+    readonly set: (key: string, value: string) => Effect.Effect<void, StorageError>;
+    readonly remove: (key: string) => Effect.Effect<void, StorageError>;
+  }
+> {}
 
-export const SessionStorage = Context.Service<SessionStorage, StorageService>(
-  "trygg/platform/SessionStorage",
-);
+export const SessionStorage = Context.Service<
+  SessionStorage,
+  {
+    readonly get: (key: string) => Effect.Effect<string | null, StorageError>;
+    readonly set: (key: string, value: string) => Effect.Effect<void, StorageError>;
+    readonly remove: (key: string) => Effect.Effect<void, StorageError>;
+  }
+>("trygg/platform/SessionStorage");
 
-export interface LocalStorage extends Context.Service<LocalStorage, StorageService> {}
+export interface LocalStorage extends Context.Service<
+  LocalStorage,
+  {
+    readonly get: (key: string) => Effect.Effect<string | null, StorageError>;
+    readonly set: (key: string, value: string) => Effect.Effect<void, StorageError>;
+    readonly remove: (key: string) => Effect.Effect<void, StorageError>;
+  }
+> {}
 
-export const LocalStorage = Context.Service<LocalStorage, StorageService>(
-  "trygg/platform/LocalStorage",
-);
+export const LocalStorage = Context.Service<
+  LocalStorage,
+  {
+    readonly get: (key: string) => Effect.Effect<string | null, StorageError>;
+    readonly set: (key: string, value: string) => Effect.Effect<void, StorageError>;
+    readonly remove: (key: string) => Effect.Effect<void, StorageError>;
+  }
+>("trygg/platform/LocalStorage");
 
 // =============================================================================
 // Browser layers
@@ -79,7 +109,7 @@ export const sessionStorageBrowser: Layer.Layer<SessionStorage> = Layer.succeed(
 
 export const localStorageBrowser: Layer.Layer<LocalStorage> = Layer.succeed(
   LocalStorage,
-  LocalStorage.of(makeStorageBrowserLayer(() => localStorage)),
+  LocalStorage.of(makeStorageBrowserLayer(() => sessionStorage)),
 );
 
 // =============================================================================
@@ -102,12 +132,10 @@ const makeStorageTestLayer = (): StorageService => {
   };
 };
 
-export const sessionStorageTest: Layer.Layer<SessionStorage> = Layer.effect(
-  SessionStorage,
-  Effect.sync(() => SessionStorage.of(makeStorageTestLayer())),
+export const sessionStorageTest: Layer.Layer<SessionStorage> = Layer.sync(SessionStorage, () =>
+  SessionStorage.of(makeStorageTestLayer()),
 );
 
-export const localStorageTest: Layer.Layer<LocalStorage> = Layer.effect(
-  LocalStorage,
-  Effect.sync(() => LocalStorage.of(makeStorageTestLayer())),
+export const localStorageTest: Layer.Layer<LocalStorage> = Layer.sync(LocalStorage, () =>
+  LocalStorage.of(makeStorageTestLayer()),
 );

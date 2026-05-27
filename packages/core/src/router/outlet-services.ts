@@ -15,11 +15,17 @@ import {
   Option,
   Ref,
   Result,
+  Schema,
   Scope,
   SubscriptionRef,
 } from "effect";
 import * as Context from "effect/Context";
-import { Element, type Element as ElementType, provideElement } from "../primitives/element.js";
+import {
+  Element,
+  isElement,
+  type Element as ElementType,
+  provideElement,
+} from "../primitives/element.js";
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
@@ -40,18 +46,28 @@ const isSignalDisposedCause = (cause: Cause.Cause<unknown>): boolean => {
   return Result.isSuccess(defect) && defect.success instanceof Signal.SignalDisposedError;
 };
 
-const ignoreExpectedSignalDisposed = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A | void, E, R> =>
-  Effect.catchCause(effect, (cause) =>
-    isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
+const ignoreExpectedSignalDisposed = <A, R>(
+  effect: Effect.Effect<A, Signal.SignalDisposedError, R>,
+): Effect.Effect<A | void, never, R> =>
+  effect.pipe(
+    Effect.catchTag("SignalDisposedError", (error) =>
+      ContractTrace.emit({
+        event: "effect.error.ignored",
+        level: "diagnostic",
+        payload: {
+          error: error._tag,
+          signal_id: error.signalId,
+          operation: error.operation,
+        },
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
+    ),
   );
 
-const runSignalSetupSync = <A>(effect: Effect.Effect<A, Signal.SignalScopeError>): A => {
-  const exit = Effect.runSyncExit(effect);
-  if (Exit.isSuccess(exit)) return exit.value;
-  throw Cause.squash(exit.cause);
-};
+const runSignalSetupSync = <A>(effect: Effect.Effect<A, Signal.SignalScopeError>): A =>
+  Effect.runSync(effect);
 import {
   resolveErrorBoundary,
   resolveForbiddenBoundary,
@@ -63,7 +79,6 @@ import {
   CurrentRouteError,
   CurrentOutletChild,
   CurrentRouter,
-  Router as RouterTag,
 } from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
@@ -72,9 +87,9 @@ export interface RouteRenderIdentity {
   readonly path: string;
 }
 
-class StaleRouteRender extends Data.TaggedError("StaleRouteRender")<{
-  readonly expectedPath: string;
-}> {}
+class StaleRouteRender extends Schema.TaggedErrorClass<StaleRouteRender>()("StaleRouteRender", {
+  expectedPath: Schema.String,
+}) {}
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
@@ -99,8 +114,11 @@ export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => 
  * Used to narrow the union type after checking !Component.isEffectComponent().
  * @internal
  */
-const isEffectElement = (u: RouteComponent): u is Effect.Effect<ElementType, unknown, unknown> =>
-  Effect.isEffect(u);
+type RuntimeRequirements = unknown;
+
+const isEffectElement = (
+  u: RouteComponent,
+): u is Effect.Effect<ElementType, unknown, RuntimeRequirements> => Effect.isEffect(u);
 
 const mapChildInputElements = (
   child: import("../primitives/element.js").ElementChildren,
@@ -110,38 +128,20 @@ const mapChildInputElements = (
     return child.map((value) => mapChildInputElements(value, f));
   }
 
-  return Component.isEffectComponent(child) ||
-    typeof child !== "object" ||
-    child === null ||
-    !("_tag" in child)
-    ? child
-    : Element.$is("Intrinsic")(child) ||
-        Element.$is("Text")(child) ||
-        Element.$is("SignalText")(child) ||
-        Element.$is("SignalElement")(child) ||
-        Element.$is("Provide")(child) ||
-        Element.$is("Component")(child) ||
-        Element.$is("Fragment")(child) ||
-        Element.$is("Portal")(child) ||
-        Element.$is("KeyedList")(child) ||
-        Element.$is("ErrorBoundaryElement")(child)
-      ? f(child)
-      : child;
+  return isElement(child) ? f(child) : child;
 };
 
-const isStaleRouteRender = (routeIdentity: RouteRenderIdentity | undefined) =>
-  Effect.gen(function* () {
-    if (routeIdentity === undefined) return false;
+const isStaleRouteRender = Effect.fn("isStaleRouteRender")(function* (
+  routeIdentity: RouteRenderIdentity | undefined,
+) {
+  if (routeIdentity === undefined) return false;
 
-    const routerFromContext = yield* Effect.serviceOption(RouterTag);
-    const router = Option.isSome(routerFromContext)
-      ? routerFromContext
-      : yield* getFiberRef(CurrentRouter);
-    if (Option.isNone(router)) return false;
+  const router = yield* getFiberRef(CurrentRouter);
+  if (Option.isNone(router)) return false;
 
-    const current = yield* SubscriptionRef.get(router.value.current._ref);
-    return current.path !== routeIdentity.path;
-  });
+  const current = yield* SubscriptionRef.get(router.value.current._ref);
+  return current.path !== routeIdentity.path;
+});
 
 const wrapElementWithFiberRefs = (
   element: ElementType,
@@ -161,6 +161,7 @@ const wrapElementWithFiberRefs = (
           key: element.key ?? undefined,
           identity: element.identity ?? element.run,
           inputs: { element: element.inputs, wrapper: wrapperInputs },
+          provider: element.provider ?? undefined,
         },
       );
     case "Provide":
@@ -249,9 +250,29 @@ export interface OutletRendererShape {
  * OutletRenderer — component rendering with params/query injection.
  * @since 1.0.0
  */
-export class OutletRenderer extends Context.Service<OutletRenderer, OutletRendererShape>()(
-  "trygg/OutletRenderer",
-) {
+export class OutletRenderer extends Context.Service<
+  OutletRenderer,
+  {
+    readonly renderComponent: (
+      component: RouteComponent,
+      params: Record<string, unknown>,
+      query?: Record<string, unknown>,
+      routeIdentity?: RouteRenderIdentity,
+    ) => Effect.Effect<ElementType, unknown, never>;
+    readonly renderLayout: (
+      layout: RouteComponent,
+      child: ElementType,
+      params: Record<string, unknown>,
+      query?: Record<string, unknown>,
+      routeIdentity?: RouteRenderIdentity,
+    ) => Effect.Effect<ElementType, unknown, never>;
+    readonly renderError: (
+      errorComp: RouteComponent,
+      cause: Cause.Cause<unknown>,
+      path: string,
+    ) => Effect.Effect<ElementType, InvalidRouteComponent | Signal.SignalScopeError, never>;
+  }
+>()("trygg/OutletRenderer") {
   static readonly Live: Layer.Layer<OutletRenderer> = Layer.succeed(OutletRenderer, {
     renderComponent: renderComponent,
     renderLayout: renderLayout,
@@ -277,9 +298,17 @@ export interface BoundaryResolverShape {
  * BoundaryResolver — nearest-wins boundary resolution.
  * @since 1.0.0
  */
-export class BoundaryResolver extends Context.Service<BoundaryResolver, BoundaryResolverShape>()(
-  "trygg/BoundaryResolver",
-) {
+export class BoundaryResolver extends Context.Service<
+  BoundaryResolver,
+  {
+    readonly resolveError: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+    readonly resolveErrorRoot: () => Option.Option<ComponentInput>;
+    readonly resolveLoading: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+    readonly resolveNotFound: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+    readonly resolveNotFoundRoot: () => Option.Option<ComponentInput>;
+    readonly resolveForbidden: (route: ResolvedRoute) => Option.Option<ComponentInput>;
+  }
+>()("trygg/BoundaryResolver") {
   static readonly make = (manifest: RoutesManifest): BoundaryResolverShape => ({
     resolveError: (route) => resolveErrorBoundary(route, manifest.error),
     resolveErrorRoot: () => fromNullable(manifest.error),
@@ -331,14 +360,23 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends Context.Service<AsyncLoader, AsyncLoaderShape>()(
-  "trygg/AsyncLoader",
-) {
+export class AsyncLoader extends Context.Service<
+  AsyncLoader,
+  {
+    readonly state: Signal.Signal<AsyncLoadState>;
+    readonly track: (
+      matchKey: string,
+      loadEffect: Effect.Effect<Element, unknown, never>,
+      trace?: { readonly epoch?: number },
+    ) => Effect.Effect<void>;
+    readonly view: Signal.Signal<Element>;
+  }
+>()("trygg/AsyncLoader") {
   /** Create a live AsyncLoader. Must be called within a Scope. */
   static readonly make = (
     loadingElement: Element,
     scope: Scope.Scope,
-  ): Effect.Effect<AsyncLoaderShape, Signal.SignalScopeError> =>
+  ): Effect.Effect<AsyncLoaderShape, Signal.SignalDisposedError | Signal.SignalScopeError> =>
     Effect.gen(function* () {
       const state = yield* Signal.make<AsyncLoadState>(AsyncLoadState.Loading());
       const view = yield* Signal.derive(
@@ -516,7 +554,7 @@ export function renderComponent(
       locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
     );
 
-  const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+  const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
     Element.fromEffect(
       Effect.gen(function* () {
         if (yield* isStaleRouteRender(routeIdentity)) {
@@ -581,7 +619,7 @@ export function renderLayout(
       ),
     );
 
-  const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+  const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
     Element.fromEffect(
       Effect.gen(function* () {
         if (yield* isStaleRouteRender(routeIdentity)) {
@@ -648,7 +686,7 @@ export function renderError(
       const withErrorContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
         locallyFiberRef(CurrentRouteError, Option.some(errorInfo), effect);
 
-      const wrapErrorElement = (effect: Effect.Effect<ElementType, unknown, unknown>) =>
+      const wrapErrorElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
         Element.fromEffect(
           Effect.gen(function* () {
             const capturedContext = yield* Effect.context<unknown>();

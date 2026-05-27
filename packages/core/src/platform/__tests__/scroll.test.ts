@@ -39,7 +39,7 @@ describe("Scroll", () => {
     Effect.gen(function* () {
       const scroll = yield* Scroll;
       // Should not throw — just a no-op
-      yield* scroll.scrollIntoView({} as Element);
+      yield* scroll.scrollIntoView(document.createElement("div"));
       const pos = yield* scroll.getPosition;
       assert.deepStrictEqual(pos, { x: 0, y: 0 });
     }).pipe(Effect.provide(scrollTest)),

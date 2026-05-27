@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { DateTime, Effect, Layer } from "effect";
 import * as Context from "effect/Context";
 import type { Severity } from "../errors/incidents";
 import { type Status, IncidentNotFound, InvalidTransition } from "../errors/incidents";
@@ -47,13 +47,31 @@ export interface IncidentService {
   readonly addTimelineEntry: (id: number, message: string) => Effect.Effect<void, IncidentNotFound>;
 }
 
-export class Incidents extends Context.Service<Incidents, IncidentService>()("Incidents") {}
+export class Incidents extends Context.Service<
+  Incidents,
+  {
+    readonly list: Effect.Effect<ReadonlyArray<Incident>>;
+    readonly get: (id: number) => Effect.Effect<Incident, IncidentNotFound>;
+    readonly create: (params: {
+      readonly title: string;
+      readonly severity: Severity;
+    }) => Effect.Effect<Incident>;
+    readonly transition: (
+      id: number,
+      to: Status,
+    ) => Effect.Effect<Incident, InvalidTransition | IncidentNotFound>;
+    readonly addTimelineEntry: (
+      id: number,
+      message: string,
+    ) => Effect.Effect<void, IncidentNotFound>;
+  }
+>()("incident/Incidents") {}
 
 // ---------------------------------------------------------------------------
 // Mock implementation (in-memory)
 // ---------------------------------------------------------------------------
 
-const now: Effect.Effect<Date> = Effect.sync(() => new Date());
+const now: Effect.Effect<Date> = DateTime.nowAsDate;
 
 const seed: ReadonlyArray<Incident> = [
   {

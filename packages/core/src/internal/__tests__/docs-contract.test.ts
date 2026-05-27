@@ -1,12 +1,11 @@
-import { describe, expect, it } from "@effect/vitest";
-import { Effect } from "effect";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect, FileSystem, Predicate } from "effect";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import assert from "node:assert/strict";
 
-import { checkDocsContract, DocsContractConfigError } from "../docs-contract.js";
+import { checkDocsContract } from "../docs-contract.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../");
 
@@ -121,29 +120,25 @@ const validOwnerSource = [
   "",
 ].join("\n");
 
-const makeTempPackage = (files: Record<string, string>) =>
-  Effect.gen(function* () {
-    const tempRoot = yield* Effect.tryPromise(() =>
-      mkdtemp(join(tmpdir(), "trygg-docs-contract-")),
-    );
+const makeTempPackage = Effect.fn("DocsContractTest.makeTempPackage")(function* (
+  files: Record<string, string>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const tempRoot = yield* fs.makeTempDirectoryScoped({ prefix: "trygg-docs-contract-" });
 
-    yield* Effect.addFinalizer(() =>
-      Effect.tryPromise(() => rm(tempRoot, { force: true, recursive: true })).pipe(Effect.ignore),
-    );
+  yield* Effect.forEach(
+    Object.entries(files),
+    ([filePath, content]) =>
+      Effect.gen(function* () {
+        const fullPath = join(tempRoot, filePath);
+        yield* fs.makeDirectory(dirname(fullPath), { recursive: true });
+        yield* fs.writeFileString(fullPath, content);
+      }),
+    { concurrency: 1 },
+  );
 
-    yield* Effect.forEach(
-      Object.entries(files),
-      ([filePath, content]) =>
-        Effect.tryPromise(async () => {
-          const fullPath = join(tempRoot, filePath);
-          await mkdir(dirname(fullPath), { recursive: true });
-          await writeFile(fullPath, content);
-        }),
-      { concurrency: 1 },
-    );
-
-    return tempRoot;
-  });
+  return tempRoot;
+});
 
 const makeDocsFixture = ({
   docsContract = fixtureDocsContract,
@@ -167,33 +162,31 @@ const makeDocsFixture = ({
     files["src/owner.docs.md"] = sidecarSource;
   }
 
-  return makeTempPackage(files);
+  return makeTempPackage(files).pipe(Effect.provide(NodeFileSystemLayer));
 };
 
 describe("docs contract", () => {
   it("documents the platform and output contract", async () => {
     const docs = await readFile(join(packageRoot, "src/config.docs.md"), "utf8");
 
-    expect(docs).toContain("public config remains `platform`, not `adapter`");
-    expect(docs).toContain('`output: "static"`');
-    expect(docs).toContain('`output: "server"`');
-    expect(docs).toContain("requires `app/api.ts`");
-    expect(docs).toContain("Cloudflare server MVP");
-    expect(docs).toContain("full SSR route rendering");
-    expect(docs).toContain("`.trygg/worker-entry.js`");
-    expect(docs).toContain("fixed `ASSETS` binding");
-    expect(docs).toContain("Public Cloudflare preview UX is deferred");
+    assert.include(docs, "public config remains `platform`, not `adapter`");
+    assert.include(docs, '`output: "static"`');
+    assert.include(docs, '`output: "server"`');
+    assert.include(docs, "requires `app/api.ts`");
+    assert.include(docs, "Cloudflare server MVP");
+    assert.include(docs, "full SSR route rendering");
+    assert.include(docs, "`.trygg/worker-entry.js`");
+    assert.include(docs, "fixed `ASSETS` binding");
+    assert.include(docs, "Public Cloudflare preview UX is deferred");
   });
 
   it("documents layout-owned static SEO tags", async () => {
     const docs = await readFile(join(packageRoot, "src/primitives/head.docs.md"), "utf8");
 
-    expect(docs).toContain("layout-rendered `<head>`");
-    expect(docs).toContain('<script type="application/ld+json">');
-    expect(docs).toContain(
-      "Do not duplicate static SEO injection through Vite `transformIndexHtml`",
-    );
-    expect(docs).toContain("hoists these tags to `document.head`");
+    assert.include(docs, "layout-rendered `<head>`");
+    assert.include(docs, '<script type="application/ld+json">');
+    assert.include(docs, "Do not duplicate static SEO injection through Vite `transformIndexHtml`");
+    assert.include(docs, "hoists these tags to `document.head`");
   });
 
   it.effect("validates current migrated public surface", () =>
@@ -236,7 +229,7 @@ describe("docs contract", () => {
         "trygg.Debug.withSpan",
         "trygg.Metrics.snapshot",
       ]) {
-        expect(report.reachableExports).toContain(publicName);
+        assert.include(report.reachableExports, publicName);
       }
     }),
   );
@@ -319,9 +312,9 @@ describe("docs contract", () => {
         const report = yield* checkDocsContract({ packageRoot: fixtureRoot });
 
         assert.deepStrictEqual(report.violations, []);
-        expect(report.reachableExports).toContain("trygg.thing");
-        expect(report.reachableExports).toContain("trygg.thing.helper");
-        expect(report.reachableExports).not.toContain("trygg.helper");
+        assert.include(report.reachableExports, "trygg.thing");
+        assert.include(report.reachableExports, "trygg.thing.helper");
+        assert.notInclude(report.reachableExports, "trygg.helper");
       }),
     ),
   );
@@ -545,11 +538,10 @@ describe("docs contract", () => {
 
         const error = yield* Effect.flip(checkDocsContract({ packageRoot: fixtureRoot }));
 
-        expect(error instanceof DocsContractConfigError).toBe(true);
-        assert.strictEqual(
-          error.message,
-          "Docs contract config error: missing category mapping for Fixtures -> src/owner.ts",
-        );
+        assert.isTrue(Predicate.isTagged(error, "DocsContractConfigError"));
+        if (Predicate.isTagged(error, "DocsContractConfigError")) {
+          assert.strictEqual(error.detail, "missing category mapping for Fixtures -> src/owner.ts");
+        }
       }),
     ),
   );

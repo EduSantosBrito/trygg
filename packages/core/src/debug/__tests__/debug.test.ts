@@ -14,20 +14,21 @@ import * as Debug from "../debug.js";
 import * as Metrics from "../metrics.js";
 
 // Helper to reset debug state between tests
-const withDebugReset = <A, E>(effect: Effect.Effect<A, E, never>): Effect.Effect<A, E, never> =>
-  Effect.gen(function* () {
-    Debug.disable();
-    // Unregister all plugins
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-    const result = yield* effect;
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-    return result;
-  });
+const withDebugReset = Effect.fn("DebugTest.withDebugReset")(function* <A, E>(
+  effect: Effect.Effect<A, E, never>,
+) {
+  Debug.disable();
+  // Unregister all plugins
+  for (const name of Debug.getPlugins()) {
+    Debug.unregisterPlugin(name);
+  }
+  const result = yield* effect;
+  Debug.disable();
+  for (const name of Debug.getPlugins()) {
+    Debug.unregisterPlugin(name);
+  }
+  return result;
+});
 
 // =============================================================================
 // Debug enable/disable
@@ -268,9 +269,10 @@ describe("Debug plugins", () => {
         Debug.enable();
 
         // First plugin throws
+        const context = yield* Effect.context<never>();
         Debug.registerPlugin(
           Debug.createPlugin("thrower", () => {
-            throw new Error("Plugin error");
+            Effect.runSyncWith(context)(Effect.fail("Plugin error"));
           }),
         );
 
@@ -655,25 +657,29 @@ describe("Metrics snapshot", () => {
 // Scope: Exporting metrics to sinks
 
 describe("Metrics sinks", () => {
-  it("should register sink", () => {
-    const sink = Metrics.createSink("test-sink", () => Effect.void);
-    Metrics.registerSink(sink);
+  it.effect("should register sink", () =>
+    Effect.sync(() => {
+      const sink = Metrics.createSink("test-sink", () => Effect.void);
+      Metrics.registerSink(sink);
 
-    assert.isTrue(Metrics.hasSink("test-sink"));
+      assert.isTrue(Metrics.hasSink("test-sink"));
 
-    Metrics.unregisterSink("test-sink");
-  });
+      Metrics.unregisterSink("test-sink");
+    }),
+  );
 
-  it("should unregister sink by name", () => {
-    const sink = Metrics.createSink("to-remove", () => Effect.void);
-    Metrics.registerSink(sink);
+  it.effect("should unregister sink by name", () =>
+    Effect.sync(() => {
+      const sink = Metrics.createSink("to-remove", () => Effect.void);
+      Metrics.registerSink(sink);
 
-    assert.isTrue(Metrics.hasSink("to-remove"));
+      assert.isTrue(Metrics.hasSink("to-remove"));
 
-    Metrics.unregisterSink("to-remove");
+      Metrics.unregisterSink("to-remove");
 
-    assert.isFalse(Metrics.hasSink("to-remove"));
-  });
+      assert.isFalse(Metrics.hasSink("to-remove"));
+    }),
+  );
 
   it.effect("should export to all registered sinks", () =>
     Effect.gen(function* () {
@@ -701,7 +707,7 @@ describe("Metrics sinks", () => {
       const snapshots: Metrics.MetricsSnapshot[] = [];
 
       // First sink throws
-      const throwingSink = Metrics.createSink("thrower", () => Effect.die(new Error("Sink error")));
+      const throwingSink = Metrics.createSink("thrower", () => Effect.fail("Sink error"));
       const collectorSink = Metrics.createCollectorSink("collector", snapshots);
 
       Metrics.registerSink(throwingSink);

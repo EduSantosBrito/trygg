@@ -3,7 +3,7 @@
  *
  * Configures custom equality testers for Effect data types.
  */
-import { expect } from "vitest";
+import * as Vitest from "@effect/vitest";
 import * as Equal from "effect/Equal";
 import * as Utils from "effect/Utils";
 import type { Tester, TesterContext } from "@vitest/expect";
@@ -28,4 +28,4 @@ function customTester(this: TesterContext, a: unknown, b: unknown, customTesters
 }
 
 // Add custom equality testers for Effect data types
-expect.addEqualityTesters([customTester]);
+Vitest.expect.addEqualityTesters([customTester]);

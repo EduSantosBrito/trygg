@@ -4,17 +4,17 @@
  *
  * Control and read viewport scroll position.
  */
-import { Data, Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class ScrollError extends Data.TaggedError("ScrollError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class ScrollError extends Schema.TaggedErrorClass<ScrollError>()("ScrollError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -30,9 +30,23 @@ export interface ScrollService {
 // Tag
 // =============================================================================
 
-export interface Scroll extends Context.Service<Scroll, ScrollService> {}
+export interface Scroll extends Context.Service<
+  Scroll,
+  {
+    readonly scrollTo: (x: number, y: number) => Effect.Effect<void, ScrollError>;
+    readonly scrollIntoView: (element: Element) => Effect.Effect<void, ScrollError>;
+    readonly getPosition: Effect.Effect<{ readonly x: number; readonly y: number }, ScrollError>;
+  }
+> {}
 
-export const Scroll = Context.Service<Scroll, ScrollService>("trygg/platform/Scroll");
+export const Scroll = Context.Service<
+  Scroll,
+  {
+    readonly scrollTo: (x: number, y: number) => Effect.Effect<void, ScrollError>;
+    readonly scrollIntoView: (element: Element) => Effect.Effect<void, ScrollError>;
+    readonly getPosition: Effect.Effect<{ readonly x: number; readonly y: number }, ScrollError>;
+  }
+>("trygg/platform/Scroll");
 
 // =============================================================================
 // Browser layer
@@ -68,19 +82,16 @@ export const browser: Layer.Layer<Scroll> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<Scroll> = Layer.effect(
-  Scroll,
-  Effect.sync(() => {
-    const position = { x: 0, y: 0 };
+export const test: Layer.Layer<Scroll> = Layer.sync(Scroll, () => {
+  const position = { x: 0, y: 0 };
 
-    return Scroll.of({
-      scrollTo: (x, y) =>
-        Effect.sync(() => {
-          position.x = x;
-          position.y = y;
-        }),
-      scrollIntoView: (_element) => Effect.void,
-      getPosition: Effect.sync(() => ({ x: position.x, y: position.y })),
-    });
-  }),
-);
+  return Scroll.of({
+    scrollTo: (x, y) =>
+      Effect.sync(() => {
+        position.x = x;
+        position.y = y;
+      }),
+    scrollIntoView: (_element) => Effect.void,
+    getPosition: Effect.sync(() => ({ x: position.x, y: position.y })),
+  });
+});

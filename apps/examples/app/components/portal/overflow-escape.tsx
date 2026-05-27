@@ -5,24 +5,22 @@ export const OverflowEscape = Component.gen(function* () {
   const showTooltip = yield* Signal.make(false);
   const hideFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void>>>(Option.none());
 
-  const show = () =>
-    Effect.gen(function* () {
-      const pending = yield* Ref.get(hideFiber);
-      if (Option.isSome(pending)) {
-        yield* Fiber.interrupt(pending.value);
-      }
-      yield* Ref.set(hideFiber, Option.none());
-      yield* Signal.set(showTooltip, true);
-    });
+  const show = Effect.fn("OverflowEscape.show")(function* () {
+    const pending = yield* Ref.get(hideFiber);
+    if (Option.isSome(pending)) {
+      yield* Fiber.interrupt(pending.value);
+    }
+    yield* Ref.set(hideFiber, Option.none());
+    yield* Signal.set(showTooltip, true);
+  });
 
-  const hide = () =>
-    Effect.gen(function* () {
-      const fiber = yield* Signal.set(showTooltip, false).pipe(
-        Effect.delay("100 millis"),
-        Effect.forkDetach,
-      );
-      yield* Ref.set(hideFiber, Option.some(fiber));
-    });
+  const hide = Effect.fn("OverflowEscape.hide")(function* () {
+    const fiber = yield* Signal.set(showTooltip, false).pipe(
+      Effect.delay("100 millis"),
+      Effect.forkDetach,
+    );
+    yield* Ref.set(hideFiber, Option.some(fiber));
+  });
 
   const Tooltip = yield* Portal.make(
     <div

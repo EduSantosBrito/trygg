@@ -9,7 +9,7 @@
  *
  * @internal
  */
-import { Effect, Layer, SubscriptionRef } from "effect";
+import { Duration, Effect, Layer, Schema, SubscriptionRef } from "effect";
 import * as Context from "effect/Context";
 import { Component, Signal } from "trygg";
 import { click, render, waitFor } from "trygg/testing";
@@ -90,29 +90,31 @@ export const contract = {
       ],
     },
   ],
-} as const;
+};
 
-interface ContractStateService {
-  readonly headings: Signal.Signal<ReadonlyArray<string>>;
-}
+class ContractWaitError extends Schema.TaggedErrorClass<ContractWaitError>()("ContractWaitError", {
+  message: Schema.String,
+}) {}
 
-class ContractState extends Context.Service<ContractState, ContractStateService>()(
-  "www/DocsNavigationNoBlankSwapState",
-) {}
+const failWait = (message: string): never =>
+  Effect.runSync(Effect.fail(new ContractWaitError({ message })));
+
+class ContractState extends Context.Service<
+  ContractState,
+  {
+    readonly headings: Signal.Signal<ReadonlyArray<string>>;
+  }
+>()("www/DocsNavigationNoBlankSwap/ContractState") {}
 
 const ContractStateLive = Layer.effect(
   ContractState,
-  Signal.make<ReadonlyArray<string>>([]).pipe(
-    Effect.orDie,
-    Effect.map((headings): ContractStateService => ({ headings })),
-  ),
+  Signal.make<ReadonlyArray<string>>([]).pipe(Effect.map((headings) => ({ headings }))),
 );
 
 const cleanupSnapshots: Array<SwapSnapshot> = [];
 let observedContainer: HTMLElement | null = null;
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
 const currentPathSnapshot = Effect.gen(function* () {
   const router = yield* Router.get;
@@ -162,17 +164,16 @@ const stringifySnapshot = (snapshot: SwapSnapshot): string =>
     text: snapshot.text,
   });
 
-const recordCleanupSnapshot = (phase: string) =>
-  Effect.gen(function* () {
-    const currentPath = yield* currentPathSnapshot;
-    const snapshot = snapshotVisibleDocs(phase, currentPath);
-    cleanupSnapshots.push(snapshot);
-    yield* ContractTrace.emit({
-      event: "contract.observation",
-      level: "diagnostic",
-      payload: { ...snapshot, html: snapshot.html.slice(0, 2000) },
-    });
+const recordCleanupSnapshot = Effect.fn("recordCleanupSnapshot")(function* (phase: string) {
+  const currentPath = yield* currentPathSnapshot;
+  const snapshot = snapshotVisibleDocs(phase, currentPath);
+  cleanupSnapshots.push(snapshot);
+  yield* ContractTrace.emit({
+    event: "contract.observation",
+    level: "diagnostic",
+    payload: { ...snapshot, html: snapshot.html.slice(0, 2000) },
   });
+});
 
 const DocsLikeLayout = Component.gen(function* () {
   const route = yield* Router.currentRoute;
@@ -288,7 +289,7 @@ const runScenario = Effect.scoped(
         );
         const article = result.container.querySelector("[data-testid='signals-article']");
         if (shell === null || article === null) {
-          throw new Error("Signals docs route is not ready");
+          return failWait("Signals docs route is not ready");
         }
         return true;
       },
@@ -306,7 +307,7 @@ const runScenario = Effect.scoped(
     const resourcesLink = yield* waitFor(
       () => {
         const link = result.container.querySelector<HTMLAnchorElement>('a[href="/docs/resources"]');
-        if (link === null) throw new Error("Resources link is not ready");
+        if (link === null) return failWait("Resources link is not ready");
         return link;
       },
       { timeout: 5000, interval: 50 },
@@ -325,7 +326,7 @@ const runScenario = Effect.scoped(
         );
         const article = result.container.querySelector("[data-testid='resources-article']");
         if (shell === null || article === null) {
-          throw new Error("Resources docs route did not settle");
+          return failWait("Resources docs route did not settle");
         }
         return true;
       },

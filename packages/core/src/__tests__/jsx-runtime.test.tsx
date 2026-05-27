@@ -7,7 +7,7 @@
  * - Accept Component.gen components
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Predicate } from "effect";
 import * as Context from "effect/Context";
 import * as Component from "../primitives/component.js";
 import { getKey } from "../primitives/element.js";
@@ -30,12 +30,12 @@ describe("JSX component validation", () => {
       const exit = yield* Effect.exit(render(element));
 
       if (Exit.isSuccess(exit)) {
-        throw new Error("Expected failure but got success");
+        return assert.fail("Expected failure but got success");
       }
 
       const error = Cause.squash(exit.cause);
       if (!(error instanceof Component.InvalidComponentError)) {
-        throw new Error(`Expected InvalidComponentError but got ${error}`);
+        return assert.fail(`Expected InvalidComponentError but got ${Cause.pretty(exit.cause)}`);
       }
 
       assert.strictEqual(error.reason, "effect");
@@ -54,12 +54,12 @@ describe("JSX component validation", () => {
       const exit = yield* Effect.exit(render(element));
 
       if (Exit.isSuccess(exit)) {
-        throw new Error("Expected failure but got success");
+        return assert.fail("Expected failure but got success");
       }
 
       const error = Cause.squash(exit.cause);
       if (!(error instanceof Component.InvalidComponentError)) {
-        throw new Error(`Expected InvalidComponentError but got ${error}`);
+        return assert.fail(`Expected InvalidComponentError but got ${Cause.pretty(exit.cause)}`);
       }
 
       assert.strictEqual(error.reason, "plain-function");
@@ -79,7 +79,7 @@ describe("JSX component validation", () => {
 
         if (Exit.isFailure(construction)) {
           return assert.fail(
-            `Expected lazy invalid-component construction but got ${String(Cause.squash(construction.cause))}`,
+            `Expected lazy invalid-component construction but got ${Cause.pretty(construction.cause)}`,
           );
         }
 
@@ -91,7 +91,7 @@ describe("JSX component validation", () => {
 
         const error = Cause.squash(exit.cause);
         if (!(error instanceof Component.InvalidComponentError)) {
-          return assert.fail(`Expected InvalidComponentError but got ${String(error)}`);
+          return assert.fail(`Expected InvalidComponentError but got ${Cause.pretty(exit.cause)}`);
         }
 
         assert.strictEqual(error.reason, "plain-function");
@@ -115,7 +115,7 @@ describe("JSX component validation", () => {
       );
 
       if (Exit.isSuccess(exit)) {
-        throw new Error("Expected failure but got success");
+        return assert.fail("Expected failure but got success");
       }
     }),
   );
@@ -180,8 +180,8 @@ describe("JSX component validation", () => {
       9,
     );
 
-    assert.strictEqual(element._tag, "Intrinsic");
-    if (element._tag !== "Intrinsic") {
+    assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
+    if (!Predicate.isTagged(element, "Intrinsic")) {
       return assert.fail("Expected Intrinsic element");
     }
 
@@ -213,7 +213,7 @@ describe("JSX component validation", () => {
           },
           get(_target, property) {
             if (property === "children") {
-              throw new Error("boom-children");
+              return assert.fail("boom-children");
             }
 
             return undefined;
@@ -231,7 +231,7 @@ describe("JSX component validation", () => {
 
       if (Exit.isFailure(jsxExit)) {
         return assert.fail(
-          `Expected jsx(Fragment, props) to degrade hostile children but got ${String(Cause.squash(jsxExit.cause))}`,
+          `Expected jsx(Fragment, props) to degrade hostile children but got ${Cause.pretty(jsxExit.cause)}`,
         );
       }
 
@@ -241,7 +241,7 @@ describe("JSX component validation", () => {
 
       if (Exit.isFailure(jsxDevExit)) {
         return assert.fail(
-          `Expected jsxDEV(Fragment, props) to match jsx(Fragment, props) but got ${String(Cause.squash(jsxDevExit.cause))}`,
+          `Expected jsxDEV(Fragment, props) to match jsx(Fragment, props) but got ${Cause.pretty(jsxDevExit.cause)}`,
         );
       }
 
@@ -263,7 +263,7 @@ describe("JSX component validation", () => {
           {},
           {
             ownKeys() {
-              throw new Error("boom-own-keys");
+              return assert.fail("boom-own-keys");
             },
           },
         );
@@ -272,13 +272,13 @@ describe("JSX component validation", () => {
 
         if (Exit.isFailure(construction)) {
           return assert.fail(
-            `Expected malformed props to degrade during jsx construction but got ${String(Cause.squash(construction.cause))}`,
+            `Expected malformed props to degrade during jsx construction but got ${Cause.pretty(construction.cause)}`,
           );
         }
 
         const element = construction.value;
-        assert.strictEqual(element._tag, "Intrinsic");
-        if (element._tag !== "Intrinsic") {
+        assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
+        if (!Predicate.isTagged(element, "Intrinsic")) {
           return assert.fail("Expected Intrinsic element");
         }
 
@@ -292,7 +292,9 @@ describe("JSX component validation", () => {
     // Test: should not require services while constructing valid effect components with jsx.
     // Scope: verifies the public sync bridge builds the element shell without running component requirements eagerly.
     // Assertion: jsx returns a component element immediately and preserves the explicit key without service provision.
-    class Theme extends Context.Service<Theme, { readonly value: string }>()("Theme") {}
+    class Theme extends Context.Service<Theme, { readonly value: string }>()(
+      "jsx-runtime.test/Theme",
+    ) {}
 
     const NeedsTheme = Component.gen(function* (
       Props: Component.ComponentProps<{ readonly label: string }>,

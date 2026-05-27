@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import { Component, type ComponentProps } from "trygg";
+import { Component, Resource, Signal, type ComponentProps } from "trygg";
+import type { ApiClient } from "trygg/api";
 import { IncidentNotFound, InvalidTransition } from "../errors/incidents";
 
 /**
@@ -16,18 +17,19 @@ const getErrorInfo = (error: unknown): Effect.Effect<{ title: string; message: s
         message: `Cannot transition from ${error.from} to ${error.to}.`,
       };
     }
-    if (error instanceof Error) {
-      return { title: "Error", message: error.message };
-    }
     return { title: "Error", message: "An unexpected error occurred." };
   });
 
-export const ErrorView = Component.gen(function* (
-  Props: ComponentProps<{
-    error: unknown;
-    onRetry?: () => Effect.Effect<void, never, unknown>;
-  }>,
-) {
+interface ErrorViewProps {
+  readonly error: unknown;
+  readonly onRetry?: () => Effect.Effect<
+    void,
+    Signal.SignalScopeError,
+    ApiClient | Resource.ResourceRegistryTag
+  >;
+}
+
+export const ErrorView = Component.gen(function* (Props: ComponentProps<ErrorViewProps>) {
   const { error, onRetry } = yield* Props;
   const { title, message } = yield* getErrorInfo(error);
 

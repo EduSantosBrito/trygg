@@ -19,7 +19,7 @@
  * @since 1.0.0
  * @module trygg/router/route
  */
-import { Cause, Data, Effect, Option, Pipeable, Schema } from "effect";
+import { Cause, Data, Effect, Option, Pipeable, Predicate, Schema } from "effect";
 import type * as LayerTypes from "effect/Layer";
 import * as Context from "effect/Context";
 import type { ComponentInput } from "./types.js";
@@ -31,6 +31,8 @@ import {
   unsafeEraseMiddlewareR,
   unsafeExtractFields,
 } from "../internal/unsafe.js";
+
+const decodeUnknownEffect = Schema.decodeUnknownEffect;
 
 // =============================================================================
 // Type-Level Path Param Extraction
@@ -101,7 +103,7 @@ export interface RouteDefinition {
   readonly error: ComponentInput | undefined;
   readonly notFound: ComponentInput | undefined;
   readonly forbidden: ComponentInput | undefined;
-  readonly middleware: ReadonlyArray<Effect.Effect<void, unknown, unknown>>;
+  readonly middleware: ReadonlyArray<Effect.Effect<void, unknown, never>>;
   readonly prefetch: ReadonlyArray<(ctx: unknown) => Effect.Effect<unknown, unknown, never>>;
   readonly children: ReadonlyArray<RouteDefinition>;
   readonly paramsSchema: unknown | undefined;
@@ -159,11 +161,11 @@ export interface RouteBuilder<
   readonly _tag: "RouteBuilder";
   readonly [RouteBuilderTypeId]: RouteBuilderTypeId;
   /** Phantom type for service requirements tracking */
-  readonly _R: R;
+  readonly _R?: R;
   /** Phantom type for coverage tracking */
-  readonly _NeedsCoverage: NeedsCoverage;
+  readonly _NeedsCoverage?: NeedsCoverage;
   /** Phantom type for boundary tracking */
-  readonly _HasErrorBoundary: HasErrorBoundary;
+  readonly _HasErrorBoundary?: HasErrorBoundary;
   readonly definition: RouteDefinition;
 
   /**
@@ -325,8 +327,8 @@ export interface RouteBuilder<
 export interface AnyRouteBuilder {
   readonly _tag: "RouteBuilder";
   readonly [RouteBuilderTypeId]: RouteBuilderTypeId;
-  readonly _NeedsCoverage: boolean;
-  readonly _HasErrorBoundary: boolean;
+  readonly _NeedsCoverage?: boolean;
+  readonly _HasErrorBoundary?: boolean;
   readonly definition: RouteDefinition;
 }
 
@@ -334,7 +336,10 @@ export interface AnyRouteBuilder {
  * Extract whether a RouteBuilder still needs error coverage.
  * @internal
  */
-type ExtractNeedsCoverage<T extends AnyRouteBuilder> = T["_NeedsCoverage"];
+type ExtractNeedsCoverage<T extends AnyRouteBuilder> =
+  T extends RouteBuilder<string, unknown, boolean, boolean, infer NeedsCoverage, boolean>
+    ? NeedsCoverage
+    : false;
 
 /**
  * Compute whether any child in a tuple needs error coverage.
@@ -356,6 +361,9 @@ export type ChildrenNeedCoverage<T extends ReadonlyArray<AnyRouteBuilder>> = T e
 /** @internal */
 export const RouteBuilderTypeId: unique symbol = Symbol.for("trygg/router/RouteBuilder");
 export type RouteBuilderTypeId = typeof RouteBuilderTypeId;
+
+const RouteBuilderData = Data.TaggedClass("RouteBuilder");
+const RouteDefinitionData = Data.TaggedClass("RouteDefinition");
 
 /** @internal */
 const makeBuilder = <
@@ -406,116 +414,120 @@ const makeBuilder = <
       children: routes.map((r) => r.definition),
     });
 
-  const self: RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary> = {
-    _tag: "RouteBuilder",
-    [RouteBuilderTypeId]: RouteBuilderTypeId,
-    _R: undefined as unknown as R,
-    _NeedsCoverage: undefined as unknown as NeedsCoverage,
-    _HasErrorBoundary: undefined as unknown as HasErrorBoundary,
-    definition: def,
+  const self: RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary> =
+    new RouteBuilderData({
+      [RouteBuilderTypeId]: RouteBuilderTypeId,
+      definition: def,
 
-    params:
-      unsafeAsOverload<
-        RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["params"]
-      >(paramsImpl),
+      params:
+        unsafeAsOverload<
+          RouteBuilder<
+            Path,
+            R,
+            HasComponent,
+            HasChildren,
+            NeedsCoverage,
+            HasErrorBoundary
+          >["params"]
+        >(paramsImpl),
 
-    query:
-      unsafeAsOverload<
-        RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["query"]
-      >(queryImpl),
+      query:
+        unsafeAsOverload<
+          RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>["query"]
+        >(queryImpl),
 
-    component:
-      unsafeAsOverload<
-        RouteBuilder<
-          Path,
-          R,
-          HasComponent,
-          HasChildren,
-          NeedsCoverage,
-          HasErrorBoundary
-        >["component"]
-      >(componentImpl),
+      component:
+        unsafeAsOverload<
+          RouteBuilder<
+            Path,
+            R,
+            HasComponent,
+            HasChildren,
+            NeedsCoverage,
+            HasErrorBoundary
+          >["component"]
+        >(componentImpl),
 
-    layout: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        layout: c,
-      }),
+      layout: (c: ComponentInput) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          layout: c,
+        }),
 
-    loading: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        loading: c,
-      }),
+      loading: (c: ComponentInput) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          loading: c,
+        }),
 
-    error: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, false, true>({
-        ...def,
-        error: c,
-      }),
+      error: (c: ComponentInput) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, false, true>({
+          ...def,
+          error: c,
+        }),
 
-    notFound: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        notFound: c,
-      }),
+      notFound: (c: ComponentInput) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          notFound: c,
+        }),
 
-    forbidden: (c: ComponentInput) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        forbidden: c,
-      }),
+      forbidden: (c: ComponentInput) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          forbidden: c,
+        }),
 
-    middleware: <R2>(m: Effect.Effect<void, unknown, R2>) =>
-      makeBuilder<Path, R | R2, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        middleware: [...def.middleware, unsafeEraseMiddlewareR(m)],
-      }),
+      middleware: <R2>(m: Effect.Effect<void, unknown, R2>) =>
+        makeBuilder<Path, R | R2, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          middleware: [...def.middleware, unsafeEraseMiddlewareR(m)],
+        }),
 
-    prefetch: (fn: (ctx: unknown) => Effect.Effect<unknown, unknown, never>) =>
-      makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
-        ...def,
-        prefetch: [...def.prefetch, fn],
-      }),
+      prefetch: (fn: (ctx: unknown) => Effect.Effect<unknown, unknown, never>) =>
+        makeBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>({
+          ...def,
+          prefetch: [...def.prefetch, fn],
+        }),
 
-    children:
-      unsafeAsOverload<
-        RouteBuilder<
-          Path,
-          R,
-          HasComponent,
-          HasChildren,
-          NeedsCoverage,
-          HasErrorBoundary
-        >["children"]
-      >(childrenImpl),
+      children:
+        unsafeAsOverload<
+          RouteBuilder<
+            Path,
+            R,
+            HasComponent,
+            HasChildren,
+            NeedsCoverage,
+            HasErrorBoundary
+          >["children"]
+        >(childrenImpl),
 
-    pipe() {
-      return Pipeable.pipeArguments(this, arguments);
-    },
-  };
+      pipe() {
+        return Pipeable.pipeArguments(this, arguments);
+      },
+    });
 
   return self;
 };
 
 /** @internal */
-const emptyDefinition = (path: string | IndexMarker): RouteDefinition => ({
-  _tag: "RouteDefinition",
-  path,
-  component: undefined,
-  layout: undefined,
-  loading: undefined,
-  error: undefined,
-  notFound: undefined,
-  forbidden: undefined,
-  middleware: [],
-  prefetch: [],
-  children: [],
-  paramsSchema: undefined,
-  querySchema: undefined,
-  renderStrategy: undefined,
-  scrollStrategy: undefined,
-});
+const emptyDefinition = (path: string | IndexMarker): RouteDefinition =>
+  new RouteDefinitionData({
+    path,
+    component: undefined,
+    layout: undefined,
+    loading: undefined,
+    error: undefined,
+    notFound: undefined,
+    forbidden: undefined,
+    middleware: [],
+    prefetch: [],
+    children: [],
+    paramsSchema: undefined,
+    querySchema: undefined,
+    renderStrategy: undefined,
+    scrollStrategy: undefined,
+  });
 
 // =============================================================================
 // Public API
@@ -593,34 +605,32 @@ export const isRouteBuilder = (
 // Route.provide — Strategy Application
 // =============================================================================
 
-/** Known RenderStrategy layer instances for detection. @internal */
-const KNOWN_RENDER_STRATEGIES = new Set<LayerTypes.Layer<RenderStrategy>>([
-  RenderStrategy.Lazy,
-  RenderStrategy.Eager,
-]);
-
-/** Known ScrollStrategy layer instances for detection. @internal */
-const KNOWN_SCROLL_STRATEGIES = new Set<LayerTypes.Layer<ScrollStrategy>>([
-  ScrollStrategy.Auto,
-  ScrollStrategy.None,
-]);
-
 /** @internal */
 type RouteStrategyLayer =
   | LayerTypes.Layer<RenderStrategy, never, never>
   | LayerTypes.Layer<ScrollStrategy, never, never>;
 
+/** Known RenderStrategy layer instances for detection. @internal */
+const KNOWN_RENDER_STRATEGIES: ReadonlySet<RouteStrategyLayer> = new Set([
+  RenderStrategy.Lazy,
+  RenderStrategy.Eager,
+]);
+
+/** Known ScrollStrategy layer instances for detection. @internal */
+const KNOWN_SCROLL_STRATEGIES: ReadonlySet<RouteStrategyLayer> = new Set([
+  ScrollStrategy.Auto,
+  ScrollStrategy.None,
+]);
+
 /** @internal */
 const isRenderStrategyLayer = (
   layer: RouteStrategyLayer,
-): layer is LayerTypes.Layer<RenderStrategy, never, never> =>
-  KNOWN_RENDER_STRATEGIES.has(layer as LayerTypes.Layer<RenderStrategy>);
+): layer is LayerTypes.Layer<RenderStrategy, never, never> => KNOWN_RENDER_STRATEGIES.has(layer);
 
 /** @internal */
 const isScrollStrategyLayer = (
   layer: RouteStrategyLayer,
-): layer is LayerTypes.Layer<ScrollStrategy, never, never> =>
-  KNOWN_SCROLL_STRATEGIES.has(layer as LayerTypes.Layer<ScrollStrategy>);
+): layer is LayerTypes.Layer<ScrollStrategy, never, never> => KNOWN_SCROLL_STRATEGIES.has(layer);
 
 /**
  * Apply strategy layers to a route:
@@ -688,11 +698,14 @@ export function provide(
  * Error produced when path params fail schema decode.
  * @since 1.0.0
  */
-export class ParamsDecodeError extends Data.TaggedError("ParamsDecodeError")<{
-  readonly path: string;
-  readonly rawParams: Record<string, string>;
-  readonly cause: unknown;
-}> {}
+export class ParamsDecodeError extends Schema.TaggedErrorClass<ParamsDecodeError>()(
+  "ParamsDecodeError",
+  {
+    path: Schema.String,
+    rawParams: Schema.Record(Schema.String, Schema.String),
+    cause: Schema.Unknown,
+  },
+) {}
 
 /**
  * Decode raw string params using a Schema.
@@ -705,7 +718,7 @@ export const decodeParams = <S extends Schema.Top>(
   rawParams: Record<string, string>,
   path: string,
 ): Effect.Effect<S["Type"], ParamsDecodeError> =>
-  unsafeEraseR(Schema.decodeUnknownEffect(schema)(rawParams)).pipe(
+  unsafeEraseR(decodeUnknownEffect(schema)(rawParams)).pipe(
     Effect.mapError((cause) => new ParamsDecodeError({ path, rawParams, cause })),
   );
 
@@ -717,11 +730,14 @@ export const decodeParams = <S extends Schema.Top>(
  * Error produced when query params fail schema decode.
  * @since 1.0.0
  */
-export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
-  readonly path: string;
-  readonly rawQuery: Record<string, string>;
-  readonly cause: unknown;
-}> {}
+export class QueryDecodeError extends Schema.TaggedErrorClass<QueryDecodeError>()(
+  "QueryDecodeError",
+  {
+    path: Schema.String,
+    rawQuery: Schema.Record(Schema.String, Schema.String),
+    cause: Schema.Unknown,
+  },
+) {}
 
 /**
  * FiberRef holding the decoded query params for the current route.
@@ -758,7 +774,7 @@ export const decodeQuery = <S extends Schema.Top>(
     raw[key] = value;
   });
 
-  return unsafeEraseR(Schema.decodeUnknownEffect(schema)(raw)).pipe(
+  return unsafeEraseR(decodeUnknownEffect(schema)(raw)).pipe(
     Effect.mapError((cause) => new QueryDecodeError({ path, rawQuery: raw, cause })),
   );
 };
@@ -772,17 +788,23 @@ export const decodeQuery = <S extends Schema.Top>(
  * Produced by `Router.redirect(path)`.
  * @since 1.0.0
  */
-export class RouterRedirectError extends Data.TaggedError("RouterRedirect")<{
-  readonly path: string;
-  readonly replace: boolean;
-}> {}
+export class RouterRedirectError extends Schema.TaggedErrorClass<RouterRedirectError>()(
+  "RouterRedirect",
+  {
+    path: Schema.String,
+    replace: Schema.Boolean,
+  },
+) {}
 
 /**
  * Typed failure for middleware forbidden.
  * Produced by `Router.forbidden()`.
  * @since 1.0.0
  */
-export class RouterForbiddenError extends Data.TaggedError("RouterForbidden")<{}> {}
+export class RouterForbiddenError extends Schema.TaggedErrorClass<RouterForbiddenError>()(
+  "RouterForbidden",
+  {},
+) {}
 
 /**
  * Redirect to another path. Used in middleware to abort and navigate.
@@ -834,8 +856,9 @@ export const routeRedirect = (
  * @public
  * @since 1.0.0
  */
-export const routeForbidden = (): Effect.Effect<never, RouterForbiddenError> =>
-  Effect.fail(new RouterForbiddenError());
+export const routeForbidden: Effect.Effect<never, RouterForbiddenError> = Effect.fail(
+  new RouterForbiddenError(),
+);
 
 // =============================================================================
 // Middleware Runner
@@ -851,11 +874,14 @@ export const routeForbidden = (): Effect.Effect<never, RouterForbiddenError> =>
  * @internal
  * @since 1.0.0
  */
-export type MiddlewareResult =
-  | { readonly _tag: "Continue" }
-  | { readonly _tag: "Redirect"; readonly path: string; readonly replace: boolean }
-  | { readonly _tag: "Forbidden" }
-  | { readonly _tag: "Error"; readonly cause: unknown };
+export type MiddlewareResult = Data.TaggedEnum<{
+  readonly Continue: {};
+  readonly Redirect: { readonly path: string; readonly replace: boolean };
+  readonly Forbidden: {};
+  readonly Error: { readonly cause: unknown };
+}>;
+
+export const MiddlewareResult = Data.taggedEnum<MiddlewareResult>();
 
 /**
  * Run a middleware chain in order (left-to-right).
@@ -867,16 +893,15 @@ export type MiddlewareResult =
  *
  * @since 1.0.0
  */
-export const runMiddlewareChain = (
-  middleware: ReadonlyArray<Effect.Effect<void, unknown, unknown>>,
-): Effect.Effect<MiddlewareResult, never, never> => {
-  if (middleware.length === 0) {
-    return Effect.succeed({ _tag: "Continue" } as MiddlewareResult);
-  }
+export const runMiddlewareChain: (
+  middleware: ReadonlyArray<Effect.Effect<void, unknown, never>>,
+) => Effect.Effect<MiddlewareResult, never, never> = Effect.fn("Route.runMiddlewareChain")(
+  function* (middleware: ReadonlyArray<Effect.Effect<void, unknown, never>>) {
+    if (middleware.length === 0) {
+      return MiddlewareResult.Continue();
+    }
 
-  const continueResult: MiddlewareResult = { _tag: "Continue" };
-
-  return Effect.gen(function* () {
+    const continueResult: MiddlewareResult = MiddlewareResult.Continue();
     for (const m of middleware) {
       const result = yield* unsafeEraseMiddlewareR(m).pipe(
         Effect.matchCauseEffect({
@@ -888,13 +913,13 @@ export const runMiddlewareChain = (
         }),
       );
 
-      if (result._tag !== "Continue") {
+      if (!MiddlewareResult.$is("Continue")(result)) {
         return result;
       }
     }
     return continueResult;
-  });
-};
+  },
+);
 
 /**
  * Extract the middleware result from a Cause.
@@ -904,17 +929,15 @@ const extractMiddlewareError = (cause: unknown): MiddlewareResult => {
   // Try to find RouterRedirect or RouterForbidden in the cause
   const error = findFailure(cause);
 
-  if (error !== null && typeof error === "object" && "_tag" in error) {
-    if (error._tag === "RouterRedirect") {
-      const redirect = unsafeExtractFields<{ path: string; replace: boolean }>(error);
-      return { _tag: "Redirect", path: redirect.path, replace: redirect.replace };
-    }
-    if (error._tag === "RouterForbidden") {
-      return { _tag: "Forbidden" };
-    }
+  if (Predicate.isTagged(error, "RouterRedirect")) {
+    const redirect = unsafeExtractFields<{ path: string; replace: boolean }>(error);
+    return MiddlewareResult.Redirect({ path: redirect.path, replace: redirect.replace });
+  }
+  if (Predicate.isTagged(error, "RouterForbidden")) {
+    return MiddlewareResult.Forbidden();
   }
 
-  return { _tag: "Error", cause };
+  return MiddlewareResult.Error({ cause });
 };
 
 /**
@@ -929,11 +952,8 @@ const findFailure = (cause: unknown): unknown => {
     return Option.getOrNull(Cause.findErrorOption(cause));
   }
 
-  if ("_tag" in cause) {
-    const tagged = cause as { _tag: string };
-    if (tagged._tag === "RouterRedirect" || tagged._tag === "RouterForbidden") {
-      return cause;
-    }
+  if (Predicate.isTagged(cause, "RouterRedirect") || Predicate.isTagged(cause, "RouterForbidden")) {
+    return cause;
   }
 
   return cause;

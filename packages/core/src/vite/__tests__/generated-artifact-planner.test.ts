@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import {
+  BuildArtifactOperation,
   makeBuildArtifactPlanner,
   makeGeneratedArtifactPlanner,
   type BuildArtifactPlanInput,
@@ -18,51 +19,67 @@ const input = (overrides: Partial<BuildArtifactPlanInput>): BuildArtifactPlanInp
   ...overrides,
 });
 
-const plan = (overrides: Partial<BuildArtifactPlanInput>) =>
-  Effect.gen(function* () {
-    const validation = yield* validationPlanner.validateOutput(input(overrides));
-    return yield* artifactPlanner.planArtifacts(validation);
-  });
+const plan = Effect.fn("GeneratedArtifactPlanner.test.plan")(function* (
+  overrides: Partial<BuildArtifactPlanInput>,
+) {
+  const validation = yield* validationPlanner.validateOutput(input(overrides));
+  return yield* artifactPlanner.planArtifacts(validation);
+});
+
+const operationDescriptors = (operations: ReadonlyArray<BuildArtifactOperation>) =>
+  operations.map((operation) =>
+    BuildArtifactOperation.$match(operation, {
+      WriteFile: ({ path }) => ({ tag: "WriteFile", path }),
+      RemoveFile: ({ path }) => ({ tag: "RemoveFile", path }),
+      RunNestedBuild: ({ name, configFile }) => ({ tag: "RunNestedBuild", name, configFile }),
+    }),
+  );
 
 describe("GeneratedArtifactPlanner", () => {
-  it("plans static generated shell without Worker artifact for non-Cloudflare targets", async () => {
-    const artifactPlan = await Effect.runPromise(plan({ output: "static", platform: "node" }));
+  it.effect("plans static generated shell without Worker artifact for non-Cloudflare targets", () =>
+    Effect.gen(function* () {
+      const artifactPlan = yield* plan({ output: "static", platform: "node" });
 
-    expect(artifactPlan.operations).toEqual([
-      expect.objectContaining({ _tag: "WriteFile", path: ".trygg/index.html" }),
-      { _tag: "RemoveFile", path: ".trygg/worker-entry.js" },
-    ]);
-  });
+      assert.deepStrictEqual(operationDescriptors(artifactPlan.operations), [
+        { tag: "WriteFile", path: ".trygg/index.html" },
+        { tag: "RemoveFile", path: ".trygg/worker-entry.js" },
+      ]);
+    }),
+  );
 
-  it("plans Cloudflare static SPA Worker artifact", async () => {
-    const artifactPlan = await Effect.runPromise(
-      plan({ output: "static", platform: "cloudflare" }),
-    );
+  it.effect("plans Cloudflare static SPA Worker artifact", () =>
+    Effect.gen(function* () {
+      const artifactPlan = yield* plan({ output: "static", platform: "cloudflare" });
 
-    expect(artifactPlan.operations).toEqual([
-      expect.objectContaining({ _tag: "WriteFile", path: ".trygg/index.html" }),
-      expect.objectContaining({ _tag: "WriteFile", path: ".trygg/worker-entry.js" }),
-    ]);
-  });
+      assert.deepStrictEqual(operationDescriptors(artifactPlan.operations), [
+        { tag: "WriteFile", path: ".trygg/index.html" },
+        { tag: "WriteFile", path: ".trygg/worker-entry.js" },
+      ]);
+    }),
+  );
 
-  it("plans server output with cleanup and nested server build intent", async () => {
-    const artifactPlan = await Effect.runPromise(plan({ output: "server", platform: "bun" }));
+  it.effect("plans server output with cleanup and nested server build intent", () =>
+    Effect.gen(function* () {
+      const artifactPlan = yield* plan({ output: "server", platform: "bun" });
 
-    expect(artifactPlan.operations).toEqual([
-      expect.objectContaining({ _tag: "WriteFile", path: ".trygg/index.html" }),
-      { _tag: "RemoveFile", path: ".trygg/worker-entry.js" },
-      { _tag: "RunNestedBuild", name: "production-server", configFile: ".trygg/server-entry.ts" },
-    ]);
-  });
+      assert.deepStrictEqual(operationDescriptors(artifactPlan.operations), [
+        { tag: "WriteFile", path: ".trygg/index.html" },
+        { tag: "RemoveFile", path: ".trygg/worker-entry.js" },
+        { tag: "RunNestedBuild", name: "production-server", configFile: ".trygg/server-entry.ts" },
+      ]);
+    }),
+  );
 
-  it("renders operation summaries", async () => {
-    const artifactPlan = await Effect.runPromise(plan({ output: "server", platform: "node" }));
-    const summary = await Effect.runPromise(artifactPlanner.renderOperationSummary(artifactPlan));
+  it.effect("renders operation summaries", () =>
+    Effect.gen(function* () {
+      const artifactPlan = yield* plan({ output: "server", platform: "node" });
+      const summary = yield* artifactPlanner.renderOperationSummary(artifactPlan);
 
-    expect(summary).toEqual([
-      "write .trygg/index.html",
-      "remove .trygg/worker-entry.js",
-      "run production-server from .trygg/server-entry.ts",
-    ]);
-  });
+      assert.deepStrictEqual(summary, [
+        "write .trygg/index.html",
+        "remove .trygg/worker-entry.js",
+        "run production-server from .trygg/server-entry.ts",
+      ]);
+    }),
+  );
 });

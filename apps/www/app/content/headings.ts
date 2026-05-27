@@ -13,14 +13,17 @@ export interface DocsHeadingsService {
   readonly set: (entries: ReadonlyArray<HeadingEntry>) => Effect.Effect<void>;
 }
 
-export class DocsHeadings extends Context.Service<DocsHeadings, DocsHeadingsService>()(
-  "www/DocsHeadings",
-) {}
+export class DocsHeadings extends Context.Service<
+  DocsHeadings,
+  {
+    readonly entries: Signal.Signal<ReadonlyArray<HeadingEntry>>;
+    readonly set: (entries: ReadonlyArray<HeadingEntry>) => Effect.Effect<void>;
+  }
+>()("www/DocsHeadings") {}
 
 export const DocsHeadingsLive = Layer.effect(
   DocsHeadings,
   Signal.make<ReadonlyArray<HeadingEntry>>([]).pipe(
-    Effect.orDie,
     Effect.map(
       (entries): DocsHeadingsService => ({
         entries,

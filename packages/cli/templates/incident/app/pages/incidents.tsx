@@ -20,11 +20,10 @@ export default Component.gen(function* () {
   // Modal open state
   const modalOpen = yield* Signal.make(false);
   const openModal = () => Signal.set(modalOpen, true);
-  const closeModalAndClearQuery = () =>
-    Effect.gen(function* () {
-      yield* Signal.set(modalOpen, false);
-      yield* Router.navigate("/incidents", { replace: true });
-    }).pipe(Effect.ignore);
+  const closeModalAndClearQuery = Effect.fn("Incidents.closeModalAndClearQuery")(function* () {
+    yield* Signal.set(modalOpen, false);
+    yield* Router.navigate("/incidents", { replace: true });
+  });
 
   // Check for ?declare=true query param to auto-open modal
   const querySignal = yield* Router.querySignal;
@@ -38,7 +37,7 @@ export default Component.gen(function* () {
 
   // Derive incidents array from resource state
   const incidentsSignal = yield* Signal.derive(state, (s) =>
-    s._tag === "Success" ? s.value : EMPTY_INCIDENTS,
+    Resource.isSuccess(s) ? s.value : EMPTY_INCIDENTS,
   );
 
   // Derive filtered incidents based on severity filter
@@ -73,10 +72,7 @@ export default Component.gen(function* () {
       </div>
     )),
     Resource.on("Failure", ({ error }) => (
-      <ErrorView
-        error={error}
-        onRetry={() => Resource.refresh(incidentsResource).pipe(Effect.orDie)}
-      />
+      <ErrorView error={error} onRetry={() => Resource.refresh(incidentsResource)} />
     )),
     Resource.exhaustive,
   );
@@ -178,7 +174,7 @@ const IncidentRow = Component.gen(function* (Props: ComponentProps<{ incident: I
 
 interface DeclareModalProps {
   readonly open: Signal.Signal<boolean>;
-  readonly onClose: () => Effect.Effect<void, never, Router.Router>;
+  readonly onClose: () => Effect.Effect<void, Router.NavigationError, Router.Router>;
 }
 
 const DeclareModal = Component.gen(function* (Props: ComponentProps<DeclareModalProps>) {

@@ -1,4 +1,4 @@
-import { Data, Effect, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
@@ -78,6 +78,39 @@ interface OwnerCheck {
   readonly violations: ReadonlyArray<DocsViolation>;
 }
 
+const DocsCategorySchema = Schema.Struct({
+  name: Schema.String,
+  ownerModule: Schema.String,
+  requiresSidecar: Schema.Boolean,
+});
+
+const DocsOwnerInputSchema = Schema.Struct({
+  category: Schema.String,
+  entrypoint: Schema.String,
+  memberExports: Schema.optional(Schema.Array(Schema.String)),
+  module: Schema.String,
+  namedExports: Schema.Array(Schema.String),
+  primaryExport: Schema.String,
+  primaryKind: Schema.optional(
+    Schema.Union([Schema.Literal("named"), Schema.Literal("namespace")]),
+  ),
+  sidecar: Schema.String,
+  topic: Schema.String,
+});
+
+type DocsOwnerInput = typeof DocsOwnerInputSchema.Type;
+
+const DocsConfigInputSchema = Schema.Struct({
+  allowedTags: Schema.Array(Schema.String),
+  categories: Schema.Array(DocsCategorySchema),
+  migratedOwners: Schema.Array(DocsOwnerInputSchema),
+  sidecarHeadings: Schema.Array(Schema.String),
+});
+
+const PackageJsonSchema = Schema.Struct({
+  exports: Schema.Record(Schema.String, Schema.Unknown),
+});
+
 const ReportPayloadSchema = Schema.Struct({
   ok: Schema.Boolean,
   reachableExports: Schema.Array(Schema.String),
@@ -91,18 +124,24 @@ const ReportPayloadSchema = Schema.Struct({
   ),
 });
 
-export class DocsContractConfigError extends Data.TaggedError("DocsContractConfigError")<{
-  readonly detail: string;
-}> {
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeDocsConfigInput = Schema.decodeUnknownEffect(DocsConfigInputSchema);
+const decodePackageJson = Schema.decodeUnknownEffect(PackageJsonSchema);
+const encodeReportPayloadJson = Schema.encodeEffect(Schema.fromJsonString(ReportPayloadSchema));
+
+export class DocsContractConfigError extends Schema.TaggedErrorClass<DocsContractConfigError>()(
+  "DocsContractConfigError",
+  { detail: Schema.String },
+) {
   override get message(): string {
     return `Docs contract config error: ${this.detail}`;
   }
 }
 
-export class DocsContractFileError extends Data.TaggedError("DocsContractFileError")<{
-  readonly detail: string;
-  readonly path: string;
-}> {
+export class DocsContractFileError extends Schema.TaggedErrorClass<DocsContractFileError>()(
+  "DocsContractFileError",
+  { detail: Schema.String, path: Schema.String },
+) {
   override get message(): string {
     return `Docs contract file error at ${this.path}: ${this.detail}`;
   }
@@ -110,352 +149,346 @@ export class DocsContractFileError extends Data.TaggedError("DocsContractFileErr
 
 type DocsContractError = DocsContractConfigError | DocsContractFileError;
 
-export const checkDocsContract = ({
-  packageRoot,
-  touchedFiles = [],
-}: {
+export const checkDocsContract: (args: {
   readonly packageRoot: string;
   readonly touchedFiles?: ReadonlyArray<string>;
-}): Effect.Effect<DocsReport, DocsContractError> =>
-  Effect.gen(function* () {
-    const config = yield* loadDocsConfig(packageRoot);
-    const packageExports = yield* loadPackageExports(packageRoot);
-    const ownerChecks = yield* Effect.forEach(
-      config.migratedOwners,
-      (owner) => checkOwner({ config, owner, packageExports, packageRoot }),
-      { concurrency: 1 },
-    );
-    const normalizedTouchedFiles = normalizeTouchedFiles(packageRoot, touchedFiles);
-    const checkAllOwners =
-      normalizedTouchedFiles.size === 0 ||
-      normalizedTouchedFiles.has("docs.contract.json") ||
-      normalizedTouchedFiles.has("package.json");
-    const touchedOwners = checkAllOwners
-      ? new Set(config.migratedOwners.map((owner) => owner.module))
-      : new Set(
-          (yield* Effect.forEach(
-            config.migratedOwners,
-            (owner) =>
-              isOwnerTouched({
-                normalizedTouchedFiles,
-                owner,
-                packageExports,
-                packageRoot,
-              }).pipe(Effect.map((touched) => (touched ? owner.module : null))),
-            { concurrency: 1 },
-          )).filter((ownerModule): ownerModule is string => ownerModule !== null),
-        );
-
-    const reachableExports = [
-      ...unique(ownerChecks.flatMap((check) => [...check.reachableExports])),
-    ].sort();
-    const violations = ownerChecks.flatMap((check) =>
-      touchedOwners.has(check.owner.module) ? [...check.violations] : [],
-    );
-    const ok = violations.length === 0;
-    const payload = {
-      ok,
-      reachableExports,
-      violations,
-    };
-
-    const json = yield* Schema.encodeEffect(Schema.fromJsonString(ReportPayloadSchema))(
-      payload,
-    ).pipe(
-      Effect.mapError(
-        () =>
-          new DocsContractConfigError({
-            detail: "unable to encode report JSON",
-          }),
-      ),
-    );
-
-    return {
-      human: formatHuman(payload),
-      json,
-      reachableExports,
-      violations,
-    };
-  });
-
-const checkOwner = ({
-  config,
-  owner,
-  packageExports,
+}) => Effect.Effect<DocsReport, DocsContractError> = Effect.fn("checkDocsContract")(function* ({
   packageRoot,
-}: {
+  touchedFiles = [],
+}) {
+  const config = yield* loadDocsConfig(packageRoot);
+  const packageExports = yield* loadPackageExports(packageRoot);
+  const ownerChecks = yield* Effect.forEach(
+    config.migratedOwners,
+    (owner) => checkOwner({ config, owner, packageExports, packageRoot }),
+    { concurrency: 1 },
+  );
+  const normalizedTouchedFiles = normalizeTouchedFiles(packageRoot, touchedFiles);
+  const checkAllOwners =
+    normalizedTouchedFiles.size === 0 ||
+    normalizedTouchedFiles.has("docs.contract.json") ||
+    normalizedTouchedFiles.has("package.json");
+  const touchedOwners = checkAllOwners
+    ? new Set(config.migratedOwners.map((owner) => owner.module))
+    : new Set(
+        (yield* Effect.forEach(
+          config.migratedOwners,
+          (owner) =>
+            isOwnerTouched({
+              normalizedTouchedFiles,
+              owner,
+              packageExports,
+              packageRoot,
+            }).pipe(Effect.map((touched) => (touched ? owner.module : null))),
+          { concurrency: 1 },
+        )).filter((ownerModule): ownerModule is string => ownerModule !== null),
+      );
+
+  const reachableExports = [
+    ...unique(ownerChecks.flatMap((check) => [...check.reachableExports])),
+  ].sort();
+  const violations = ownerChecks.flatMap((check) =>
+    touchedOwners.has(check.owner.module) ? [...check.violations] : [],
+  );
+  const ok = violations.length === 0;
+  const payload = {
+    ok,
+    reachableExports,
+    violations,
+  };
+
+  const json = yield* encodeReportPayloadJson(payload).pipe(
+    Effect.mapError(
+      () =>
+        new DocsContractConfigError({
+          detail: "unable to encode report JSON",
+        }),
+    ),
+  );
+
+  return {
+    human: formatHuman(payload),
+    json,
+    reachableExports,
+    violations,
+  };
+});
+
+const checkOwner: (args: {
   readonly config: DocsConfig;
   readonly owner: DocsOwner;
   readonly packageExports: PackageExports;
   readonly packageRoot: string;
-}): Effect.Effect<OwnerCheck, DocsContractError> =>
-  Effect.gen(function* () {
-    const category = findCategory(config.categories, owner.category, owner.module);
-    if (category === undefined) {
-      return yield* new DocsContractConfigError({
-        detail: `missing category mapping for ${owner.category} -> ${owner.module}`,
-      });
-    }
-
-    const ownerFile = resolve(packageRoot, owner.module);
-    const ownerText = yield* readUtf8(ownerFile);
-    const entrypointFile = yield* resolveEntrypointSourceFile(
-      packageRoot,
-      packageExports,
-      owner.entrypoint,
-    );
-    const entrypointText =
-      ownerFile === entrypointFile ? ownerText : yield* readUtf8(entrypointFile);
-
-    const ownerExports = collectExportDeclarations(ownerFile, ownerText);
-    const entrypointExports =
-      ownerFile === entrypointFile ? [] : collectReexports(entrypointFile, entrypointText);
-    const publishedBase = toPublishedBase(owner.entrypoint);
-
-    const namedEntrypointExportsForSource = (
-      sourceName: string,
-    ): ReadonlyArray<{
-      readonly exportName: string;
-      readonly sourceName: string;
-      readonly targetFile: string;
-    }> =>
-      entrypointExports.filter(
-        (entrypointExport) =>
-          entrypointExport.kind === "named" &&
-          entrypointExport.sourceName === sourceName &&
-          entrypointExport.targetFile === ownerFile,
-      );
-
-    const publicNamesForOwnerExport = (exportName: string): ReadonlyArray<string> => {
-      const names: Array<string> = [];
-
-      if (owner.primaryKind === "namespace" && primaryReachable) {
-        names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
-      }
-
-      if (owner.memberExports.includes(exportName) && primaryReachable) {
-        names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
-      }
-
-      if (ownerFile === entrypointFile) {
-        if (owner.primaryKind === "named") {
-          names.push(`${publishedBase}.${exportName}`);
-        }
-        return [...unique(names)];
-      }
-
-      for (const entrypointExport of namedEntrypointExportsForSource(exportName)) {
-        names.push(`${publishedBase}.${entrypointExport.exportName}`);
-      }
-
-      return [...unique(names)];
-    };
-
-    const primaryPublicName =
-      owner.primaryKind === "namespace"
-        ? `${publishedBase}.${owner.primaryExport}`
-        : (publicNamesForOwnerExport(owner.primaryExport)[0] ??
-          `${publishedBase}.${owner.primaryExport}`);
-
-    const isNamedReachable = (exportName: string): boolean =>
-      ownerFile === entrypointFile
-        ? ownerExports.some((ownerExport) => ownerExport.name === exportName)
-        : namedEntrypointExportsForSource(exportName).length > 0;
-
-    const primaryReachable =
-      owner.primaryKind === "named"
-        ? isNamedReachable(owner.primaryExport)
-        : ownerFile !== entrypointFile &&
-          entrypointExports.some(
-            (entrypointExport) =>
-              entrypointExport.kind === "namespace" &&
-              entrypointExport.exportName === owner.primaryExport &&
-              entrypointExport.targetFile === ownerFile,
-          );
-
-    const reachablePublicNames = (ownerExport: ExportDeclarationDoc): ReadonlyArray<string> =>
-      publicNamesForOwnerExport(ownerExport.name);
-
-    const enforcedPublicNamesForOwnerExport = (
-      ownerExport: ExportDeclarationDoc,
-    ): ReadonlyArray<string> => reachablePublicNames(ownerExport);
-
-    const reachableExports = ownerExports.flatMap((ownerExport) => [
-      ...enforcedPublicNamesForOwnerExport(ownerExport),
-    ]);
-
-    const violations: Array<DocsViolation> = [];
-
-    if (!primaryReachable) {
-      violations.push({
-        code: "entrypoint_reachability",
-        file: owner.module,
-        message:
-          owner.primaryKind === "namespace"
-            ? `Expected ${owner.primaryExport} namespace re-export from ${owner.entrypoint}`
-            : `Expected named re-export ${owner.primaryExport} from ${owner.entrypoint}`,
-        publicName: primaryPublicName,
-      });
-    }
-
-    for (const namedExport of owner.namedExports) {
-      const namedReachable = isNamedReachable(namedExport);
-      if (!namedReachable) {
-        violations.push({
-          code: "entrypoint_reachability",
-          file: owner.module,
-          message: `Expected named re-export ${namedExport} from ${owner.entrypoint}`,
-          publicName: `${publishedBase}.${namedExport}`,
-        });
-      }
-    }
-
-    const moduleDoc = parseDocBlock(extractLeadingFileDoc(ownerText));
-    if (
-      moduleDoc === undefined ||
-      moduleDoc.summary.length === 0 ||
-      !hasTagContent(moduleDoc, "remarks")
-    ) {
-      violations.push({
-        code: "missing_module_docs",
-        file: owner.module,
-        message: `Expected module summary and @remarks for ${owner.topic}`,
-        publicName: primaryPublicName,
-      });
-    }
-    if (moduleDoc !== undefined) {
-      for (const tag of collectUnknownTags(moduleDoc, config.allowedTags)) {
-        violations.push({
-          code: "unknown_tag",
-          file: owner.module,
-          message: `Unknown module tag @${tag}`,
-          publicName: primaryPublicName,
-        });
-      }
-    }
-
-    if (category.requiresSidecar) {
-      const sidecarFile = resolve(packageRoot, owner.sidecar);
-      if (!existsSync(sidecarFile)) {
-        violations.push({
-          code: "missing_sidecar",
-          file: owner.sidecar,
-          message: `Missing sidecar guide for ${owner.topic}`,
-          publicName: primaryPublicName,
-        });
-      } else {
-        const sidecarText = yield* readUtf8(sidecarFile);
-        violations.push(
-          ...validateSidecar(owner, sidecarText, config.sidecarHeadings, primaryPublicName),
-        );
-      }
-    }
-
-    for (const ownerExport of ownerExports) {
-      const publicNames = enforcedPublicNamesForOwnerExport(ownerExport);
-      if (publicNames.length === 0) {
-        continue;
-      }
-      const publicName = publicNames[0] ?? primaryPublicName;
-      const doc = parseDocBlock(ownerExport.rawDoc);
-
-      if (doc === undefined || doc.summary.length === 0) {
-        violations.push({
-          code: "missing_summary",
-          file: owner.module,
-          message: `Missing summary for ${ownerExport.name}`,
-          publicName,
-        });
-        continue;
-      }
-
-      const visibilityCount = countTags(doc, ["public", "internal"]);
-      if (visibilityCount !== 1) {
-        violations.push({
-          code: "visibility_tag",
-          file: owner.module,
-          message: `Expected exactly one visibility tag on ${ownerExport.name}`,
-          publicName,
-        });
-      }
-
-      if (!hasTagContent(doc, "remarks")) {
-        violations.push({
-          code: "missing_remarks",
-          file: owner.module,
-          message: `Missing @remarks for ${ownerExport.name}`,
-          publicName,
-        });
-      }
-
-      const isPublic = doc.tags.has("public");
-      if (isPublic) {
-        const categoryTag = firstTagValue(doc, "category");
-        if (categoryTag === undefined) {
-          violations.push({
-            code: "missing_category",
-            file: owner.module,
-            message: `Missing @category for ${ownerExport.name}`,
-            publicName,
-          });
-        } else if (categoryTag !== owner.category) {
-          violations.push({
-            code: "wrong_category",
-            file: owner.module,
-            message: `Expected @category ${owner.category} on ${ownerExport.name}`,
-            publicName,
-          });
-        }
-
-        if (!hasTagContent(doc, "example")) {
-          violations.push({
-            code: "missing_example",
-            file: owner.module,
-            message: `Missing @example for ${ownerExport.name}`,
-            publicName,
-          });
-        }
-      }
-
-      for (const tag of collectUnknownTags(doc, config.allowedTags)) {
-        violations.push({
-          code: "unknown_tag",
-          file: owner.module,
-          message: `Unknown tag @${tag} on ${ownerExport.name}`,
-          publicName,
-        });
-      }
-    }
-
-    return {
-      owner,
-      reachableExports,
-      violations,
-    };
-  });
-
-const isOwnerTouched = ({
-  normalizedTouchedFiles,
+}) => Effect.Effect<OwnerCheck, DocsContractError> = Effect.fn("checkOwner")(function* ({
+  config,
   owner,
   packageExports,
   packageRoot,
-}: {
+}) {
+  const category = findCategory(config.categories, owner.category, owner.module);
+  if (category === undefined) {
+    return yield* new DocsContractConfigError({
+      detail: `missing category mapping for ${owner.category} -> ${owner.module}`,
+    });
+  }
+
+  const ownerFile = resolve(packageRoot, owner.module);
+  const ownerText = yield* readUtf8(ownerFile);
+  const entrypointFile = yield* resolveEntrypointSourceFile(
+    packageRoot,
+    packageExports,
+    owner.entrypoint,
+  );
+  const entrypointText = ownerFile === entrypointFile ? ownerText : yield* readUtf8(entrypointFile);
+
+  const ownerExports = collectExportDeclarations(ownerFile, ownerText);
+  const entrypointExports =
+    ownerFile === entrypointFile ? [] : collectReexports(entrypointFile, entrypointText);
+  const publishedBase = toPublishedBase(owner.entrypoint);
+
+  const namedEntrypointExportsForSource = (
+    sourceName: string,
+  ): ReadonlyArray<{
+    readonly exportName: string;
+    readonly sourceName: string;
+    readonly targetFile: string;
+  }> =>
+    entrypointExports.filter(
+      (entrypointExport) =>
+        entrypointExport.kind === "named" &&
+        entrypointExport.sourceName === sourceName &&
+        entrypointExport.targetFile === ownerFile,
+    );
+
+  const publicNamesForOwnerExport = (exportName: string): ReadonlyArray<string> => {
+    const names: Array<string> = [];
+
+    if (owner.primaryKind === "namespace" && primaryReachable) {
+      names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
+    }
+
+    if (owner.memberExports.includes(exportName) && primaryReachable) {
+      names.push(`${publishedBase}.${owner.primaryExport}.${exportName}`);
+    }
+
+    if (ownerFile === entrypointFile) {
+      if (owner.primaryKind === "named") {
+        names.push(`${publishedBase}.${exportName}`);
+      }
+      return [...unique(names)];
+    }
+
+    for (const entrypointExport of namedEntrypointExportsForSource(exportName)) {
+      names.push(`${publishedBase}.${entrypointExport.exportName}`);
+    }
+
+    return [...unique(names)];
+  };
+
+  const primaryPublicName =
+    owner.primaryKind === "namespace"
+      ? `${publishedBase}.${owner.primaryExport}`
+      : (publicNamesForOwnerExport(owner.primaryExport)[0] ??
+        `${publishedBase}.${owner.primaryExport}`);
+
+  const isNamedReachable = (exportName: string): boolean =>
+    ownerFile === entrypointFile
+      ? ownerExports.some((ownerExport) => ownerExport.name === exportName)
+      : namedEntrypointExportsForSource(exportName).length > 0;
+
+  const primaryReachable =
+    owner.primaryKind === "named"
+      ? isNamedReachable(owner.primaryExport)
+      : ownerFile !== entrypointFile &&
+        entrypointExports.some(
+          (entrypointExport) =>
+            entrypointExport.kind === "namespace" &&
+            entrypointExport.exportName === owner.primaryExport &&
+            entrypointExport.targetFile === ownerFile,
+        );
+
+  const reachablePublicNames = (ownerExport: ExportDeclarationDoc): ReadonlyArray<string> =>
+    publicNamesForOwnerExport(ownerExport.name);
+
+  const enforcedPublicNamesForOwnerExport = (
+    ownerExport: ExportDeclarationDoc,
+  ): ReadonlyArray<string> => reachablePublicNames(ownerExport);
+
+  const reachableExports = ownerExports.flatMap((ownerExport) => [
+    ...enforcedPublicNamesForOwnerExport(ownerExport),
+  ]);
+
+  const violations: Array<DocsViolation> = [];
+
+  if (!primaryReachable) {
+    violations.push({
+      code: "entrypoint_reachability",
+      file: owner.module,
+      message:
+        owner.primaryKind === "namespace"
+          ? `Expected ${owner.primaryExport} namespace re-export from ${owner.entrypoint}`
+          : `Expected named re-export ${owner.primaryExport} from ${owner.entrypoint}`,
+      publicName: primaryPublicName,
+    });
+  }
+
+  for (const namedExport of owner.namedExports) {
+    const namedReachable = isNamedReachable(namedExport);
+    if (!namedReachable) {
+      violations.push({
+        code: "entrypoint_reachability",
+        file: owner.module,
+        message: `Expected named re-export ${namedExport} from ${owner.entrypoint}`,
+        publicName: `${publishedBase}.${namedExport}`,
+      });
+    }
+  }
+
+  const moduleDoc = parseDocBlock(extractLeadingFileDoc(ownerText));
+  if (
+    moduleDoc === undefined ||
+    moduleDoc.summary.length === 0 ||
+    !hasTagContent(moduleDoc, "remarks")
+  ) {
+    violations.push({
+      code: "missing_module_docs",
+      file: owner.module,
+      message: `Expected module summary and @remarks for ${owner.topic}`,
+      publicName: primaryPublicName,
+    });
+  }
+  if (moduleDoc !== undefined) {
+    for (const tag of collectUnknownTags(moduleDoc, config.allowedTags)) {
+      violations.push({
+        code: "unknown_tag",
+        file: owner.module,
+        message: `Unknown module tag @${tag}`,
+        publicName: primaryPublicName,
+      });
+    }
+  }
+
+  if (category.requiresSidecar) {
+    const sidecarFile = resolve(packageRoot, owner.sidecar);
+    if (!existsSync(sidecarFile)) {
+      violations.push({
+        code: "missing_sidecar",
+        file: owner.sidecar,
+        message: `Missing sidecar guide for ${owner.topic}`,
+        publicName: primaryPublicName,
+      });
+    } else {
+      const sidecarText = yield* readUtf8(sidecarFile);
+      violations.push(
+        ...validateSidecar(owner, sidecarText, config.sidecarHeadings, primaryPublicName),
+      );
+    }
+  }
+
+  for (const ownerExport of ownerExports) {
+    const publicNames = enforcedPublicNamesForOwnerExport(ownerExport);
+    if (publicNames.length === 0) {
+      continue;
+    }
+    const publicName = publicNames[0] ?? primaryPublicName;
+    const doc = parseDocBlock(ownerExport.rawDoc);
+
+    if (doc === undefined || doc.summary.length === 0) {
+      violations.push({
+        code: "missing_summary",
+        file: owner.module,
+        message: `Missing summary for ${ownerExport.name}`,
+        publicName,
+      });
+      continue;
+    }
+
+    const visibilityCount = countTags(doc, ["public", "internal"]);
+    if (visibilityCount !== 1) {
+      violations.push({
+        code: "visibility_tag",
+        file: owner.module,
+        message: `Expected exactly one visibility tag on ${ownerExport.name}`,
+        publicName,
+      });
+    }
+
+    if (!hasTagContent(doc, "remarks")) {
+      violations.push({
+        code: "missing_remarks",
+        file: owner.module,
+        message: `Missing @remarks for ${ownerExport.name}`,
+        publicName,
+      });
+    }
+
+    const isPublic = doc.tags.has("public");
+    if (isPublic) {
+      const categoryTag = firstTagValue(doc, "category");
+      if (categoryTag === undefined) {
+        violations.push({
+          code: "missing_category",
+          file: owner.module,
+          message: `Missing @category for ${ownerExport.name}`,
+          publicName,
+        });
+      } else if (categoryTag !== owner.category) {
+        violations.push({
+          code: "wrong_category",
+          file: owner.module,
+          message: `Expected @category ${owner.category} on ${ownerExport.name}`,
+          publicName,
+        });
+      }
+
+      if (!hasTagContent(doc, "example")) {
+        violations.push({
+          code: "missing_example",
+          file: owner.module,
+          message: `Missing @example for ${ownerExport.name}`,
+          publicName,
+        });
+      }
+    }
+
+    for (const tag of collectUnknownTags(doc, config.allowedTags)) {
+      violations.push({
+        code: "unknown_tag",
+        file: owner.module,
+        message: `Unknown tag @${tag} on ${ownerExport.name}`,
+        publicName,
+      });
+    }
+  }
+
+  return {
+    owner,
+    reachableExports,
+    violations,
+  };
+});
+
+const isOwnerTouched: (args: {
   readonly normalizedTouchedFiles: ReadonlySet<string>;
   readonly owner: DocsOwner;
   readonly packageExports: PackageExports;
   readonly packageRoot: string;
-}): Effect.Effect<boolean, DocsContractError> =>
-  Effect.gen(function* () {
-    const entrypointFile = yield* resolveEntrypointSourceFile(
-      packageRoot,
-      packageExports,
-      owner.entrypoint,
-    );
+}) => Effect.Effect<boolean, DocsContractError> = Effect.fn("isOwnerTouched")(function* ({
+  normalizedTouchedFiles,
+  owner,
+  packageExports,
+  packageRoot,
+}) {
+  const entrypointFile = yield* resolveEntrypointSourceFile(
+    packageRoot,
+    packageExports,
+    owner.entrypoint,
+  );
 
-    return [owner.module, owner.sidecar, normalizeTouchedFile(packageRoot, entrypointFile)].some(
-      (filePath) => normalizedTouchedFiles.has(filePath),
-    );
-  });
+  return [owner.module, owner.sidecar, normalizeTouchedFile(packageRoot, entrypointFile)].some(
+    (filePath) => normalizedTouchedFiles.has(filePath),
+  );
+});
 
 const loadDocsConfig = (packageRoot: string): Effect.Effect<DocsConfig, DocsContractError> =>
   readJsonFile(resolve(packageRoot, "docs.contract.json")).pipe(Effect.flatMap(parseDocsConfig));
@@ -468,7 +501,7 @@ const loadPackageExports = (
 const readJsonFile = (path: string): Effect.Effect<unknown, DocsContractError> =>
   readUtf8(path).pipe(
     Effect.flatMap((text) =>
-      Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+      decodeJson(text).pipe(
         Effect.mapError(
           () =>
             new DocsContractFileError({
@@ -490,209 +523,108 @@ const readUtf8 = (path: string): Effect.Effect<string, DocsContractError> =>
       }),
   });
 
-const parseDocsConfig = (value: unknown): Effect.Effect<DocsConfig, DocsContractError> =>
-  Effect.try({
-    try: () => {
-      if (!isRecord(value)) {
-        throw new Error("config must be an object");
-      }
+const normalizeOwner = (owner: DocsOwnerInput): DocsOwner => ({
+  category: owner.category,
+  entrypoint: owner.entrypoint,
+  memberExports: owner.memberExports ?? [],
+  module: owner.module,
+  namedExports: owner.namedExports,
+  primaryExport: owner.primaryExport,
+  primaryKind: owner.primaryKind ?? "namespace",
+  sidecar: owner.sidecar,
+  topic: owner.topic,
+});
 
-      const allowedTags = readStringArray(value, "allowedTags");
-      const sidecarHeadings = readStringArray(value, "sidecarHeadings");
-      const categoriesValue = value["categories"];
-      const migratedOwnersValue = value["migratedOwners"];
-
-      if (!Array.isArray(categoriesValue) || !Array.isArray(migratedOwnersValue)) {
-        throw new Error("categories and migratedOwners must be arrays");
-      }
-
-      const categories = categoriesValue.map((categoryValue) => parseCategory(categoryValue));
-      const migratedOwners = migratedOwnersValue.map((ownerValue) => parseOwner(ownerValue));
-
-      return {
-        allowedTags,
-        categories,
-        migratedOwners,
-        sidecarHeadings,
-      };
-    },
-    catch: (error) =>
-      new DocsContractConfigError({
-        detail: error instanceof Error ? error.message : "invalid docs.contract.json",
-      }),
-  });
-
-const parsePackageExports = (value: unknown): Effect.Effect<PackageExports, DocsContractError> =>
-  Effect.try({
-    try: () => {
-      if (!isRecord(value)) {
-        throw new Error("package.json must be an object");
-      }
-
-      const exportsValue = value["exports"];
-      if (!isRecord(exportsValue)) {
-        throw new Error("package.json exports must be an object");
-      }
-
-      const entrypoints = new Map<string, string>();
-      for (const [exportKey, exportValue] of Object.entries(exportsValue)) {
-        if (typeof exportValue === "string") {
-          entrypoints.set(exportKey, exportValue);
-          continue;
-        }
-        if (!isRecord(exportValue)) {
-          throw new Error(`export ${exportKey} must be a string or object`);
-        }
-        const typesValue = exportValue["types"];
-        if (typeof typesValue !== "string") {
-          throw new Error(`export ${exportKey} missing types path`);
-        }
-        entrypoints.set(exportKey, typesValue);
-      }
-
-      return { entrypoints };
-    },
-    catch: (error) =>
-      new DocsContractConfigError({
-        detail: error instanceof Error ? error.message : "invalid package.json exports",
-      }),
-  });
-
-const parseCategory = (value: unknown): DocsCategory => {
-  if (!isRecord(value)) {
-    throw new Error("category must be an object");
-  }
-
-  const name = value["name"];
-  const ownerModule = value["ownerModule"];
-  const requiresSidecar = value["requiresSidecar"];
-
-  if (
-    typeof name !== "string" ||
-    typeof ownerModule !== "string" ||
-    typeof requiresSidecar !== "boolean"
-  ) {
-    throw new Error("category fields invalid");
-  }
+const parseDocsConfig: (value: unknown) => Effect.Effect<DocsConfig, DocsContractError> = Effect.fn(
+  "parseDocsConfig",
+)(function* (value: unknown) {
+  const config = yield* decodeDocsConfigInput(value).pipe(
+    Effect.mapError(
+      () =>
+        new DocsContractConfigError({
+          detail: "invalid docs.contract.json",
+        }),
+    ),
+  );
 
   return {
-    name,
-    ownerModule,
-    requiresSidecar,
+    allowedTags: config.allowedTags,
+    categories: config.categories,
+    migratedOwners: config.migratedOwners.map(normalizeOwner),
+    sidecarHeadings: config.sidecarHeadings,
   };
-};
+});
 
-const parseOwner = (value: unknown): DocsOwner => {
-  if (!isRecord(value)) {
-    throw new Error("migrated owner must be an object");
-  }
+const parsePackageExports: (value: unknown) => Effect.Effect<PackageExports, DocsContractError> =
+  Effect.fn("parsePackageExports")(function* (value: unknown) {
+    const packageJson = yield* decodePackageJson(value).pipe(
+      Effect.mapError(
+        () =>
+          new DocsContractConfigError({
+            detail: "invalid package.json exports",
+          }),
+      ),
+    );
 
-  const topic = value["topic"];
-  const category = value["category"];
-  const entrypoint = value["entrypoint"];
-  const memberExportsValue = value["memberExports"];
-  const module = value["module"];
-  const primaryExport = value["primaryExport"];
-  const primaryKindValue = value["primaryKind"];
-  const sidecar = value["sidecar"];
-  const namedExportsValue = value["namedExports"];
-
-  if (
-    typeof topic !== "string" ||
-    typeof category !== "string" ||
-    typeof entrypoint !== "string" ||
-    typeof module !== "string" ||
-    typeof primaryExport !== "string" ||
-    typeof sidecar !== "string" ||
-    (memberExportsValue !== undefined && !Array.isArray(memberExportsValue)) ||
-    !Array.isArray(namedExportsValue)
-  ) {
-    throw new Error("migrated owner fields invalid");
-  }
-
-  const primaryKind =
-    primaryKindValue === undefined
-      ? "namespace"
-      : primaryKindValue === "named" || primaryKindValue === "namespace"
-        ? primaryKindValue
-        : (() => {
-            throw new Error("primaryKind must be named or namespace");
-          })();
-
-  const memberExports = (memberExportsValue ?? []).map((memberExport) => {
-    if (typeof memberExport !== "string") {
-      throw new Error("memberExports must contain only strings");
+    const entrypoints = new Map<string, string>();
+    for (const [exportKey, exportValue] of Object.entries(packageJson.exports)) {
+      if (typeof exportValue === "string") {
+        entrypoints.set(exportKey, exportValue);
+        continue;
+      }
+      if (!isRecord(exportValue)) {
+        return yield* new DocsContractConfigError({
+          detail: `export ${exportKey} must be a string or object`,
+        });
+      }
+      const typesValue = exportValue["types"];
+      if (typeof typesValue !== "string") {
+        return yield* new DocsContractConfigError({
+          detail: `export ${exportKey} missing types path`,
+        });
+      }
+      entrypoints.set(exportKey, typesValue);
     }
-    return memberExport;
+
+    return { entrypoints };
   });
 
-  const namedExports = namedExportsValue.map((namedExport) => {
-    if (typeof namedExport !== "string") {
-      throw new Error("namedExports must contain only strings");
-    }
-    return namedExport;
-  });
-
-  return {
-    category,
-    entrypoint,
-    memberExports,
-    module,
-    namedExports,
-    primaryExport,
-    primaryKind,
-    sidecar,
-    topic,
-  };
-};
-
-const readStringArray = (record: Record<string, unknown>, key: string): ReadonlyArray<string> => {
-  const value = record[key];
-  if (!Array.isArray(value)) {
-    throw new Error(`${key} must be an array`);
-  }
-
-  return value.map((item) => {
-    if (typeof item !== "string") {
-      throw new Error(`${key} must contain only strings`);
-    }
-    return item;
-  });
-};
-
-const resolveEntrypointSourceFile = (
+const resolveEntrypointSourceFile: (
   packageRoot: string,
   packageExports: PackageExports,
   entrypoint: string,
-): Effect.Effect<string, DocsContractError> =>
-  Effect.gen(function* () {
-    const typesPath = packageExports.entrypoints.get(entrypoint);
-    if (typesPath === undefined) {
-      return yield* new DocsContractConfigError({
-        detail: `missing package export ${entrypoint}`,
-      });
-    }
-
-    const relativeDistPath = stripLeadingDotSlash(typesPath)
-      .replace(/^dist\//, "")
-      .replace(/\.d\.ts$/, "");
-    const candidates = [
-      resolve(packageRoot, "src", `${relativeDistPath}.ts`),
-      resolve(packageRoot, "src", `${relativeDistPath}.tsx`),
-      resolve(packageRoot, "src", relativeDistPath, "index.ts"),
-      resolve(packageRoot, "src", relativeDistPath, "index.tsx"),
-    ];
-
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
-
+) => Effect.Effect<string, DocsContractError> = Effect.fn("resolveEntrypointSourceFile")(function* (
+  packageRoot: string,
+  packageExports: PackageExports,
+  entrypoint: string,
+) {
+  const typesPath = packageExports.entrypoints.get(entrypoint);
+  if (typesPath === undefined) {
     return yield* new DocsContractConfigError({
-      detail: `unable to resolve source entrypoint for ${entrypoint} from ${typesPath}`,
+      detail: `missing package export ${entrypoint}`,
     });
+  }
+
+  const relativeDistPath = stripLeadingDotSlash(typesPath)
+    .replace(/^dist\//, "")
+    .replace(/\.d\.ts$/, "");
+  const candidates = [
+    resolve(packageRoot, "src", `${relativeDistPath}.ts`),
+    resolve(packageRoot, "src", `${relativeDistPath}.tsx`),
+    resolve(packageRoot, "src", relativeDistPath, "index.ts"),
+    resolve(packageRoot, "src", relativeDistPath, "index.tsx"),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return yield* new DocsContractConfigError({
+    detail: `unable to resolve source entrypoint for ${entrypoint} from ${typesPath}`,
   });
+});
 
 const collectReexports = (
   filePath: string,

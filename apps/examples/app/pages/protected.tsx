@@ -11,12 +11,11 @@ const ProtectedPage = Component.gen(function* () {
     return <div>Loading...</div>;
   }
 
-  const handleLogout = () =>
-    Effect.gen(function* () {
-      yield* setAuth(Option.none());
-      const router = yield* Router.get;
-      yield* Effect.ignore(router.navigate("/login"));
-    });
+  const handleLogout = Effect.fn("ProtectedPage.handleLogout")(function* () {
+    yield* setAuth(Option.none());
+    const router = yield* Router.get;
+    yield* router.navigate("/login");
+  });
 
   return (
     <div className="bg-white p-6 rounded-lg border border-gray-200">

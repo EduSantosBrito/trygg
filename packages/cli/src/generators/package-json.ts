@@ -3,7 +3,7 @@
  * Uses PlatformConfig service for platform-specific values
  * @since 1.0.0
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { PlatformConfig } from "../platform-config.js";
 import {
   TRYGG_VERSION,
@@ -22,68 +22,86 @@ export interface PackageJsonOptions {
   readonly output: "server" | "static";
 }
 
-export const generatePackageJson = (
+const StringRecord = Schema.Record(Schema.String, Schema.String);
+
+const PackageJson = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String,
+  private: Schema.Boolean,
+  type: Schema.Literal("module"),
+  scripts: StringRecord,
+  dependencies: StringRecord,
+  devDependencies: StringRecord,
+});
+
+const PackageJsonString = Schema.fromJsonString(PackageJson);
+const encodePackageJson = Schema.encodeEffect(PackageJsonString);
+const packageType = "module";
+
+export const generatePackageJson: (
   options: PackageJsonOptions,
-): Effect.Effect<string, never, PlatformConfig> =>
-  Effect.gen(function* () {
-    const { name, output } = options;
-    const platform = yield* PlatformConfig;
+) => Effect.Effect<string, Schema.SchemaError, PlatformConfig> = Effect.fn(
+  "Cli.generatePackageJson",
+)(function* (options: PackageJsonOptions) {
+  const { name, output } = options;
+  const platform = yield* PlatformConfig;
 
-    const scripts: Record<string, string> = {
-      dev: platform.devScript,
-      build: "vite build",
-      typecheck: "tsc --noEmit",
-      lint: "oxlint .",
-      "lint:fix": "oxlint . --fix",
-      "effect:check": "effect-language-service diagnostics --project tsconfig.json",
-      check: "bun run lint && bun run typecheck && bun run effect:check",
-      prepare: "effect-language-service patch",
-    };
+  const scripts: Record<string, string> = {
+    dev: platform.devScript,
+    build: "vite build",
+    typecheck: "tsc --noEmit",
+    lint: "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "effect:check": "effect-language-service diagnostics --project tsconfig.json",
+    check: "bun run lint && bun run typecheck && bun run effect:check",
+    prepare: "effect-language-service patch",
+  };
 
-    // Add platform-specific scripts for server output
-    if (output === "server") {
-      const runtime = platform.name;
-      scripts.preview = `${runtime} dist/server.js`;
-      scripts.start = `${runtime} dist/server.js`;
-    } else {
-      scripts.preview = "vite preview";
-    }
+  // Add platform-specific scripts for server output
+  if (output === "server") {
+    const runtime = platform.name;
+    scripts.preview = `${runtime} dist/server.js`;
+    scripts.start = `${runtime} dist/server.js`;
+  } else {
+    scripts.preview = "vite preview";
+  }
 
-    const dependencies: Record<string, string> = {
-      effect: EFFECT_VERSION,
-      "@effect/platform-browser": EFFECT_PLATFORM_BROWSER_VERSION,
-      trygg: TRYGG_VERSION,
-    };
+  const dependencies: Record<string, string> = {
+    effect: EFFECT_VERSION,
+    "@effect/platform-browser": EFFECT_PLATFORM_BROWSER_VERSION,
+    trygg: TRYGG_VERSION,
+  };
 
-    const devDependencies: Record<string, string> = {
-      "@effect/language-service": EFFECT_LANGUAGE_SERVICE_VERSION,
-      typescript: TYPESCRIPT_VERSION,
-      vite: VITE_VERSION,
-      oxlint: OXLINT_VERSION,
-      "@tailwindcss/vite": TAILWIND_VITE_VERSION,
-      tailwindcss: TAILWIND_VERSION,
-    };
+  const devDependencies: Record<string, string> = {
+    "@effect/language-service": EFFECT_LANGUAGE_SERVICE_VERSION,
+    typescript: TYPESCRIPT_VERSION,
+    vite: VITE_VERSION,
+    oxlint: OXLINT_VERSION,
+    "@tailwindcss/vite": TAILWIND_VITE_VERSION,
+    tailwindcss: TAILWIND_VERSION,
+  };
 
-    // Add platform devDependencies only for static output (dev-only)
-    // For server output, platform package goes in dependencies instead
-    if (output === "static") {
-      Object.assign(devDependencies, platform.devDependencies);
-    }
+  // Add platform devDependencies only for static output (dev-only)
+  // For server output, platform package goes in dependencies instead
+  if (output === "static") {
+    Object.assign(devDependencies, platform.devDependencies);
+  }
 
-    // Add runtime dependency for server output
-    if (output === "server") {
-      dependencies[platform.runtimeDependencyName] = platform.runtimeVersion;
-    }
+  // Add runtime dependency for server output
+  if (output === "server") {
+    dependencies[platform.runtimeDependencyName] = platform.runtimeVersion;
+  }
 
-    const pkg = {
-      name,
-      version: "0.1.0",
-      private: true,
-      type: "module",
-      scripts,
-      dependencies,
-      devDependencies,
-    };
+  const pkg: Schema.Schema.Type<typeof PackageJson> = {
+    name,
+    version: "0.1.0",
+    private: true,
+    type: packageType,
+    scripts,
+    dependencies,
+    devDependencies,
+  };
 
-    return JSON.stringify(pkg, null, 2) + "\n";
-  });
+  const packageJson = yield* encodePackageJson(pkg);
+  return `${packageJson}\n`;
+});

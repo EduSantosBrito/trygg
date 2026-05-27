@@ -10,27 +10,41 @@
  * @since 1.0.0
  * @module trygg/primitives/component
  */
-import { Data, Effect, Layer, Pipeable } from "effect";
+import { Effect, Layer, Pipeable, Predicate, Schema } from "effect";
 import * as Context from "effect/Context";
 import { unsafeTagCallable } from "../internal/unsafe.js";
-import { Element, type ComponentElementWithRequirements } from "./element.js";
+import {
+  Element,
+  type ComponentElementWithRequirements,
+  type ElementRequirementsOf,
+} from "./element.js";
 
 /**
  * Error raised when an invalid component type is used in JSX.
  * @since 1.0.0
  */
-export class InvalidComponentError extends Data.TaggedError("InvalidComponentError")<{
-  readonly reason: "plain-function" | "effect" | "unknown";
-  readonly displayName?: string | undefined;
-}> {}
+export class InvalidComponentError extends Schema.TaggedErrorClass<InvalidComponentError>()(
+  "InvalidComponentError",
+  {
+    reason: Schema.Union([
+      Schema.Literal("plain-function"),
+      Schema.Literal("effect"),
+      Schema.Literal("unknown"),
+    ]),
+    displayName: Schema.optional(Schema.String),
+  },
+) {}
 
 /**
  * Error raised when Component.gen is called incorrectly.
  * @since 1.0.0
  */
-export class ComponentGenError extends Data.TaggedError("ComponentGenError")<{
-  readonly message: string;
-}> {}
+export class ComponentGenError extends Schema.TaggedErrorClass<ComponentGenError>()(
+  "ComponentGenError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 // =============================================================================
 // Type Utilities
@@ -84,12 +98,20 @@ export type ComponentProps<P> = Context.Service<PropsMarker<P>, P>;
 // Component Types
 // =============================================================================
 
-type ComponentResult = Element | Effect.Effect<Element, unknown, unknown>;
+type ComponentResult = Element | Effect.Effect<Element, unknown, never | object>;
 type ComponentCallProps<Props> = [Props] extends [never] ? {} : Props;
+type ExtractResultError<Result> = [Result] extends [Effect.Effect<unknown, infer E, infer _R>]
+  ? E
+  : never;
+type ExtractResultContext<Result> = [Result] extends [Effect.Effect<infer A, infer _E, infer R>]
+  ? R | ElementRequirementsOf<A>
+  : ElementRequirementsOf<Result>;
+type ComponentError<Eff, Result> = ExtractError<Eff> | ExtractResultError<Result>;
+type ComponentContext<Eff, Result> = ExtractContext<Eff> | ExtractResultContext<Result>;
 type ComponentYieldable = Effect.Yieldable.Any;
 type LegacyGenResume = undefined;
 
-const effectComponentTag = "EffectComponent" as const;
+const effectComponentTag = "EffectComponent";
 
 /**
  * Tag a component function with Component metadata.
@@ -98,7 +120,7 @@ const effectComponentTag = "EffectComponent" as const;
 export const tagComponent = <Props, RuntimeProps, E, R>(
   fn: (props: RuntimeProps) => Element,
   layers: ReadonlyArray<unknown> = [],
-  runFn?: (props: RuntimeProps) => Effect.Effect<Element, E, unknown>,
+  runFn?: (props: RuntimeProps) => Effect.Effect<Element, E, R>,
   displayName?: string,
 ): Component.Type<Props, E, R> =>
   unsafeTagCallable<Component.Type<Props, E, R>>(fn, {
@@ -126,13 +148,21 @@ const normalizeResult = <E, R>(
  * Service requirements are resolved from the parent context.
  * @since 1.0.0
  */
-function makeComponent<P extends object = {}>(): <E, R>(
-  effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
-) => Component.Type<P, E, Exclude<R, PropsMarker<P>>> {
-  return <E, R>(
-    effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<Element, E, R>,
-  ): Component.Type<P, E, Exclude<R, PropsMarker<P>>> => {
-    const PropsTag = Context.Service<PropsMarker<P>, P>("@trygg/Props");
+function makeComponent<P extends object = {}>(): <A extends ComponentResult, E, R>(
+  effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<A, E, R>,
+) => Component.Type<
+  P,
+  E | ExtractResultError<A>,
+  Exclude<R | ExtractResultContext<A>, PropsMarker<P>>
+> {
+  return <A extends ComponentResult, E, R>(
+    effectFn: (Props: Context.Service<PropsMarker<P>, P>) => Effect.Effect<A, E, R>,
+  ): Component.Type<
+    P,
+    E | ExtractResultError<A>,
+    Exclude<R | ExtractResultContext<A>, PropsMarker<P>>
+  > => {
+    const PropsTag = Context.Service<PropsMarker<P>, P & {}>("@trygg/Props");
 
     const componentFn = (props: P): Element => {
       const run = (): Effect.Effect<Element, E, R> => {
@@ -144,7 +174,12 @@ function makeComponent<P extends object = {}>(): <E, R>(
       return Element.fromEffect(Effect.suspend(run), { identity: componentFn, inputs: props });
     };
 
-    return tagComponent<P, P, E, Exclude<R, PropsMarker<P>>>(componentFn);
+    return tagComponent<
+      P,
+      P,
+      E | ExtractResultError<A>,
+      Exclude<R | ExtractResultContext<A>, PropsMarker<P>>
+    >(componentFn);
   };
 }
 
@@ -167,9 +202,7 @@ export declare namespace Component {
   export interface Type<Props = never, _E = never, _R = never> {
     readonly _tag: "EffectComponent";
     readonly _layers: ReadonlyArray<unknown>;
-    readonly _runFn?: (
-      props: ComponentCallProps<Props>,
-    ) => Effect.Effect<Element, unknown, unknown>;
+    readonly _runFn?: (props: ComponentCallProps<Props>) => unknown;
     readonly _displayName?: string;
     readonly pipe: Pipeable.Pipeable["pipe"];
     (props: ComponentCallProps<Props>): ComponentElementWithRequirements<_R>;
@@ -179,9 +212,6 @@ export declare namespace Component {
 // =============================================================================
 // Type Guards
 // =============================================================================
-
-const hasTag = (value: unknown): value is { _tag: unknown } =>
-  typeof value === "function" && value !== null && "_tag" in value;
 
 /**
  * Check whether a value is a trygg component.
@@ -204,7 +234,7 @@ const hasTag = (value: unknown): value is { _tag: unknown } =>
  * @since 1.0.0
  */
 export const isEffectComponent = (value: unknown): value is Component.Type<unknown> =>
-  hasTag(value) && value._tag === effectComponentTag;
+  Predicate.isTagged(value, effectComponentTag);
 
 // =============================================================================
 // Component.gen API
@@ -242,16 +272,21 @@ type ExtractContext<Eff> = [Eff] extends [never]
  */
 function genNoProps<Eff extends ComponentYieldable, AEff extends ComponentResult>(
   f: (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
-): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>> {
-  type E = ExtractError<Eff>;
-
-  const runFn = (): Effect.Effect<Element, E, unknown> =>
-    normalizeResult(Effect.gen(() => f(undefined)));
+): Component.Type<never, ComponentError<Eff, AEff>, ComponentContext<Eff, AEff>> {
+  const runFn = (): Effect.Effect<
+    Element,
+    ComponentError<Eff, AEff>,
+    ComponentContext<Eff, AEff>
+  > => normalizeResult(Effect.gen(() => f(undefined)));
 
   const componentFn = (_props: {}): Element =>
     Element.fromEffect(Effect.suspend(runFn), { identity: componentFn });
 
-  return tagComponent<never, {}, E, ExtractContext<Eff>>(componentFn, [], runFn);
+  return tagComponent<never, {}, ComponentError<Eff, AEff>, ComponentContext<Eff, AEff>>(
+    componentFn,
+    [],
+    runFn,
+  );
 }
 
 /**
@@ -265,16 +300,29 @@ function genWithProps<P extends object>(): <
   f: (
     Props: Context.Service<PropsMarker<P>, P>,
   ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
-) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
+) => Component.Type<
+  P,
+  ComponentError<Eff, AEff>,
+  Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+> {
   return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
     f: (
       Props: Context.Service<PropsMarker<P>, P>,
     ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
-  ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> => {
-    type E = ExtractError<Eff>;
-    const PropsTag = Context.Service<PropsMarker<P>, P>("@trygg/Props");
+  ): Component.Type<
+    P,
+    ComponentError<Eff, AEff>,
+    Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+  > => {
+    const PropsTag = Context.Service<PropsMarker<P>, P & {}>("@trygg/Props");
 
-    const runFn = (props: P): Effect.Effect<Element, E, unknown> => {
+    const runFn = (
+      props: P,
+    ): Effect.Effect<
+      Element,
+      ComponentError<Eff, AEff>,
+      Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+    > => {
       const baseEffect = Effect.gen(() => f(PropsTag)(undefined));
       const withProps = Effect.provideService(baseEffect, PropsTag, props);
       return normalizeResult(withProps);
@@ -286,11 +334,12 @@ function genWithProps<P extends object>(): <
         { identity: componentFn, inputs: props },
       );
 
-    return tagComponent<P, P, E, Exclude<ExtractContext<Eff>, PropsMarker<P>>>(
-      componentFn,
-      [],
-      runFn,
-    );
+    return tagComponent<
+      P,
+      P,
+      ComponentError<Eff, AEff>,
+      Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+    >(componentFn, [], runFn);
   };
 }
 
@@ -306,7 +355,11 @@ function genWithPropsDirect<P extends object>(): <
     Props: Context.Service<PropsMarker<P>, P>,
     resume?: LegacyGenResume,
   ) => Generator<Eff, AEff, never>,
-) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> {
+) => Component.Type<
+  P,
+  ComponentError<Eff, AEff>,
+  Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+> {
   const withProps = genWithProps<P>();
 
   return <Eff extends ComponentYieldable, AEff extends ComponentResult>(
@@ -314,8 +367,11 @@ function genWithPropsDirect<P extends object>(): <
       Props: Context.Service<PropsMarker<P>, P>,
       resume?: LegacyGenResume,
     ) => Generator<Eff, AEff, never>,
-  ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>> =>
-    withProps((Props) => (resume) => f(Props, resume));
+  ): Component.Type<
+    P,
+    ComponentError<Eff, AEff>,
+    Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+  > => withProps((Props) => (resume) => f(Props, resume));
 }
 
 /**
@@ -339,29 +395,36 @@ const isGeneratorFunction = (fn: unknown): fn is GeneratorComponentFn =>
  *
  * @since 1.0.0
  */
-type Gen = {
-  <Eff extends ComponentYieldable>(
-    f: (resume: LegacyGenResume) => Generator<Eff, ComponentResult, never>,
-  ): Component.Type<never, ExtractError<Eff>, ExtractContext<Eff>>;
-  <
-    P extends object = {},
-    Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
-  >(
-    f: (
-      Props: Context.Service<PropsMarker<P>, P>,
-      resume?: LegacyGenResume,
-    ) => Generator<Eff, ComponentResult, never>,
-  ): Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
-  <P extends object = {}>(): <
-    Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
-  >(
-    f: (
-      Props: Context.Service<PropsMarker<P>, P>,
-    ) => (resume: LegacyGenResume) => Generator<Eff, ComponentResult, never>,
-  ) => Component.Type<P, ExtractError<Eff>, Exclude<ExtractContext<Eff>, PropsMarker<P>>>;
-};
-
-export const gen: Gen = function <P extends object>(f?: unknown): any {
+export function gen<Eff extends ComponentYieldable, AEff extends ComponentResult>(
+  f: (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
+): Component.Type<never, ComponentError<Eff, AEff>, ComponentContext<Eff, AEff>>;
+export function gen<
+  P extends object = {},
+  Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
+  AEff extends ComponentResult = ComponentResult,
+>(
+  f: (
+    Props: Context.Service<PropsMarker<P>, P>,
+    resume?: LegacyGenResume,
+  ) => Generator<Eff, AEff, never>,
+): Component.Type<
+  P,
+  ComponentError<Eff, AEff>,
+  Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+>;
+export function gen<P extends object = {}>(): <
+  Eff extends ComponentYieldable = EffectYieldable<unknown, unknown, unknown>,
+  AEff extends ComponentResult = ComponentResult,
+>(
+  f: (
+    Props: Context.Service<PropsMarker<P>, P>,
+  ) => (resume: LegacyGenResume) => Generator<Eff, AEff, never>,
+) => Component.Type<
+  P,
+  ComponentError<Eff, AEff>,
+  Exclude<ComponentContext<Eff, AEff>, PropsMarker<P>>
+>;
+export function gen<P extends object>(f?: unknown): unknown {
   if (f !== undefined && isGeneratorFunction(f)) {
     if (f.length === 0) {
       return genNoProps((resume) => f(resume));
@@ -377,7 +440,7 @@ export const gen: Gen = function <P extends object>(f?: unknown): any {
       message: "Component.gen: expected a generator function or call with type parameter first",
     });
   });
-};
+}
 
 export const provide =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>

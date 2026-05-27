@@ -12,8 +12,8 @@
  * - Fragment items break moveRange: Fragment returns first child as result.node,
  *   so moveRange(startMarker, firstChild, ref) orphans subsequent siblings.
  */
-import { describe, effect, expect } from "@effect/vitest";
-import { Cause, Data, Effect } from "effect";
+import { assert, describe, effect } from "@effect/vitest";
+import { Cause, Effect, Predicate, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 import * as Resource from "../resource.js";
@@ -88,7 +88,17 @@ describe("KeyedList Fragment reorder", () => {
       const getSpanTexts = () =>
         Array.from(container.querySelectorAll("span.part")).map((el) => el.textContent);
 
-      expect(getSpanTexts()).toEqual(["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]);
+      assert.deepStrictEqual(getSpanTexts(), [
+        "A1",
+        "A2",
+        "A3",
+        "B1",
+        "B2",
+        "B3",
+        "C1",
+        "C2",
+        "C3",
+      ]);
 
       // Reorder: move 'c' to front
       yield* Signal.set(items, [
@@ -102,7 +112,17 @@ describe("KeyedList Fragment reorder", () => {
 
       // Expected after reorder: C1 C2 C3 A1 A2 A3 B1 B2 B3
       // BUG: Without fix, only C1 moves, C2 and C3 orphaned at end
-      expect(getSpanTexts()).toEqual(["C1", "C2", "C3", "A1", "A2", "A3", "B1", "B2", "B3"]);
+      assert.deepStrictEqual(getSpanTexts(), [
+        "C1",
+        "C2",
+        "C3",
+        "A1",
+        "A2",
+        "A3",
+        "B1",
+        "B2",
+        "B3",
+      ]);
     }),
   );
 
@@ -134,7 +154,7 @@ describe("KeyedList Fragment reorder", () => {
       const getValues = () =>
         Array.from(container.querySelectorAll("span[data-value]")).map((el) => el.textContent);
 
-      expect(getValues()).toEqual(["X", "Y", "P", "Q", "M", "N"]);
+      assert.deepStrictEqual(getValues(), ["X", "Y", "P", "Q", "M", "N"]);
 
       // Complete reverse
       yield* Signal.set(items, [
@@ -145,7 +165,7 @@ describe("KeyedList Fragment reorder", () => {
 
       yield* Effect.yieldNow;
 
-      expect(getValues()).toEqual(["M", "N", "P", "Q", "X", "Y"]);
+      assert.deepStrictEqual(getValues(), ["M", "N", "P", "Q", "X", "Y"]);
     }),
   );
 
@@ -178,7 +198,7 @@ describe("KeyedList Fragment reorder", () => {
       const getNums = () =>
         Array.from(container.querySelectorAll("span[data-n]")).map((el) => el.textContent);
 
-      expect(getNums()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
+      assert.deepStrictEqual(getNums(), ["1", "2", "3", "4", "5", "6", "7", "8"]);
 
       // Interleave: a, c, b, d -> 1,2, 5,6, 3,4, 7,8
       yield* Signal.set(items, [
@@ -190,7 +210,7 @@ describe("KeyedList Fragment reorder", () => {
 
       yield* Effect.yieldNow;
 
-      expect(getNums()).toEqual(["1", "2", "5", "6", "3", "4", "7", "8"]);
+      assert.deepStrictEqual(getNums(), ["1", "2", "5", "6", "3", "4", "7", "8"]);
     }),
   );
 });
@@ -224,7 +244,7 @@ describe("KeyedList Fragment removal", () => {
         </div>,
       );
 
-      expect(container.querySelectorAll("span").length).toBe(4);
+      assert.strictEqual(container.querySelectorAll("span").length, 4);
 
       // Remove first item
       yield* Signal.set(items, [{ id: "b", parts: ["B1", "B2"] }]);
@@ -232,7 +252,7 @@ describe("KeyedList Fragment removal", () => {
 
       // Should only have B1, B2
       const texts = Array.from(container.querySelectorAll("span")).map((el) => el.textContent);
-      expect(texts).toEqual(["B1", "B2"]);
+      assert.deepStrictEqual(texts, ["B1", "B2"]);
     }),
   );
 });
@@ -263,13 +283,13 @@ describe("KeyedList single-element reorder (baseline)", () => {
       const getItems = () =>
         Array.from(container.querySelectorAll("[data-item]")).map((el) => el.textContent);
 
-      expect(getItems()).toEqual(["alpha", "beta", "gamma"]);
+      assert.deepStrictEqual(getItems(), ["alpha", "beta", "gamma"]);
 
       // Reverse order
       yield* Signal.set(items, ["gamma", "beta", "alpha"]);
       yield* Effect.yieldNow;
 
-      expect(getItems()).toEqual(["gamma", "beta", "alpha"]);
+      assert.deepStrictEqual(getItems(), ["gamma", "beta", "alpha"]);
     }),
   );
 
@@ -290,7 +310,7 @@ describe("KeyedList single-element reorder (baseline)", () => {
       );
 
       const anchor = findKeyedListAnchor(container);
-      expect(anchor).not.toBeNull();
+      assert.isNotNull(anchor);
 
       if (anchor === null) {
         return;
@@ -303,7 +323,7 @@ describe("KeyedList single-element reorder (baseline)", () => {
       yield* Signal.set(items, ["a", "b", "c"]);
       yield* Effect.yieldNow;
 
-      expect(newParent.querySelectorAll("[data-id]").length).toBe(3);
+      assert.strictEqual(newParent.querySelectorAll("[data-id]").length, 3);
     }),
   );
 
@@ -364,17 +384,17 @@ describe("KeyedList single-element reorder (baseline)", () => {
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
 
-      expect(ids()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(ids(), ["1", "2", "3"]);
 
       yield* Signal.set(filter, "SEV-1");
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
-      expect(ids()).toEqual(["2"]);
+      assert.deepStrictEqual(ids(), ["2"]);
 
       yield* Signal.set(filter, "all");
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
-      expect(ids()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(ids(), ["1", "2", "3"]);
 
       // Rapid toggles should still converge to stable order.
       for (let i = 0; i < 3; i++) {
@@ -385,7 +405,7 @@ describe("KeyedList single-element reorder (baseline)", () => {
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
-      expect(ids()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(ids(), ["1", "2", "3"]);
     }),
   );
 });
@@ -421,7 +441,7 @@ describe("KeyedList stable-order updates", () => {
       const getLabels = () =>
         Array.from(container.querySelectorAll("[data-id]")).map((el) => el.textContent);
 
-      expect(getLabels()).toEqual(["Alpha", "Bravo"]);
+      assert.deepStrictEqual(getLabels(), ["Alpha", "Bravo"]);
 
       // Same keys, same order, one item changed
       yield* Signal.set(items, [
@@ -430,7 +450,7 @@ describe("KeyedList stable-order updates", () => {
       ]);
       yield* Effect.yieldNow;
 
-      expect(getLabels()).toEqual(["Alpha", "Bravo 2"]);
+      assert.deepStrictEqual(getLabels(), ["Alpha", "Bravo 2"]);
     }),
   );
 
@@ -487,7 +507,7 @@ describe("KeyedList stable-order updates", () => {
         el.getAttribute("data-id"),
       );
 
-      expect(ids).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(ids, ["1", "2", "3"]);
     }),
   );
 
@@ -568,18 +588,18 @@ describe("KeyedList stable-order updates", () => {
 
       yield* TestClock.adjust("20 millis");
       yield* Effect.yieldNow;
-      expect(readOrder()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(readOrder(), ["1", "2", "3"]);
 
       yield* Signal.set(filter, "SEV-1");
       yield* Effect.yieldNow;
       yield* TestClock.adjust("10 millis");
-      expect(readOrder()).toEqual(["2"]);
+      assert.deepStrictEqual(readOrder(), ["2"]);
 
       yield* Signal.set(filter, "all");
       yield* Effect.yieldNow;
       yield* TestClock.adjust("20 millis");
       yield* Effect.yieldNow;
-      expect(readOrder()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(readOrder(), ["1", "2", "3"]);
     }),
   );
 
@@ -626,18 +646,18 @@ describe("KeyedList stable-order updates", () => {
           .filter((id): id is string => id !== null);
 
       yield* Effect.yieldNow;
-      expect(ids()).toEqual(["2"]);
+      assert.deepStrictEqual(ids(), ["2"]);
 
       yield* Signal.set(filter, "all");
       yield* TestClock.adjust("10 millis");
       yield* Effect.yieldNow;
 
       // Should not show partial rebuild like [2,1] while id=3 is still rendering.
-      expect(ids()).toEqual(["2"]);
+      assert.deepStrictEqual(ids(), ["2"]);
 
       yield* TestClock.adjust("60 millis");
       yield* Effect.yieldNow;
-      expect(ids()).toEqual(["1", "2", "3"]);
+      assert.deepStrictEqual(ids(), ["1", "2", "3"]);
     }),
   );
 });
@@ -655,7 +675,7 @@ describe("KeyedList with SignalElement swap", () => {
       >(Resource.Pending());
 
       const items = yield* Signal.derive(state, (s) =>
-        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+        Predicate.isTagged(s, "Success") ? s.value : EMPTY_ITEMS,
       );
 
       const dataRegion = yield* Resource.match(state).pipe(
@@ -696,7 +716,7 @@ describe("KeyedList with SignalElement swap", () => {
       yield* TestClock.adjust("30 millis");
       yield* Effect.yieldNow;
 
-      expect(container.querySelectorAll("[data-id]").length).toBe(3);
+      assert.strictEqual(container.querySelectorAll("[data-id]").length, 3);
     }),
   );
 
@@ -731,9 +751,9 @@ describe("KeyedList with SignalElement swap", () => {
       >(Resource.Pending());
 
       const items = yield* Signal.derive(state, (s) =>
-        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+        Predicate.isTagged(s, "Success") ? s.value : EMPTY_ITEMS,
       );
-      const showContent = yield* Signal.derive(state, (s) => s._tag === "Success");
+      const showContent = yield* Signal.derive(state, (s) => Predicate.isTagged(s, "Success"));
 
       const fallbackRegion = yield* Resource.match(state).pipe(
         Resource.on("Pending", () => <div data-testid="skeleton">loading</div>),
@@ -780,7 +800,7 @@ describe("KeyedList with SignalElement swap", () => {
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
 
-      expect(container.querySelectorAll("[data-id]").length).toBe(3);
+      assert.strictEqual(container.querySelectorAll("[data-id]").length, 3);
     }),
   );
 
@@ -815,9 +835,9 @@ describe("KeyedList with SignalElement swap", () => {
       });
 
       const items = yield* Signal.derive(state, (s) =>
-        s._tag === "Success" ? s.value : EMPTY_ITEMS,
+        Predicate.isTagged(s, "Success") ? s.value : EMPTY_ITEMS,
       );
-      const showContent = yield* Signal.derive(state, (s) => s._tag === "Success");
+      const showContent = yield* Signal.derive(state, (s) => Predicate.isTagged(s, "Success"));
 
       const contentRegion = yield* Signal.derive(showContent, (visible) =>
         visible ? (
@@ -865,8 +885,8 @@ describe("KeyedList with SignalElement swap", () => {
       yield* TestClock.adjust("30 millis");
       yield* Effect.yieldNow;
 
-      expect(container.querySelectorAll("[data-id]").length).toBe(2);
-      expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A2");
+      assert.strictEqual(container.querySelectorAll("[data-id]").length, 2);
+      assert.strictEqual(container.querySelector('[data-id="1"]')?.textContent, "A2");
     }),
   );
 
@@ -887,7 +907,6 @@ describe("KeyedList with SignalElement swap", () => {
             if (child.parentNode === this) {
               child.remove();
             }
-            throw new DOMException("simulated race", "NotFoundError");
           }
 
           originalInsertBefore.call(this, node, child);
@@ -939,8 +958,8 @@ describe("KeyedList with SignalElement swap", () => {
           yield* Signal.set(items, [{ id: 1, label: "A2" }]);
           yield* Effect.yieldNow;
 
-          expect(container.querySelectorAll("[data-id]").length).toBe(1);
-          expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A2");
+          assert.strictEqual(container.querySelectorAll("[data-id]").length, 1);
+          assert.strictEqual(container.querySelector('[data-id="1"]')?.textContent, "A2");
         }),
       ({ restore }) => Effect.sync(restore),
     ),
@@ -948,7 +967,9 @@ describe("KeyedList with SignalElement swap", () => {
 
   effect("renders ErrorBoundary fallback when keyed list item rerender fails", () =>
     Effect.gen(function* () {
-      class ItemError extends Data.TaggedError("ItemError")<{ readonly reason: "fail" }> {}
+      class ItemError extends Schema.TaggedErrorClass<ItemError>()("ItemError", {
+        reason: Schema.Literal("fail"),
+      }) {}
 
       interface ItemRowData {
         readonly id: number;
@@ -1003,14 +1024,14 @@ describe("KeyedList with SignalElement swap", () => {
       for (let i = 0; i < 10; i++) {
         yield* Effect.yieldNow;
       }
-      expect(container.querySelector('[data-id="1"]')).not.toBeNull();
+      assert.isNotNull(container.querySelector('[data-id="1"]'));
 
       yield* Signal.set(shouldFail, true);
       for (let i = 0; i < 10; i++) {
         yield* Effect.yieldNow;
       }
 
-      expect(container.querySelector('[data-testid="item-fallback"]')).not.toBeNull();
+      assert.isNotNull(container.querySelector('[data-testid="item-fallback"]'));
     }),
   );
 
@@ -1027,7 +1048,9 @@ describe("KeyedList with SignalElement swap", () => {
         ): T {
           if (!injected && child instanceof Comment && child.data === "component") {
             injected = true;
-            throw new DOMException("simulated transient race", "NotFoundError");
+            if (child.parentNode === this) {
+              child.remove();
+            }
           }
 
           originalInsertBefore.call(this, node, child);
@@ -1071,8 +1094,8 @@ describe("KeyedList with SignalElement swap", () => {
           yield* Signal.set(items, [{ id: 1, label: "A" }]);
           yield* Effect.yieldNow;
 
-          expect(container.querySelectorAll("[data-id]").length).toBe(1);
-          expect(container.querySelector('[data-id="1"]')?.textContent).toBe("A");
+          assert.strictEqual(container.querySelectorAll("[data-id]").length, 1);
+          assert.strictEqual(container.querySelector('[data-id="1"]')?.textContent, "A");
         }),
       ({ restore }) => Effect.sync(restore),
     ),

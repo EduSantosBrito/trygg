@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Match } from "effect";
 import { Component, Signal, type ComponentProps, type Element } from "trygg";
 
 import { CodeBlock, highlightCode } from "../components/code-block";
@@ -8,7 +8,7 @@ import {
   type CommandSection,
   type PackageManager,
 } from "../content/getting-started";
-import { setDocsHeadings } from "../content/headings";
+import { setDocsHeadings, type HeadingEntry } from "../content/headings";
 import gettingStartedSource from "../examples/getting-started.tsx?raw";
 
 const SectionShell = Component.gen(function* (
@@ -73,16 +73,27 @@ const NextSteps = Component.gen(function* () {
 });
 
 const CopyForAgent = Component.gen(function* () {
-  const copied = yield* Signal.make(false);
-  const label = yield* Signal.derive(copied, (value) => (value ? "Copied!" : "Copy"));
+  const copyState = yield* Signal.make<"idle" | "copied" | "failed">("idle");
+  const label = yield* Signal.derive(copyState, (state) =>
+    Match.value(state).pipe(
+      Match.when("copied", () => "Copied!"),
+      Match.when("failed", () => "Copy failed"),
+      Match.when("idle", () => "Copy"),
+      Match.exhaustive,
+    ),
+  );
 
-  const copyPrompt = () =>
-    Effect.gen(function* () {
-      yield* Effect.tryPromise(() => navigator.clipboard.writeText(gettingStarted.agentPrompt));
-      yield* Signal.set(copied, true);
-      yield* Effect.sleep("2 seconds");
-      yield* Signal.set(copied, false);
-    }).pipe(Effect.ignore);
+  const copyPrompt = Effect.fnUntraced(function* (_event: Event) {
+    const copied = yield* Effect.tryPromise(() =>
+      navigator.clipboard.writeText(gettingStarted.agentPrompt),
+    ).pipe(
+      Effect.as(true),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+    yield* Signal.set(copyState, copied ? "copied" : "failed");
+    yield* Effect.sleep("2 seconds");
+    yield* Signal.set(copyState, "idle");
+  });
 
   return (
     <div className="docs-agent-panel">
@@ -106,18 +117,18 @@ const CopyForAgent = Component.gen(function* () {
   );
 });
 
-const gettingStartedHeadings = [
+const gettingStartedHeadings: ReadonlyArray<HeadingEntry> = [
   {
     id: gettingStarted.prerequisites.id,
     text: gettingStarted.prerequisites.title,
-    level: 2 as const,
+    level: 2,
   },
-  { id: gettingStarted.create.id, text: gettingStarted.create.title, level: 2 as const },
-  { id: gettingStarted.install.id, text: gettingStarted.install.title, level: 2 as const },
-  { id: gettingStarted.explore.id, text: gettingStarted.explore.title, level: 2 as const },
-  { id: gettingStarted.runDev.id, text: gettingStarted.runDev.title, level: 2 as const },
-  { id: "next-steps", text: "What's next", level: 2 as const },
-  { id: "create-with-ai", text: "Create with AI", level: 2 as const },
+  { id: gettingStarted.create.id, text: gettingStarted.create.title, level: 2 },
+  { id: gettingStarted.install.id, text: gettingStarted.install.title, level: 2 },
+  { id: gettingStarted.explore.id, text: gettingStarted.explore.title, level: 2 },
+  { id: gettingStarted.runDev.id, text: gettingStarted.runDev.title, level: 2 },
+  { id: "next-steps", text: "What's next", level: 2 },
+  { id: "create-with-ai", text: "Create with AI", level: 2 },
 ];
 
 export default Component.gen(function* () {

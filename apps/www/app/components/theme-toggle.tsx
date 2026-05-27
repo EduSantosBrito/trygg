@@ -8,8 +8,8 @@ export const ThemeToggle = Component.gen(function* () {
 
   if (typeof window !== "undefined") {
     const syncTheme = (event: Event) => {
-      const detail = (event as CustomEvent<Theme>).detail;
-      Effect.runFork(Signal.set(theme, detail ?? getTheme()));
+      const detail = event instanceof CustomEvent ? event.detail : getTheme();
+      Effect.runFork(Signal.set(theme, detail));
     };
 
     window.addEventListener(THEME_CHANGE_EVENT, syncTheme);

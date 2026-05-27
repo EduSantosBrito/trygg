@@ -29,7 +29,7 @@ export const AuthLive = Layer.effect(
       setAuth: (nextUser: Option.Option<AuthUser>) => Signal.set(user, nextUser),
       getAuth: Signal.peek(user),
     };
-  }),
+  }).pipe(Effect.annotateLogs({ service: "AuthStore" })),
 );
 
 /**
@@ -55,4 +55,4 @@ export const requireAuth = Effect.gen(function* () {
   if (Option.isNone(user)) {
     return yield* Router.routeRedirect("/login");
   }
-});
+}).pipe(Effect.provide(AuthLive));

@@ -1,0 +1,7 @@
+{
+  "languages": {
+    "TypeScript": { "language_servers": ["tsgo", "!vtsls"] },
+    "TSX": { "language_servers": ["tsgo", "!vtsls"] },
+    "JavaScript": { "language_servers": ["tsgo", "!vtsls"] },
+  },
+}

@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Duration, Effect, Exit, Layer, Scope } from "effect";
 import * as Context from "effect/Context";
 import * as Component from "../primitives/component.js";
 import * as Signal from "../primitives/signal.js";
@@ -30,6 +30,13 @@ interface ContractViolation {
   readonly firstDivergenceSeq: number;
   readonly expected: string;
   readonly actual: string;
+}
+
+interface ContractDefinition {
+  readonly name: string;
+  readonly suspectedFiles: ReadonlyArray<string>;
+  readonly laws: ReadonlyArray<ContractLaw>;
+  readonly scenarios: ReadonlyArray<ContractScenarioMetadata>;
 }
 
 interface ContractRunOptions {
@@ -70,7 +77,7 @@ const mountedStoreMetadata: ContractScenarioMetadata = {
   ],
 };
 
-export const contract = {
+export const contract: ContractDefinition = {
   name: "lifecycle-provided-store",
   suspectedFiles: [
     "packages/core/src/primitives/component.ts",
@@ -79,18 +86,17 @@ export const contract = {
   ],
   laws: [providerLifetimeLaw],
   scenarios: [mountedStoreMetadata],
-} as const;
+};
 
 class Store extends Context.Service<
   Store,
   {
     readonly count: Signal.Signal<number>;
-    readonly increment: Effect.Effect<void>;
+    readonly increment: Effect.Effect<void, Signal.SignalDisposedError>;
   }
->()("contract/LifecycleStore") {}
+>()("contract/lifecycle/Store") {}
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
 const scenarioByName = (name: string | undefined): ContractScenarioMetadata => {
   const selected = contract.scenarios.find((scenario) => scenario.name === name);
@@ -116,7 +122,7 @@ const mountedStoreScenario = Effect.scoped(
           count,
           increment: Signal.update(count, (value) => value + 1),
         };
-      }),
+      }).pipe(Effect.annotateLogs({ service: "Store" })),
     );
 
     const StoreView = Component.gen(function* () {

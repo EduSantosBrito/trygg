@@ -6,7 +6,7 @@
  * for both Bun and Node.js runtimes.
  */
 import { FileSystem } from "effect";
-import { Data, Effect, Layer, Scope } from "effect";
+import { Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
@@ -19,20 +19,20 @@ import type { Connect } from "vite";
  * Error when importing a platform module fails
  * @since 1.0.0
  */
-export class ImportError extends Data.TaggedError("ImportError")<{
-  readonly module: string;
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class ImportError extends Schema.TaggedErrorClass<ImportError>()("ImportError", {
+  module: Schema.String,
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
+}) {}
 
 /**
  * Error when API initialization fails
  * @since 1.0.0
  */
-export class ApiInitError extends Data.TaggedError("ApiInitError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class ApiInitError extends Schema.TaggedErrorClass<ApiInitError>()("ApiInitError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
+}) {}
 
 /**
  * Union of all DevApi errors
@@ -136,9 +136,25 @@ export interface DevPlatformService {
  * Service key for the DevPlatform service
  * @since 1.0.0
  */
-export interface DevPlatform extends Context.Service<DevPlatform, DevPlatformService> {}
+export interface DevPlatform extends Context.Service<
+  DevPlatform,
+  {
+    readonly fileSystemLayer: Layer.Layer<FileSystem.FileSystem>;
+    readonly makeApi: (
+      options: DevApiOptions,
+    ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope>;
+  }
+> {}
 
-export const DevPlatform = Context.Service<DevPlatform, DevPlatformService>("trygg/DevPlatform");
+export const DevPlatform = Context.Service<
+  DevPlatform,
+  {
+    readonly fileSystemLayer: Layer.Layer<FileSystem.FileSystem>;
+    readonly makeApi: (
+      options: DevApiOptions,
+    ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope>;
+  }
+>("trygg/DevPlatform");
 
 // =============================================================================
 // ServerPlatform — codegen fragments for the production server entry
@@ -163,11 +179,23 @@ export interface ServerPlatformService {
  * Service key for platform-specific production server codegen.
  * @since 1.0.0
  */
-export interface ServerPlatform extends Context.Service<ServerPlatform, ServerPlatformService> {}
+export interface ServerPlatform extends Context.Service<
+  ServerPlatform,
+  {
+    readonly imports: string;
+    readonly serverLayer: string;
+    readonly runtime: string;
+  }
+> {}
 
-export const ServerPlatform = Context.Service<ServerPlatform, ServerPlatformService>(
-  "trygg/ServerPlatform",
-);
+export const ServerPlatform = Context.Service<
+  ServerPlatform,
+  {
+    readonly imports: string;
+    readonly serverLayer: string;
+    readonly runtime: string;
+  }
+>("trygg/ServerPlatform");
 
 /** Node.js server platform — @effect/platform-node subpath imports */
 export const NodeServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {

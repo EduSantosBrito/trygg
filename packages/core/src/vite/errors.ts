@@ -1,4 +1,15 @@
-import { Data } from "effect";
+import { Schema } from "effect";
+
+const PluginFileSystemOperation = Schema.Union([
+  Schema.Literal("read"),
+  Schema.Literal("write"),
+  Schema.Literal("mkdir"),
+  Schema.Literal("exists"),
+  Schema.Literal("readdir"),
+  Schema.Literal("stat"),
+  Schema.Literal("transform"),
+  Schema.Literal("remove"),
+]);
 
 /**
  * Plugin file system error.
@@ -10,19 +21,14 @@ import { Data } from "effect";
  * @internal
  * @since 1.0.0
  */
-export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemError")<{
-  readonly operation:
-    | "read"
-    | "write"
-    | "mkdir"
-    | "exists"
-    | "readdir"
-    | "stat"
-    | "transform"
-    | "remove";
-  readonly path: string;
-  readonly cause: unknown;
-}> {}
+export class PluginFileSystemError extends Schema.TaggedErrorClass<PluginFileSystemError>()(
+  "PluginFileSystemError",
+  {
+    operation: PluginFileSystemOperation,
+    path: Schema.String,
+    cause: Schema.Unknown,
+  },
+) {}
 
 /**
  * Plugin bootstrap error.
@@ -34,10 +40,13 @@ export class PluginFileSystemError extends Data.TaggedError("PluginFileSystemErr
  * @internal
  * @since 1.0.0
  */
-export class PluginBootstrapError extends Data.TaggedError("PluginBootstrapError")<{
-  readonly reason: "NotReady";
-  readonly message: string;
-}> {
+export class PluginBootstrapError extends Schema.TaggedErrorClass<PluginBootstrapError>()(
+  "PluginBootstrapError",
+  {
+    reason: Schema.Literal("NotReady"),
+    message: Schema.String,
+  },
+) {
   static notReady(): PluginBootstrapError {
     return new PluginBootstrapError({
       reason: "NotReady",

@@ -4,17 +4,17 @@
  *
  * Read current URL state.
  */
-import { Data, Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class LocationError extends Data.TaggedError("LocationError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class LocationError extends Schema.TaggedErrorClass<LocationError>()("LocationError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -32,9 +32,27 @@ export interface LocationService {
 // Tag
 // =============================================================================
 
-export interface Location extends Context.Service<Location, LocationService> {}
+export interface Location extends Context.Service<
+  Location,
+  {
+    readonly pathname: Effect.Effect<string, LocationError>;
+    readonly search: Effect.Effect<string, LocationError>;
+    readonly hash: Effect.Effect<string, LocationError>;
+    readonly href: Effect.Effect<string, LocationError>;
+    readonly fullPath: Effect.Effect<string, LocationError>;
+  }
+> {}
 
-export const Location = Context.Service<Location, LocationService>("trygg/platform/Location");
+export const Location = Context.Service<
+  Location,
+  {
+    readonly pathname: Effect.Effect<string, LocationError>;
+    readonly search: Effect.Effect<string, LocationError>;
+    readonly hash: Effect.Effect<string, LocationError>;
+    readonly href: Effect.Effect<string, LocationError>;
+    readonly fullPath: Effect.Effect<string, LocationError>;
+  }
+>("trygg/platform/Location");
 
 // =============================================================================
 // Browser layer
@@ -71,30 +89,27 @@ export const browser: Layer.Layer<Location> = Layer.succeed(
 // =============================================================================
 
 export const test = (initialPath: string = "/"): Layer.Layer<Location> =>
-  Layer.effect(
-    Location,
-    Effect.sync(() => {
-      const url = { pathname: initialPath, search: "", hash: "" };
+  Layer.sync(Location, () => {
+    const url = { pathname: initialPath, search: "", hash: "" };
 
-      // Parse initial path into components
-      const hashIdx = initialPath.indexOf("#");
-      const searchIdx = initialPath.indexOf("?");
-      if (hashIdx >= 0) {
-        url.hash = initialPath.slice(hashIdx);
-        url.pathname = initialPath.slice(0, hashIdx);
-      }
-      if (searchIdx >= 0) {
-        const hashStart = url.hash !== "" ? initialPath.indexOf("#") : initialPath.length;
-        url.search = initialPath.slice(searchIdx, hashStart);
-        url.pathname = initialPath.slice(0, searchIdx);
-      }
+    // Parse initial path into components
+    const hashIdx = initialPath.indexOf("#");
+    const searchIdx = initialPath.indexOf("?");
+    if (hashIdx >= 0) {
+      url.hash = initialPath.slice(hashIdx);
+      url.pathname = initialPath.slice(0, hashIdx);
+    }
+    if (searchIdx >= 0) {
+      const hashStart = url.hash !== "" ? initialPath.indexOf("#") : initialPath.length;
+      url.search = initialPath.slice(searchIdx, hashStart);
+      url.pathname = initialPath.slice(0, searchIdx);
+    }
 
-      return Location.of({
-        pathname: Effect.succeed(url.pathname),
-        search: Effect.succeed(url.search),
-        hash: Effect.succeed(url.hash),
-        href: Effect.succeed(`http://localhost${url.pathname}${url.search}${url.hash}`),
-        fullPath: Effect.succeed(`${url.pathname}${url.search}${url.hash}`),
-      });
-    }),
-  );
+    return Location.of({
+      pathname: Effect.succeed(url.pathname),
+      search: Effect.succeed(url.search),
+      hash: Effect.succeed(url.hash),
+      href: Effect.succeed(`http://localhost${url.pathname}${url.search}${url.hash}`),
+      fullPath: Effect.succeed(`${url.pathname}${url.search}${url.hash}`),
+    });
+  });

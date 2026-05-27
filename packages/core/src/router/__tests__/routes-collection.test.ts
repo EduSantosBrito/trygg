@@ -9,29 +9,14 @@ import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
-
-// Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
-
 // Dummy components
-const comp = makeComp();
-const notFoundComp = makeComp();
-const forbiddenComp = makeComp();
+const comp: RouteComponent = Effect.succeed(empty);
+const notFoundComp: RouteComponent = Effect.succeed(empty);
+const forbiddenComp: RouteComponent = Effect.succeed(empty);
 
 // Test service for R != never
 class AuthService extends Context.Service<AuthService, { readonly check: () => boolean }>()(
-  "AuthService",
+  "test/AuthService",
 ) {}
 
 // =============================================================================
@@ -73,13 +58,15 @@ describe(".add()", () => {
     assert.strictEqual(routes.manifest.routes.length, 1);
   });
 
-  it("should reject route with unsatisfied R (type-level)", () => {
-    const requireAuth = AuthService.asEffect().pipe(Effect.flatMap(() => Effect.void));
-    const routeWithR = Route.make("/admin").middleware(requireAuth).component(comp);
+  it.effect("should reject route with unsatisfied R (type-level)", () =>
+    Effect.sync(() => {
+      const requireAuth = AuthService.asEffect().pipe(Effect.flatMap(() => Effect.void));
+      const routeWithR = Route.make("/admin").middleware(requireAuth).component(comp);
 
-    // @ts-expect-error - Route has R = AuthService, not never
-    Routes.make().add(routeWithR);
-  });
+      // @ts-expect-error - Route has R = AuthService, not never
+      Routes.make().add(routeWithR);
+    }),
+  );
 
   it("should allow params route without error boundary", () => {
     const routes = Routes.make().add(
@@ -151,12 +138,14 @@ describe(".notFound()", () => {
     assert.strictEqual(routes.manifest.notFound, notFoundComp);
   });
 
-  it("should override previous notFound", () => {
-    const other = makeComp();
-    const routes = Routes.make().notFound(notFoundComp).notFound(other);
+  it.effect("should override previous notFound", () =>
+    Effect.sync(() => {
+      const other: RouteComponent = Effect.succeed(empty);
+      const routes = Routes.make().notFound(notFoundComp).notFound(other);
 
-    assert.strictEqual(routes.manifest.notFound, other);
-  });
+      assert.strictEqual(routes.manifest.notFound, other);
+    }),
+  );
 });
 
 // =============================================================================
@@ -170,12 +159,14 @@ describe(".forbidden()", () => {
     assert.strictEqual(routes.manifest.forbidden, forbiddenComp);
   });
 
-  it("should override previous forbidden", () => {
-    const other = makeComp();
-    const routes = Routes.make().forbidden(forbiddenComp).forbidden(other);
+  it.effect("should override previous forbidden", () =>
+    Effect.sync(() => {
+      const other: RouteComponent = Effect.succeed(empty);
+      const routes = Routes.make().forbidden(forbiddenComp).forbidden(other);
 
-    assert.strictEqual(routes.manifest.forbidden, other);
-  });
+      assert.strictEqual(routes.manifest.forbidden, other);
+    }),
+  );
 });
 
 // =============================================================================
@@ -189,12 +180,14 @@ describe(".error()", () => {
     assert.strictEqual(routes.manifest.error, comp);
   });
 
-  it("should override previous root error boundary", () => {
-    const other = makeComp();
-    const routes = Routes.make().error(comp).error(other);
+  it.effect("should override previous root error boundary", () =>
+    Effect.sync(() => {
+      const other: RouteComponent = Effect.succeed(empty);
+      const routes = Routes.make().error(comp).error(other);
 
-    assert.strictEqual(routes.manifest.error, other);
-  });
+      assert.strictEqual(routes.manifest.error, other);
+    }),
+  );
 });
 
 // =============================================================================

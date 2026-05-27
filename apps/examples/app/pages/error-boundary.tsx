@@ -1,4 +1,4 @@
-import { Layer } from "effect";
+import { Layer, type Cause } from "effect";
 import { Signal, ErrorBoundary, Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../services/error-boundary";
 import { NetworkErrorDisplay } from "../components/error-boundary/network-error-display";
@@ -6,7 +6,6 @@ import { ValidationErrorDisplay } from "../components/error-boundary/validation-
 import { UnknownErrorDisplay } from "../components/error-boundary/unknown-error-display";
 import { RiskyComponent } from "../components/error-boundary/risky-component";
 import { TriggerButton } from "../components/error-boundary/trigger-button";
-import { Cause } from "effect";
 
 const defaultErrorTheme = Layer.succeed(ErrorTheme, {
   errorBackground: "#ffebee",
@@ -25,11 +24,11 @@ const ErrorBoundaryPage = Component.gen(function* () {
   const GenericErrorDisplay = Component.gen(function* (
     Props: ComponentProps<{ cause: Cause.Cause<unknown> }>,
   ) {
-    const { cause } = yield* Props;
+    const { cause: _cause } = yield* Props;
     return (
       <div className="p-4 rounded bg-red-100 text-red-800">
         <h3 className="mt-0">Unexpected Error</h3>
-        <pre>{String(Cause.squash(cause))}</pre>
+        <pre>See the typed error details above or retry the action.</pre>
       </div>
     );
   });

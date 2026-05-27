@@ -5,8 +5,7 @@ import * as Router from "trygg/router";
 export const ErrorFallback = Component.gen(function* () {
   const { cause, path, reset } = yield* Router.currentError;
 
-  const error = Cause.squash(cause);
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorMessage = Cause.pretty(cause);
 
   return (
     <div className="max-w-[600px] mx-auto mt-16 p-8 bg-white border border-gray-200 rounded-lg text-center">

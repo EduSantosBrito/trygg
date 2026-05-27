@@ -67,7 +67,7 @@ const LocaleStoreLive = Layer.effect(
           yield* Signal.set(greeting, next.greeting);
         }),
     };
-  }),
+  }).pipe(Effect.annotateLogs({ service: "LocaleStore" })),
 );
 
 class CardStyle extends Context.Service<

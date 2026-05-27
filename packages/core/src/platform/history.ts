@@ -4,17 +4,17 @@
  *
  * Manage the browser navigation stack.
  */
-import { Data, Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class HistoryError extends Data.TaggedError("HistoryError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class HistoryError extends Schema.TaggedErrorClass<HistoryError>()("HistoryError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -34,9 +34,29 @@ export interface HistoryService {
 // Tag
 // =============================================================================
 
-export interface History extends Context.Service<History, HistoryService> {}
+export interface History extends Context.Service<
+  History,
+  {
+    readonly pushState: (state: unknown, url: string) => Effect.Effect<void, HistoryError>;
+    readonly replaceState: (state: unknown, url: string) => Effect.Effect<void, HistoryError>;
+    readonly back: Effect.Effect<void, HistoryError>;
+    readonly forward: Effect.Effect<void, HistoryError>;
+    readonly state: Effect.Effect<unknown, HistoryError>;
+    readonly setScrollRestoration: (mode: ScrollRestoration) => Effect.Effect<void, HistoryError>;
+  }
+> {}
 
-export const History = Context.Service<History, HistoryService>("trygg/platform/History");
+export const History = Context.Service<
+  History,
+  {
+    readonly pushState: (state: unknown, url: string) => Effect.Effect<void, HistoryError>;
+    readonly replaceState: (state: unknown, url: string) => Effect.Effect<void, HistoryError>;
+    readonly back: Effect.Effect<void, HistoryError>;
+    readonly forward: Effect.Effect<void, HistoryError>;
+    readonly state: Effect.Effect<unknown, HistoryError>;
+    readonly setScrollRestoration: (mode: ScrollRestoration) => Effect.Effect<void, HistoryError>;
+  }
+>("trygg/platform/History");
 
 // =============================================================================
 // Browser layer
@@ -76,7 +96,7 @@ export const browser: Layer.Layer<History> = Layer.succeed(
     }),
 
     state: Effect.try({
-      try: () => window.history.state as unknown,
+      try: () => window.history.state,
       catch: (cause) => new HistoryError({ operation: "state", cause }),
     }),
 
@@ -94,41 +114,38 @@ export const browser: Layer.Layer<History> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<History> = Layer.effect(
-  History,
-  Effect.sync(() => {
-    const entries: Array<{ state: unknown; url: string }> = [{ state: null, url: "/" }];
-    let index = 0;
+export const test: Layer.Layer<History> = Layer.sync(History, () => {
+  const entries: Array<{ state: unknown; url: string }> = [{ state: null, url: "/" }];
+  let index = 0;
 
-    return History.of({
-      pushState: (state, url) =>
-        Effect.sync(() => {
-          // Truncate forward entries when pushing new state
-          entries.length = index + 1;
-          entries.push({ state, url });
-          index = entries.length - 1;
-        }),
-
-      replaceState: (state, url) =>
-        Effect.sync(() => {
-          entries[index] = { state, url };
-        }),
-
-      back: Effect.sync(() => {
-        if (index > 0) {
-          index--;
-        }
+  return History.of({
+    pushState: (state, url) =>
+      Effect.sync(() => {
+        // Truncate forward entries when pushing new state
+        entries.length = index + 1;
+        entries.push({ state, url });
+        index = entries.length - 1;
       }),
 
-      forward: Effect.sync(() => {
-        if (index < entries.length - 1) {
-          index++;
-        }
+    replaceState: (state, url) =>
+      Effect.sync(() => {
+        entries[index] = { state, url };
       }),
 
-      state: Effect.sync(() => entries[index]?.state ?? null),
+    back: Effect.sync(() => {
+      if (index > 0) {
+        index--;
+      }
+    }),
 
-      setScrollRestoration: () => Effect.void,
-    });
-  }),
-);
+    forward: Effect.sync(() => {
+      if (index < entries.length - 1) {
+        index++;
+      }
+    }),
+
+    state: Effect.sync(() => entries[index]?.state ?? null),
+
+    setScrollRestoration: () => Effect.void,
+  });
+});

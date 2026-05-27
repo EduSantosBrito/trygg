@@ -9,7 +9,7 @@
  * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Option } from "effect";
+import { Cause, Effect, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import * as Signal from "../../primitives/signal.js";
 import * as ErrorBoundary from "../../primitives/error-boundary.js";
@@ -19,12 +19,14 @@ import { render } from "../../testing/index.js";
 import * as Component from "../../primitives/component.js";
 
 // Tagged errors for testing error boundaries
-class TestError extends Data.TaggedError("TestError")<{ message: string }> {}
-class OtherError extends Data.TaggedError("OtherError")<{}> {}
+class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {
+  detail: Schema.String,
+}) {}
+class OtherError extends Schema.TaggedErrorClass<OtherError>()("OtherError", {}) {}
 
 // Helper to reset debug state
-const withDebugReset = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
+const withDebugReset: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R> =
+  Effect.fn("withDebugReset")(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
     Debug.disable();
     for (const name of Debug.getPlugins()) {
       Debug.unregisterPlugin(name);
@@ -68,7 +70,7 @@ describe("ErrorBoundary", () => {
   it.effect("should render fallback when component fails", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
-        return yield* new TestError({ message: "Test error" });
+        return yield* new TestError({ detail: "Test error" });
       });
 
       const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
@@ -84,14 +86,14 @@ describe("ErrorBoundary", () => {
   it.effect("should pass cause to specific error handler", () =>
     Effect.gen(function* () {
       const FailingComponent = Component.gen(function* () {
-        return yield* new TestError({ message: "Specific error" });
+        return yield* new TestError({ detail: "Specific error" });
       });
 
       const TestErrorView = Component.gen(function* (
         Props: Component.ComponentProps<{ error: TestError }>,
       ) {
         const { error } = yield* Props;
-        return <div>Error: {error.message}</div>;
+        return <div>Error: {error.detail}</div>;
       });
 
       const SafeComponent = yield* ErrorBoundary.catch(FailingComponent).pipe(
@@ -146,7 +148,7 @@ describe("ErrorBoundary", () => {
   it.effect("should catch at nearest boundary", () =>
     Effect.gen(function* () {
       const InnerFailing = Component.gen(function* () {
-        return yield* new TestError({ message: "Inner error" });
+        return yield* new TestError({ detail: "Inner error" });
       });
 
       const InnerSafe = yield* ErrorBoundary.catch(InnerFailing).pipe(
@@ -173,7 +175,7 @@ describe("ErrorBoundary", () => {
       const ChildComponent = Component.gen(function* () {
         const throwNow = yield* Signal.get(shouldThrow);
         if (throwNow) {
-          return yield* new TestError({ message: "Re-render error" });
+          return yield* new TestError({ detail: "Re-render error" });
         }
         return <div data-testid="child">Child content</div>;
       });
@@ -208,7 +210,7 @@ describe("ErrorBoundary", () => {
         const { mode } = yield* Props;
         const currentMode = yield* Signal.get(mode);
         if (currentMode === "error") {
-          return yield* new TestError({ message: "Prop error" });
+          return yield* new TestError({ detail: "Prop error" });
         }
         return <div data-testid="ok">OK</div>;
       });
@@ -253,7 +255,7 @@ describe("ErrorBoundary", () => {
       const ChildComponent = Component.gen(function* () {
         const value = yield* Signal.get(contentSignal);
         if (value === "error") {
-          return yield* new TestError({ message: "Component threw on rerender" });
+          return yield* new TestError({ detail: "Component threw on rerender" });
         }
         return <div data-testid="content">Good content</div>;
       });
@@ -283,7 +285,7 @@ describe("ErrorBoundary", () => {
   it.effect("on() after catchAll on same builder succeeds (immutable state)", () =>
     Effect.gen(function* () {
       const Component_ = Component.gen(function* () {
-        return yield* new TestError({ message: "fail" });
+        return yield* new TestError({ detail: "fail" });
       });
 
       const builder = ErrorBoundary.catch(Component_);

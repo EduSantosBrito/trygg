@@ -8,23 +8,8 @@ import * as Route from "../route.js";
 import { createMatcher } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
-import type { Any as AnyLayer } from "effect/Layer";
-
-// Helper to create dummy RouteComponent
-const makeComp = (): RouteComponent => {
-  const fn = () => empty;
-  const comp = Object.assign(fn, {
-    _tag: "EffectComponent" as const,
-    _layers: [] as ReadonlyArray<AnyLayer>,
-    pipe() {
-      return this;
-    },
-  });
-  return comp as RouteComponent;
-};
-
 // Dummy component
-const comp = makeComp();
+const comp: RouteComponent = Effect.succeed(empty);
 
 // =============================================================================
 // .params() - Schema stored on route

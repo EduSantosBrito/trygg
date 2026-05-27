@@ -13,7 +13,8 @@
  *
  * @internal
  */
-import { Effect } from "effect";
+import { assert } from "@effect/vitest";
+import { Duration, Effect } from "effect";
 import { Component } from "trygg";
 import { click, render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -91,41 +92,37 @@ export const contract = {
       ],
     },
   ],
-} as const;
+};
 
 let nextInstanceId = 0;
 let layoutCleanupCount = 0;
 let observedContainer: HTMLElement | null = null;
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
 const currentPathSnapshot = Effect.gen(function* () {
   const route = yield* Router.currentRoute;
   return route.path;
 });
 
-const observeLayout = (phase: string, container: HTMLElement) =>
-  Effect.gen(function* () {
-    const currentPath = yield* currentPathSnapshot;
-    return {
-      phase,
-      currentPath,
-      shellInstance:
-        container.querySelector("[data-testid='docs-shell']")?.getAttribute("data-instance") ??
-        null,
-      headerInstance:
-        container.querySelector("[data-testid='docs-header']")?.getAttribute("data-instance") ??
-        null,
-      sidebarInstance:
-        container.querySelector("[data-testid='docs-sidebar']")?.getAttribute("data-instance") ??
-        null,
-      hasSignalsPage: container.querySelector("[data-testid='signals-page']") !== null,
-      hasResourcesPage: container.querySelector("[data-testid='resources-page']") !== null,
-      cleanupCount: layoutCleanupCount,
-      text: container.textContent?.replace(/\s+/g, " ").trim() ?? "",
-    } satisfies LayoutObservation;
-  });
+const observeLayout = Effect.fn("observeLayout")(function* (phase: string, container: HTMLElement) {
+  const currentPath = yield* currentPathSnapshot;
+  return {
+    phase,
+    currentPath,
+    shellInstance:
+      container.querySelector("[data-testid='docs-shell']")?.getAttribute("data-instance") ?? null,
+    headerInstance:
+      container.querySelector("[data-testid='docs-header']")?.getAttribute("data-instance") ?? null,
+    sidebarInstance:
+      container.querySelector("[data-testid='docs-sidebar']")?.getAttribute("data-instance") ??
+      null,
+    hasSignalsPage: container.querySelector("[data-testid='signals-page']") !== null,
+    hasResourcesPage: container.querySelector("[data-testid='resources-page']") !== null,
+    cleanupCount: layoutCleanupCount,
+    text: container.textContent?.replace(/\s+/g, " ").trim() ?? "",
+  } satisfies LayoutObservation;
+});
 
 const emitObservation = (observation: LayoutObservation) =>
   ContractTrace.emit({
@@ -147,7 +144,7 @@ const DocsLikeLayout = Component.gen(function* () {
         const observation = yield* observeLayout("layout-cleanup", observedContainer);
         yield* emitObservation(observation);
       }
-    }).pipe(Effect.ignore),
+    }),
   );
 
   return (
@@ -235,7 +232,7 @@ const runScenario = Effect.scoped(
       () => {
         const shell = result.container.querySelector("[data-testid='docs-shell']");
         const page = result.container.querySelector("[data-testid='signals-page']");
-        if (shell === null || page === null) throw new Error("Signals docs route is not ready");
+        if (shell === null || page === null) return assert.fail("Signals docs route is not ready");
         return true;
       },
       { timeout: 5000, interval: 50 },
@@ -250,7 +247,7 @@ const runScenario = Effect.scoped(
     const resourcesLink = yield* waitFor(
       () => {
         const link = result.container.querySelector<HTMLAnchorElement>('a[href="/docs/resources"]');
-        if (link === null) throw new Error("Resources link is not ready");
+        if (link === null) return assert.fail("Resources link is not ready");
         return link;
       },
       { timeout: 5000, interval: 50 },
@@ -265,7 +262,7 @@ const runScenario = Effect.scoped(
     yield* waitFor(
       () => {
         const page = result.container.querySelector("[data-testid='resources-page']");
-        if (page === null) throw new Error("Resources docs route did not settle");
+        if (page === null) return assert.fail("Resources docs route did not settle");
         return true;
       },
       { timeout: 5000, interval: 50 },

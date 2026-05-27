@@ -22,19 +22,22 @@ interface User {
 
 interface ApiError {
   readonly _tag: "ApiError";
-  readonly message: string;
+  readonly detail: string;
 }
 
-interface ApiClientService {
-  readonly users: {
-    readonly list: () => Effect.Effect<ReadonlyArray<User>, ApiError>;
-  };
-}
+class ApiClient extends Context.Service<
+  ApiClient,
+  {
+    readonly users: {
+      readonly list: () => Effect.Effect<ReadonlyArray<User>, ApiError>;
+    };
+  }
+>()("App/ApiClient") {}
 
-class ApiClient extends Context.Service<ApiClient, ApiClientService>()("App/ApiClient") {}
+const EMPTY_USERS: ReadonlyArray<User> = [];
 
 const ApiClientLive: Layer.Layer<ApiClient> = Layer.succeed(ApiClient, {
-  users: { list: () => Effect.succeed([] as ReadonlyArray<User>) },
+  users: { list: () => Effect.succeed(EMPTY_USERS) },
 });
 
 // ---------------------------------------------------------------------------
@@ -56,7 +59,7 @@ const UserList = Component.gen(function* (props: ComponentProps<UserListProps>) 
         ))}
       </ul>
     )),
-    Resource.on("Failure", ({ error }) => <p>{error.message}</p>),
+    Resource.on("Failure", ({ error }) => <p>{error.detail}</p>),
     Resource.exhaustive,
   );
 });

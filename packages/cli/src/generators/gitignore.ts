@@ -4,8 +4,7 @@
  */
 import { Effect } from "effect";
 
-export const generateGitignore = (): Effect.Effect<string> =>
-  Effect.succeed(`# Dependencies
+export const generateGitignore: Effect.Effect<string> = Effect.succeed(`# Dependencies
 node_modules
 .pnp
 .pnp.js

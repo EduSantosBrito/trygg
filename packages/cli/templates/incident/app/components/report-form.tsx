@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import { ApiClient } from "trygg/api";
+import type { NavigationError, Router } from "trygg/router";
 import { type Severity } from "../errors/incidents";
 import { incidentsResource } from "../resources/incidents";
 
@@ -19,7 +20,7 @@ const parseSeverity = (value: string): Effect.Effect<Severity | undefined> =>
   Effect.sync(() => SEVERITIES.find((s) => s.value === value)?.value);
 
 interface ReportFormProps {
-  readonly onSuccess?: () => Effect.Effect<void, never, unknown>;
+  readonly onSuccess?: () => Effect.Effect<void, NavigationError, Router>;
 }
 
 export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportFormProps>) {

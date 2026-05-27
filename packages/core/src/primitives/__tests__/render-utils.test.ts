@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { moveRange } from "../render-utils.js";
 
 describe("render-utils", () => {
@@ -17,6 +17,6 @@ describe("render-utils", () => {
 
     moveRange(start, end, before);
 
-    expect(Array.from(parent.childNodes)).toEqual([start, first, second, end, before]);
+    assert.deepStrictEqual(Array.from(parent.childNodes), [start, first, second, end, before]);
   });
 });

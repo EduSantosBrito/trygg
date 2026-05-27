@@ -1,4 +1,4 @@
-import { Data, Schema } from "effect";
+import { Schema } from "effect";
 
 export const Status = Schema.Union([
   Schema.Literal("Detected"),
@@ -17,12 +17,18 @@ export const Severity = Schema.Union([
 ]);
 export type Severity = Schema.Schema.Type<typeof Severity>;
 
-export class InvalidTransition extends Data.TaggedError("InvalidTransition")<{
-  readonly from: Status;
-  readonly to: Status;
-  readonly validNext: ReadonlyArray<Status>;
-}> {}
+export class InvalidTransition extends Schema.TaggedErrorClass<InvalidTransition>()(
+  "InvalidTransition",
+  {
+    from: Status,
+    to: Status,
+    validNext: Schema.Array(Status),
+  },
+) {}
 
-export class IncidentNotFound extends Data.TaggedError("IncidentNotFound")<{
-  readonly id: number;
-}> {}
+export class IncidentNotFound extends Schema.TaggedErrorClass<IncidentNotFound>()(
+  "IncidentNotFound",
+  {
+    id: Schema.Number,
+  },
+) {}

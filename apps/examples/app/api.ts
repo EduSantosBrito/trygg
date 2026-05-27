@@ -3,7 +3,7 @@
  *
  * Single file defining all API endpoints and handlers.
  */
-import { Data, Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 
 // =============================================================================
@@ -30,9 +30,9 @@ const UserNotFoundSchema = Schema.TaggedStruct("UserNotFound", {
   id: Schema.String,
 });
 
-export class UserNotFound extends Data.TaggedError("UserNotFound")<{
-  readonly id: string;
-}> {}
+export class UserNotFound extends Schema.TaggedErrorClass<UserNotFound>()("UserNotFound", {
+  id: Schema.String,
+}) {}
 
 // =============================================================================
 // Mock Data
@@ -95,7 +95,7 @@ const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
         yield* Effect.sleep("300 millis");
         const user = mockUsers[params.id];
         if (!user) {
-          return yield* Effect.fail(new UserNotFound({ id: params.id }));
+          return yield* new UserNotFound({ id: params.id });
         }
         return user;
       }),

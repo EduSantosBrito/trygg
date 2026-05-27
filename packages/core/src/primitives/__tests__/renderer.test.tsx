@@ -17,24 +17,36 @@
  * - Tests verify DOM structure and cleanup
  */
 import { assert, describe } from "@effect/vitest";
-import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Data, Effect, Exit, Layer, Option, Scope } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Scope, Schema } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
-
-// Tagged errors for testing component failures
-class ComponentError extends Data.TaggedError("ComponentError")<{ message: string }> {}
+import * as Debug from "../../debug/debug.js";
+import { Element, Fragment } from "../../index.js";
+import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
+import * as Router from "../../router/index.js";
+import * as SafeUrl from "../../security/safe-url.js";
+import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
-import * as Signal from "../signal.js";
 import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import { Renderer, browserLayer } from "../renderer.js";
-import * as Router from "../../router/index.js";
-import { Element, Fragment } from "../../index.js";
-import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
-import * as Debug from "../../debug/debug.js";
-import * as SafeUrl from "../../security/safe-url.js";
+import * as Signal from "../signal.js";
+
+// Tagged errors for testing component failures
+class ComponentError extends Schema.TaggedErrorClass<ComponentError>()("ComponentError", {
+  message: Schema.String,
+}) {}
+
+const expectInputElement = (element: HTMLElement): HTMLInputElement => {
+  if (element instanceof HTMLInputElement) return element;
+  assert.fail(`Expected HTMLInputElement, got ${element.tagName}`);
+};
+
+const expectButtonElement = (element: HTMLElement): HTMLButtonElement => {
+  if (element instanceof HTMLButtonElement) return element;
+  assert.fail(`Expected HTMLButtonElement, got ${element.tagName}`);
+};
 
 // =============================================================================
 // mount - App entry point
@@ -340,7 +352,7 @@ describe("SignalElement rendering", () => {
 
   scoped("should preserve provided context when swapping", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Service<Theme, { value: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { value: string }>()("renderer.test/Theme") {}
       const themeLayer = Layer.succeed(Theme, { value: "themed" });
 
       const ViewA = Component.gen(function* () {
@@ -814,13 +826,16 @@ describe("Props application", () => {
 
   scoped("should reject SVG-only props on HTML elements at typecheck", () =>
     Effect.sync(() => {
-      void (<svg viewBox="0 0 24 24" strokeWidth="2" />);
+      const validSvgProps = <svg viewBox="0 0 24 24" strokeWidth="2" />;
+      assert.isDefined(validSvgProps);
 
       // @ts-expect-error viewBox is SVG-only.
-      void (<div viewBox="0 0 24 24" />);
+      const invalidViewBox = <div viewBox="0 0 24 24" />;
+      assert.isDefined(invalidViewBox);
 
       // @ts-expect-error strokeWidth is SVG-only.
-      void (<button strokeWidth="2" />);
+      const invalidStrokeWidth = <button strokeWidth="2" />;
+      assert.isDefined(invalidStrokeWidth);
     }),
   );
 
@@ -850,7 +865,7 @@ describe("Props application", () => {
         <input data-testid="checked" type="checkbox" checked={true} />,
       );
 
-      assert.isTrue(((yield* getByTestId("checked")) as HTMLInputElement).checked);
+      assert.isTrue(expectInputElement(yield* getByTestId("checked")).checked);
     }),
   );
 
@@ -860,7 +875,7 @@ describe("Props application", () => {
         <input data-testid="value" type="text" value="hello" />,
       );
 
-      assert.strictEqual(((yield* getByTestId("value")) as HTMLInputElement).value, "hello");
+      assert.strictEqual(expectInputElement(yield* getByTestId("value")).value, "hello");
     }),
   );
 
@@ -868,7 +883,7 @@ describe("Props application", () => {
     Effect.gen(function* () {
       const { getByTestId } = yield* render(<button data-testid="disabled" disabled={true} />);
 
-      assert.isTrue(((yield* getByTestId("disabled")) as HTMLButtonElement).disabled);
+      assert.isTrue(expectButtonElement(yield* getByTestId("disabled")).disabled);
     }),
   );
 
@@ -902,7 +917,7 @@ describe("Props application", () => {
         <input data-testid="bool" type="text" readonly={true} required={true} />,
       );
 
-      const input = (yield* getByTestId("bool")) as HTMLInputElement;
+      const input = expectInputElement(yield* getByTestId("bool"));
       assert.isTrue(input.readOnly);
       assert.isTrue(input.required);
     }),
@@ -938,12 +953,12 @@ describe("Signal props", () => {
         <input data-testid="sig-value" type="text" value={valueSignal} />,
       );
 
-      assert.strictEqual(((yield* getByTestId("sig-value")) as HTMLInputElement).value, "initial");
+      assert.strictEqual(expectInputElement(yield* getByTestId("sig-value")).value, "initial");
 
       yield* Signal.set(valueSignal, "updated");
       yield* TestClock.adjust(10);
 
-      assert.strictEqual(((yield* getByTestId("sig-value")) as HTMLInputElement).value, "updated");
+      assert.strictEqual(expectInputElement(yield* getByTestId("sig-value")).value, "updated");
     }),
   );
 
@@ -954,12 +969,12 @@ describe("Signal props", () => {
         <input data-testid="sig-checked" type="checkbox" checked={checkedSignal} />,
       );
 
-      assert.isFalse(((yield* getByTestId("sig-checked")) as HTMLInputElement).checked);
+      assert.isFalse(expectInputElement(yield* getByTestId("sig-checked")).checked);
 
       yield* Signal.set(checkedSignal, true);
       yield* TestClock.adjust(10);
 
-      assert.isTrue(((yield* getByTestId("sig-checked")) as HTMLInputElement).checked);
+      assert.isTrue(expectInputElement(yield* getByTestId("sig-checked")).checked);
     }),
   );
 
@@ -972,12 +987,12 @@ describe("Signal props", () => {
         </button>,
       );
 
-      assert.isFalse(((yield* getByTestId("sig-disabled")) as HTMLButtonElement).disabled);
+      assert.isFalse(expectButtonElement(yield* getByTestId("sig-disabled")).disabled);
 
       yield* Signal.set(disabledSignal, true);
       yield* TestClock.adjust(10);
 
-      assert.isTrue(((yield* getByTestId("sig-disabled")) as HTMLButtonElement).disabled);
+      assert.isTrue(expectButtonElement(yield* getByTestId("sig-disabled")).disabled);
     }),
   );
 
@@ -1405,7 +1420,7 @@ describe("Re-render behavior", () => {
 
       const { getByTestId } = yield* render(<Parent />);
 
-      const inputBefore = (yield* getByTestId("child-input")) as HTMLInputElement;
+      const inputBefore = expectInputElement(yield* getByTestId("child-input"));
 
       assert.strictEqual(childRenderCount, 1);
       assert.strictEqual(inputBefore.value, "stable");
@@ -1413,7 +1428,7 @@ describe("Re-render behavior", () => {
       yield* Signal.set(parentTrigger, 1);
       yield* TestClock.adjust(20);
 
-      const inputAfter = (yield* getByTestId("child-input")) as HTMLInputElement;
+      const inputAfter = expectInputElement(yield* getByTestId("child-input"));
 
       assert.strictEqual(childRenderCount, 1);
       assert.strictEqual(childCleanupCount, 0);
@@ -1446,7 +1461,7 @@ describe("Re-render behavior", () => {
 
       const { getByTestId } = yield* render(<Parent />);
 
-      const inputBefore = (yield* getByTestId("child-input-update")) as HTMLInputElement;
+      const inputBefore = expectInputElement(yield* getByTestId("child-input-update"));
 
       assert.strictEqual(childRenderCount, 1);
       assert.strictEqual(inputBefore.value, "before");
@@ -1454,7 +1469,7 @@ describe("Re-render behavior", () => {
       yield* Signal.set(label, "after");
       yield* TestClock.adjust(20);
 
-      const inputAfter = (yield* getByTestId("child-input-update")) as HTMLInputElement;
+      const inputAfter = expectInputElement(yield* getByTestId("child-input-update"));
 
       assert.strictEqual(childRenderCount, 2);
       assert.strictEqual(childCleanupCount, 0);
@@ -1465,7 +1480,9 @@ describe("Re-render behavior", () => {
 
   scoped("should rerender stable child when provided context changes without remounting", () =>
     Effect.gen(function* () {
-      class Theme extends Context.Service<Theme, { readonly value: string }>()("Theme") {}
+      class Theme extends Context.Service<Theme, { readonly value: string }>()(
+        "renderer.test/Theme",
+      ) {}
 
       const theme = yield* Signal.make("blue");
       let childRenderCount = 0;
@@ -1492,7 +1509,7 @@ describe("Re-render behavior", () => {
 
       const { getByTestId } = yield* render(<Parent />);
 
-      const inputBefore = (yield* getByTestId("child-context-input")) as HTMLInputElement;
+      const inputBefore = expectInputElement(yield* getByTestId("child-context-input"));
 
       assert.strictEqual(childRenderCount, 1);
       assert.strictEqual(inputBefore.value, "blue");
@@ -1500,7 +1517,7 @@ describe("Re-render behavior", () => {
       yield* Signal.set(theme, "red");
       yield* TestClock.adjust(20);
 
-      const inputAfter = (yield* getByTestId("child-context-input")) as HTMLInputElement;
+      const inputAfter = expectInputElement(yield* getByTestId("child-context-input"));
 
       assert.strictEqual(childRenderCount, 2);
       assert.strictEqual(childCleanupCount, 0);
@@ -1512,9 +1529,12 @@ describe("Re-render behavior", () => {
   scoped("should treat stable child update failures without a boundary as defects", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        class StableChildError extends Data.TaggedError("StableChildError")<{
-          readonly reason: "update-failed";
-        }> {}
+        class StableChildError extends Schema.TaggedErrorClass<StableChildError>()(
+          "StableChildError",
+          {
+            reason: Schema.Literal("update-failed"),
+          },
+        ) {}
 
         const Child = Component.gen(function* (Props: Component.ComponentProps<{ value: string }>) {
           const { value } = yield* Props;
@@ -1571,9 +1591,12 @@ describe("Re-render behavior", () => {
   scoped("should swap to ErrorBoundary fallback when a stable child update defects", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        class StableChildError extends Data.TaggedError("StableChildError")<{
-          readonly reason: "update-failed";
-        }> {}
+        class StableChildError extends Schema.TaggedErrorClass<StableChildError>()(
+          "StableChildError",
+          {
+            reason: Schema.Literal("update-failed"),
+          },
+        ) {}
 
         const RiskyChild = Component.gen(function* (
           Props: Component.ComponentProps<{ value: string }>,
@@ -2237,30 +2260,7 @@ describe("Re-render behavior", () => {
         return <div data-testid="home">Home Page (render #{homeRenderCount})</div>;
       });
 
-      const routes = {
-        routes: [
-          {
-            _tag: "RouteDefinition" as const,
-            path: "/",
-            component: HomeComp,
-            layout: undefined,
-            loading: undefined,
-            error: undefined,
-            notFound: undefined,
-            forbidden: undefined,
-            middleware: [],
-            prefetch: [],
-            children: [],
-            paramsSchema: undefined,
-            querySchema: undefined,
-            renderStrategy: undefined,
-            scrollStrategy: undefined,
-          },
-        ],
-        notFound: undefined,
-        forbidden: undefined,
-        error: undefined,
-      };
+      const routes = Router.Routes.make().add(Router.Route.make("/").component(HomeComp)).manifest;
 
       const App = Component.gen(function* () {
         return <Router.Outlet routes={routes} />;
@@ -2440,7 +2440,9 @@ describe("Renderer error handling", () => {
 describe("Provide element", () => {
   scoped("should provide context to child components", () =>
     Effect.gen(function* () {
-      class TestCtx extends Context.Service<TestCtx, { value: string }>()("TestCtx") {}
+      class TestCtx extends Context.Service<TestCtx, { value: string }>()(
+        "renderer.test/TestCtx",
+      ) {}
 
       const Child = Component.gen(function* () {
         const ctx = yield* TestCtx;
@@ -2459,7 +2461,9 @@ describe("Provide element", () => {
 
   scoped("should propagate context to deeply nested components", () =>
     Effect.gen(function* () {
-      class DeepCtx extends Context.Service<DeepCtx, { nested: string }>()("DeepCtx") {}
+      class DeepCtx extends Context.Service<DeepCtx, { nested: string }>()(
+        "renderer.test/DeepCtx",
+      ) {}
 
       const DeepChild = Component.gen(function* () {
         const ctx = yield* DeepCtx;
@@ -2531,17 +2535,16 @@ describe("KeyedList rendering", () => {
       yield* TestClock.adjust(20);
 
       // Verify initial order: A, B, C
-      const getOrder = () =>
-        Effect.gen(function* () {
-          const list = yield* getByTestId("list");
-          const labels: Array<string> = [];
-          list.querySelectorAll("[data-testid^='item-']").forEach((el) => {
-            labels.push(el.getAttribute("data-testid")?.replace("item-", "") ?? "");
-          });
-          return labels;
+      const getOrder = Effect.gen(function* () {
+        const list = yield* getByTestId("list");
+        const labels: Array<string> = [];
+        list.querySelectorAll("[data-testid^='item-']").forEach((el) => {
+          labels.push(el.getAttribute("data-testid")?.replace("item-", "") ?? "");
         });
+        return labels;
+      });
 
-      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+      assert.deepStrictEqual(yield* getOrder, ["A", "B", "C"]);
 
       // Toggle the LAST item (C) — this triggered the reorder bug
       const toggleC = yield* getByTestId("toggle-C");
@@ -2553,14 +2556,14 @@ describe("KeyedList rendering", () => {
       assert.strictEqual(detailC.textContent, "details");
 
       // Order must still be A, B, C — NOT C, A, B
-      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+      assert.deepStrictEqual(yield* getOrder, ["A", "B", "C"]);
 
       // Toggle the FIRST item (A) too
       const toggleA = yield* getByTestId("toggle-A");
       toggleA.click();
       yield* TestClock.adjust(20);
 
-      assert.deepStrictEqual(yield* getOrder(), ["A", "B", "C"]);
+      assert.deepStrictEqual(yield* getOrder, ["A", "B", "C"]);
     }),
   );
 
@@ -2598,17 +2601,16 @@ describe("KeyedList rendering", () => {
       const { getByTestId } = yield* render(<List />);
       yield* TestClock.adjust(20);
 
-      const getOrder = () =>
-        Effect.gen(function* () {
-          const list = yield* getByTestId("counters");
-          const ids: Array<string> = [];
-          list.querySelectorAll("[data-testid^='counter-']").forEach((el) => {
-            ids.push(el.getAttribute("data-testid")?.replace("counter-", "") ?? "");
-          });
-          return ids;
+      const getOrder = Effect.gen(function* () {
+        const list = yield* getByTestId("counters");
+        const ids: Array<string> = [];
+        list.querySelectorAll("[data-testid^='counter-']").forEach((el) => {
+          ids.push(el.getAttribute("data-testid")?.replace("counter-", "") ?? "");
         });
+        return ids;
+      });
 
-      assert.deepStrictEqual(yield* getOrder(), ["1", "2", "3", "4", "5"]);
+      assert.deepStrictEqual(yield* getOrder, ["1", "2", "3", "4", "5"]);
 
       // Click middle item (3) to trigger re-render
       (yield* getByTestId("inc-3")).click();
@@ -2618,7 +2620,7 @@ describe("KeyedList rendering", () => {
       assert.strictEqual((yield* getByTestId("inc-3")).textContent, "1");
 
       // Order preserved
-      assert.deepStrictEqual(yield* getOrder(), ["1", "2", "3", "4", "5"]);
+      assert.deepStrictEqual(yield* getOrder, ["1", "2", "3", "4", "5"]);
     }),
   );
 });

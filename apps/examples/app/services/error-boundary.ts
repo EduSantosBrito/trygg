@@ -8,4 +8,4 @@ export class ErrorTheme extends Context.Service<
     readonly successBackground: string;
     readonly successText: string;
   }
->()("ErrorTheme") {}
+>()("examples/ErrorTheme") {}

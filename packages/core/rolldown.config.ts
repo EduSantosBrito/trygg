@@ -16,7 +16,7 @@ export default defineConfig({
     format: "esm",
     sourcemap: true,
   },
-  external: [/^effect/, /^@effect\//, /^node:/, /^bun:/, "vite", "consola"],
+  external: [/^effect/, /^@effect\//, /^node:/, /^bun:/, "vite", "consola", "typescript"],
   resolve: {
     extensions: [".ts", ".tsx", ".js"],
   },

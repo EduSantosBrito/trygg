@@ -60,7 +60,7 @@ export const UserDetail = Component.gen(function* (
           onSome: (user) => (
             <div>
               <div className="bg-red-50 text-red-800 py-3 px-4 rounded-md flex justify-between items-center text-sm">
-                Failed to refresh: {String(error)}
+                Failed to refresh the cached user.
                 <button
                   className="bg-red-800 text-white border-none py-1.5 px-2.5 rounded cursor-pointer text-sm"
                   onClick={() =>

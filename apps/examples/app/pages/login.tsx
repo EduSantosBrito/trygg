@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Effect, Option, Random } from "effect";
 import { Signal, Component } from "trygg";
 import * as Router from "trygg/router";
 import { AuthStore, type AuthUser, setAuth } from "../resources/auth";
@@ -10,25 +10,25 @@ const LoginPage = Component.gen(function* () {
   const auth = yield* AuthStore;
   const user = yield* Signal.get(auth.user);
 
-  const handleLogin = (e: Event) =>
-    Effect.gen(function* () {
-      e.preventDefault();
-      const name = yield* Signal.peek(username);
+  const handleLogin = Effect.fn("LoginPage.handleLogin")(function* (e: Event) {
+    e.preventDefault();
+    const name = yield* Signal.peek(username);
 
-      if (name.trim().length === 0) {
-        yield* Signal.set(error, Option.some("Please enter a username"));
-        return;
-      }
+    if (name.trim().length === 0) {
+      yield* Signal.set(error, Option.some("Please enter a username"));
+      return;
+    }
 
-      const newUser: AuthUser = {
-        id: crypto.randomUUID(),
-        name: name.trim(),
-      };
-      yield* setAuth(Option.some(newUser));
+    const id = yield* Random.nextInt;
+    const newUser: AuthUser = {
+      id: String(id),
+      name: name.trim(),
+    };
+    yield* setAuth(Option.some(newUser));
 
-      const router = yield* Router.get;
-      yield* Effect.ignore(router.navigate("/protected"));
-    });
+    const router = yield* Router.get;
+    yield* router.navigate("/protected");
+  });
 
   if (Option.isSome(user)) {
     return (

@@ -17,7 +17,7 @@ const seo = {
   description:
     "TypeScript UI framework built on Effect. Component types declare props, typed errors, and service dependencies. Signals, HttpApi contracts, generated clients.",
   url: "https://trygg.dev",
-} as const;
+};
 
 const jsonLd = {
   "@context": "https://schema.org",

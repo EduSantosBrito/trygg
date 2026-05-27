@@ -10,7 +10,7 @@
  *
  * @internal
  */
-import { Deferred, Effect, Fiber, Layer } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { Component, Renderer, browserLayer } from "trygg";
 import * as Router from "trygg/router";
 
@@ -86,10 +86,9 @@ export const contract = {
       ],
     },
   ],
-} as const;
+};
 
-const flushDom = (ms: number): Effect.Effect<void> =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, ms)));
+const flushDom = (ms: number): Effect.Effect<void> => Effect.sleep(Duration.millis(ms));
 
 const observe = (phase: string, container: HTMLElement): RefreshObservation => ({
   phase,
@@ -160,7 +159,7 @@ const runScenario = Effect.scoped(
     });
 
     const ResourcesPage = Component.gen(function* () {
-      yield* Deferred.succeed(articleStarted, void 0);
+      yield* Deferred.succeed(articleStarted, undefined);
       yield* Deferred.await(releaseArticle);
       return (
         <article data-testid="resources-article">
@@ -204,7 +203,7 @@ const runScenario = Effect.scoped(
         },
       });
 
-      yield* Deferred.succeed(releaseArticle, void 0);
+      yield* Deferred.succeed(releaseArticle, undefined);
       yield* Fiber.join(mountFiber).pipe(Effect.catchCause(() => Effect.void));
 
       return [
@@ -221,7 +220,7 @@ const runScenario = Effect.scoped(
     yield* ContractTrace.withAction(
       "a2",
       { kind: "release", target: "resources-article" },
-      Deferred.succeed(releaseArticle, void 0),
+      Deferred.succeed(releaseArticle, undefined),
     );
     yield* Fiber.join(mountFiber);
     yield* flushDom(25);

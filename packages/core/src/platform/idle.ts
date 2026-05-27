@@ -4,17 +4,17 @@
  *
  * Schedule low-priority work during browser idle periods.
  */
-import { Data, Effect, Layer, Scope } from "effect";
+import { Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class IdleError extends Data.TaggedError("IdleError")<{
-  readonly operation: string;
-  readonly cause: unknown;
-}> {}
+export class IdleError extends Schema.TaggedErrorClass<IdleError>()("IdleError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -31,9 +31,25 @@ export interface IdleService {
 // Tag
 // =============================================================================
 
-export interface Idle extends Context.Service<Idle, IdleService> {}
+export interface Idle extends Context.Service<
+  Idle,
+  {
+    readonly request: (
+      handler: () => Effect.Effect<void>,
+      options?: { readonly timeout?: number },
+    ) => Effect.Effect<void, never, Scope.Scope>;
+  }
+> {}
 
-export const Idle = Context.Service<Idle, IdleService>("trygg/platform/Idle");
+export const Idle = Context.Service<
+  Idle,
+  {
+    readonly request: (
+      handler: () => Effect.Effect<void>,
+      options?: { readonly timeout?: number },
+    ) => Effect.Effect<void, never, Scope.Scope>;
+  }
+>("trygg/platform/Idle");
 
 // =============================================================================
 // Browser layer

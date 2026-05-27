@@ -27,8 +27,10 @@ import {
   ManagedRuntime,
   Match,
   Option,
+  Predicate,
   References,
   Result,
+  Schema,
   Scope,
   SynchronizedRef,
 } from "effect";
@@ -59,10 +61,11 @@ import {
   InvalidBuildOutputCombination,
   makeBuildArtifactPlanner,
   makeGeneratedArtifactPlanner,
-  type BuildArtifactOperation,
-  type BuildPlanDiagnostic,
+  BuildArtifactOperation,
+  BuildPlanDiagnostic,
   type GeneratedArtifactPlan,
 } from "./build-artifact-planner.js";
+import { transformTryggJsxForRequirements } from "./jsx-requirement-transform.js";
 // BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
 
 // =============================================================================
@@ -78,6 +81,7 @@ const VIRTUAL_API_ID = "trygg/api";
 const RESOLVED_API_ID = "\0" + VIRTUAL_API_ID;
 const API_EXPORT_MESSAGE =
   "app/api.ts must export Api for imports from trygg/api. Add `export const Api = ...` to app/api.ts.";
+const ROUTE_TRANSFORM_METHODS: ReadonlyArray<"component" | "layout"> = ["component", "layout"];
 
 type RollupWarning = {
   readonly message?: string;
@@ -323,7 +327,7 @@ export const makeNodeHandler = (apiLive) =>
 // =============================================================================
 
 // =============================================================================
-// Error Types - Yieldable via Data.TaggedError
+// Error Types - Yieldable via Schema.TaggedErrorClass
 // =============================================================================
 
 /**
@@ -336,16 +340,24 @@ export const makeNodeHandler = (apiLive) =>
  * @internal
  * @since 1.0.0
  */
-export class PluginValidationError extends Data.TaggedError("PluginValidationError")<{
-  readonly reason: "MissingFile" | "MissingExport" | "RouteConflict" | "InvalidStructure";
-  readonly message: string;
-  readonly file?: string | undefined;
-  readonly details?: string | undefined;
-}> {
+export class PluginValidationError extends Schema.TaggedErrorClass<PluginValidationError>()(
+  "PluginValidationError",
+  {
+    reason: Schema.Union([
+      Schema.Literal("MissingFile"),
+      Schema.Literal("MissingExport"),
+      Schema.Literal("RouteConflict"),
+      Schema.Literal("InvalidStructure"),
+    ]),
+    description: Schema.String,
+    file: Schema.optional(Schema.String),
+    details: Schema.optional(Schema.String),
+  },
+) {
   static missingFile(file: string, details?: string): PluginValidationError {
     return new PluginValidationError({
       reason: "MissingFile",
-      message: `Required file missing: ${file}`,
+      description: `Required file missing: ${file}`,
       file,
       details,
     });
@@ -354,7 +366,7 @@ export class PluginValidationError extends Data.TaggedError("PluginValidationErr
   static missingExport(file: string, exportName: string): PluginValidationError {
     return new PluginValidationError({
       reason: "MissingExport",
-      message: `${file} must export '${exportName}'`,
+      description: `${file} must export '${exportName}'`,
       file,
     });
   }
@@ -362,7 +374,7 @@ export class PluginValidationError extends Data.TaggedError("PluginValidationErr
   static routeConflict(routePath: string, file: string): PluginValidationError {
     return new PluginValidationError({
       reason: "RouteConflict",
-      message: `Route conflict: ${routePath}`,
+      description: `Route conflict: ${routePath}`,
       file,
       details: "Path defined both as page route and API endpoint",
     });
@@ -371,9 +383,13 @@ export class PluginValidationError extends Data.TaggedError("PluginValidationErr
   static invalidStructure(message: string, file?: string): PluginValidationError {
     return new PluginValidationError({
       reason: "InvalidStructure",
-      message,
+      description: message,
       file,
     });
+  }
+
+  override get message(): string {
+    return this.description;
   }
 }
 
@@ -387,15 +403,18 @@ export class PluginValidationError extends Data.TaggedError("PluginValidationErr
  * @internal
  * @since 1.0.0
  */
-export class PluginValidationErrors extends Data.TaggedError("PluginValidationErrors")<{
-  readonly errors: Array.NonEmptyArray<PluginValidationError>;
-}> {
+export class PluginValidationErrors extends Schema.TaggedErrorClass<PluginValidationErrors>()(
+  "PluginValidationErrors",
+  {
+    errors: Schema.NonEmptyArray(Schema.instanceOf(PluginValidationError)),
+  },
+) {
   override get message(): string {
     return this.errors
       .map((e) => {
         const loc = e.file ? ` (${e.file})` : "";
         const detail = e.details ? `: ${e.details}` : "";
-        return `${e.message}${loc}${detail}`;
+        return `${e.description}${loc}${detail}`;
       })
       .join("\n");
   }
@@ -411,10 +430,17 @@ export class PluginValidationErrors extends Data.TaggedError("PluginValidationEr
  * @internal
  * @since 1.0.0
  */
-export class PluginParseError extends Data.TaggedError("PluginParseError")<{
-  readonly message: string;
-  readonly input: unknown;
-}> {}
+export class PluginParseError extends Schema.TaggedErrorClass<PluginParseError>()(
+  "PluginParseError",
+  {
+    description: Schema.String,
+    input: Schema.Unknown,
+  },
+) {
+  override get message(): string {
+    return this.description;
+  }
+}
 
 /**
  * Plugin file system error.
@@ -505,7 +531,7 @@ const makePluginLayer = (
   return Layer.mergeAll(
     buildOutputLayer,
     Logger.layer([PluginLogger]),
-    Layer.effect(References.MinimumLogLevel, Effect.succeed("Debug")),
+    Layer.succeed(References.MinimumLogLevel, "Debug"),
   );
 };
 
@@ -516,7 +542,7 @@ const makePluginLayer = (
 const logValidationErrors = (e: PluginValidationErrors): Effect.Effect<void> =>
   Effect.forEach(e.errors, (error) =>
     Effect.gen(function* () {
-      yield* Effect.logError(error.message);
+      yield* Effect.logError(error.description);
       if (error.details) {
         yield* Effect.logDebug(`  ${error.details}`);
       }
@@ -527,13 +553,14 @@ const logValidationErrors = (e: PluginValidationErrors): Effect.Effect<void> =>
  * Log single validation error.
  * @internal
  */
-const logValidationError = (e: PluginValidationError): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    yield* Effect.logError(e.message);
-    if (e.details) {
-      yield* Effect.logDebug(`  ${e.details}`);
-    }
-  });
+const logValidationError: (e: PluginValidationError) => Effect.Effect<void> = Effect.fn(
+  "VitePlugin.logValidationError",
+)(function* (e: PluginValidationError) {
+  yield* Effect.logError(e.description);
+  if (e.details) {
+    yield* Effect.logDebug(`  ${e.details}`);
+  }
+});
 
 /**
  * Log file system errors.
@@ -547,7 +574,7 @@ const logFileSystemError = (e: PluginFileSystemError): Effect.Effect<void> =>
  * @internal
  */
 const logParseError = (e: PluginParseError): Effect.Effect<void> =>
-  Effect.logError(`Failed to parse module: ${e.message}`);
+  Effect.logError(`Failed to parse module: ${e.description}`);
 
 /**
  * Log API validation errors (handles both validation and parse errors).
@@ -578,8 +605,8 @@ const logApiValidationError = (
  * @internal
  * @since 1.0.0
  */
-export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArray<string>> =>
-  Effect.gen(function* () {
+export const extractParamNames: (routePath: string) => Effect.Effect<ReadonlyArray<string>> =
+  Effect.fn("VitePlugin.extractParamNames")(function* (routePath: string) {
     const segments = routePath.split("/").filter(Boolean);
     return Array.filterMap(segments, (segment) =>
       segment.startsWith(":") ? Result.succeed(segment.slice(1)) : Result.failVoid,
@@ -596,15 +623,16 @@ export const extractParamNames = (routePath: string): Effect.Effect<ReadonlyArra
  * @internal
  * @since 1.0.0
  */
-export const generateParamType = (routePath: string): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    const params = yield* extractParamNames(routePath);
-    if (params.length === 0) {
-      return "{}";
-    }
-    const fields = params.map((p) => `readonly ${p}: string`);
-    return `{ ${fields.join("; ")} }`;
-  });
+export const generateParamType: (routePath: string) => Effect.Effect<string> = Effect.fn(
+  "VitePlugin.generateParamType",
+)(function* (routePath: string) {
+  const params = yield* extractParamNames(routePath);
+  if (params.length === 0) {
+    return "{}";
+  }
+  const fields = params.map((p) => `readonly ${p}: string`);
+  return `{ ${fields.join("; ")} }`;
+});
 
 // =============================================================================
 // Route Parsing & Type Generation
@@ -729,41 +757,42 @@ export const parseSchemaStruct = (structBody: string): ReadonlyArray<ParsedParam
  * @internal
  * @since 1.0.0
  */
-export const parseRoutes = (source: string): Effect.Effect<ReadonlyArray<ParsedRoute>> =>
-  Effect.gen(function* () {
-    const routes: Array<ParsedRoute> = [];
+export const parseRoutes: (source: string) => Effect.Effect<ReadonlyArray<ParsedRoute>> = Effect.fn(
+  "VitePlugin.parseRoutes",
+)(function* (source: string) {
+  const routes: Array<ParsedRoute> = [];
 
-    // Extract all Route.make("path") occurrences with their chained methods
-    // Strategy: find Route.make or Route.index calls and capture the chain
-    const routeMakeRegex = /Route\.make\(\s*"([^"]+)"\s*\)/g;
-    const routeIndexRegex = /Route\.index\(\s*\w+\s*\)/g;
+  // Extract all Route.make("path") occurrences with their chained methods
+  // Strategy: find Route.make or Route.index calls and capture the chain
+  const routeMakeRegex = /Route\.make\(\s*"([^"]+)"\s*\)/g;
+  const routeIndexRegex = /Route\.index\(\s*\w+\s*\)/g;
 
-    let routeMatch: RegExpExecArray | null = routeMakeRegex.exec(source);
-    while (routeMatch !== null) {
-      const path = routeMatch[1];
-      if (path !== undefined) {
-        // Get the chain after Route.make("path")
-        const chainStart = routeMatch.index + routeMatch[0].length;
-        const chain = extractChain(source, chainStart);
+  let routeMatch: RegExpExecArray | null = routeMakeRegex.exec(source);
+  while (routeMatch !== null) {
+    const path = routeMatch[1];
+    if (path !== undefined) {
+      // Get the chain after Route.make("path")
+      const chainStart = routeMatch.index + routeMatch[0].length;
+      const chain = extractChain(source, chainStart);
 
-        const params = extractParamsFromChain(chain);
-        const query = extractQueryFromChain(chain);
-        const children = yield* extractChildrenFromChain(chain);
+      const params = extractParamsFromChain(chain);
+      const query = extractQueryFromChain(chain);
+      const children = yield* extractChildrenFromChain(chain);
 
-        routes.push({ path, params, query, children, isIndex: false });
-      }
-      routeMatch = routeMakeRegex.exec(source);
+      routes.push({ path, params, query, children, isIndex: false });
     }
+    routeMatch = routeMakeRegex.exec(source);
+  }
 
-    // Extract Route.index() calls (index routes don't have paths)
-    let indexMatch: RegExpExecArray | null = routeIndexRegex.exec(source);
-    while (indexMatch !== null) {
-      routes.push({ path: "", params: [], query: [], children: [], isIndex: true });
-      indexMatch = routeIndexRegex.exec(source);
-    }
+  // Extract Route.index() calls (index routes don't have paths)
+  let indexMatch: RegExpExecArray | null = routeIndexRegex.exec(source);
+  while (indexMatch !== null) {
+    routes.push({ path: "", params: [], query: [], children: [], isIndex: true });
+    indexMatch = routeIndexRegex.exec(source);
+  }
 
-    return routes;
-  });
+  return routes;
+});
 
 /**
  * Extract the method chain following a Route.make() call.
@@ -817,8 +846,8 @@ const extractQueryFromChain = (chain: string): ReadonlyArray<ParsedParam> => {
  * Extract .children(...) nested routes from a method chain.
  * @internal
  */
-const extractChildrenFromChain = (chain: string): Effect.Effect<ReadonlyArray<ParsedRoute>> =>
-  Effect.gen(function* () {
+const extractChildrenFromChain: (chain: string) => Effect.Effect<ReadonlyArray<ParsedRoute>> =
+  Effect.fn("VitePlugin.extractChildrenFromChain")(function* (chain: string) {
     const childrenMatch = chain.match(/\.children\(\s*\n?([\s\S]*?)\n?\s*\)/);
     if (childrenMatch === null || childrenMatch[1] === undefined) return [];
     return yield* parseRoutes(childrenMatch[1]);
@@ -869,21 +898,22 @@ export const resolveRoutePaths = (
  * @internal
  * @since 1.0.0
  */
-export const generateRouteTypes = (
+export const generateRouteTypes: (
   parsedRoutes: ReadonlyArray<ParsedRoute>,
-): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    const resolved = resolveRoutePaths(parsedRoutes);
+) => Effect.Effect<string> = Effect.fn("VitePlugin.generateRouteTypes")(function* (
+  parsedRoutes: ReadonlyArray<ParsedRoute>,
+) {
+  const resolved = resolveRoutePaths(parsedRoutes);
 
-    const mapEntries = resolved.map(({ path, params }) => {
-      if (params.length === 0) {
-        return `    readonly "${path}": {}`;
-      }
-      const fields = params.filter((p) => !p.optional).map((p) => `readonly ${p.name}: ${p.type}`);
-      return `    readonly "${path}": { ${fields.join("; ")} }`;
-    });
+  const mapEntries = resolved.map(({ path, params }) => {
+    if (params.length === 0) {
+      return `    readonly "${path}": {}`;
+    }
+    const fields = params.filter((p) => !p.optional).map((p) => `readonly ${p.name}: ${p.type}`);
+    return `    readonly "${path}": { ${fields.join("; ")} }`;
+  });
 
-    return `// Auto-generated by trygg
+  return `// Auto-generated by trygg
 export type Routes = never
 
 declare module "trygg/router" {
@@ -894,7 +924,7 @@ ${mapEntries.join("\n")}
 
 export {}
 `;
-  });
+});
 
 /**
  * Collected import info for route transform.
@@ -928,42 +958,44 @@ interface ImportedComponent {
  * @internal
  * @since 1.0.0
  */
-export const transformRoutesForBuild = (
+export const transformRoutesForBuild: (
   source: string,
   routesFilePath: string,
-): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    // 1. Collect all named/default imports with their source paths
-    const imports = collectImports(source, routesFilePath);
+) => Effect.Effect<string> = Effect.fn("VitePlugin.transformRoutesForBuild")(function* (
+  source: string,
+  routesFilePath: string,
+) {
+  // 1. Collect all named/default imports with their source paths
+  const imports = collectImports(source, routesFilePath);
 
-    // 2. Neutralize strings/comments for position-accurate paren matching
-    const clean = neutralizeSource(source);
+  // 2. Neutralize strings/comments for position-accurate paren matching
+  const clean = neutralizeSource(source);
 
-    // 3. Transform .component(X) and .layout(X) to lazy imports.
-    //    Each occurrence is checked against Eager context (own chain + ancestors).
-    //    Boundary components (.loading, .error, .notFound, .forbidden) are NOT
-    //    transformed — they must be available synchronously as fallback UI.
-    let transformed = source;
+  // 3. Transform .component(X) and .layout(X) to lazy imports.
+  //    Each occurrence is checked against Eager context (own chain + ancestors).
+  //    Boundary components (.loading, .error, .notFound, .forbidden) are NOT
+  //    transformed — they must be available synchronously as fallback UI.
+  let transformed = source;
 
-    for (const imp of imports) {
-      for (const method of ["component", "layout"] as const) {
-        const methodRegex = new RegExp(
-          `\\.${method}\\(\\s*${escapeRegex(imp.localName)}\\s*\\)`,
-          "g",
-        );
-        const replacement = imp.isDefault
-          ? `.${method}(() => import("${imp.importPath}"))`
-          : `.${method}(() => import("${imp.importPath}").then(m => m.${imp.localName}))`;
+  for (const imp of imports) {
+    for (const method of ROUTE_TRANSFORM_METHODS) {
+      const methodRegex = new RegExp(
+        `\\.${method}\\(\\s*${escapeRegex(imp.localName)}\\s*\\)`,
+        "g",
+      );
+      const replacement = imp.isDefault
+        ? `.${method}(() => import("${imp.importPath}"))`
+        : `.${method}(() => import("${imp.importPath}").then(m => m.${imp.localName}))`;
 
-        // Per-occurrence: only transform if NOT in Eager context
-        transformed = transformed.replace(methodRegex, (fullMatch, offset: number) =>
-          isInEagerContext(clean, offset) ? fullMatch : replacement,
-        );
-      }
+      // Per-occurrence: only transform if NOT in Eager context
+      transformed = transformed.replace(methodRegex, (fullMatch, offset: number) =>
+        isInEagerContext(clean, offset) ? fullMatch : replacement,
+      );
     }
+  }
 
-    return transformed;
-  });
+  return transformed;
+});
 
 // =============================================================================
 // Eager Context Detection — Ancestor-Aware
@@ -1193,6 +1225,13 @@ const nodePlatformImportPattern =
 
 const apiExportPattern = /(?:^|[;\n\r])\s*export\s+const\s+Api\b/;
 
+const isTypeScriptJsxModule = (id: string): boolean => {
+  const [modulePath] = id.split("?");
+  if (modulePath === undefined) return false;
+  const normalized = modulePath.replace(/\\/g, "/");
+  return normalized.endsWith(".tsx") && !normalized.includes("/node_modules/");
+};
+
 const stripNonCodeText = (source: string): string => {
   let output = "";
   let index = 0;
@@ -1270,8 +1309,8 @@ const stripNonCodeText = (source: string): string => {
  * Check if path exists.
  * @internal
  */
-const pathExists = (filePath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
+const pathExists: (filePath: string) => Effect.Effect<boolean, never, FileSystem.FileSystem> =
+  Effect.fn("VitePlugin.pathExists")(function* (filePath: string) {
     const fs = yield* FileSystem.FileSystem;
     return yield* fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));
   });
@@ -1280,39 +1319,40 @@ const pathExists = (filePath: string): Effect.Effect<boolean, never, FileSystem.
  * Write file with directory creation.
  * @internal
  */
-const writeFileSafe = (
+const writeFileSafe: (
   filePath: string,
   content: string,
-): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const dir = nodePath.dirname(filePath);
+) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> = Effect.fn(
+  "VitePlugin.writeFileSafe",
+)(function* (filePath: string, content: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const dir = nodePath.dirname(filePath);
 
-    yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-      Effect.catchTag("PlatformError", (e) =>
-        e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
-      ),
-      Effect.mapError(
-        (cause) =>
-          new PluginFileSystemError({
-            operation: "mkdir",
-            path: dir,
-            cause,
-          }),
-      ),
-    );
+  yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+    Effect.catchTag("PlatformError", (e) =>
+      Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(e),
+    ),
+    Effect.mapError(
+      (cause) =>
+        new PluginFileSystemError({
+          operation: "mkdir",
+          path: dir,
+          cause,
+        }),
+    ),
+  );
 
-    yield* fs.writeFileString(filePath, content).pipe(
-      Effect.mapError(
-        (cause) =>
-          new PluginFileSystemError({
-            operation: "write",
-            path: filePath,
-            cause,
-          }),
-      ),
-    );
-  });
+  yield* fs.writeFileString(filePath, content).pipe(
+    Effect.mapError(
+      (cause) =>
+        new PluginFileSystemError({
+          operation: "write",
+          path: filePath,
+          cause,
+        }),
+    ),
+  );
+});
 
 // =============================================================================
 // Validation
@@ -1328,11 +1368,11 @@ const writeFileSafe = (
  * @internal
  * @since 1.0.0
  */
-export const validateApiPlatform = (
+export const validateApiPlatform: (
   apiPath: string,
   platform: Platform,
-): Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
+) => Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =
+  Effect.fn("VitePlugin.validateApiPlatform")(function* (apiPath: string, platform: Platform) {
     if (platform !== "bun") {
       return;
     }
@@ -1363,74 +1403,56 @@ export const validateApiPlatform = (
     }
   });
 
-type ApiClientContract =
-  | { readonly _tag: "Absent" }
-  | { readonly _tag: "ServerOnly" }
-  | { readonly _tag: "ClientEnabled" };
+type ApiClientContract = Data.TaggedEnum<{
+  readonly Absent: {};
+  readonly ServerOnly: {};
+  readonly ClientEnabled: {};
+}>;
 
-const readApiClientContract = (
+const ApiClientContract = Data.taggedEnum<ApiClientContract>();
+
+const readApiClientContract: (
   apiPath: string,
-): Effect.Effect<ApiClientContract, PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const hasApi = yield* pathExists(apiPath);
-    if (!hasApi) {
-      return { _tag: "Absent" } as const;
-    }
+) => Effect.Effect<ApiClientContract, PluginFileSystemError, FileSystem.FileSystem> = Effect.fn(
+  "VitePlugin.readApiClientContract",
+)(function* (apiPath: string) {
+  const hasApi = yield* pathExists(apiPath);
+  if (!hasApi) {
+    return ApiClientContract.Absent();
+  }
 
-    const fs = yield* FileSystem.FileSystem;
-    const source = yield* fs.readFileString(apiPath).pipe(
-      Effect.mapError(
-        (cause) =>
-          new PluginFileSystemError({
-            operation: "read",
-            path: apiPath,
-            cause,
-          }),
-      ),
-    );
+  const fs = yield* FileSystem.FileSystem;
+  const source = yield* fs.readFileString(apiPath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new PluginFileSystemError({
+          operation: "read",
+          path: apiPath,
+          cause,
+        }),
+    ),
+  );
 
-    if (apiExportPattern.test(stripNonCodeText(source))) {
-      return { _tag: "ClientEnabled" } as const;
-    }
+  if (apiExportPattern.test(stripNonCodeText(source))) {
+    return ApiClientContract.ClientEnabled();
+  }
 
-    return { _tag: "ServerOnly" } as const;
-  });
+  return ApiClientContract.ServerOnly();
+});
 
-const validateGeneratedApiClient = (
+const validateGeneratedApiClient: (
   apiPath: string,
-): Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
+) => Effect.Effect<void, PluginValidationError | PluginFileSystemError, FileSystem.FileSystem> =
+  Effect.fn("VitePlugin.validateGeneratedApiClient")(function* (apiPath: string) {
     const contract = yield* readApiClientContract(apiPath);
-    if (contract._tag === "ClientEnabled") {
+    if (ApiClientContract.$is("ClientEnabled")(contract)) {
       return;
     }
     return yield* PluginValidationError.invalidStructure(API_EXPORT_MESSAGE, apiPath);
   });
 
-const generateApiClientModule = (apiPath: string): string => {
-  const apiImportPath = apiPath.replace(/\\/g, "/");
-
-  return `// Auto-generated by trygg - DO NOT EDIT
-import { Effect, Layer } from "effect"
-import * as Context from "effect/Context"
-import { FetchHttpClient } from "effect/unstable/http"
-import { HttpApiClient } from "effect/unstable/httpapi"
-import { Api } from ${JSON.stringify(apiImportPath)}
-
-const client = HttpApiClient.make(Api, { baseUrl: "" })
-
-type ApiClientService = HttpApiClient.ForApi<typeof Api>
-
-export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
-
-export const ApiClientLive = Layer.effect(
-  ApiClient,
-  client.pipe(Effect.provide(FetchHttpClient.layer)),
-)
-
-export { Api }
-`;
-};
+const generateApiClientModule = (apiPath: string): string =>
+  renderApiClientModule({ apiImportPath: apiPath.replace(/\\/g, "/") });
 
 // =============================================================================
 // Code Generation
@@ -1585,21 +1607,35 @@ interface PluginFilesService {
  * @internal
  * @since 1.0.0
  */
-export interface PluginFiles extends Context.Service<PluginFiles, PluginFilesService> {}
-
-/**
- * Service tag for generated plugin file operations.
- *
- * @remarks
- * Used by the Vite plugin runtime and local tests to request named generated
- * file operations.
- *
- * @internal
- * @since 1.0.0
- */
-export const PluginFiles = Context.Service<PluginFiles, PluginFilesService>(
-  "trygg/vite/PluginFiles",
-);
+export class PluginFiles extends Context.Service<
+  PluginFiles,
+  {
+    readonly appApiPath: (paths: PluginFilePaths) => string;
+    readonly appApiExists: (paths: PluginFilePaths) => Effect.Effect<boolean>;
+    readonly routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined>;
+    readonly isRoutesFile: (paths: PluginFilePaths, filePath: string) => Effect.Effect<boolean>;
+    readonly writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError>;
+    readonly writeGeneratedRouteTypes: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<void, PluginFileSystemError>;
+    readonly regenerateGeneratedRouteTypes: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<void, PluginFileSystemError>;
+    readonly writeClientEntryFiles: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<void, PluginFileSystemError>;
+    readonly executeArtifactOperations: (
+      operations: ReadonlyArray<BuildArtifactOperation>,
+    ) => Effect.Effect<void, PluginFileSystemError>;
+    readonly writeBuildEntryFiles: (
+      paths: PluginFilePaths,
+      options: { readonly output: Output; readonly platform: Platform },
+    ) => Effect.Effect<void, PluginFileSystemError>;
+    readonly writeProductionServerEntry: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<string, PluginFileSystemError, ServerPlatform>;
+  }
+>()("trygg/vite/PluginFiles") {}
 
 const routeSourcePath = (paths: PluginFilePaths): string =>
   nodePath.join(paths.appDir, "routes.ts");
@@ -1634,16 +1670,16 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
       const pathExists = (filePath: string): Effect.Effect<boolean> =>
         fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));
 
-      const writeFileSafe = (
+      const writeFileSafe: (
         filePath: string,
         content: string,
-      ): Effect.Effect<void, PluginFileSystemError> =>
-        Effect.gen(function* () {
+      ) => Effect.Effect<void, PluginFileSystemError> = Effect.fn("PluginFiles.writeFileSafe")(
+        function* (filePath: string, content: string) {
           const dir = nodePath.dirname(filePath);
 
           yield* fs.makeDirectory(dir, { recursive: true }).pipe(
             Effect.catchTag("PlatformError", (e) =>
-              e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(e),
+              Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(e),
             ),
             Effect.mapError(
               (cause) =>
@@ -1665,53 +1701,59 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
                 }),
             ),
           );
-        });
+        },
+      );
 
-      const routesFilePath = (paths: PluginFilePaths) =>
-        Effect.gen(function* () {
+      const routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined> =
+        Effect.fn("PluginFiles.routesFilePath")(function* (paths: PluginFilePaths) {
           const filePath = routeSourcePath(paths);
           const exists = yield* pathExists(filePath);
           return exists ? filePath : undefined;
         });
 
-      const writeRouteTypesFromRoutesWithFs = (
+      const writeRouteTypesFromRoutesWithFs: (
         routesFilePath: string,
         routeTypesPath: string,
-      ): Effect.Effect<boolean, PluginFileSystemError> =>
-        Effect.gen(function* () {
-          const routeSource = yield* fs
-            .readFileString(routesFilePath)
-            .pipe(Effect.orElseSucceed(() => ""));
-          if (routeSource.length === 0) {
-            return false;
-          }
+      ) => Effect.Effect<boolean, PluginFileSystemError> = Effect.fn(
+        "PluginFiles.writeRouteTypesFromRoutesWithFs",
+      )(function* (routesFilePath: string, routeTypesPath: string) {
+        const routeSource = yield* fs
+          .readFileString(routesFilePath)
+          .pipe(Effect.orElseSucceed(() => ""));
+        if (routeSource.length === 0) {
+          return false;
+        }
 
-          const parsed = yield* parseRoutes(routeSource);
-          const content = yield* generateRouteTypes(parsed);
-          yield* writeFileSafe(routeTypesPath, content);
-          return true;
-        });
+        const parsed = yield* parseRoutes(routeSource);
+        const content = yield* generateRouteTypes(parsed);
+        yield* writeFileSafe(routeTypesPath, content);
+        return true;
+      });
 
-      const writeEntryFile = (paths: PluginFilePaths) =>
-        Effect.gen(function* () {
+      const writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError> =
+        Effect.fn("PluginFiles.writeEntryFile")(function* (paths: PluginFilePaths) {
           const routesFile = yield* routesFilePath(paths);
           const content = yield* generateEntryModule(paths.appDir, paths.generatedDir, routesFile);
           yield* writeFileSafe(generatedEntryPath(paths), content);
         });
 
-      const writeRouteTypesWithLog = (paths: PluginFilePaths, message: string) =>
-        Effect.gen(function* () {
-          const routesFile = yield* routesFilePath(paths);
-          if (routesFile !== undefined) {
-            const wroteTypes = yield* writeRouteTypesFromRoutesWithFs(
-              routesFile,
-              generatedRouteTypesPath(paths),
-            );
-            if (wroteTypes) {
-              yield* Effect.logDebug(message);
-            }
+      const writeRouteTypesWithLog: (
+        paths: PluginFilePaths,
+        message: string,
+      ) => Effect.Effect<void, PluginFileSystemError> = Effect.fn(
+        "PluginFiles.writeRouteTypesWithLog",
+      )(function* (paths: PluginFilePaths, message: string) {
+        const routesFile = yield* routesFilePath(paths);
+        if (routesFile !== undefined) {
+          const wroteTypes = yield* writeRouteTypesFromRoutesWithFs(
+            routesFile,
+            generatedRouteTypesPath(paths),
+          );
+          if (wroteTypes) {
+            yield* Effect.logDebug(message);
           }
-        });
+        }
+      });
 
       const writeGeneratedRouteTypes = (paths: PluginFilePaths) =>
         writeRouteTypesWithLog(paths, "Generated route types");
@@ -1730,92 +1772,96 @@ export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSyst
             ),
           ),
         routesFilePath,
-        isRoutesFile: (paths, filePath) =>
-          Effect.gen(function* () {
-            const routesFile = yield* routesFilePath(paths);
-            return routesFile !== undefined && sameFilePath(filePath, routesFile);
-          }),
+        isRoutesFile: Effect.fn("PluginFiles.isRoutesFile")(function* (
+          paths: PluginFilePaths,
+          filePath: string,
+        ) {
+          const routesFile = yield* routesFilePath(paths);
+          return routesFile !== undefined && sameFilePath(filePath, routesFile);
+        }),
         writeEntryFile,
         writeGeneratedRouteTypes,
         regenerateGeneratedRouteTypes: (paths) =>
           writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
-        writeClientEntryFiles: (paths) =>
-          Effect.gen(function* () {
-            const entryPath = generatedEntryPath(paths);
-            const hasEntry = yield* pathExists(entryPath);
-            const routesFile = yield* routesFilePath(paths);
+        writeClientEntryFiles: Effect.fn("PluginFiles.writeClientEntryFiles")(function* (
+          paths: PluginFilePaths,
+        ) {
+          const entryPath = generatedEntryPath(paths);
+          const hasEntry = yield* pathExists(entryPath);
+          const routesFile = yield* routesFilePath(paths);
 
-            if (!hasEntry || routesFile !== undefined) {
-              yield* writeEntryFile(paths);
-            }
+          if (!hasEntry || routesFile !== undefined) {
+            yield* writeEntryFile(paths);
+          }
 
-            yield* writeGeneratedRouteTypes(paths);
-          }),
+          yield* writeGeneratedRouteTypes(paths);
+        }),
         executeArtifactOperations: (operations) =>
           Effect.forEach(
             operations,
             (operation) => {
-              switch (operation._tag) {
-                case "WriteFile":
-                  return writeFileSafe(operation.path, operation.contents);
-                case "RemoveFile":
-                  return pathExists(operation.path).pipe(
+              return BuildArtifactOperation.$match(operation, {
+                WriteFile: (writeFile) => writeFileSafe(writeFile.path, writeFile.contents),
+                RemoveFile: (removeFile) =>
+                  pathExists(removeFile.path).pipe(
                     Effect.flatMap((exists) =>
                       exists
-                        ? fs.remove(operation.path).pipe(
+                        ? fs.remove(removeFile.path).pipe(
                             Effect.mapError(
                               (cause) =>
                                 new PluginFileSystemError({
                                   operation: "remove",
-                                  path: operation.path,
+                                  path: removeFile.path,
                                   cause,
                                 }),
                             ),
                           )
                         : Effect.void,
                     ),
-                  );
-                case "RunNestedBuild":
-                  return Effect.void;
-              }
+                  ),
+                RunNestedBuild: () => Effect.void,
+              });
             },
             { discard: true },
           ),
-        writeBuildEntryFiles: (paths, options) =>
-          Effect.gen(function* () {
-            const entryPath = generatedEntryPath(paths);
-            const hasEntry = yield* pathExists(entryPath);
-            const routesFile = yield* routesFilePath(paths);
+        writeBuildEntryFiles: Effect.fn("PluginFiles.writeBuildEntryFiles")(function* (
+          paths: PluginFilePaths,
+          options: { readonly output: Output; readonly platform: Platform },
+        ) {
+          const entryPath = generatedEntryPath(paths);
+          const hasEntry = yield* pathExists(entryPath);
+          const routesFile = yield* routesFilePath(paths);
 
-            if (!hasEntry || routesFile !== undefined) {
-              yield* writeEntryFile(paths);
-            }
+          if (!hasEntry || routesFile !== undefined) {
+            yield* writeEntryFile(paths);
+          }
 
-            yield* writeGeneratedRouteTypes(paths);
+          yield* writeGeneratedRouteTypes(paths);
 
+          yield* writeFileSafe(
+            nodePath.join(paths.generatedDir, "index.html"),
+            generateHtmlTemplate(),
+          );
+
+          if (options.platform === "cloudflare" && options.output === "static") {
             yield* writeFileSafe(
-              nodePath.join(paths.generatedDir, "index.html"),
-              generateHtmlTemplate(),
+              nodePath.join(paths.generatedDir, "worker-entry.js"),
+              renderCloudflareStaticWorkerEntryModule(),
             );
+          }
+        }),
+        writeProductionServerEntry: Effect.fn("PluginFiles.writeProductionServerEntry")(function* (
+          paths: PluginFilePaths,
+        ) {
+          const hasApi = yield* pathExists(nodePath.join(paths.appDir, "api.ts"));
+          const serverEntryPath = nodePath.join(paths.generatedDir, "server-entry.ts");
+          const content = yield* generateServerEntry(hasApi);
 
-            if (options.platform === "cloudflare" && options.output === "static") {
-              yield* writeFileSafe(
-                nodePath.join(paths.generatedDir, "worker-entry.js"),
-                renderCloudflareStaticWorkerEntryModule(),
-              );
-            }
-          }),
-        writeProductionServerEntry: (paths) =>
-          Effect.gen(function* () {
-            const hasApi = yield* pathExists(nodePath.join(paths.appDir, "api.ts"));
-            const serverEntryPath = nodePath.join(paths.generatedDir, "server-entry.ts");
-            const content = yield* generateServerEntry(hasApi);
-
-            yield* writeFileSafe(serverEntryPath, content);
-            return serverEntryPath;
-          }),
+          yield* writeFileSafe(serverEntryPath, content);
+          return serverEntryPath;
+        }),
       } satisfies PluginFilesService;
-    }),
+    }).pipe(Effect.annotateLogs({ service: "PluginFiles" })),
   );
 
 const generatedApiClientTypesPath = (generatedDir: string): string =>
@@ -1824,51 +1870,53 @@ const generatedApiClientTypesPath = (generatedDir: string): string =>
 const legacyGeneratedApiClientTypesPath = (generatedDir: string): string =>
   nodePath.join(generatedDir, "api-types.ts");
 
-const removeFileIfExists = (
+const removeFileIfExists: (
   filePath: string,
-): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const exists = yield* pathExists(filePath);
-    if (!exists) {
-      return;
-    }
+) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> = Effect.fn(
+  "VitePlugin.removeFileIfExists",
+)(function* (filePath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const exists = yield* pathExists(filePath);
+  if (!exists) {
+    return;
+  }
 
-    yield* fs.remove(filePath).pipe(
-      Effect.mapError(
-        (cause) =>
-          new PluginFileSystemError({
-            operation: "remove",
-            path: filePath,
-            cause,
-          }),
-      ),
-    );
-  });
+  yield* fs.remove(filePath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new PluginFileSystemError({
+          operation: "remove",
+          path: filePath,
+          cause,
+        }),
+    ),
+  );
+});
 
-const writeGeneratedApiClientTypes = (
+const writeGeneratedApiClientTypes: (
   appDir: string,
   generatedDir: string,
-): Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const apiPath = nodePath.join(appDir, "api.ts");
-    const contract = yield* readApiClientContract(apiPath);
+) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem> = Effect.fn(
+  "VitePlugin.writeGeneratedApiClientTypes",
+)(function* (appDir: string, generatedDir: string) {
+  const apiPath = nodePath.join(appDir, "api.ts");
+  const contract = yield* readApiClientContract(apiPath);
 
-    yield* removeFileIfExists(legacyGeneratedApiClientTypesPath(generatedDir));
+  yield* removeFileIfExists(legacyGeneratedApiClientTypesPath(generatedDir));
 
-    if (contract._tag === "ClientEnabled") {
-      const appImportPath = toModuleImportPath(generatedDir, appDir);
-      const content = renderApiClientDeclarations({
-        apiTypeImportPath: `${appImportPath}/api`,
-      });
-      yield* writeFileSafe(generatedApiClientTypesPath(generatedDir), content);
-      return;
-    }
+  if (ApiClientContract.$is("ClientEnabled")(contract)) {
+    const appImportPath = toModuleImportPath(generatedDir, appDir);
+    const content = renderApiClientDeclarations({
+      apiTypeImportPath: `${appImportPath}/api`,
+    });
+    yield* writeFileSafe(generatedApiClientTypesPath(generatedDir), content);
+    return;
+  }
 
-    // Remove stale generated declarations for Absent and ServerOnly
-    const typesPath = generatedApiClientTypesPath(generatedDir);
-    yield* removeFileIfExists(typesPath);
-  });
+  // Remove stale generated declarations for Absent and ServerOnly
+  const typesPath = generatedApiClientTypesPath(generatedDir);
+  yield* removeFileIfExists(typesPath);
+});
 
 /**
  * Render the generated Cloudflare Static SPA Worker entry.
@@ -1941,7 +1989,7 @@ export const renderCloudflareStaticWorkerEntryModule = (): string =>
     `    }`,
     ``,
     `    const shell = new URL(request.url);`,
-    `    shell.pathname = "/index.html";`,
+    `    shell.pathname = "/";`,
     `    shell.search = "";`,
     `    return env.ASSETS.fetch(new Request(shell, request));`,
     `  },`,
@@ -1963,7 +2011,8 @@ export const renderApiClientModule = ({
 }: {
   readonly apiImportPath: string;
 }): string =>
-  `import { HttpApiClient } from "effect/unstable/httpapi"
+  `// Auto-generated by trygg - DO NOT EDIT
+import { HttpApiClient } from "effect/unstable/httpapi"
 import { Effect, Layer } from "effect"
 import * as Context from "effect/Context"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -1971,9 +2020,7 @@ import { Api } from ${JSON.stringify(apiImportPath)}
 
 const client = HttpApiClient.make(Api, { baseUrl: "" })
 
-type ApiClientService = HttpApiClient.ForApi<typeof Api>
-
-export class ApiClient extends Context.Service<ApiClient, ApiClientService>()("ApiClient") {}
+export class ApiClient extends Context.Service()("ApiClient") {}
 
 export const ApiClientLive = Layer.effect(
   ApiClient,
@@ -2157,13 +2204,14 @@ ${owner.platform.runtime}.runMain(
  * @internal
  * @since 1.0.0
  */
-export const generateServerEntry = (
+export const generateServerEntry: (
   hasApi: boolean,
-): Effect.Effect<string, never, ServerPlatform> =>
-  Effect.gen(function* () {
+) => Effect.Effect<string, never, ServerPlatform> = Effect.fn("VitePlugin.generateServerEntry")(
+  function* (hasApi: boolean) {
     const platform = yield* ServerPlatform;
     return renderProductionServerEntryModule({ hasApi, platform });
-  });
+  },
+);
 
 interface BuildOutputConfig {
   readonly command: string;
@@ -2205,9 +2253,17 @@ interface BuildOutputDeps {
   readonly serverPlatform: ServerPlatformService;
 }
 
-interface BuildOutput extends Context.Service<BuildOutput, BuildOutputService> {}
-
-const BuildOutput = Context.Service<BuildOutput, BuildOutputService>("trygg/vite/BuildOutput");
+class BuildOutput extends Context.Service<
+  BuildOutput,
+  {
+    readonly buildStart: (
+      input: BuildOutputStartInput,
+    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+    readonly closeBundle: (
+      input: BuildOutputCloseInput,
+    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+  }
+>()("trygg/vite/BuildOutput") {}
 
 /**
  * Create build output hook operations.
@@ -2227,7 +2283,9 @@ export const makeBuildOutput = ({
   const planner = makeBuildArtifactPlanner({ failOnWarnings: false });
   const generatedArtifactPlanner = makeGeneratedArtifactPlanner({ includeCleanupOperations: true });
   const emitDiagnostic = (diagnostic: BuildPlanDiagnostic) =>
-    diagnostic._tag === "Warning" ? Effect.logWarning(diagnostic.message) : Effect.void;
+    BuildPlanDiagnostic.$is("Warning")(diagnostic)
+      ? Effect.logWarning(diagnostic.message)
+      : Effect.void;
   const validatePlan = (input: {
     readonly output: Output;
     readonly platform: Platform;
@@ -2243,16 +2301,19 @@ export const makeBuildOutput = ({
         ),
       ),
     );
-  const planArtifacts = (input: {
+  const planArtifacts: (input: {
     readonly output: Output;
     readonly platform: Platform;
     readonly hasApi: boolean;
     readonly appDir: string;
     readonly generatedDir: string;
-  }) =>
-    Effect.gen(function* () {
-      const validation = yield* validatePlan(input);
-      return yield* generatedArtifactPlanner.planArtifacts(validation).pipe(
+  }) => Effect.Effect<GeneratedArtifactPlan, PluginValidationError> = Effect.fn(
+    "BuildOutput.planArtifacts",
+  )(function* (input) {
+    const validation = yield* validatePlan(input);
+    return yield* generatedArtifactPlanner
+      .planArtifacts(validation)
+      .pipe(
         Effect.mapError((error) =>
           PluginValidationError.invalidStructure(
             `Failed to plan build artifacts during ${error.operation}`,
@@ -2260,50 +2321,78 @@ export const makeBuildOutput = ({
           ),
         ),
       );
-    });
+  });
   const hasOperation = (
     plan: GeneratedArtifactPlan,
     tag: BuildArtifactOperation["_tag"],
     path: string,
   ) =>
-    plan.operations.some(
-      (operation) =>
-        operation._tag === tag &&
-        "path" in operation &&
-        nodePath.resolve(operation.path) === nodePath.resolve(path),
+    plan.operations.some((operation) =>
+      BuildArtifactOperation.$match(operation, {
+        WriteFile: (writeFile) =>
+          tag === "WriteFile" && nodePath.resolve(writeFile.path) === nodePath.resolve(path),
+        RemoveFile: (removeFile) =>
+          tag === "RemoveFile" && nodePath.resolve(removeFile.path) === nodePath.resolve(path),
+        RunNestedBuild: () => false,
+      }),
     );
 
   return {
-    buildStart: ({ appDir, generatedDir, config, output, platform }) =>
-      Effect.gen(function* () {
-        const paths = { appDir, generatedDir };
-        const apiPath = files.appApiPath(paths);
+    buildStart: Effect.fn("BuildOutput.buildStart")(function* ({
+      appDir,
+      generatedDir,
+      config,
+      output,
+      platform,
+    }: BuildOutputStartInput) {
+      const paths = { appDir, generatedDir };
+      const apiPath = files.appApiPath(paths);
 
-        yield* validateApiPlatform(apiPath, platform).pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.tapError(logApiValidationError),
-        );
+      yield* validateApiPlatform(apiPath, platform).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.tapError(logApiValidationError),
+      );
 
-        if (config.command !== "build") {
-          return;
-        }
+      if (config.command !== "build") {
+        return;
+      }
 
-        const hasApi = yield* files.appApiExists(paths);
-        const artifactPlan = yield* planArtifacts({ appDir, generatedDir, output, platform, hasApi });
-        yield* files.writeClientEntryFiles(paths);
-        yield* files.executeArtifactOperations(
-          artifactPlan.operations.filter((operation) => operation._tag !== "RunNestedBuild"),
-        );
-      }),
+      const hasApi = yield* files.appApiExists(paths);
+      const artifactPlan = yield* planArtifacts({
+        appDir,
+        generatedDir,
+        output,
+        platform,
+        hasApi,
+      });
+      yield* files.writeClientEntryFiles(paths);
+      yield* files.executeArtifactOperations(
+        artifactPlan.operations.filter(
+          (operation) => !BuildArtifactOperation.$is("RunNestedBuild")(operation),
+        ),
+      );
+    }),
     closeBundle: ({ appDir, generatedDir, config, output, platform }) =>
       config.command !== "build"
         ? Effect.void
         : Effect.gen(function* () {
             const paths = { appDir, generatedDir };
             const hasApi = yield* files.appApiExists(paths);
-            const artifactPlan = yield* planArtifacts({ appDir, generatedDir, output, platform, hasApi });
+            const artifactPlan = yield* planArtifacts({
+              appDir,
+              generatedDir,
+              output,
+              platform,
+              hasApi,
+            });
 
-            if (hasOperation(artifactPlan, "WriteFile", nodePath.join(generatedDir, "worker-entry.js"))) {
+            if (
+              hasOperation(
+                artifactPlan,
+                "WriteFile",
+                nodePath.join(generatedDir, "worker-entry.js"),
+              )
+            ) {
               const internalShellDir = nodePath.join(config.root, "dist", GENERATED_DIR);
               const internalShellPath = nodePath.join(internalShellDir, "index.html");
               const publicShellPath = nodePath.join(config.root, "dist", "index.html");
@@ -2345,7 +2434,9 @@ export const makeBuildOutput = ({
             }
 
             const nestedBuild = artifactPlan.operations.find(
-              (operation) => operation._tag === "RunNestedBuild" && operation.name === "production-server",
+              (operation) =>
+                BuildArtifactOperation.$is("RunNestedBuild")(operation) &&
+                operation.name === "production-server",
             );
             if (nestedBuild === undefined) {
               return;
@@ -2403,7 +2494,7 @@ const makeBuildOutputLayer = (): Layer.Layer<
       const files = yield* PluginFiles;
       const serverPlatform = yield* ServerPlatform;
       return makeBuildOutput({ buildServer: viteServerBuild, fileSystem, files, serverPlatform });
-    }),
+    }).pipe(Effect.annotateLogs({ service: "BuildOutput" })),
   );
 
 // =============================================================================
@@ -2568,37 +2659,32 @@ export interface ViteServer {
 }
 
 export namespace PluginApi {
-  export interface Absent {
-    readonly _tag: "Absent";
-    readonly apiPath: string;
-  }
+  export type InitialState = Data.TaggedEnum<{
+    readonly Absent: { readonly apiPath: string };
+    readonly Loading: { readonly apiPath: string };
+    readonly Ready: {
+      readonly apiPath: string;
+      readonly handle: DevApiHandle;
+      readonly scope: Scope.Closeable;
+    };
+    readonly Reloading: {
+      readonly apiPath: string;
+      readonly handle: DevApiHandle;
+      readonly scope: Scope.Closeable;
+    };
+    readonly Failed: {
+      readonly apiPath: string;
+      readonly error: ImportError | ApiInitError;
+    };
+  }>;
 
-  export interface Loading {
-    readonly _tag: "Loading";
-    readonly apiPath: string;
-  }
+  export const InitialState = Data.taggedEnum<InitialState>();
 
-  export interface Ready {
-    readonly _tag: "Ready";
-    readonly apiPath: string;
-    readonly handle: DevApiHandle;
-    readonly scope: Scope.Closeable;
-  }
-
-  export interface Reloading {
-    readonly _tag: "Reloading";
-    readonly apiPath: string;
-    readonly handle: DevApiHandle;
-    readonly scope: Scope.Closeable;
-  }
-
-  export interface Failed {
-    readonly _tag: "Failed";
-    readonly apiPath: string;
-    readonly error: ImportError | ApiInitError;
-  }
-
-  export type InitialState = Absent | Loading | Ready | Reloading | Failed;
+  export type Absent = Extract<InitialState, { readonly _tag: "Absent" }>;
+  export type Loading = Extract<InitialState, { readonly _tag: "Loading" }>;
+  export type Ready = Extract<InitialState, { readonly _tag: "Ready" }>;
+  export type Reloading = Extract<InitialState, { readonly _tag: "Reloading" }>;
+  export type Failed = Extract<InitialState, { readonly _tag: "Failed" }>;
 
   /**
    * Active dev API facade owned by the plugin layer.
@@ -2616,31 +2702,27 @@ export namespace PluginApi {
     readonly reloadChangedFile: (file: string) => Effect.Effect<void>;
   }
 
-  interface ReloadIdle {
-    readonly _tag: "Idle";
-  }
+  type ReloadState = Data.TaggedEnum<{
+    readonly Idle: {};
+    readonly Running: {
+      readonly followUp: boolean;
+      readonly done: Deferred.Deferred<void, DevApiErrors>;
+    };
+  }>;
 
-  interface ReloadRunning {
-    readonly _tag: "Running";
-    readonly followUp: boolean;
-    readonly done: Deferred.Deferred<void, DevApiErrors>;
-  }
+  const ReloadState = Data.taggedEnum<ReloadState>();
 
-  type ReloadState = ReloadIdle | ReloadRunning;
+  type ReloadDecision = Data.TaggedEnum<{
+    readonly Run: { readonly done: Deferred.Deferred<void, DevApiErrors> };
+    readonly Await: { readonly done: Deferred.Deferred<void, DevApiErrors> };
+  }>;
 
-  interface RunReload {
-    readonly _tag: "Run";
-    readonly done: Deferred.Deferred<void, DevApiErrors>;
-  }
+  const ReloadDecision = Data.taggedEnum<ReloadDecision>();
 
-  interface AwaitReload {
-    readonly _tag: "Await";
-    readonly done: Deferred.Deferred<void, DevApiErrors>;
-  }
+  const reloadIdle = ReloadState.Idle();
 
-  type ReloadDecision = RunReload | AwaitReload;
-
-  const reloadIdle: ReloadIdle = { _tag: "Idle" };
+  const isDevApiError = (error: unknown): error is DevApiErrors =>
+    Predicate.isTagged(error, "ApiInitError") || Predicate.isTagged(error, "ImportError");
   export interface InitialLoadOptions<RHasApi> {
     readonly apiPath: string;
     readonly hasApi: Effect.Effect<boolean, never, RHasApi>;
@@ -2656,138 +2738,149 @@ export namespace PluginApi {
     state: InitialState,
   ): Effect.Effect<void> => options.observe?.(state) ?? Effect.void;
 
-  const coalesceReload = <RHasApi>(
+  const coalesceReload: <RHasApi>(
     options: InitialLoadOptions<RHasApi>,
     reload: DevApiHandle["reload"],
     getReady: () => Ready,
-  ): Effect.Effect<DevApiHandle["reload"]> =>
-    Effect.gen(function* () {
-      const reloadState = yield* SynchronizedRef.make<ReloadState>(reloadIdle);
+  ) => Effect.Effect<DevApiHandle["reload"]> = Effect.fn("PluginApi.coalesceReload")(function* <
+    RHasApi,
+  >(options: InitialLoadOptions<RHasApi>, reload: DevApiHandle["reload"], getReady: () => Ready) {
+    const reloadState = yield* SynchronizedRef.make<ReloadState>(reloadIdle);
 
-      const runReload = (
-        done: Deferred.Deferred<void, DevApiErrors>,
-      ): Effect.Effect<void, DevApiErrors, Scope.Scope> =>
-        Effect.suspend(() =>
-          Effect.uninterruptibleMask((restore) =>
-            Effect.gen(function* () {
-              const ready = getReady();
-              const reloading: Reloading = { ...ready, _tag: "Reloading" };
-              yield* observe(options, reloading);
-              const exit = yield* restore(reload).pipe(Effect.exit);
-              if (Exit.isFailure(exit)) {
-                const foundError = Cause.findErrorOption(exit.cause);
-                const canRetry = yield* Option.match(foundError, {
-                  onNone: () => Effect.succeed(false),
-                  onSome: (error) => {
-                    if (!(error instanceof ApiInitError || error instanceof ImportError)) {
-                      return Effect.succeed(false);
-                    }
-
-                    const failed: Failed = { apiPath: ready.apiPath, error, _tag: "Failed" };
-                    return observe(options, failed).pipe(Effect.as(true));
-                  },
-                });
-
-                if (canRetry) {
-                  const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
-                    if (state._tag === "Running" && state.followUp) {
-                      const next: ReloadRunning = { _tag: "Running", followUp: false, done };
-                      const result: readonly [boolean, ReloadState] = [true, next];
-                      return Effect.succeed(result);
-                    }
-
-                    const result: readonly [boolean, ReloadState] = [false, reloadIdle];
-                    return Effect.succeed(result);
-                  });
-
-                  if (shouldReload) {
-                    return yield* runReload(done);
+    const runReload = (
+      done: Deferred.Deferred<void, DevApiErrors>,
+    ): Effect.Effect<void, DevApiErrors, Scope.Scope> =>
+      Effect.suspend(() =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const ready = getReady();
+            const reloading = InitialState.Reloading({
+              apiPath: ready.apiPath,
+              handle: ready.handle,
+              scope: ready.scope,
+            });
+            yield* observe(options, reloading);
+            const exit = yield* restore(reload).pipe(Effect.exit);
+            if (Exit.isFailure(exit)) {
+              const foundError = Cause.findErrorOption(exit.cause);
+              const canRetry = yield* Option.match(foundError, {
+                onNone: () => Effect.succeed(false),
+                onSome: (error) => {
+                  if (!isDevApiError(error)) {
+                    return Effect.succeed(false);
                   }
-                }
 
-                yield* SynchronizedRef.set(reloadState, reloadIdle);
-                yield* Deferred.done(done, exit).pipe(Effect.asVoid);
-                return yield* Effect.failCause(exit.cause);
-              }
-
-              const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
-                if (state._tag === "Running" && state.followUp) {
-                  const next: ReloadRunning = { _tag: "Running", followUp: false, done };
-                  const result: readonly [boolean, ReloadState] = [true, next];
-                  return Effect.succeed(result);
-                }
-
-                const result: readonly [boolean, ReloadState] = [false, reloadIdle];
-                return Effect.succeed(result);
+                  const failed = InitialState.Failed({ apiPath: ready.apiPath, error });
+                  return observe(options, failed).pipe(Effect.as(true));
+                },
               });
 
-              if (shouldReload) {
-                return yield* runReload(done);
+              if (canRetry) {
+                const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
+                  if (ReloadState.$is("Running")(state) && state.followUp) {
+                    const next = ReloadState.Running({ followUp: false, done });
+                    const result: readonly [boolean, ReloadState] = [true, next];
+                    return Effect.succeed(result);
+                  }
+
+                  const result: readonly [boolean, ReloadState] = [false, reloadIdle];
+                  return Effect.succeed(result);
+                });
+
+                if (shouldReload) {
+                  return yield* runReload(done);
+                }
               }
 
-              yield* observe(options, ready);
-              yield* Deferred.succeed(done, undefined).pipe(Effect.asVoid);
-            }),
-          ),
+              yield* SynchronizedRef.set(reloadState, reloadIdle);
+              yield* Deferred.done(done, exit).pipe(Effect.asVoid);
+              return yield* Effect.failCause(exit.cause);
+            }
+
+            const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
+              if (ReloadState.$is("Running")(state) && state.followUp) {
+                const next = ReloadState.Running({ followUp: false, done });
+                const result: readonly [boolean, ReloadState] = [true, next];
+                return Effect.succeed(result);
+              }
+
+              const result: readonly [boolean, ReloadState] = [false, reloadIdle];
+              return Effect.succeed(result);
+            });
+
+            if (shouldReload) {
+              return yield* runReload(done);
+            }
+
+            yield* observe(options, ready);
+            yield* Deferred.succeed(done, undefined).pipe(Effect.asVoid);
+          }),
+        ),
+      );
+
+    return yield* Effect.succeed(
+      Effect.gen(function* () {
+        const decision = yield* SynchronizedRef.modifyEffect(reloadState, (state) =>
+          Effect.gen(function* () {
+            if (ReloadState.$is("Running")(state)) {
+              const next = ReloadState.Running({ done: state.done, followUp: true });
+              const result: readonly [ReloadDecision, ReloadState] = [
+                ReloadDecision.Await({ done: state.done }),
+                next,
+              ];
+              return result;
+            }
+
+            const done = yield* Deferred.make<void, DevApiErrors>();
+            const next = ReloadState.Running({ followUp: false, done });
+            const result: readonly [ReloadDecision, ReloadState] = [
+              ReloadDecision.Run({ done }),
+              next,
+            ];
+            return result;
+          }),
         );
 
-      return yield* Effect.succeed(
-        Effect.gen(function* () {
-          const decision = yield* SynchronizedRef.modifyEffect(reloadState, (state) =>
-            Effect.gen(function* () {
-              if (state._tag === "Running") {
-                const next: ReloadRunning = { ...state, followUp: true };
-                const result: readonly [ReloadDecision, ReloadState] = [
-                  { _tag: "Await", done: state.done },
-                  next,
-                ];
-                return result;
-              }
+        if (ReloadDecision.$is("Await")(decision)) {
+          return yield* Deferred.await(decision.done);
+        }
 
-              const done = yield* Deferred.make<void, DevApiErrors>();
-              const next: ReloadRunning = { _tag: "Running", followUp: false, done };
-              const result: readonly [ReloadDecision, ReloadState] = [{ _tag: "Run", done }, next];
-              return result;
-            }),
-          );
+        return yield* runReload(decision.done);
+      }).pipe(Effect.withSpan("PluginApi.reloadApi")),
+    );
+  });
 
-          if (decision._tag === "Await") {
-            return yield* Deferred.await(decision.done);
-          }
-
-          return yield* runReload(decision.done);
-        }),
-      );
-    });
-
-  export const loadInitial = <RHasApi>(
+  export const loadInitial: <RHasApi>(
     options: InitialLoadOptions<RHasApi>,
-  ): Effect.Effect<Absent | Ready | Failed, never, RHasApi> =>
-    Effect.gen(function* () {
+  ) => Effect.Effect<Absent | Ready | Failed, never, RHasApi> = Effect.fn("PluginApi.loadInitial")(
+    function* <RHasApi>(options: InitialLoadOptions<RHasApi>) {
       const hasApi = yield* options.hasApi;
       if (!hasApi) {
-        const state: Absent = { _tag: "Absent", apiPath: options.apiPath };
+        const state = InitialState.Absent({ apiPath: options.apiPath });
         yield* observe(options, state);
         return state;
       }
 
-      const loading: Loading = { _tag: "Loading", apiPath: options.apiPath };
+      const loading = InitialState.Loading({ apiPath: options.apiPath });
       yield* observe(options, loading);
       const scope = yield* Scope.make();
 
       return yield* Effect.gen(function* () {
         const handlerFactory = yield* options.loadHandlerFactory;
         const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
-        const initialReady: Ready = {
-          _tag: "Ready",
+        const initialReady = InitialState.Ready({
           apiPath: options.apiPath,
           handle,
           scope,
-        };
+        });
         let readyState = initialReady;
         const reload = yield* coalesceReload(options, handle.reload, () => readyState);
         const readyHandle: DevApiHandle = { ...handle, reload };
-        const ready: Ready = { ...initialReady, handle: readyHandle };
+        const ready = InitialState.Ready({
+          apiPath: initialReady.apiPath,
+          handle: readyHandle,
+          scope: initialReady.scope,
+        });
         readyState = ready;
         yield* observe(options, ready);
         return ready;
@@ -2795,21 +2888,25 @@ export namespace PluginApi {
         Effect.catch((error: ImportError | ApiInitError) =>
           Effect.gen(function* () {
             yield* Scope.close(scope, Exit.fail(error));
-            const failed: Failed = { _tag: "Failed", apiPath: options.apiPath, error };
+            const failed = InitialState.Failed({ apiPath: options.apiPath, error });
             yield* observe(options, failed);
             return failed;
           }),
         ),
       );
-    });
+    },
+  );
 
   export const closeInitial = (state: InitialState): Effect.Effect<void> =>
-    state._tag === "Ready" ? Scope.close(state.scope, Exit.void) : Effect.void;
+    InitialState.$is("Ready")(state) ? Scope.close(state.scope, Exit.void) : Effect.void;
 }
 
+const devApiErrorTag = (error: DevApiErrors): DevApiErrors["_tag"] =>
+  Predicate.isTagged(error, "ApiInitError") ? "ApiInitError" : "ImportError";
+
 const logPluginApiReloadError = (error: DevApiErrors): Effect.Effect<void> =>
-  Effect.logError(`[api] reload.failed: ${error.message}`).pipe(
-    Effect.annotateLogs("error_tag", error._tag),
+  Effect.logError(`[api] reload.failed: ${Cause.pretty(Cause.fail(error))}`).pipe(
+    Effect.annotateLogs("error_tag", devApiErrorTag(error)),
   );
 
 /**
@@ -2879,7 +2976,7 @@ export const makeViteServer = (
     closeApiScopeOnServerClose: (scope) =>
       Effect.sync(() =>
         server.httpServer?.on("close", () => {
-          void runPromise(Scope.close(scope, Exit.void));
+          runPromise(Scope.close(scope, Exit.void)).catch(() => undefined);
         }),
       ).pipe(Effect.asVoid),
     mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
@@ -2905,14 +3002,14 @@ export const makeViteServer = (
             res.end(html);
           }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
 
-          void runPromise(effect);
+          runPromise(effect).catch(() => undefined);
         }),
       ),
   };
 };
 
-const loadHandlerFactory = (viteServer: ViteServer): Effect.Effect<HandlerFactory, ApiInitError> =>
-  Effect.gen(function* () {
+const loadHandlerFactory: (viteServer: ViteServer) => Effect.Effect<HandlerFactory, ApiInitError> =
+  Effect.fn("VitePlugin.loadHandlerFactory")(function* (viteServer: ViteServer) {
     // SSR-load handler factory — resolves @effect/platform from project root,
     // same module instance as user's api.ts, preventing Router.Live identity mismatches.
     const rawFactoryMod = yield* viteServer.loadModule(
@@ -3129,16 +3226,16 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             devPlatform.makeApi({
               loadApiModule: () => viteServer.loadModule(apiPath, "Failed to load API module"),
               onError: (error) =>
-                Effect.logError(
-                  `[api] middleware.error: ${error instanceof Error ? error.message : String(error)}`,
-                ),
+                Effect.logError(`[api] middleware.error: ${Cause.pretty(Cause.fail(error))}`),
               handlerFactory,
             }),
         });
 
-        const pluginApi = apiState._tag === "Ready" ? makePluginApi(apiState.handle) : undefined;
+        const pluginApi = PluginApi.InitialState.$is("Ready")(apiState)
+          ? makePluginApi(apiState.handle)
+          : undefined;
 
-        if (apiState._tag === "Ready") {
+        if (PluginApi.InitialState.$is("Ready")(apiState)) {
           yield* viteServer.closeApiScopeOnServerClose(apiState.scope);
           yield* Effect.logInfo("API handlers loaded").pipe(
             Effect.annotateLogs("style", "success"),
@@ -3149,7 +3246,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           });
         }
 
-        if (apiState._tag === "Failed") {
+        if (PluginApi.InitialState.$is("Failed")(apiState)) {
           return yield* apiState.error;
         }
 
@@ -3177,9 +3274,9 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         }
 
         return () => {
-          void pluginRuntime.runPromise(
-            viteServer.mountHtmlFallbackMiddleware(generateHtmlTemplate()),
-          );
+          pluginRuntime
+            .runPromise(viteServer.mountHtmlFallbackMiddleware(generateHtmlTemplate()))
+            .catch(() => undefined);
         };
       });
 
@@ -3258,11 +3355,19 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           const paths = { appDir, generatedDir };
           const isRoutesFile = yield* files.isRoutesFile(paths, id);
 
-          // Only transform the routes file in production builds
-          if (!isRoutesFile) return null;
-          if (config.command !== "build") return null;
+          let transformed = code;
 
-          return yield* transformRoutesForBuild(code, id);
+          // Only transform the routes file in production builds
+          if (isRoutesFile && config.command === "build") {
+            transformed = yield* transformRoutesForBuild(transformed, id);
+          }
+
+          if (isTypeScriptJsxModule(id)) {
+            const jsxResult = transformTryggJsxForRequirements(transformed, id);
+            transformed = jsxResult.code;
+          }
+
+          return transformed;
         }),
       );
       return result !== code ? result : null;

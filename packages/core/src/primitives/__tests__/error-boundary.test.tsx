@@ -16,7 +16,7 @@
  * - Verify handler requirements are propagated
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Layer, Option } from "effect";
+import { Cause, Effect, Layer, Option, Schema } from "effect";
 import * as Context from "effect/Context";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
@@ -27,8 +27,8 @@ import { render } from "../../testing/index.js";
 // Test Errors
 // =============================================================================
 
-class TestError extends Data.TaggedError("TestError")<{}> {}
-class NetworkError extends Data.TaggedError("NetworkError")<{}> {}
+class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {}) {}
+class NetworkError extends Schema.TaggedErrorClass<NetworkError>()("NetworkError", {}) {}
 
 const catchAllView = (content: string, testId?: string) =>
   Component.gen(function* (_Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {

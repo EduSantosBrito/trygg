@@ -42,13 +42,13 @@ import type { Effect, Types } from "effect";
  * @public
  * @since 1.0.0
  */
-export type Handler<E extends HttpApiEndpoint.Any> = (
+export type Handler<E extends HttpApiEndpoint.Any, R = never> = (
   request: Types.Simplify<HttpApiEndpoint.Request<E>>,
 ) => Effect.Effect<
   HttpApiEndpoint.Success<E>["Type"],
   HttpApiEndpoint.Error<E>["Type"],
-  // R is inferred from implementation - allows any dependencies
-  any
+  // R is configurable by callers when handlers require services.
+  R
 >;
 
 /**

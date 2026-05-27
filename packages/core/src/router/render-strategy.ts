@@ -26,7 +26,7 @@
  * @since 1.0.0
  * @module trygg/router/render-strategy
  */
-import { Data, Layer } from "effect";
+import { Data, Layer, Schema } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
@@ -50,9 +50,7 @@ import * as Context from "effect/Context";
  * @public
  * @since 1.0.0
  */
-export interface Eager {
-  readonly _tag: "Eager";
-}
+export type Eager = Extract<RenderStrategyType, { readonly _tag: "Eager" }>;
 
 /**
  * Lazy — component is code-split via dynamic import. Default strategy.
@@ -71,9 +69,7 @@ export interface Eager {
  * @public
  * @since 1.0.0
  */
-export interface Lazy {
-  readonly _tag: "Lazy";
-}
+export type Lazy = Extract<RenderStrategyType, { readonly _tag: "Lazy" }>;
 
 // Future variants (uncomment when implementing):
 // export interface Server { readonly _tag: "Server"; readonly endpoint?: string }
@@ -97,7 +93,12 @@ export interface Lazy {
  * @public
  * @since 1.0.0
  */
-export type RenderStrategyType = Eager | Lazy;
+export type RenderStrategyType = Data.TaggedEnum<{
+  readonly Eager: {};
+  readonly Lazy: {};
+}>;
+
+export const RenderStrategyType = Data.taggedEnum<RenderStrategyType>();
 
 // =============================================================================
 // Error (standalone — not coupled to strategy)
@@ -119,19 +120,19 @@ export type RenderStrategyType = Eager | Lazy;
  * @public
  * @since 1.0.0
  */
-export class RenderLoadError extends Data.TaggedError("RenderLoadError")<{
-  readonly cause: unknown;
-}> {}
+export class RenderLoadError extends Schema.TaggedErrorClass<RenderLoadError>()("RenderLoadError", {
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service Keys + Layer Factories
 // =============================================================================
 
 /** @internal */
-const eager: Eager = { _tag: "Eager" };
+const eager: Eager = RenderStrategyType.Eager();
 
 /** @internal */
-const lazy: Lazy = { _tag: "Lazy" };
+const lazy: Lazy = RenderStrategyType.Lazy();
 
 /**
  * RenderStrategy service key — controls how route components are loaded/rendered.
@@ -158,9 +159,10 @@ const lazy: Lazy = { _tag: "Lazy" };
  * @public
  * @since 1.0.0
  */
-export class RenderStrategy extends Context.Service<RenderStrategy, RenderStrategyType>()(
-  "trygg/RenderStrategy",
-) {
+export class RenderStrategy extends Context.Service<
+  RenderStrategy,
+  { readonly _tag: "Eager" } | { readonly _tag: "Lazy" }
+>()("trygg/RenderStrategy") {
   /**
    * Eager rendering — component in main bundle.
    * Singleton Layer (no config).
