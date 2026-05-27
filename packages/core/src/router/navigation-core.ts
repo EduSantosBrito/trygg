@@ -58,6 +58,7 @@ export interface NavigationCoreShape {
     target: NavigationTarget,
     exact: boolean,
   ) => Effect.Effect<boolean, NavigationCoreError>;
+  readonly refresh: Effect.Effect<void, NavigationCoreError>;
 }
 
 export const navigationTarget = (
@@ -132,6 +133,7 @@ export const makeNavigationCore = (
         const snapshot = yield* SynchronizedRef.get(state);
         return exact ? snapshot.path === path : snapshot.path.startsWith(path);
       }),
+      refresh,
     };
   });
 

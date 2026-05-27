@@ -31,9 +31,9 @@ import type {
   RoutePath,
   RouteParamsFor,
 } from "./types.js";
-import { NavigationError, interpolateParams } from "./types.js";
+import { NavigationError } from "./types.js";
 import type { Element } from "../primitives/element.js";
-import { parsePath, buildPath } from "./utils.js";
+import { parsePath } from "./utils.js";
 import { SessionStorage } from "../platform/storage.js";
 import { Scroll } from "../platform/scroll.js";
 import { Dom, DomError } from "../platform/dom.js";
@@ -44,6 +44,7 @@ import { Observer } from "../platform/observer.js";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
 import {
+  NavigationCoreError,
   makeInMemoryNavigationAdapter,
   makeNavigationCore,
   navigationTarget,
@@ -59,19 +60,6 @@ const ScrollPositionJson = Schema.fromJsonString(ScrollPosition);
 const ScrollState = Schema.Struct({ _scrollKey: Schema.String });
 /** @internal */
 const decodeScrollState = Schema.decodeUnknownOption(ScrollState);
-
-const interpolateNavigationPath = (
-  targetPath: string,
-  params: Record<string, string | number>,
-): Effect.Effect<string, NavigationError> =>
-  interpolateParams(targetPath, params).pipe(
-    Effect.mapError((cause) => new NavigationError({ operation: "interpolateParams", cause })),
-  );
-
-const interpolateActivePath = (
-  targetPath: string,
-  params: Record<string, string | number>,
-): Effect.Effect<string> => interpolateParams(targetPath, params).pipe(Effect.orDie);
 
 // F-001: Viewport prefetch constants from framework research
 /** IntersectionObserver threshold - 10% visible triggers prefetch */
@@ -675,17 +663,89 @@ export const browserLayer: Layer.Layer<
 
     const prefetchStateRef = yield* Ref.make<OutletPrefetchState>({ _tag: "Idle" });
 
-    // Update signals from a path
-    const updateFromPath = (fullPath: string) =>
-      Effect.gen(function* () {
-        const { path: newPath, query: newQuery } = yield* parsePath(fullPath);
-        yield* Signal.set(currentSignal, {
-          path: newPath,
-          params: {},
-          query: newQuery,
-        });
-        yield* Signal.set(querySignal, newQuery);
+    const navigationAdapter = {
+      read: Effect.gen(function* () {
+        const fullPath = yield* location.fullPath.pipe(
+          Effect.mapError((cause) =>
+            new NavigationCoreError({ operation: "location.fullPath", cause }),
+          ),
+        );
+        const { path: snapshotPath, query } = yield* parsePath(fullPath).pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "parsePath", cause })),
+        );
+        const hash = yield* location.hash.pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "location.hash", cause })),
+        );
+        return {
+          path: snapshotPath,
+          query,
+          isPopstate: false,
+          hash,
+          scrollKey: currentNavKey,
+        };
+      }),
+      push: (url: string, state: unknown) =>
+        history.pushState(state, url).pipe(
+          Effect.tap(() => {
+            const scrollState = decodeScrollState(state);
+            if (Option.isSome(scrollState)) {
+              currentNavKey = scrollState.value._scrollKey;
+            }
+            return Effect.void;
+          }),
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "pushState", cause })),
+        ),
+      replace: (url: string, state: unknown) =>
+        history.replaceState(state, url).pipe(
+          Effect.tap(() => {
+            const scrollState = decodeScrollState(state);
+            if (Option.isSome(scrollState)) {
+              currentNavKey = scrollState.value._scrollKey;
+            }
+            return Effect.void;
+          }),
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "replaceState", cause })),
+        ),
+      back: history.back.pipe(
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "history.back", cause })),
+      ),
+      forward: history.forward.pipe(
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "history.forward", cause })),
+      ),
+    };
+    const navigationCore = yield* makeNavigationCore(
+      { notifyUnchangedQuery: false },
+      navigationAdapter,
+    ).pipe(Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })));
+
+    const applyNavigationSnapshot = Effect.fn("RouterService.applyNavigationSnapshot")(function* () {
+      const current = yield* Signal.get(currentSignal);
+      const snapshot = yield* navigationCore.current;
+      yield* Signal.set(currentSignal, {
+        path: snapshot.path,
+        params: {},
+        query: snapshot.query,
       });
+      yield* ContractTrace.emit({
+        event: "router.current.set",
+        level: "semantic",
+        payload: { fromPath: current.path, toPath: snapshot.path },
+      });
+      const queryChanged = !sameQuery(current.query, snapshot.query);
+      if (queryChanged) {
+        yield* Signal.set(querySignal, snapshot.query);
+      }
+      yield* ContractTrace.emit({
+        event: "router.query.set",
+        level: "semantic",
+        payload: {
+          fromQuery: current.query.toString(),
+          toQuery: snapshot.query.toString(),
+          changed: queryChanged,
+          notified: queryChanged,
+        },
+      });
+    });
 
     // Save scroll using captured services (best-effort, errors ignored)
     const doSaveScroll = () =>
@@ -778,9 +838,9 @@ export const browserLayer: Layer.Layer<
           scrollKey: currentNavKey,
         });
 
-        // Read current location and update signals
-        const currentPath = yield* location.fullPath;
-        yield* updateFromPath(currentPath);
+        // Read current location and update shared navigation state/signals.
+        yield* navigationCore.refresh.pipe(Effect.ignore);
+        yield* applyNavigationSnapshot().pipe(Effect.ignore);
       }).pipe(Effect.ignore),
     );
 
@@ -798,10 +858,11 @@ export const browserLayer: Layer.Layer<
         const traceId = Debug.nextTraceId();
         yield* Debug.setTraceId(traceId);
 
-        // Interpolate params into path pattern if provided
-        const resolvedPath = options?.params
-          ? yield* interpolateNavigationPath(targetPath, options.params)
-          : targetPath;
+        const target = navigationTarget(targetPath, options);
+        const fullPath = yield* resolveNavigationTarget(target).pipe(
+          Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
+        );
+        const { path: resolvedPath } = yield* parsePath(fullPath);
 
         const current = yield* Signal.get(currentSignal);
         yield* ContractTrace.emit({
@@ -826,73 +887,28 @@ export const browserLayer: Layer.Layer<
         // Save scroll position before navigating away (best-effort)
         yield* doSaveScroll();
 
-        const fullPath = yield* buildPath(resolvedPath, options?.query);
+        yield* navigationCore.navigate(target).pipe(
+          Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
+        );
 
-        // Generate new key for this navigation entry
-        const newKey = yield* generateKey;
-        const historyState = { _scrollKey: newKey };
-
-        if (options?.replace) {
-          yield* history
-            .replaceState(historyState, fullPath)
-            .pipe(
-              Effect.mapError((cause) => new NavigationError({ operation: "replaceState", cause })),
-            );
-          yield* ContractTrace.emit({
-            event: "history.replace",
-            level: "semantic",
-            payload: { path: fullPath },
-          });
-        } else {
-          yield* history
-            .pushState(historyState, fullPath)
-            .pipe(
-              Effect.mapError((cause) => new NavigationError({ operation: "pushState", cause })),
-            );
-          yield* ContractTrace.emit({
-            event: "history.push",
-            level: "semantic",
-            payload: { path: fullPath },
-          });
-        }
-
-        currentNavKey = newKey;
-
-        // Set navigation context for outlet scroll handling
         const hash = yield* location.hash.pipe(Effect.orElseSucceed(() => ""));
         yield* Ref.set(navContextRef, {
           isPopstate: false,
           hash,
           scrollKey: currentNavKey,
         });
-
-        const { path: newPath, query: newQuery } = yield* parsePath(fullPath);
-        yield* Signal.set(currentSignal, {
-          path: newPath,
-          params: {},
-          query: newQuery,
-        });
         yield* ContractTrace.emit({
-          event: "router.current.set",
+          event: options?.replace ? "history.replace" : "history.push",
           level: "semantic",
-          payload: { fromPath: current.path, toPath: newPath },
+          payload: { path: fullPath },
         });
-        yield* Signal.set(querySignal, newQuery);
-        yield* ContractTrace.emit({
-          event: "router.query.set",
-          level: "semantic",
-          payload: {
-            fromQuery: current.query.toString(),
-            toQuery: newQuery.toString(),
-            changed: current.query.toString() !== newQuery.toString(),
-            notified: current.query.toString() !== newQuery.toString(),
-          },
-        });
+        yield* applyNavigationSnapshot();
+        const snapshot = yield* navigationCore.current;
 
         yield* ContractTrace.emit({
           event: "router.navigate.commit",
           level: "semantic",
-          payload: { path: fullPath, query: newQuery.toString() },
+          payload: { path: fullPath, query: snapshot.query.toString() },
         });
         yield* Debug.log({
           event: "router.navigate.complete",
@@ -903,7 +919,7 @@ export const browserLayer: Layer.Layer<
       back: () =>
         Effect.gen(function* () {
           const before = yield* Signal.get(currentSignal);
-          yield* history.back.pipe(Effect.ignore);
+          yield* navigationCore.back.pipe(Effect.ignore);
           const after = yield* Signal.get(currentSignal);
           yield* ContractTrace.emit({
             event: "history.back",
@@ -915,7 +931,7 @@ export const browserLayer: Layer.Layer<
       forward: () =>
         Effect.gen(function* () {
           const before = yield* Signal.get(currentSignal);
-          yield* history.forward.pipe(Effect.ignore);
+          yield* navigationCore.forward.pipe(Effect.ignore);
           const after = yield* Signal.get(currentSignal);
           yield* ContractTrace.emit({
             event: "history.forward",
@@ -929,12 +945,12 @@ export const browserLayer: Layer.Layer<
 
       isActive: (targetPath: string, options?: IsActiveOptions) =>
         Effect.gen(function* () {
-          const resolvedPath = options?.params
-            ? yield* interpolateActivePath(targetPath, options.params)
-            : targetPath;
+          const target = navigationTarget(targetPath, options);
+          const resolvedPath = yield* resolveNavigationTarget(target).pipe(Effect.orDie);
+          const pathOnly = resolvedPath.split("?")[0] ?? resolvedPath;
           const matcher = options?.exact
-            ? (route: Route) => route.path === resolvedPath
-            : (route: Route) => route.path.startsWith(resolvedPath);
+            ? (route: Route) => route.path === pathOnly
+            : (route: Route) => route.path.startsWith(pathOnly);
           return yield* Signal.derive(currentSignal, matcher);
         }),
 

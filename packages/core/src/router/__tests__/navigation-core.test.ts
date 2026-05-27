@@ -2,17 +2,58 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect, Ref } from "effect";
 import * as Signal from "../../primitives/signal.js";
 import {
+  NavigationCoreError,
   makeInMemoryNavigationAdapter,
   makeNavigationCore,
   navigationTarget,
   sameQuery,
+  type NavigationAdapter,
   type NavigationCoreShape,
 } from "../navigation-core.js";
+import { parsePath } from "../utils.js";
 import * as Router from "../service.js";
 
 const makeCore = (initialPath: string): Effect.Effect<NavigationCoreShape> =>
   Effect.gen(function* () {
     const adapter = yield* makeInMemoryNavigationAdapter(initialPath).pipe(Effect.orDie);
+    return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(Effect.orDie);
+  });
+
+const makeBrowserLikeCore = (initialPath: string): Effect.Effect<NavigationCoreShape> =>
+  Effect.gen(function* () {
+    const historyStack: Array<string> = [initialPath];
+    let index = 0;
+    const adapter: NavigationAdapter = {
+      read: Effect.gen(function* () {
+        const fullPath = historyStack[index] ?? "/";
+        const { path, query } = yield* parsePath(fullPath).pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "parsePath", cause })),
+        );
+        return { path, query, isPopstate: false, hash: "", scrollKey: `browser-like-${index}` };
+      }),
+      push: (url) =>
+        Effect.sync(() => {
+          historyStack.splice(index + 1);
+          historyStack.push(url);
+          index = historyStack.length - 1;
+        }).pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "pushState", cause })),
+        ),
+      replace: (url) =>
+        Effect.sync(() => {
+          historyStack[index] = url;
+        }).pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "replaceState", cause })),
+        ),
+      back: Effect.sync(() => {
+        if (index > 0) index--;
+      }).pipe(Effect.mapError((cause) => new NavigationCoreError({ operation: "back", cause }))),
+      forward: Effect.sync(() => {
+        if (index < historyStack.length - 1) index++;
+      }).pipe(
+        Effect.mapError((cause) => new NavigationCoreError({ operation: "forward", cause })),
+      ),
+    };
     return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter).pipe(Effect.orDie);
   });
 
@@ -90,6 +131,9 @@ const runNavigationLaws = (name: string, make: () => Effect.Effect<NavigationCor
 };
 
 runNavigationLaws("NavigationCore in-memory laws", () => makeCore("/dashboard?tab=main"));
+runNavigationLaws("NavigationCore browser-like adapter laws", () =>
+  makeBrowserLikeCore("/dashboard?tab=main"),
+);
 
 describe("Router.testLayer NavigationCore delegation", () => {
   it.effect("does not notify query subscribers when the semantic query is unchanged", () =>
