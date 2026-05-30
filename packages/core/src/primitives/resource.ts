@@ -37,7 +37,7 @@ import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import { isEffectComponent, type Component } from "./component.js";
 import * as ReactiveMatcher from "./reactive-matcher.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import {
   unsafeEntrySignal,
   unsafeAsParams,
@@ -478,18 +478,16 @@ export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag, Signal.Signa
           Effect.gen(function* () {
             const existing = map.get(key);
             if (existing !== undefined) {
-              yield* Debug.log({
-                event: "resource.registry.get_existing",
+              yield* Trace.emit("resource.registry.get_existing", () => ({
                 key,
-              });
+              }));
               const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [existing, map];
               return result;
             }
 
-            yield* Debug.log({
-              event: "resource.registry.create_entry",
+            yield* Trace.emit("resource.registry.create_entry", () => ({
               key,
-            });
+            }));
 
             // Create new entry
             const state = yield* Signal.make<ResourceState<unknown, unknown>>(Pending());
@@ -563,67 +561,59 @@ const fetchInternal: <A, E, R>(
 ) {
   const state = unsafeEntrySignal<A, E>(entry.state);
 
-  yield* Debug.log({
-    event: "resource.fetch.start",
+  yield* Trace.emit("resource.fetch.start", () => ({
     key: resource.key,
-  });
+  }));
 
   // Create deferred for dedupe coordination
   const deferred = yield* Deferred.make<void, never>();
   yield* Ref.set(entry.inFlight, Option.some(deferred));
 
-  const fiber: Fiber.Fiber<void, never> = yield* Debug.log({
-    event: "resource.fetch.fork_running",
+  const fiber: Fiber.Fiber<void, never> = yield* Trace.emit("resource.fetch.fork_running", () => ({
     key: resource.key,
-  }).pipe(
+  })).pipe(
     Effect.flatMap(() => Effect.provide(resource.fetch, ctx)),
     Effect.tap((value) =>
-      Debug.log({
-        event: "resource.fetch.success",
+      Trace.emit("resource.fetch.success", () => ({
         key: resource.key,
         value_type: typeof value,
         is_array: Array.isArray(value),
         length: Array.isArray(value) ? value.length : undefined,
-      }),
+      })),
     ),
     Effect.tapCause((cause) =>
-      Debug.log({
-        event: "resource.fetch.error",
+      Trace.emit("resource.fetch.error", () => ({
         key: resource.key,
         error: Cause.squash(cause),
         error_message: Cause.pretty(cause),
-      }),
+      })),
     ),
     Effect.tapDefect((defect) =>
-      Debug.log({
-        event: "resource.fetch.defect",
+      Trace.emit("resource.fetch.defect", () => ({
         key: resource.key,
         defect: String(defect),
-      }),
+      })),
     ),
     Effect.matchCauseEffect({
       onSuccess: (value) =>
         Effect.gen(function* () {
-          yield* Debug.log({
-            event: "resource.fetch.set_success",
+          yield* Trace.emit("resource.fetch.set_success", () => ({
             key: resource.key,
-          });
+          }));
           yield* Signal.set(state, Success<A, E>(value, false));
         }),
       onFailure: (cause) =>
         Cause.hasInterruptsOnly(cause)
-          ? Debug.log({
-              event: "resource.fetch.interrupted",
+          ? Trace.emit("resource.fetch.interrupted", () => ({
               key: resource.key,
-            })
+            }))
           : Effect.gen(function* () {
               const error = Cause.squash(cause);
-              yield* Debug.log({
-                event: "resource.fetch.set_failure",
+              yield* Trace.emit("resource.fetch.set_failure", () => ({
                 key: resource.key,
                 error,
                 error_message: Cause.pretty(cause),
-              });
+              }));
               const prev = yield* Signal.get(state);
               const staleValue = ResourceState.$is("Success")(prev)
                 ? Option.some(prev.value)
@@ -632,19 +622,17 @@ const fetchInternal: <A, E, R>(
             }),
     }),
     Effect.catchCause((cause) =>
-      Debug.log({
-        event: "resource.fetch.unhandled",
+      Trace.emit("resource.fetch.unhandled", () => ({
         key: resource.key,
         error: Cause.squash(cause),
         error_message: Cause.pretty(cause),
-      }),
+      })),
     ),
     Effect.ensuring(
       Effect.gen(function* () {
-        yield* Debug.log({
-          event: "resource.fetch.complete",
+        yield* Trace.emit("resource.fetch.complete", () => ({
           key: resource.key,
-        });
+        }));
         const now = yield* Clock.currentTimeMillis;
         yield* Deferred.succeed(deferred, undefined);
         yield* Ref.set(entry.inFlight, Option.none());
@@ -697,7 +685,7 @@ export const fetch: {
     resource: Resource<A, E, R>,
   ): Effect.Effect<
     Signal.Signal<ResourceState<A, E>>,
-    Signal.SignalDisposedError | Signal.SignalScopeError,
+    Signal.SignalScopeError,
     ResourceRegistryTag | R
   >;
   <P extends object, A, E, R>(
@@ -705,7 +693,7 @@ export const fetch: {
     params: ReactiveParams<P>,
   ): Effect.Effect<
     Signal.Signal<ResourceState<A, E>>,
-    Signal.SignalDisposedError | Signal.SignalScopeError,
+    Signal.SignalScopeError,
     ResourceRegistryTag | R | Scope.Scope
   >;
 } = unsafeAsOverload(
@@ -733,14 +721,13 @@ const fetchStatic = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<
   Signal.Signal<ResourceState<A, E>>,
-  Signal.SignalDisposedError | Signal.SignalScopeError,
+  Signal.SignalScopeError,
   ResourceRegistryTag | R
 > =>
   Effect.gen(function* () {
-    yield* Debug.log({
-      event: "resource.fetch.called",
+    yield* Trace.emit("resource.fetch.called", () => ({
       key: resource.key,
-    });
+    }));
 
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
@@ -751,10 +738,9 @@ const fetchStatic = <A, E, R>(
 
     // Dedupe: if fetch in progress, wait for it
     if (Option.isSome(currentInFlight)) {
-      yield* Debug.log({
-        event: "resource.fetch.dedupe_wait",
+      yield* Trace.emit("resource.fetch.dedupe_wait", () => ({
         key: resource.key,
-      });
+      }));
       yield* Deferred.await(currentInFlight.value);
       return state;
     }
@@ -765,18 +751,16 @@ const fetchStatic = <A, E, R>(
     // causing keyed-list teardown/remount race that blanks rendered items.
     const currentState = yield* Signal.peek(state);
     if (!ResourceState.$is("Pending")(currentState)) {
-      yield* Debug.log({
-        event: "resource.fetch.cached",
+      yield* Trace.emit("resource.fetch.cached", () => ({
         key: resource.key,
         state: currentState._tag,
-      });
+      }));
       return state;
     }
 
-    yield* Debug.log({
-      event: "resource.fetch.starting",
+    yield* Trace.emit("resource.fetch.starting", () => ({
       key: resource.key,
-    });
+    }));
 
     // Start fetch with captured context
     yield* fetchInternal(resource, entry, ctx);
@@ -794,7 +778,7 @@ const fetchReactive = <P extends object, A, E, R>(
   reactiveParams: ReactiveParams<P>,
 ): Effect.Effect<
   Signal.Signal<ResourceState<A, E>>,
-  Signal.SignalDisposedError | Signal.SignalScopeError,
+  Signal.SignalScopeError,
   ResourceRegistryTag | R | Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -803,7 +787,7 @@ const fetchReactive = <P extends object, A, E, R>(
 
     // Unwrap current values from reactive params without registering component
     // dependencies — reactivity is handled by explicit subscriptions below.
-    const unwrapParams: Effect.Effect<P, Signal.SignalDisposedError> = Effect.gen(function* () {
+    const unwrapParams: Effect.Effect<P> = Effect.gen(function* () {
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(reactiveParams)) {
         if (Signal.isSignal(value)) {
@@ -843,98 +827,89 @@ const fetchReactive = <P extends object, A, E, R>(
     // so that invalidate/refresh changes propagate to the component.
     // Uses SynchronizedRef.updateEffect to atomically interrupt+fork+store, preventing
     // race conditions where concurrent doFetch calls could leak daemons.
-    const doFetch: (
-      resource: Resource<A, E, R>,
-    ) => Effect.Effect<void, Signal.SignalDisposedError | Signal.SignalScopeError> = Effect.fn(
-      "Resource.fetch.reactive.doFetch",
-    )(function* (resource: Resource<A, E, R>) {
-      yield* Ref.set(activeKey, resource.key);
-      yield* Signal.set(outputState, Pending<A, E>());
+    const doFetch: (resource: Resource<A, E, R>) => Effect.Effect<void, Signal.SignalScopeError> =
+      Effect.fn("Resource.fetch.reactive.doFetch")(function* (resource: Resource<A, E, R>) {
+        yield* Ref.set(activeKey, resource.key);
+        yield* Signal.set(outputState, Pending<A, E>());
 
-      const setOutputIfActive: (
-        next: ResourceState<A, E>,
-      ) => Effect.Effect<void, Signal.SignalDisposedError> = Effect.fn(
-        "Resource.fetch.reactive.setOutputIfActive",
-      )(function* (next: ResourceState<A, E>) {
-        const currentKey = yield* Ref.get(activeKey);
-        if (currentKey === resource.key) {
-          yield* Signal.set(outputState, next);
-        }
-      });
-
-      // Atomically: interrupt previous daemon → fork new daemon → store reference
-      yield* SynchronizedRef.updateEffect(activeFiber, (prevFiber) =>
-        Effect.gen(function* () {
-          // Cancel previous doFetch daemon before forking new one
-          if (Option.isSome(prevFiber)) {
-            yield* Fiber.interrupt(prevFiber.value);
+        const setOutputIfActive: (next: ResourceState<A, E>) => Effect.Effect<void> = Effect.fn(
+          "Resource.fetch.reactive.setOutputIfActive",
+        )(function* (next: ResourceState<A, E>) {
+          const currentKey = yield* Ref.get(activeKey);
+          if (currentKey === resource.key) {
+            yield* Signal.set(outputState, next);
           }
+        });
 
-          // Fork the fetch work as a daemon
-          const daemon = yield* Effect.gen(function* () {
-            const registry = yield* ResourceRegistryTag;
-            const entry = yield* registry.getOrCreate(resource.key);
-            const entryState = unsafeEntrySignal<A, E>(entry.state);
-
-            // Check if already cached
-            const cached = yield* Signal.peek(entryState);
-            if (!ResourceState.$is("Pending")(cached)) {
-              yield* setOutputIfActive(cached);
-            } else {
-              // Dedupe: if fetch already in-flight for this key, wait for it
-              const currentInFlight = yield* Ref.get(entry.inFlight);
-              if (Option.isSome(currentInFlight)) {
-                yield* Deferred.await(currentInFlight.value);
-              } else {
-                // Start fetch and wait for completion
-                const fiber = yield* fetchInternal(
-                  resource,
-                  entry,
-                  unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
-                  true,
-                );
-                yield* Fiber.join(fiber);
-              }
-              // Sync resolved state to output
-              const finalState = yield* Signal.peek(entryState);
-              yield* setOutputIfActive(finalState);
+        // Atomically: interrupt previous daemon → fork new daemon → store reference
+        yield* SynchronizedRef.updateEffect(activeFiber, (prevFiber) =>
+          Effect.gen(function* () {
+            // Cancel previous doFetch daemon before forking new one
+            if (Option.isSome(prevFiber)) {
+              yield* Fiber.interrupt(prevFiber.value);
             }
 
-            // Subscribe to entry state so invalidate/refresh propagates to outputState.
-            // The daemon stays alive until interrupted by the next doFetch call.
-            const unsubscribe = yield* Signal.subscribe(entryState, () =>
-              Signal.peek(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
-            );
-            return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
-          }).pipe(
-            Effect.provide(ctx),
-            Effect.catchCause((cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : Debug.log({
-                    event: "resource.fetch.unhandled",
-                    key: resource.key,
-                    error: Cause.squash(cause),
-                    error_message: Cause.pretty(cause),
-                  }),
-            ),
-            Effect.forkIn(scope, { startImmediately: true }),
-          );
+            // Fork the fetch work as a daemon
+            const daemon = yield* Effect.gen(function* () {
+              const registry = yield* ResourceRegistryTag;
+              const entry = yield* registry.getOrCreate(resource.key);
+              const entryState = unsafeEntrySignal<A, E>(entry.state);
 
-          return Option.some(daemon);
-        }),
-      );
-    });
+              // Check if already cached
+              const cached = yield* Signal.peek(entryState);
+              if (!ResourceState.$is("Pending")(cached)) {
+                yield* setOutputIfActive(cached);
+              } else {
+                // Dedupe: if fetch already in-flight for this key, wait for it
+                const currentInFlight = yield* Ref.get(entry.inFlight);
+                if (Option.isSome(currentInFlight)) {
+                  yield* Deferred.await(currentInFlight.value);
+                } else {
+                  // Start fetch and wait for completion
+                  const fiber = yield* fetchInternal(
+                    resource,
+                    entry,
+                    unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+                    true,
+                  );
+                  yield* Fiber.join(fiber);
+                }
+                // Sync resolved state to output
+                const finalState = yield* Signal.peek(entryState);
+                yield* setOutputIfActive(finalState);
+              }
+
+              // Subscribe to entry state so invalidate/refresh propagates to outputState.
+              // The daemon stays alive until interrupted by the next doFetch call.
+              const unsubscribe = yield* Signal.subscribe(entryState, () =>
+                Signal.peek(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
+              );
+              return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
+            }).pipe(
+              Effect.provide(ctx),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Trace.emit("resource.fetch.unhandled", () => ({
+                      key: resource.key,
+                      error: Cause.squash(cause),
+                      error_message: Cause.pretty(cause),
+                    })),
+              ),
+              Effect.forkIn(scope, { startImmediately: true }),
+            );
+
+            return Option.some(daemon);
+          }),
+        );
+      });
 
     // Initial fetch
     yield* doFetch(initialResource).pipe(Effect.provide(ctx));
 
     // If there are reactive signals, subscribe to changes
     if (signalFields.length > 0) {
-      const onParamChange: Effect.Effect<
-        void,
-        Signal.SignalDisposedError | Signal.SignalScopeError
-      > = Effect.gen(function* () {
+      const onParamChange: Effect.Effect<void, Signal.SignalScopeError> = Effect.gen(function* () {
         const newParams = yield* unwrapParams;
         const newResource = factory(newParams);
         const currentKey = yield* Ref.get(activeKey);
@@ -1248,7 +1223,7 @@ export function on(state: MatchState, handler: unknown) {
  */
 export const exhaustive = <A, E, R>(
   self: ResourceMatcher<A, E, R, true, true, true>,
-): Effect.Effect<ElementType, Signal.SignalDisposedError, Scope.Scope | R> =>
+): Effect.Effect<ElementType, never, Scope.Scope | R> =>
   Effect.gen(function* () {
     const pending = self.pending;
     const success = self.success;
@@ -1277,7 +1252,7 @@ export const exhaustive = <A, E, R>(
       ResourceState<A, E>,
       Signal.Signal<ElementType>,
       ElementType,
-      Signal.SignalDisposedError,
+      never,
       Scope.Scope | R
     >(
       self.state,
@@ -1309,7 +1284,7 @@ export const exhaustive = <A, E, R>(
  */
 export const invalidate = <A, E, R>(
   resource: Resource<A, E, R>,
-): Effect.Effect<void, Signal.SignalDisposedError, ResourceRegistryTag | R> =>
+): Effect.Effect<void, never, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
@@ -1358,11 +1333,7 @@ export const invalidate = <A, E, R>(
  */
 export const refresh = <A, E, R>(
   resource: Resource<A, E, R>,
-): Effect.Effect<
-  void,
-  Signal.SignalDisposedError | Signal.SignalScopeError,
-  ResourceRegistryTag | R
-> =>
+): Effect.Effect<void, Signal.SignalScopeError, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;

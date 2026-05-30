@@ -20,6 +20,12 @@ const docsElementsLayer = Layer.merge(
 );
 const homeLayer = Layer.merge(Layer.merge(testLayer, Router.testLayer("/")), DocsHeadingsLive);
 
+const flushDom = Effect.gen(function* () {
+  for (let i = 0; i < 10; i++) {
+    yield* Effect.yieldNow;
+  }
+});
+
 describe("Docs chrome", () => {
   layer(docsGettingStartedLayer)("/docs/getting-started", (it) => {
     it.effect("renders grouped docs sidebar links", () =>
@@ -47,12 +53,22 @@ describe("Docs chrome", () => {
       }),
     );
 
+    it.effect("does not render duplicate drawer sidebar before the drawer opens", () =>
+      Effect.gen(function* () {
+        const result = yield* renderElement(<DocsLayout />);
+
+        assert.strictEqual(result.container.querySelectorAll(".docs-sidebar").length, 1);
+        assert.isNull(result.container.querySelector(".docs-drawer .docs-sidebar"));
+      }),
+    );
+
     it.effect("opens mobile drawer from hamburger", () =>
       Effect.gen(function* () {
         const result = yield* renderElement(<DocsLayout />);
         const button = yield* result.getByText("Menu");
 
         yield* click(button);
+        yield* flushDom;
 
         assert.include(
           result.container.querySelector(".docs-drawer--open")?.textContent,
@@ -67,6 +83,8 @@ describe("Docs chrome", () => {
         const button = yield* result.getByText("Menu");
 
         yield* click(button);
+        yield* flushDom;
+
         const drawerLink = result.container.querySelector(
           '.docs-drawer a[href="/docs/getting-started"]',
         );
@@ -74,6 +92,7 @@ describe("Docs chrome", () => {
         if (drawerLink instanceof HTMLElement) {
           yield* click(drawerLink);
         }
+        yield* flushDom;
 
         assert.isNull(result.container.querySelector(".docs-drawer--open"));
       }),

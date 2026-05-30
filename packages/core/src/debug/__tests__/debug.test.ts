@@ -1,511 +1,232 @@
 /**
  * Debug and Metrics Unit Tests
  *
- * Tests for debug logging system and observability metrics.
+ * Tests for the human-facing console logger over the trace stream and the
+ * observability metrics.
  *
  * Goals: Reliability, stability
- * - Verify debug enable/disable works
- * - Verify plugins receive events
+ * - Verify the console logger formats catalog events and passes other logs through
+ * - Verify Debug.layer tunes the minimum level, name filter, and batching
  * - Verify metrics are recorded correctly
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Context } from "effect";
+import { Duration, Effect } from "effect";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
+import { TestClock } from "effect/testing";
 import * as Debug from "../debug.js";
 import * as Metrics from "../metrics.js";
+import * as Trace from "../../trace/index.js";
 
-// Helper to reset debug state between tests
-const withDebugReset = Effect.fn("DebugTest.withDebugReset")(function* <A, E>(
-  effect: Effect.Effect<A, E, never>,
-) {
-  Debug.disable();
-  // Unregister all plugins
-  for (const name of Debug.getPlugins()) {
-    Debug.unregisterPlugin(name);
-  }
-  const result = yield* effect;
-  Debug.disable();
-  for (const name of Debug.getPlugins()) {
-    Debug.unregisterPlugin(name);
-  }
-  return result;
-});
+/** A captured `console.log` invocation's format string (its first argument). */
+const textOf = (line: ReadonlyArray<unknown> | undefined): string =>
+  line === undefined ? "" : String(line[0]);
+
+/**
+ * Run `use` with `console.log` stubbed to collect each invocation's arguments,
+ * restoring the original on success, failure, or interrupt.
+ */
+const withConsoleCapture = <A, E, R>(
+  use: (lines: Array<ReadonlyArray<unknown>>) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.suspend(() => {
+    const lines: Array<ReadonlyArray<unknown>> = [];
+    const original = console.log;
+    console.log = (...args: Array<unknown>) => {
+      lines.push(args);
+    };
+    return use(lines).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          console.log = original;
+        }),
+      ),
+    );
+  });
 
 // =============================================================================
-// Debug enable/disable
+// consoleLogger
 // =============================================================================
-// Scope: Controlling debug logging state
+// Scope: The standalone Logger that pretty-prints the trace stream
 
-describe("Debug enable/disable", () => {
-  it("should enable logging for all events", () => {
-    Debug.disable();
-    Debug.enable();
-
-    assert.isTrue(Debug.isEnabled());
-    assert.isNull(Debug.getFilter());
-
-    Debug.disable();
-  });
-
-  it("should stop logging when disabled", () => {
-    Debug.enable();
-    Debug.disable();
-
-    assert.isFalse(Debug.isEnabled());
-
-    Debug.disable();
-  });
-
-  it("should report enabled state correctly", () => {
-    Debug.disable();
-    assert.isFalse(Debug.isEnabled());
-
-    Debug.enable();
-    assert.isTrue(Debug.isEnabled());
-
-    Debug.disable();
-    assert.isFalse(Debug.isEnabled());
-  });
-});
-
-// =============================================================================
-// Debug filters
-// =============================================================================
-// Scope: Filtering which events are logged
-
-describe("Debug filters", () => {
-  it("should filter events by string prefix", () => {
-    Debug.disable();
-    Debug.enable("signal");
-
-    const filter = Debug.getFilter();
-    assert.deepStrictEqual(filter, ["signal"]);
-
-    Debug.disable();
-  });
-
-  it("should filter events by array of prefixes", () => {
-    Debug.disable();
-    Debug.enable(["signal", "render"]);
-
-    const filter = Debug.getFilter();
-    assert.isNotNull(filter);
-    assert.isTrue(filter?.includes("signal"));
-    assert.isTrue(filter?.includes("render"));
-
-    Debug.disable();
-  });
-
-  it("should return current filter configuration", () => {
-    Debug.disable();
-    Debug.enable(["signal", "router"]);
-
-    const filter = Debug.getFilter();
-    assert.isArray(filter);
-    assert.strictEqual(filter?.length, 2);
-
-    Debug.disable();
-  });
-
-  it.effect("should match exact event name", () =>
-    withDebugReset(
+describe("consoleLogger", () => {
+  it.effect("formats a catalog event with category, subtype, and payload", () =>
+    withConsoleCapture((lines) =>
       Effect.gen(function* () {
-        Debug.enable("signal.set");
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
 
-        const events: Debug.DebugEvent[] = [];
-        const plugin = Debug.createCollectorPlugin("test", events);
-        Debug.registerPlugin(plugin);
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "test",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events.length, 1);
-        assert.strictEqual(events[0]?.event, "signal.set");
-      }),
+        assert.strictEqual(lines.length, 1);
+        const text = textOf(lines[0]);
+        assert.include(text, "trygg");
+        assert.include(text, "signal");
+        assert.include(text, "set");
+        assert.include(text, "signal_id:s1");
+      }).pipe(
+        Effect.provide(Logger.layer([Debug.consoleLogger])),
+        Effect.provideService(References.MinimumLogLevel, "Trace"),
+      ),
     ),
   );
 
-  it.effect("should match events with prefix", () =>
-    withDebugReset(
+  it.effect("passes a non-trace log through plainly, tagged with its level", () =>
+    withConsoleCapture((lines) =>
       Effect.gen(function* () {
-        Debug.enable("signal");
+        yield* Effect.log("hello world");
 
-        const events: Debug.DebugEvent[] = [];
-        const plugin = Debug.createCollectorPlugin("test", events);
-        Debug.registerPlugin(plugin);
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "test",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-        yield* Debug.log({ event: "signal.get", signal_id: "test", trigger: "test" });
-
-        assert.strictEqual(events.length, 2);
-      }),
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "hello world");
+        assert.include(textOf(lines[0]), "Info");
+      }).pipe(Effect.provide(Logger.layer([Debug.consoleLogger]))),
     ),
   );
 
-  it.effect("should not match unrelated events", () =>
-    withDebugReset(
+  it.effect("does not fail framework work when payload stringification throws", () =>
+    withConsoleCapture((lines) =>
       Effect.gen(function* () {
-        Debug.enable("signal");
-
-        const events: Debug.DebugEvent[] = [];
-        const plugin = Debug.createCollectorPlugin("test", events);
-        Debug.registerPlugin(plugin);
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "test",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-        yield* Debug.log({ event: "render.component.initial", accessed_signals: 0 });
-
-        assert.strictEqual(events.length, 1);
-        assert.strictEqual(events[0]?.event, "signal.set");
-      }),
-    ),
-  );
-});
-
-// =============================================================================
-// Debug plugins
-// =============================================================================
-// Scope: Plugin system for custom event handling
-
-describe("Debug plugins", () => {
-  it("should register plugin", () => {
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-
-    const plugin = Debug.createPlugin("test-plugin", () => {});
-    Debug.registerPlugin(plugin);
-
-    assert.isTrue(Debug.hasPlugin("test-plugin"));
-
-    Debug.unregisterPlugin("test-plugin");
-  });
-
-  it("should unregister plugin by name", () => {
-    Debug.disable();
-    const plugin = Debug.createPlugin("to-remove", () => {});
-    Debug.registerPlugin(plugin);
-
-    assert.isTrue(Debug.hasPlugin("to-remove"));
-
-    Debug.unregisterPlugin("to-remove");
-
-    assert.isFalse(Debug.hasPlugin("to-remove"));
-  });
-
-  it("should return registered plugin names", () => {
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-
-    Debug.registerPlugin(Debug.createPlugin("plugin-a", () => {}));
-    Debug.registerPlugin(Debug.createPlugin("plugin-b", () => {}));
-
-    const plugins = Debug.getPlugins();
-    assert.isTrue(plugins.includes("plugin-a"));
-    assert.isTrue(plugins.includes("plugin-b"));
-
-    Debug.unregisterPlugin("plugin-a");
-    Debug.unregisterPlugin("plugin-b");
-  });
-
-  it("should check if plugin is registered", () => {
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-
-    assert.isFalse(Debug.hasPlugin("nonexistent"));
-
-    Debug.registerPlugin(Debug.createPlugin("exists", () => {}));
-    assert.isTrue(Debug.hasPlugin("exists"));
-
-    Debug.unregisterPlugin("exists");
-  });
-
-  it.effect("should call plugin handle with events", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.enable();
-
-        const events: Debug.DebugEvent[] = [];
-        const plugin = Debug.createCollectorPlugin("collector", events);
-        Debug.registerPlugin(plugin);
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events.length, 1);
-        assert.strictEqual(events[0]?.event, "signal.set");
-      }),
-    ),
-  );
-
-  it.effect("should isolate plugin errors", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.enable();
-
-        // First plugin throws
-        const context = yield* Effect.context<never>();
-        Debug.registerPlugin(
-          Debug.createPlugin("thrower", () => {
-            Effect.runSyncWith(context)(Effect.fail("Plugin error"));
-          }),
+        // Test: should isolate debug payload rendering failures.
+        // Scope: trace payloads with hostile serialization hooks.
+        // Assertion: the event is logged with a fallback payload representation.
+        const hostilePayload = {
+          toJSON: () => decodeURIComponent("%"),
+        };
+        const exit = yield* Trace.emit("signal.set", () => ({ signal_id: hostilePayload })).pipe(
+          Effect.provide(Logger.layer([Debug.consoleLogger])),
+          Effect.provideService(References.MinimumLogLevel, "Trace"),
+          Effect.exit,
         );
 
-        const events: Debug.DebugEvent[] = [];
-        Debug.registerPlugin(Debug.createCollectorPlugin("collector", events));
-
-        // Should not throw, and collector should still receive event
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events.length, 1);
+        assert.strictEqual(exit._tag, "Success");
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "signal_id:[Unserializable]");
       }),
     ),
   );
 
-  it.effect("should send event to all registered plugins", () =>
-    withDebugReset(
+  it.effect("drops events below the ambient minimum level (no console write)", () =>
+    withConsoleCapture((lines) =>
       Effect.gen(function* () {
-        Debug.enable();
+        // signal.set is a `cost` event (Debug); the default minimum level is Info.
+        yield* Trace.emit("signal.set");
 
-        const events1: Debug.DebugEvent[] = [];
-        const events2: Debug.DebugEvent[] = [];
-
-        Debug.registerPlugin(Debug.createCollectorPlugin("collector1", events1));
-        Debug.registerPlugin(Debug.createCollectorPlugin("collector2", events2));
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events1.length, 1);
-        assert.strictEqual(events2.length, 1);
-      }),
-    ),
-  );
-});
-
-// =============================================================================
-// Debug.log
-// =============================================================================
-// Scope: Logging debug events
-
-describe("Debug.log", () => {
-  it.effect("should log events when enabled", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.enable();
-
-        const events: Debug.DebugEvent[] = [];
-        Debug.registerPlugin(Debug.createCollectorPlugin("test", events));
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events.length, 1);
-      }),
+        assert.strictEqual(lines.length, 0);
+      }).pipe(Effect.provide(Logger.layer([Debug.consoleLogger]))),
     ),
   );
 
-  it.effect("should skip logging when disabled", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.disable();
-
-        const events: Debug.DebugEvent[] = [];
-        Debug.registerPlugin(Debug.createCollectorPlugin("test", events));
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.strictEqual(events.length, 0);
-      }),
-    ),
-  );
-
-  it.effect("should add timestamp to events", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.enable();
-
-        const events: Debug.DebugEvent[] = [];
-        Debug.registerPlugin(Debug.createCollectorPlugin("test", events));
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-
-        assert.isDefined(events[0]?.timestamp);
-        // Timestamp should be ISO format
-        assert.match(events[0]?.timestamp ?? "", /^\d{4}-\d{2}-\d{2}T/);
-      }),
-    ),
-  );
-
-  it.effect("should respect event filter", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        Debug.enable("signal");
-
-        const events: Debug.DebugEvent[] = [];
-        Debug.registerPlugin(Debug.createCollectorPlugin("test", events));
-
-        yield* Debug.log({
-          event: "signal.set",
-          signal_id: "s1",
-          prev_value: 0,
-          value: 1,
-          listener_count: 0,
-        });
-        yield* Debug.log({ event: "render.component.initial", accessed_signals: 0 });
-
-        assert.strictEqual(events.length, 1);
-        assert.strictEqual(events[0]?.event, "signal.set");
-      }),
-    ),
-  );
-});
-
-// =============================================================================
-// Debug ID generation
-// =============================================================================
-// Scope: Generating unique IDs for debugging
-
-describe("Debug ID generation", () => {
-  it("should generate unique signal IDs", () => {
-    const id1 = Debug.nextSignalId();
-    const id2 = Debug.nextSignalId();
-    const id3 = Debug.nextSignalId();
-
-    assert.notStrictEqual(id1, id2);
-    assert.notStrictEqual(id2, id3);
-    assert.notStrictEqual(id1, id3);
-    assert.match(id1, /^sig_\d+$/);
-  });
-
-  it("should generate unique trace IDs", () => {
-    const id1 = Debug.nextTraceId();
-    const id2 = Debug.nextTraceId();
-    const id3 = Debug.nextTraceId();
-
-    assert.notStrictEqual(id1, id2);
-    assert.notStrictEqual(id2, id3);
-    assert.match(id1, /^trace_\d+$/);
-  });
-
-  it("should generate unique span IDs", () => {
-    const id1 = Debug.nextSpanId();
-    const id2 = Debug.nextSpanId();
-    const id3 = Debug.nextSpanId();
-
-    assert.notStrictEqual(id1, id2);
-    assert.notStrictEqual(id2, id3);
-    assert.match(id1, /^span_\d+$/);
-  });
-});
-
-// =============================================================================
-// Trace context
-// =============================================================================
-// Scope: Trace ID propagation through effects
-
-describe("Trace context", () => {
-  it.effect("should store trace ID in fiber context", () =>
+  it.effect("does not fail framework work when console.log throws", () =>
     Effect.gen(function* () {
-      yield* Debug.setTraceId("trace_123");
-
-      const ctx = yield* Debug.getTraceContext;
-      assert.strictEqual(ctx.traceId, "trace_123");
-
-      yield* Debug.clearTraceContext;
-    }),
-  );
-
-  it.effect("should clear all trace context fields", () =>
-    Effect.gen(function* () {
-      yield* Effect.withFiber((fiber) =>
-        Effect.sync(() => {
-          fiber.setContext(
-            Context.add(
-              Context.add(
-                Context.add(fiber.context, Debug.CurrentTraceId, "trace_abc"),
-                Debug.CurrentSpanId,
-                "span_123",
-              ),
-              Debug.CurrentParentSpanId,
-              "span_parent",
-            ),
-          );
-        }),
+      // Test: should isolate debug console failures.
+      // Scope: human-facing logger boundary around Trace.emit.
+      // Assertion: the traced effect succeeds even when the console is hostile.
+      const original = console.log;
+      console.log = () => decodeURIComponent("%");
+      const exit = yield* Trace.emit("router.navigate.request", () => ({ to: "/x" })).pipe(
+        Effect.provide(Logger.layer([Debug.consoleLogger])),
+        Effect.provideService(References.MinimumLogLevel, "Trace"),
+        Effect.exit,
+        Effect.ensuring(
+          Effect.sync(() => {
+            console.log = original;
+          }),
+        ),
       );
 
-      yield* Debug.clearTraceContext;
-
-      const ctx = yield* Debug.getTraceContext;
-      assert.isUndefined(ctx.traceId);
-      assert.isUndefined(ctx.spanId);
-      assert.isUndefined(ctx.parentSpanId);
+      assert.strictEqual(exit._tag, "Success");
     }),
   );
+});
 
-  it.effect("should propagate trace context to child effects", () =>
-    Effect.gen(function* () {
-      yield* Debug.setTraceId("trace_parent");
+// =============================================================================
+// layer
+// =============================================================================
+// Scope: Installing and tuning the console logger for a subtree
 
-      const childCtx = yield* Debug.getTraceContext;
+describe("layer", () => {
+  it.effect("minLevel lowers the threshold so cost events are printed", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
 
-      assert.strictEqual(childCtx.traceId, "trace_parent");
+        assert.strictEqual(lines.length, 1);
+      }).pipe(Effect.provide(Debug.layer({ minLevel: "Trace" }))),
+    ),
+  );
 
-      yield* Debug.clearTraceContext;
-    }),
+  it.effect("a string filter keeps matching catalog events and drops the rest", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
+        yield* Trace.emit("router.navigate.request", () => ({ to: "/x" }));
+
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "signal");
+      }).pipe(Effect.provide(Debug.layer({ minLevel: "Trace", filter: "signal" }))),
+    ),
+  );
+
+  it.effect("an array filter keeps every listed prefix", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
+        yield* Trace.emit("render.schedule", () => ({}));
+        yield* Trace.emit("router.navigate.request", () => ({ to: "/x" }));
+
+        assert.strictEqual(lines.length, 2);
+        assert.include(textOf(lines[0]), "signal");
+        assert.include(textOf(lines[1]), "render");
+      }).pipe(Effect.provide(Debug.layer({ minLevel: "Trace", filter: ["signal", "render"] }))),
+    ),
+  );
+
+  it.effect("a filter never suppresses non-trace logs", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        yield* Effect.log("plain message");
+
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "plain message");
+      }).pipe(Effect.provide(Debug.layer({ minLevel: "Trace", filter: "signal" }))),
+    ),
+  );
+
+  it.effect("preserves an outer trace recorder when installed in a subtree", () =>
+    withConsoleCapture(() =>
+      Effect.gen(function* () {
+        // Test: should not replace scoped recorders when Debug.layer is provided lower in the tree.
+        // Scope: logger layer composition used by app layouts inside Trace.record/withRecording.
+        // Assertion: the recorder still sees the event emitted under Debug.layer.
+        const recorder = Trace.makeRecorder();
+        yield* Trace.record(
+          Trace.emit("signal.set", () => ({ signal_id: "s1" })).pipe(
+            Effect.provide(Debug.layer({ minLevel: "Trace" })),
+          ),
+          recorder,
+        );
+
+        assert.deepStrictEqual(
+          recorder.records().map((record) => record.name),
+          ["signal.set"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("batchWindow buffers events and flushes them after the window elapses", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
+        yield* Trace.emit("signal.get", () => ({ signal_id: "s1" }));
+
+        // Nothing is written until the batch window elapses.
+        assert.strictEqual(lines.length, 0);
+
+        yield* TestClock.adjust(Duration.millis(100));
+
+        assert.strictEqual(lines.length, 2);
+      }).pipe(
+        Effect.provide(Debug.layer({ minLevel: "Trace", batchWindow: Duration.millis(100) })),
+      ),
+    ),
   );
 });
 

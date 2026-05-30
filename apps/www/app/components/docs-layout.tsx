@@ -127,36 +127,44 @@ const registerActiveHeadingTracker = Effect.gen(function* () {
 });
 
 const DocsPrevNext = Component.gen(function* () {
-  const route = yield* currentRouteSnapshot;
-  const { prev, next } = getPrevNext(route.path);
+  // The shared DocsLayout is now preserved across sibling navigations, so this
+  // component renders ONCE. prev/next depend on the current path, so derive
+  // reactively from router.current (mirrors DocsSidebar) rather than reading a
+  // one-shot snapshot — otherwise the links would freeze on the first topic.
+  const router = yield* Router.get;
+  const content = yield* Signal.derive(router.current, (route) => {
+    const { prev, next } = getPrevNext(route.path);
 
-  if (prev === null && next === null) return <></>;
+    if (prev === null && next === null) return <></>;
 
-  return (
-    <nav className="docs-prev-next" aria-label="Previous and next pages">
-      {prev ? (
-        <Router.Link to={prev.href} className="docs-prev-next__link">
-          <span className="docs-prev-next__label">Previous</span>
-          <span className="docs-prev-next__title">{prev.label}</span>
-        </Router.Link>
-      ) : (
-        <div />
-      )}
-      {next ? (
-        <Router.Link
-          to={next.href}
-          className={
-            prev
-              ? "docs-prev-next__link docs-prev-next__link--next"
-              : "docs-prev-next__link docs-prev-next__link--next docs-prev-next__only"
-          }
-        >
-          <span className="docs-prev-next__label">Next</span>
-          <span className="docs-prev-next__title">{next.label}</span>
-        </Router.Link>
-      ) : null}
-    </nav>
-  );
+    return (
+      <nav className="docs-prev-next" aria-label="Previous and next pages">
+        {prev ? (
+          <Router.Link to={prev.href} className="docs-prev-next__link">
+            <span className="docs-prev-next__label">Previous</span>
+            <span className="docs-prev-next__title">{prev.label}</span>
+          </Router.Link>
+        ) : (
+          <div />
+        )}
+        {next ? (
+          <Router.Link
+            to={next.href}
+            className={
+              prev
+                ? "docs-prev-next__link docs-prev-next__link--next"
+                : "docs-prev-next__link docs-prev-next__link--next docs-prev-next__only"
+            }
+          >
+            <span className="docs-prev-next__label">Next</span>
+            <span className="docs-prev-next__title">{next.label}</span>
+          </Router.Link>
+        ) : null}
+      </nav>
+    );
+  });
+
+  return <>{content}</>;
 });
 
 export const DocsLayout = Component.gen(function* () {
@@ -169,6 +177,15 @@ export const DocsLayout = Component.gen(function* () {
 
   const openDrawer = () => Signal.set(drawerOpen, true);
   const closeDrawer = () => Signal.set(drawerOpen, false);
+  const drawerPanel = yield* Signal.derive(drawerOpen, (open) =>
+    open ? (
+      <div className="docs-drawer__panel">
+        <DocsSidebar onNavigate={closeDrawer} />
+      </div>
+    ) : (
+      <></>
+    ),
+  );
 
   const route = yield* currentRouteSnapshot;
   const hasRail = route.path !== "/docs";
@@ -209,9 +226,7 @@ export const DocsLayout = Component.gen(function* () {
             aria-label="Close docs navigation"
             onClick={closeDrawer}
           />
-          <div className="docs-drawer__panel">
-            <DocsSidebar onNavigate={closeDrawer} />
-          </div>
+          {drawerPanel}
         </div>
 
         <main id="main-content" className="docs-content">

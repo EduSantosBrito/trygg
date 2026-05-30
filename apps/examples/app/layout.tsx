@@ -4,7 +4,7 @@
  * Renders the full <html>/<head>/<body> structure.
  * Docs-style layout with fixed sidebar navigation and scrollable content area.
  */
-import { Component, DevMode } from "trygg";
+import { Component, Debug } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
 import { AuthLive } from "./resources/auth";
@@ -19,8 +19,6 @@ export default Component.gen(function* () {
         <link rel="icon" href="/favicon.svg" />
       </head>
       <body className="min-h-screen bg-gray-50 text-gray-800">
-        <DevMode />
-
         <aside className="fixed top-0 left-0 bottom-0 w-60 bg-white border-r border-gray-200 overflow-y-auto z-40">
           <div className="px-5 py-5 border-b border-gray-100">
             <Router.Link
@@ -118,4 +116,8 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).pipe(Component.provide(ApiClientLive), Component.provide(AuthLive));
+}).pipe(
+  Component.provide(ApiClientLive),
+  Component.provide(AuthLive),
+  Component.provide(Debug.layer({ minLevel: "Trace", filter: "signal" })),
+);

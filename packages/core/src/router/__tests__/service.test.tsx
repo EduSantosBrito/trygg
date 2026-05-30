@@ -565,17 +565,20 @@ describe("Router.currentError", () => {
     }),
   );
 
-  scoped("should die when called outside error boundary context", () =>
+  scoped("should fail when called outside error boundary context", () =>
     Effect.gen(function* () {
       const exit = yield* Effect.exit(Router.currentError);
 
       Exit.match(exit, {
         onFailure: (cause) => {
-          assert.isTrue(Cause.hasDies(cause));
-          assert.instanceOf(Cause.squash(cause), Router.CurrentErrorOutsideBoundaryError);
+          const error = Cause.findErrorOption(cause);
+          if (Option.isNone(error)) {
+            return assert.fail("Expected CurrentErrorOutsideBoundaryError failure");
+          }
+          assert.instanceOf(error.value, Router.CurrentErrorOutsideBoundaryError);
         },
         onSuccess: () => {
-          assert.fail("Expected currentError to die outside error boundary context");
+          assert.fail("Expected currentError to fail outside error boundary context");
         },
       });
     }).pipe(Effect.provide(Router.testLayer("/"))),

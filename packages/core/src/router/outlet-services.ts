@@ -5,20 +5,7 @@
  * Testable services used internally by the Outlet. Each has a service key
  * with Layer factories for production and testing.
  */
-import {
-  Cause,
-  Data,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Ref,
-  Result,
-  Schema,
-  Scope,
-  SubscriptionRef,
-} from "effect";
+import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import {
   Element,
@@ -29,8 +16,8 @@ import {
 import * as Signal from "../primitives/signal.js";
 import * as Component from "../primitives/component.js";
 import * as Metrics from "../debug/metrics.js";
-import * as ContractTrace from "../contract/trace.js";
-import { getFiberRef, locallyFiberRef } from "../internal/fiber-ref.js";
+import * as Trace from "../trace/index.js";
+import { locallyFiberRef } from "../internal/fiber-ref.js";
 import type { RoutesManifest } from "./routes.js";
 import {
   InvalidRouteComponent,
@@ -41,31 +28,6 @@ import {
 } from "./types.js";
 import type { ResolvedRoute } from "./matching.js";
 
-const isSignalDisposedCause = (cause: Cause.Cause<unknown>): boolean => {
-  const defect = Cause.findDefect(cause);
-  return Result.isSuccess(defect) && defect.success instanceof Signal.SignalDisposedError;
-};
-
-const ignoreExpectedSignalDisposed = <A, R>(
-  effect: Effect.Effect<A, Signal.SignalDisposedError, R>,
-): Effect.Effect<A | void, never, R> =>
-  effect.pipe(
-    Effect.catchTag("SignalDisposedError", (error) =>
-      ContractTrace.emit({
-        event: "effect.error.ignored",
-        level: "diagnostic",
-        payload: {
-          error: error._tag,
-          signal_id: error.signalId,
-          operation: error.operation,
-        },
-      }),
-    ),
-    Effect.catchCause((cause) =>
-      isSignalDisposedCause(cause) ? Effect.void : Effect.failCause(cause),
-    ),
-  );
-
 const runSignalSetupSync = <A>(effect: Effect.Effect<A, Signal.SignalScopeError>): A =>
   Effect.runSync(effect);
 import {
@@ -74,18 +36,26 @@ import {
   resolveLoadingBoundary,
   resolveNotFoundBoundary,
 } from "./matching.js";
-import {
-  CurrentRouteParams,
-  CurrentRouteError,
-  CurrentOutletChild,
-  CurrentRouter,
-} from "./service.js";
+import { CurrentRouteParams, CurrentRouteError, locallyCurrentOutletChild } from "./service.js";
 import { CurrentRouteQuery } from "./route.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
 
 export interface RouteRenderIdentity {
   readonly path: string;
+  readonly key: string;
+  readonly currentKey: Effect.Effect<string>;
 }
+
+export const routeRenderKey = (path: string, query: URLSearchParams): string => {
+  const queryString = query.toString();
+  return queryString === "" ? path : `${path}?${queryString}`;
+};
+
+export const routeRenderIdentity = (
+  path: string,
+  query: URLSearchParams,
+  currentKey: Effect.Effect<string>,
+): RouteRenderIdentity => ({ path, key: routeRenderKey(path, query), currentKey });
 
 class StaleRouteRender extends Schema.TaggedErrorClass<StaleRouteRender>()("StaleRouteRender", {
   expectedPath: Schema.String,
@@ -134,26 +104,65 @@ const mapChildInputElements = (
 const isStaleRouteRender = Effect.fn("isStaleRouteRender")(function* (
   routeIdentity: RouteRenderIdentity | undefined,
 ) {
-  if (routeIdentity === undefined) return false;
+  if (routeIdentity === undefined) {
+    return false;
+  }
 
-  const router = yield* getFiberRef(CurrentRouter);
-  if (Option.isNone(router)) return false;
-
-  const current = yield* SubscriptionRef.get(router.value.current._ref);
-  return current.path !== routeIdentity.path;
+  return (yield* routeIdentity.currentKey) !== routeIdentity.key;
 });
+
+// The lexical context captured around a route/layout element is re-injected via
+// provideElement when that element actually renders LATER, inside the outlet's
+// own render phase. It must NOT carry the transient render-state fiber refs that
+// happened to be ambient at capture time (the enclosing layout wrapper's render
+// phase, component scope, and signal owner). If it does, provideElement re-injects
+// the enclosing phase and renderComponent's own provideService(CurrentRenderPhase,
+// childPhase) becomes a no-op — the wrapped child renders under the WRONG phase.
+// Its local Signal.get reads then get attributed to the layout wrapper instead of
+// the child, so child-local updates re-render the layout (and stop at the no-op
+// SignalElement reconcile) instead of re-running the child. Strip them so each
+// child renders under its own phase. Mirrors render-component.ts:133-137.
+const stripCapturedRenderState = Context.omit(
+  Signal.CurrentRenderPhase,
+  Signal.CurrentComponentScope,
+  Signal.CurrentSignalOwner,
+);
+
+// The outlet passes a single-entry context fragment carrying CurrentRouter (the
+// live router service for this outlet's subtree). Merge it into the stripped
+// capturable context so the route staleness gate (isStaleRouteRender) can read
+// router.current on every route child's render AND re-render fiber. The
+// route/layout element is ALREADY a Provide boundary, so this only adds to the
+// provided context — it never changes the element's shape. CurrentRouter cannot
+// be set on the outlet's own fiber (render fibers fork from this captured
+// context, not the live outlet fiber), and ManagedRuntime's layer-time fiber-ref
+// propagation does not reach render fibers under a plain Effect.provide runtime;
+// threading it through the captured context is the one channel that always
+// reaches the gate.
+const mergeRouterContext = (
+  stripped: Context.Context<unknown>,
+  routerContext: Context.Context<never> | undefined,
+): Context.Context<unknown> =>
+  routerContext === undefined ? stripped : Context.merge(stripped, routerContext);
 
 const wrapElementWithFiberRefs = (
   element: ElementType,
-  wrapRun: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+  // The route variant of wrapRun (withRouteContext) gates each wrapped
+  // component's run on route staleness and may short-circuit with
+  // StaleRouteRender; layout/error variants never add to the error channel and
+  // remain assignable by covariance.
+  wrapRun: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | StaleRouteRender, R>,
   wrapperInputs: unknown,
+  shouldDropSignalUpdate?: Effect.Effect<boolean>,
 ): ElementType => {
   switch (element._tag) {
     case "Component":
       return Element.fromEffect(
         Effect.suspend(() =>
           wrapRun(element.run()).pipe(
-            Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun, wrapperInputs)),
+            Effect.map((child) =>
+              wrapElementWithFiberRefs(child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
+            ),
             unsafeEraseR,
           ),
         ),
@@ -164,31 +173,63 @@ const wrapElementWithFiberRefs = (
           provider: element.provider ?? undefined,
         },
       );
+    case "SignalElement":
+      return Element.fromEffect(
+        Effect.gen(function* () {
+          const wrapSignalValue = (value: unknown) => {
+            const child = isElement(value)
+              ? wrapElementWithFiberRefs(value, wrapRun, wrapperInputs, shouldDropSignalUpdate)
+              : Element.Text({ content: String(value) });
+            return Element.fromEffect(wrapRun(Effect.succeed(child)).pipe(unsafeEraseR), {
+              identity: element.signal,
+              inputs: { value, wrapper: wrapperInputs },
+            });
+          };
+          const initial = yield* Signal.peek(element.signal);
+          const wrappedSignal = yield* Signal.make<ElementType>(wrapSignalValue(initial));
+          const unsubscribe = yield* Signal.subscribe(element.signal, () =>
+            Effect.gen(function* () {
+              if (shouldDropSignalUpdate !== undefined && (yield* shouldDropSignalUpdate)) {
+                yield* Trace.emit("route.render.skipStale", () => ({ reason: "signalElement" }));
+                return;
+              }
+              const value = yield* Signal.peek(element.signal);
+              yield* Signal.set(wrappedSignal, wrapSignalValue(value));
+            }),
+          );
+          yield* Effect.addFinalizer(() => unsubscribe);
+          return Element.SignalElement({ signal: wrappedSignal, onSwap: element.onSwap });
+        }).pipe(unsafeEraseR),
+        {
+          identity: element.signal,
+          inputs: { signal: element.signal, onSwap: element.onSwap, wrapper: wrapperInputs },
+        },
+      );
     case "Provide":
       return provideElement(
         element.context,
-        wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
+        wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
       );
     case "Intrinsic":
       return Element.Intrinsic({
         tag: element.tag,
         props: element.props,
         children: element.children.map((child) =>
-          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
         ),
         key: element.key,
       });
     case "Fragment":
       return Element.Fragment({
         children: element.children.map((child) =>
-          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
         ),
       });
     case "Portal":
       return Element.Portal({
         target: element.target,
         children: mapChildInputElements(element.children, (child) =>
-          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs),
+          wrapElementWithFiberRefs(child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
         ),
       });
     case "KeyedList":
@@ -198,21 +239,46 @@ const wrapElementWithFiberRefs = (
         renderFn: (item, index) =>
           element
             .renderFn(item, index)
-            .pipe(Effect.map((child) => wrapElementWithFiberRefs(child, wrapRun, wrapperInputs))),
+            .pipe(
+              Effect.map((child) =>
+                wrapElementWithFiberRefs(child, wrapRun, wrapperInputs, shouldDropSignalUpdate),
+              ),
+            ),
       });
     case "ErrorBoundaryElement":
       if (typeof element.fallback === "function") {
         const fallback = element.fallback;
         return Element.ErrorBoundaryElement({
-          child: wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
-          fallback: (cause) => wrapElementWithFiberRefs(fallback(cause), wrapRun, wrapperInputs),
+          child: wrapElementWithFiberRefs(
+            element.child,
+            wrapRun,
+            wrapperInputs,
+            shouldDropSignalUpdate,
+          ),
+          fallback: (cause) =>
+            wrapElementWithFiberRefs(
+              fallback(cause),
+              wrapRun,
+              wrapperInputs,
+              shouldDropSignalUpdate,
+            ),
           onError: element.onError,
         });
       }
 
       return Element.ErrorBoundaryElement({
-        child: wrapElementWithFiberRefs(element.child, wrapRun, wrapperInputs),
-        fallback: wrapElementWithFiberRefs(element.fallback, wrapRun, wrapperInputs),
+        child: wrapElementWithFiberRefs(
+          element.child,
+          wrapRun,
+          wrapperInputs,
+          shouldDropSignalUpdate,
+        ),
+        fallback: wrapElementWithFiberRefs(
+          element.fallback,
+          wrapRun,
+          wrapperInputs,
+          shouldDropSignalUpdate,
+        ),
         onError: element.onError,
       });
     default:
@@ -376,7 +442,7 @@ export class AsyncLoader extends Context.Service<
   static readonly make = (
     loadingElement: Element,
     scope: Scope.Scope,
-  ): Effect.Effect<AsyncLoaderShape, Signal.SignalDisposedError | Signal.SignalScopeError> =>
+  ): Effect.Effect<AsyncLoaderShape, Signal.SignalScopeError> =>
     Effect.gen(function* () {
       const state = yield* Signal.make<AsyncLoadState>(AsyncLoadState.Loading());
       const view = yield* Signal.derive(
@@ -396,108 +462,98 @@ export class AsyncLoader extends Context.Service<
       );
       const matchKeyRef = yield* Ref.make<Option.Option<string>>(Option.none());
 
-      const track = (
+      const track = Effect.fnUntraced(function* (
         matchKey: string,
         loadEffect: Effect.Effect<Element, unknown, never>,
         trace?: { readonly epoch?: number },
-      ): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          // Dedup: skip if matchKey unchanged
-          const currentKey = yield* Ref.get(matchKeyRef);
-          if (Option.isSome(currentKey) && currentKey.value === matchKey) {
-            yield* ContractTrace.emit({
-              event: "asyncLoader.dedup",
-              level: "semantic",
-              payload: { matchKey, epoch: trace?.epoch },
-            });
-            return;
-          }
-          yield* ContractTrace.emit({
-            event: "asyncLoader.track",
-            level: "semantic",
-            payload: {
-              matchKey,
-              previousMatchKey: Option.getOrUndefined(currentKey),
-              epoch: trace?.epoch,
-            },
-          });
-          yield* Ref.set(matchKeyRef, Option.some(matchKey));
+      ) {
+        // Dedup: skip if matchKey unchanged
+        const currentKey = yield* Ref.get(matchKeyRef);
+        if (Option.isSome(currentKey) && currentKey.value === matchKey) {
+          yield* Trace.emit("asyncLoader.dedup", () => ({ matchKey, epoch: trace?.epoch }));
+          return;
+        }
+        yield* Trace.emit("asyncLoader.track", () => ({
+          matchKey,
+          previousMatchKey: Option.getOrUndefined(currentKey),
+          epoch: trace?.epoch,
+        }));
+        yield* Ref.set(matchKeyRef, Option.some(matchKey));
 
-          // Interrupt previous load fiber
-          const prevFiber = yield* Ref.get(currentFiberRef);
-          yield* Option.match(prevFiber, {
-            onNone: () => Effect.void,
-            onSome: (fiber) =>
-              Effect.gen(function* () {
-                yield* ContractTrace.emit({
-                  event: "asyncLoader.interrupt",
-                  level: "semantic",
-                  payload: {
-                    fromMatchKey: Option.getOrUndefined(currentKey),
-                    toMatchKey: matchKey,
-                    epoch: trace?.epoch,
-                  },
-                });
-                yield* Fiber.interrupt(fiber);
-                yield* ContractTrace.emit({
-                  event: "effect.fiber.interrupt",
-                  level: "semantic",
-                  payload: { owner: "router.asyncLoader", reason: "new-match" },
-                });
-                yield* Ref.set(currentFiberRef, Option.none());
-              }),
-          });
-
-          // Set loading/refreshing state
-          const lastEl = yield* Ref.get(lastElementRef);
-          yield* Option.match(lastEl, {
-            onNone: () =>
-              ContractTrace.emit({
-                event: "asyncLoader.loading",
-                level: "semantic",
-                payload: { matchKey, epoch: trace?.epoch },
-              }).pipe(Effect.flatMap(() => Signal.set(state, AsyncLoadState.Loading()))),
-            onSome: (previous) =>
-              ContractTrace.emit({
-                event: "asyncLoader.refreshing",
-                level: "semantic",
-                payload: { matchKey, hasPrevious: true, epoch: trace?.epoch },
-              }).pipe(
-                Effect.flatMap(() => Signal.set(state, AsyncLoadState.Refreshing({ previous }))),
-              ),
-          });
-
-          // Fork the load effect
-          yield* ContractTrace.emit({
-            event: "effect.fork.scoped",
-            level: "semantic",
-            payload: { owner: "router.asyncLoader", scopeKind: "outlet" },
-          });
-          const fiber = yield* Effect.forkIn(
+        // Interrupt previous load fiber
+        const prevFiber = yield* Ref.get(currentFiberRef);
+        yield* Option.match(prevFiber, {
+          onNone: () => Effect.void,
+          onSome: (fiber) =>
             Effect.gen(function* () {
-              const exit = yield* Effect.exit(loadEffect);
-              if (Exit.isSuccess(exit)) {
-                yield* Ref.set(lastElementRef, Option.some(exit.value));
-                yield* ContractTrace.emit({
-                  event: "asyncLoader.ready",
-                  level: "semantic",
-                  payload: { matchKey, epoch: trace?.epoch },
-                });
-                yield* Signal.set(state, AsyncLoadState.Ready({ element: exit.value }));
-              } else {
-                yield* ContractTrace.emit({
-                  event: "asyncLoader.error",
-                  level: "semantic",
-                  payload: { matchKey, epoch: trace?.epoch, cause: Cause.pretty(exit.cause) },
-                });
-                yield* Signal.set(state, AsyncLoadState.Loading());
-              }
-            }).pipe(ignoreExpectedSignalDisposed),
-            scope,
-          );
+              yield* Trace.emit("asyncLoader.interrupt", () => ({
+                fromMatchKey: Option.getOrUndefined(currentKey),
+                toMatchKey: matchKey,
+                epoch: trace?.epoch,
+              }));
+              yield* Effect.sync(() => {
+                fiber.interruptUnsafe();
+              });
+              yield* Trace.emit("effect.fiber.interrupt", () => ({
+                owner: "router.asyncLoader",
+                reason: "new-match",
+              }));
+              yield* Ref.set(currentFiberRef, Option.none());
+            }),
+        });
 
-          yield* Ref.set(currentFiberRef, Option.some(fiber));
-        }).pipe(ignoreExpectedSignalDisposed);
+        // Set loading/refreshing state
+        const lastEl = yield* Ref.get(lastElementRef);
+        yield* Option.match(lastEl, {
+          onNone: () =>
+            Trace.emit("asyncLoader.loading", () => ({ matchKey, epoch: trace?.epoch })).pipe(
+              Effect.flatMap(() => Signal.set(state, AsyncLoadState.Loading())),
+            ),
+          onSome: (previous) =>
+            Trace.emit("asyncLoader.refreshing", () => ({
+              matchKey,
+              hasPrevious: true,
+              epoch: trace?.epoch,
+            })).pipe(
+              Effect.flatMap(() => Signal.set(state, AsyncLoadState.Refreshing({ previous }))),
+            ),
+        });
+
+        // Fork the load effect
+        yield* Trace.emit("effect.fork.scoped", () => ({
+          owner: "router.asyncLoader",
+          scopeKind: "outlet",
+        }));
+        const fiber = yield* Effect.forkIn(
+          Effect.gen(function* () {
+            const exit = yield* Effect.exit(loadEffect);
+            const activeKey = yield* Ref.get(matchKeyRef);
+            if (Option.isNone(activeKey) || activeKey.value !== matchKey) {
+              yield* Trace.emit("asyncLoader.dropStale", () => ({
+                matchKey,
+                activeMatchKey: Option.getOrUndefined(activeKey),
+                epoch: trace?.epoch,
+              }));
+              return;
+            }
+            if (Exit.isSuccess(exit)) {
+              yield* Ref.set(lastElementRef, Option.some(exit.value));
+              yield* Trace.emit("asyncLoader.ready", () => ({ matchKey, epoch: trace?.epoch }));
+              yield* Signal.set(state, AsyncLoadState.Ready({ element: exit.value }));
+            } else {
+              yield* Trace.emit("asyncLoader.error", () => ({
+                matchKey,
+                epoch: trace?.epoch,
+                cause: Cause.pretty(exit.cause),
+              }));
+              yield* Signal.set(state, AsyncLoadState.Loading());
+            }
+          }),
+          scope,
+        );
+
+        yield* Ref.set(currentFiberRef, Option.some(fiber));
+      });
 
       return { state, view, track } satisfies AsyncLoaderShape;
     });
@@ -521,10 +577,8 @@ export class AsyncLoader extends Context.Service<
           const exit = yield* Effect.exit(loadEffect);
           if (Exit.isSuccess(exit)) {
             lastElement = exit.value;
-            yield* ignoreExpectedSignalDisposed(
-              Signal.set(stateSignal, AsyncLoadState.Ready({ element: lastElement })),
-            );
-            yield* ignoreExpectedSignalDisposed(Signal.set(viewSignal, lastElement));
+            yield* Signal.set(stateSignal, AsyncLoadState.Ready({ element: lastElement }));
+            yield* Signal.set(viewSignal, lastElement);
           }
         }),
     };
@@ -545,24 +599,46 @@ export function renderComponent(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
   routeIdentity?: RouteRenderIdentity,
+  routerContext?: Context.Context<never>,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
-  const withRouteContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    locallyFiberRef(
-      CurrentRouteParams,
-      params,
-      locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
+  // Gate every wrapped route-subtree component run on staleness. This wraps each
+  // component's `run` (initial AND re-render), so when a superseded route child
+  // re-renders from its own local signal during a pending navigation, its body
+  // never executes — no stale write to shared chrome, no wasted subtree work.
+  // The raised StaleRouteRender is a transient render failure: render-component
+  // preserves the current DOM and skips the commit instead of tearing down.
+  // (The wrapper gen below also checks staleness, but only on its OWN render;
+  // after correct render-phase attribution the inner component re-renders
+  // directly and bypasses that wrapper-level check — this gate covers it.)
+  const withRouteContext = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | StaleRouteRender, R> =>
+    Effect.flatMap(
+      isStaleRouteRender(routeIdentity),
+      (stale): Effect.Effect<A, E | StaleRouteRender, R> =>
+        stale
+          ? Effect.flatMap(
+              Trace.emit("route.render.skipStale", () => ({ expectedPath: routeIdentity?.path })),
+              () =>
+                Effect.fail(
+                  new StaleRouteRender({ expectedPath: routeIdentity?.path ?? "<unknown>" }),
+                ),
+            )
+          : locallyFiberRef(
+              CurrentRouteParams,
+              params,
+              locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
+            ),
     );
 
   const wrapRouteElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
     Element.fromEffect(
       Effect.gen(function* () {
         if (yield* isStaleRouteRender(routeIdentity)) {
-          yield* ContractTrace.emit({
-            event: "route.render.skipStale",
-            level: "semantic",
-            payload: { expectedPath: routeIdentity?.path },
-          });
+          yield* Trace.emit("route.render.skipStale", () => ({
+            expectedPath: routeIdentity?.path,
+          }));
           return yield* new StaleRouteRender({ expectedPath: routeIdentity?.path ?? "<unknown>" });
         }
 
@@ -575,8 +651,13 @@ export function renderComponent(
           wrappedIdentity: component,
         };
         return provideElement(
-          capturedContext,
-          wrapElementWithFiberRefs(element, withRouteContext, wrapperInputs),
+          mergeRouterContext(stripCapturedRenderState(capturedContext), routerContext),
+          wrapElementWithFiberRefs(
+            element,
+            withRouteContext,
+            wrapperInputs,
+            isStaleRouteRender(routeIdentity),
+          ),
         );
       }).pipe(unsafeEraseR),
       {
@@ -606,28 +687,23 @@ export function renderLayout(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
   routeIdentity?: RouteRenderIdentity,
+  routerContext?: Context.Context<never>,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
   const params = toRouteParams(decodedParams);
   const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     locallyFiberRef(
       CurrentRouteParams,
       params,
-      locallyFiberRef(
-        CurrentRouteQuery,
-        decodedQuery,
-        locallyFiberRef(CurrentOutletChild, Option.some(child), effect),
-      ),
+      locallyFiberRef(CurrentRouteQuery, decodedQuery, locallyCurrentOutletChild(child, effect)),
     );
 
   const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
     Element.fromEffect(
       Effect.gen(function* () {
         if (yield* isStaleRouteRender(routeIdentity)) {
-          yield* ContractTrace.emit({
-            event: "route.layout.skipStale",
-            level: "semantic",
-            payload: { expectedPath: routeIdentity?.path },
-          });
+          yield* Trace.emit("route.layout.skipStale", () => ({
+            expectedPath: routeIdentity?.path,
+          }));
           return yield* new StaleRouteRender({ expectedPath: routeIdentity?.path ?? "<unknown>" });
         }
 
@@ -641,13 +717,77 @@ export function renderLayout(
           wrappedIdentity: layout,
         };
         return provideElement(
-          capturedContext,
-          wrapElementWithFiberRefs(element, withLayoutContext, wrapperInputs),
+          mergeRouterContext(stripCapturedRenderState(capturedContext), routerContext),
+          wrapElementWithFiberRefs(
+            element,
+            withLayoutContext,
+            wrapperInputs,
+            isStaleRouteRender(routeIdentity),
+          ),
         );
       }).pipe(unsafeEraseR),
       {
         identity: layout,
         inputs: { child, params, query: decodedQuery, routeIdentity, wrappedIdentity: layout },
+      },
+    );
+
+  if (Component.isEffectComponent(layout)) {
+    return Effect.succeed(wrapLayoutElement(Effect.succeed(layout({}))));
+  }
+
+  if (isEffectElement(layout)) {
+    return Effect.succeed(wrapLayoutElement(layout));
+  }
+
+  return Effect.fail(new InvalidRouteComponent({ actual: layout }));
+}
+
+/**
+ * Render a layout component wrapping a PERSISTENT child SignalElement.
+ *
+ * Unlike {@link renderLayout}, this never bakes child identity into the element
+ * inputs: the child region swaps through `childSignalElement`, so normal sibling
+ * navigation keeps layout chrome mounted. It does include the caller's
+ * `routeContextKey` in the inputs so a preserved layout is rebuilt when the
+ * decoded params/query context it reads through `Router.params` / `Router.query`
+ * changes. routeIdentity is intentionally absent so no stale-render guard tears
+ * down a still-current persistent frame.
+ * @internal
+ */
+export function renderLayoutReactive(
+  layout: RouteComponent,
+  childSignalElement: ElementType,
+  decodedParams: Record<string, unknown>,
+  decodedQuery: Record<string, unknown> = {},
+  routeContextKey?: string,
+): Effect.Effect<ElementType, InvalidRouteComponent, never> {
+  const params = toRouteParams(decodedParams);
+  const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    locallyFiberRef(
+      CurrentRouteParams,
+      params,
+      locallyFiberRef(
+        CurrentRouteQuery,
+        decodedQuery,
+        locallyCurrentOutletChild(childSignalElement, effect),
+      ),
+    );
+
+  const wrapLayoutElement = (effect: Effect.Effect<ElementType, unknown, RuntimeRequirements>) =>
+    Element.fromEffect(
+      Effect.gen(function* () {
+        const capturedContext = yield* Effect.context<unknown>();
+        const element = yield* effect;
+        const wrapperInputs = { wrappedIdentity: layout, routeContextKey };
+        return provideElement(
+          stripCapturedRenderState(capturedContext),
+          wrapElementWithFiberRefs(element, withLayoutContext, wrapperInputs),
+        );
+      }).pipe(unsafeEraseR),
+      {
+        identity: layout,
+        inputs: { wrappedIdentity: layout, routeContextKey },
       },
     );
 
@@ -693,7 +833,7 @@ export function renderError(
             const element = yield* effect;
             const wrapperInputs = { cause, path, wrappedIdentity: errorComp };
             return provideElement(
-              capturedContext,
+              stripCapturedRenderState(capturedContext),
               wrapElementWithFiberRefs(element, withErrorContext, wrapperInputs),
             );
           }).pipe(unsafeEraseR),

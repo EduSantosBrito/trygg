@@ -141,53 +141,50 @@ const computeClassesEffect = Effect.fn("computeClassesEffect")(function* (
  */
 export const cx: (
   ...inputs: ReadonlyArray<ClassInput>
-) => Effect.Effect<
-  string | Signal.Signal<string>,
-  Signal.SignalDisposedError | Signal.SignalScopeError,
-  Scope.Scope
-> = Effect.fn("cx")(function* (...inputs: ReadonlyArray<ClassInput>) {
-  // Collect Signal inputs
-  const signals: Array<Signal.Signal<unknown>> = [];
-  for (const input of inputs) {
-    if (Signal.isSignal(input)) {
-      signals.push(input);
+) => Effect.Effect<string | Signal.Signal<string>, Signal.SignalScopeError, Scope.Scope> =
+  Effect.fn("cx")(function* (...inputs: ReadonlyArray<ClassInput>) {
+    // Collect Signal inputs
+    const signals: Array<Signal.Signal<unknown>> = [];
+    for (const input of inputs) {
+      if (Signal.isSignal(input)) {
+        signals.push(input);
+      }
     }
-  }
 
-  // No signals — compute and return plain string
-  if (signals.length === 0) {
-    const signalValues = new Map<Signal.Signal<unknown>, unknown>();
-    return yield* computeClasses(inputs, signalValues);
-  }
+    // No signals — compute and return plain string
+    if (signals.length === 0) {
+      const signalValues = new Map<Signal.Signal<unknown>, unknown>();
+      return yield* computeClasses(inputs, signalValues);
+    }
 
-  // Has signals — create reactive output Signal
-  const renderScope = yield* Signal.CurrentRenderScope;
-  const scope = renderScope ?? (yield* Effect.scope);
+    // Has signals — create reactive output Signal
+    const renderScope = yield* Signal.CurrentRenderScope;
+    const scope = renderScope ?? (yield* Effect.scope);
 
-  const initial = yield* computeClassesEffect(inputs);
-  const output: Signal.Signal<string> = yield* Signal.make(initial);
+    const initial = yield* computeClassesEffect(inputs);
+    const output: Signal.Signal<string> = yield* Signal.make(initial);
 
-  // Subscribe to each signal — recompute on change
-  const unsubscribes: Array<Effect.Effect<void>> = [];
-  for (const sig of signals) {
-    const unsubscribe = yield* Signal.subscribe(sig, () =>
+    // Subscribe to each signal — recompute on change
+    const unsubscribes: Array<Effect.Effect<void>> = [];
+    for (const sig of signals) {
+      const unsubscribe = yield* Signal.subscribe(sig, () =>
+        Effect.gen(function* () {
+          const newValue = yield* computeClassesEffect(inputs);
+          yield* Signal.set(output, newValue);
+        }),
+      );
+      unsubscribes.push(unsubscribe);
+    }
+
+    // Register cleanup
+    yield* Scope.addFinalizer(
+      scope,
       Effect.gen(function* () {
-        const newValue = yield* computeClassesEffect(inputs);
-        yield* Signal.set(output, newValue);
+        for (const unsub of unsubscribes) {
+          yield* unsub;
+        }
       }),
     );
-    unsubscribes.push(unsubscribe);
-  }
 
-  // Register cleanup
-  yield* Scope.addFinalizer(
-    scope,
-    Effect.gen(function* () {
-      for (const unsub of unsubscribes) {
-        yield* unsub;
-      }
-    }),
-  );
-
-  return output;
-});
+    return output;
+  });

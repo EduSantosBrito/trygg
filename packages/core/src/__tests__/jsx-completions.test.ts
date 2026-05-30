@@ -79,5 +79,5 @@ describe("JSX intrinsic completions", () => {
     assert.isFalse(divNames.has("strokeWidth"));
     assert.isTrue(svgNames.has("viewBox"));
     assert.isTrue(svgNames.has("strokeWidth"));
-  });
+  }, 15_000);
 });

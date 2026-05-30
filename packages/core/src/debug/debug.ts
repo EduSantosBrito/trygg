@@ -1,1634 +1,123 @@
 /**
- * Structured debug events, plugins, and tracing helpers.
+ * Debug — the human-facing console sink for the Trace flight recorder.
  *
  * @remarks
- * Owner module for the `Debug` topic. Use this module when the app needs direct
- * control over debug enablement, event plugins, or trace/span context beyond
- * the higher-level `DevMode` component.
+ * Owner module for the `Debug` topic. Where {@link module:trygg/trace} is the
+ * framework's internal, machine-assertable flight recorder, `Debug` turns those
+ * events into colour-coded, human-readable console output. It is an ordinary
+ * Effect {@link Logger} over the trace stream — there is no bespoke sink
+ * machinery.
+ *
+ * - {@link consoleLogger} formats catalog events with `%c` category badges and
+ *   passes other logs through plainly.
+ * - {@link layer} builds a `Layer` you provide to a component subtree (via
+ *   `Component.provide`) to install the console logger and tune the minimum log
+ *   level, a name filter, and optional batching.
+ *
+ * The framework installs a console logger by default in the generated entry
+ * module, so logging works in dev and prod with no application wiring; reach for
+ * {@link layer} only to tune it.
  *
  * @see ./debug.docs.md - Source-owned topic guide
  * @since 1.0.0
  * @module trygg/debug/debug
  */
-
-import { Cause, Context, DateTime, Effect, Layer, Schema } from "effect";
-import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
-
-/** Base fields for all events */
-interface BaseEvent {
-  readonly timestamp: string;
-  readonly duration_ms?: number;
-  /** Trace ID for correlating events across a navigation flow */
-  readonly traceId?: string;
-  /** Span ID for tracking nested operations within a trace */
-  readonly spanId?: string;
-  /** Parent span ID for building span hierarchies */
-  readonly parentSpanId?: string;
-}
-
-/** Signal events */
-type SignalCreateEvent = BaseEvent & {
-  readonly event: "signal.create";
-  readonly signal_id: string;
-  readonly value: unknown;
-  readonly component: string;
-  readonly owner?: "component" | "provider" | "effect" | undefined;
-};
-
-type SignalDisposeEvent = BaseEvent & {
-  readonly event: "signal.dispose";
-  readonly signal_id: string;
-  readonly owner: "component" | "provider" | "effect";
-  readonly listener_count: number;
-};
-
-type SignalDisposedAccessEvent = BaseEvent & {
-  readonly event: "signal.disposed_access";
-  readonly signal_id: string;
-  readonly owner: "component" | "provider" | "effect";
-  readonly operation: "get" | "set" | "update" | "modify";
-};
-
-type SignalGetEvent = BaseEvent & {
-  readonly event: "signal.get";
-  readonly signal_id: string;
-  readonly trigger: string;
-};
-
-type SignalGetPhaseEvent = BaseEvent & {
-  readonly event: "signal.get.phase";
-  readonly signal_id: string;
-  readonly has_phase: boolean;
-};
-
-type SignalPeekEvent = BaseEvent & {
-  readonly event: "signal.peek";
-  readonly signal_id: string;
-};
-
-type SignalSetEvent = BaseEvent & {
-  readonly event: "signal.set";
-  readonly signal_id: string;
-  readonly prev_value: unknown;
-  readonly value: unknown;
-  readonly listener_count: number;
-};
-
-type SignalSetSkippedEvent = BaseEvent & {
-  readonly event: "signal.set.skipped";
-  readonly signal_id: string;
-  readonly value: unknown;
-  readonly reason: string;
-};
-
-type SignalUpdateEvent = BaseEvent & {
-  readonly event: "signal.update";
-  readonly signal_id: string;
-  readonly prev_value: unknown;
-  readonly value: unknown;
-  readonly listener_count: number;
-};
-
-type SignalUpdateSkippedEvent = BaseEvent & {
-  readonly event: "signal.update.skipped";
-  readonly signal_id: string;
-  readonly value: unknown;
-  readonly reason: string;
-};
-
-type SignalNotifyEvent = BaseEvent & {
-  readonly event: "signal.notify";
-  readonly signal_id: string;
-  readonly listener_count: number;
-};
-
-type SignalSubscribeEvent = BaseEvent & {
-  readonly event: "signal.subscribe";
-  readonly signal_id: string;
-  readonly listener_count: number;
-};
-
-type SignalUnsubscribeEvent = BaseEvent & {
-  readonly event: "signal.unsubscribe";
-  readonly signal_id: string;
-  readonly listener_count: number;
-};
-
-/** F-003: Signal listener error event for error isolation */
-type SignalListenerErrorEvent = BaseEvent & {
-  readonly event: "signal.listener.error";
-  readonly signal_id: string;
-  readonly cause: string;
-  readonly listener_index: number;
-};
-
-type SignalDeriveCreateEvent = BaseEvent & {
-  readonly event: "signal.derive.create";
-  readonly signal_id: string;
-  readonly source_id: string;
-  readonly value: unknown;
-};
-
-type SignalDeriveCleanupEvent = BaseEvent & {
-  readonly event: "signal.derive.cleanup";
-  readonly signal_id: string;
-  readonly source_id: string;
-};
-
-type SignalDeriveAllCreateEvent = BaseEvent & {
-  readonly event: "signal.deriveAll.create";
-  readonly signal_id: string;
-  readonly source_count: number;
-  readonly value: unknown;
-};
-
-type SignalDeriveAllCleanupEvent = BaseEvent & {
-  readonly event: "signal.deriveAll.cleanup";
-  readonly signal_id: string;
-  readonly source_count: number;
-};
-
-/** Render events */
-type RenderComponentInitialEvent = BaseEvent & {
-  readonly event: "render.component.initial";
-  readonly accessed_signals: number;
-};
-
-type RenderComponentRerenderEvent = BaseEvent & {
-  readonly event: "render.component.rerender";
-  readonly trigger: string;
-  readonly accessed_signals: number;
-};
-
-type RenderComponentCleanupEvent = BaseEvent & {
-  readonly event: "render.component.cleanup";
-};
-
-type RenderComponentErrorEvent = BaseEvent & {
-  readonly event: "render.component.error";
-  readonly reason: string;
-};
-
-type RenderComponentRerenderErrorEvent = BaseEvent & {
-  readonly event: "render.component.rerender.error";
-  readonly reason: string;
-};
-
-type ProviderAcquireEvent = BaseEvent & {
-  readonly event: "provider.acquire";
-  readonly provider_id?: string | undefined;
-  readonly component?: string | undefined;
-  readonly reason: "mount" | "rerender" | "identity-change" | "key-change" | "unmount" | "failure";
-  readonly duration_ms?: number | undefined;
-};
-
-type ProviderReuseEvent = BaseEvent & {
-  readonly event: "provider.reuse";
-  readonly provider_id: string;
-  readonly component?: string | undefined;
-  readonly reason: "rerender";
-};
-
-type ProviderFailureEvent = BaseEvent & {
-  readonly event: "provider.failure";
-  readonly provider_id?: string | undefined;
-  readonly component?: string | undefined;
-  readonly reason: "failure";
-  readonly duration_ms?: number | undefined;
-  readonly cause: string;
-};
-
-type ProviderReplaceEvent = BaseEvent & {
-  readonly event: "provider.replace";
-  readonly provider_id: string;
-  readonly component?: string | undefined;
-  readonly reason: "identity-change" | "key-change";
-};
-
-type ProviderFinalizeEvent = BaseEvent & {
-  readonly event: "provider.finalize";
-  readonly provider_id: string;
-  readonly component?: string | undefined;
-  readonly reason: "unmount";
-  readonly duration_ms: number;
-};
-
-type RenderSignalTextInitialEvent = BaseEvent & {
-  readonly event: "render.signaltext.initial";
-  readonly signal_id: string;
-  readonly value: unknown;
-};
-
-type RenderSignalTextUpdateEvent = BaseEvent & {
-  readonly event: "render.signaltext.update";
-  readonly signal_id: string;
-  readonly value: unknown;
-};
-
-type RenderDocumentSignalInitialEvent = BaseEvent & {
-  readonly event: "render.document.signal.initial";
-  readonly signal_id: string;
-  readonly value: unknown;
-};
-
-type RenderDocumentSignalUpdateEvent = BaseEvent & {
-  readonly event: "render.document.signal.update";
-  readonly signal_id: string;
-  readonly value: unknown;
-};
-
-type RenderSignalElementInitialEvent = BaseEvent & {
-  readonly event: "render.signalelement.initial";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementSwapEvent = BaseEvent & {
-  readonly event: "render.signalelement.swap";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementReconcileEvent = BaseEvent & {
-  readonly event: "render.signalelement.reconcile";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementSwapStartEvent = BaseEvent & {
-  readonly event: "render.signalelement.swap.start";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementSwapCleanupEvent = BaseEvent & {
-  readonly event: "render.signalelement.swap.cleanup";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementSwapRenderEvent = BaseEvent & {
-  readonly event: "render.signalelement.swap.render";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementSwapErrorEvent = BaseEvent & {
-  readonly event: "render.signalelement.swap.error";
-  readonly signal_id: string;
-  readonly error: string;
-};
-
-type RenderSignalElementScopeStartEvent = BaseEvent & {
-  readonly event: "render.signalelement.scope.start";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementScopeRenderEvent = BaseEvent & {
-  readonly event: "render.signalelement.scope.render";
-  readonly signal_id: string;
-};
-
-type RenderSignalElementScopeRenderedEvent = BaseEvent & {
-  readonly event: "render.signalelement.scope.rendered";
-  readonly signal_id: string;
-  readonly fragment_children: number;
-};
-
-type RenderSignalElementInsertEvent = BaseEvent & {
-  readonly event: "render.signalelement.insert";
-  readonly signal_id: string;
-  readonly inserted_children: number;
-  readonly anchor_in_dom: boolean;
-  readonly parent_in_dom: boolean;
-};
-
-type RenderSignalElementCleanupEvent = BaseEvent & {
-  readonly event: "render.signalelement.cleanup";
-  readonly signal_id: string;
-};
-
-type RenderIntrinsicEvent = BaseEvent & {
-  readonly event: "render.intrinsic";
-  readonly element_tag: string;
-};
-
-type RenderIntrinsicCleanupStartEvent = BaseEvent & {
-  readonly event: "render.intrinsic.cleanup.start";
-  readonly element_tag: string;
-  readonly child_count: number;
-};
-
-type RenderIntrinsicCleanupRemoveEvent = BaseEvent & {
-  readonly event: "render.intrinsic.cleanup.remove";
-  readonly element_tag: string;
-  readonly in_dom: boolean;
-};
-
-type RenderSafeUrlBlockedEvent = BaseEvent & {
-  readonly event: "render.safeurl.blocked";
-  readonly attribute: string;
-  readonly url: string;
-  readonly allowed_schemes: ReadonlyArray<string>;
-};
-
-type RenderDocumentEvent = BaseEvent & {
-  readonly event: "render.document";
-  readonly element_tag: string;
-  readonly target: string;
-};
-
-type RenderScheduleEvent = BaseEvent & {
-  readonly event: "render.schedule";
-  readonly is_rerendering: boolean;
-  readonly pending_rerender: boolean;
-};
-
-type RenderKeyedListUpdateEvent = BaseEvent & {
-  readonly event: "render.keyedlist.update";
-  readonly current_keys: number;
-};
-
-type RenderKeyedListItemAddEvent = BaseEvent & {
-  readonly event: "render.keyedlist.item.add";
-  readonly key: string | number;
-};
-
-type RenderKeyedListItemRemoveEvent = BaseEvent & {
-  readonly event: "render.keyedlist.item.remove";
-  readonly key: string | number;
-};
-
-type RenderKeyedListItemRerenderEvent = BaseEvent & {
-  readonly event: "render.keyedlist.item.rerender";
-  readonly key: string | number;
-};
-
-type RenderKeyedListItemRerenderErrorEvent = BaseEvent & {
-  readonly event: "render.keyedlist.item.rerender.error";
-  readonly key: string | number;
-  readonly reason: string;
-};
-
-type RenderKeyedListSubscriptionAddEvent = BaseEvent & {
-  readonly event: "render.keyedlist.subscription.add";
-  readonly key: string | number;
-  readonly signal_id: string;
-};
-
-type RenderKeyedListSubscriptionRemoveEvent = BaseEvent & {
-  readonly event: "render.keyedlist.subscription.remove";
-  readonly key: string | number;
-  readonly signal_id: string;
-};
-
-type RenderKeyedListReorderEvent = BaseEvent & {
-  readonly event: "render.keyedlist.reorder";
-  readonly total_items: number;
-  readonly moves: number;
-  readonly stable_nodes: number;
-};
-
-type RenderKeyedListUpdateErrorEvent = BaseEvent & {
-  readonly event: "render.keyedlist.update.error";
-  readonly reason: string;
-};
-
-type RenderKeyedListStateEvent = BaseEvent & {
-  readonly event: "render.keyedlist.state";
-  readonly phase: "start" | "computed" | "after-reorder" | "committed";
-  readonly key_order: ReadonlyArray<string | number>;
-  readonly new_keys?: ReadonlyArray<string | number>;
-  readonly move_count?: number;
-};
-
-/** Error boundary events */
-type RenderErrorBoundaryInitialEvent = BaseEvent & {
-  readonly event: "render.errorboundary.initial";
-};
-
-type RenderErrorBoundaryCaughtEvent = BaseEvent & {
-  readonly event: "render.errorboundary.caught";
-  readonly reason: string;
-};
-
-type RenderErrorBoundaryFallbackEvent = BaseEvent & {
-  readonly event: "render.errorboundary.fallback";
-};
-
-/** Resource events */
-type ResourceRegistryGetExistingEvent = BaseEvent & {
-  readonly event: "resource.registry.get_existing";
-  readonly key: string;
-};
-
-type ResourceRegistryCreateEntryEvent = BaseEvent & {
-  readonly event: "resource.registry.create_entry";
-  readonly key: string;
-};
-
-type ResourceFetchCalledEvent = BaseEvent & {
-  readonly event: "resource.fetch.called";
-  readonly key: string;
-};
-
-type ResourceFetchDedupeWaitEvent = BaseEvent & {
-  readonly event: "resource.fetch.dedupe_wait";
-  readonly key: string;
-};
-
-type ResourceFetchCachedEvent = BaseEvent & {
-  readonly event: "resource.fetch.cached";
-  readonly key: string;
-  readonly state: string;
-};
-
-type ResourceFetchStartingEvent = BaseEvent & {
-  readonly event: "resource.fetch.starting";
-  readonly key: string;
-};
-
-type ResourceFetchStartEvent = BaseEvent & {
-  readonly event: "resource.fetch.start";
-  readonly key: string;
-};
-
-type ResourceFetchForkRunningEvent = BaseEvent & {
-  readonly event: "resource.fetch.fork_running";
-  readonly key: string;
-};
-
-type ResourceFetchSuccessEvent = BaseEvent & {
-  readonly event: "resource.fetch.success";
-  readonly key: string;
-  readonly value_type: string;
-  readonly is_array: boolean;
-  readonly length?: number;
-};
-
-type ResourceFetchErrorEvent = BaseEvent & {
-  readonly event: "resource.fetch.error";
-  readonly key: string;
-  readonly error: unknown;
-  readonly error_message: string;
-};
-
-type ResourceFetchSetSuccessEvent = BaseEvent & {
-  readonly event: "resource.fetch.set_success";
-  readonly key: string;
-};
-
-type ResourceFetchSetFailureEvent = BaseEvent & {
-  readonly event: "resource.fetch.set_failure";
-  readonly key: string;
-  readonly error: string;
-};
-
-type ResourceFetchInterruptedEvent = BaseEvent & {
-  readonly event: "resource.fetch.interrupted";
-  readonly key: string;
-};
-
-type ResourceFetchCompleteEvent = BaseEvent & {
-  readonly event: "resource.fetch.complete";
-  readonly key: string;
-};
-
-type ResourceFetchDefectEvent = BaseEvent & {
-  readonly event: "resource.fetch.defect";
-  readonly key: string;
-  readonly defect: string;
-};
-
-type ResourceFetchUnhandledEvent = BaseEvent & {
-  readonly event: "resource.fetch.unhandled";
-  readonly key: string;
-  readonly cause: string;
-};
-
-/** API middleware events */
-type ApiMiddlewareInitEvent = BaseEvent & {
-  readonly event: "api.middleware.init";
-};
-
-type ApiMiddlewareMountedEvent = BaseEvent & {
-  readonly event: "api.middleware.mounted";
-  readonly platform: string;
-};
-
-type ApiMiddlewareErrorEvent = BaseEvent & {
-  readonly event: "api.middleware.error";
-  readonly reason: string;
-};
-
-type ApiRequestReceivedEvent = BaseEvent & {
-  readonly event: "api.request.received";
-  readonly method: string;
-  readonly url: string;
-};
-
-type ApiRequestHandlerAvailableEvent = BaseEvent & {
-  readonly event: "api.request.handler_available";
-  readonly url: string;
-};
-
-type ApiRequestHandlerMissingEvent = BaseEvent & {
-  readonly event: "api.request.handler_missing";
-  readonly url: string;
-  readonly last_error?: string;
-};
-
-type ApiRequestErrorEvent = BaseEvent & {
-  readonly event: "api.request.error";
-  readonly url: string;
-  readonly error: string;
-};
-
-type ApiHandlerLoadingEvent = BaseEvent & {
-  readonly event: "api.handler.loading";
-  readonly module_path: string;
-};
-
-type ApiHandlerLoadedEvent = BaseEvent & {
-  readonly event: "api.handler.loaded";
-  readonly module_path: string;
-  readonly exports: ReadonlyArray<string>;
-};
-
-type ApiHandlerLoadErrorEvent = BaseEvent & {
-  readonly event: "api.handler.load_error";
-  readonly module_path: string;
-  readonly error: string;
-};
-
-/** Router events */
-type RouterNavigateEvent = BaseEvent & {
-  readonly event: "router.navigate";
-  readonly from_path: string;
-  readonly to_path: string;
-  readonly replace?: boolean;
-};
-
-type RouterNavigateCompleteEvent = BaseEvent & {
-  readonly event: "router.navigate.complete";
-  readonly path: string;
-};
-
-type RouterMatchEvent = BaseEvent & {
-  readonly event: "router.match";
-  readonly path: string;
-  readonly route_pattern: string;
-  readonly params: Record<string, string>;
-};
-
-type RouterMatchNotFoundEvent = BaseEvent & {
-  readonly event: "router.match.notfound";
-  readonly path: string;
-};
-
-type RouterGuardStartEvent = BaseEvent & {
-  readonly event: "router.guard.start";
-  readonly route_pattern: string;
-  readonly has_guard: boolean;
-};
-
-type RouterGuardAllowEvent = BaseEvent & {
-  readonly event: "router.guard.allow";
-  readonly route_pattern: string;
-};
-
-type RouterGuardRedirectEvent = BaseEvent & {
-  readonly event: "router.guard.redirect";
-  readonly route_pattern: string;
-  readonly redirect_to: string;
-};
-
-type RouterGuardSkipEvent = BaseEvent & {
-  readonly event: "router.guard.skip";
-  readonly route_pattern: string;
-  readonly reason: string;
-};
-
-type RouterRenderStartEvent = BaseEvent & {
-  readonly event: "router.render.start";
-  readonly route_pattern: string;
-  readonly params: Record<string, string>;
-  readonly has_guard: boolean;
-  readonly has_layout: boolean;
-};
-
-type RouterRenderCompleteEvent = BaseEvent & {
-  readonly event: "router.render.complete";
-  readonly route_pattern: string;
-  readonly has_layout: boolean;
-};
-
-type RouterLinkClickEvent = BaseEvent & {
-  readonly event: "router.link.click";
-  readonly to_path: string;
-  readonly replace?: boolean;
-  readonly reason?: string;
-};
-
-type RouterErrorEvent = BaseEvent & {
-  readonly event: "router.error";
-  readonly route_pattern: string;
-  readonly error: string;
-};
-
-type RouterPopstateAddedEvent = BaseEvent & {
-  readonly event: "router.popstate.added";
-};
-
-type RouterPopstateRemovedEvent = BaseEvent & {
-  readonly event: "router.popstate.removed";
-};
-
-type RouterPopstateErrorEvent = BaseEvent & {
-  readonly event: "router.popstate.error";
-  readonly cause: unknown;
-};
-
-type RouterMatcherCompileEvent = BaseEvent & {
-  readonly event: "router.matcher.compile";
-  readonly route_count: number;
-  readonly is_recompile: boolean;
-};
-
-type RouterMatcherCachedEvent = BaseEvent & {
-  readonly event: "router.matcher.cached";
-  readonly route_count: number;
-};
-
-type Router404RenderEvent = BaseEvent & {
-  readonly event: "router.404.render";
-  readonly path: string;
-  readonly has_custom_404: boolean;
-};
-
-type Router404FallbackEvent = BaseEvent & {
-  readonly event: "router.404.fallback";
-  readonly path: string;
-  readonly has_custom_404: boolean;
-};
-
-/** F-002: Route load cancellation event */
-type RouterLoadCancelledEvent = BaseEvent & {
-  readonly event: "router.load.cancelled";
-  readonly from_key: string;
-  readonly to_key: string;
-};
-
-/** F-001: Module loading events for parallel loading with memoization */
-type RouterModuleLoadStartEvent = BaseEvent & {
-  readonly event: "router.module.load.start";
-  readonly path: string;
-  readonly kind: "component" | "layout" | "guard" | "loading" | "error" | "not_found";
-  readonly is_prefetch: boolean;
-  readonly attempt: number;
-};
-
-type RouterModuleLoadCompleteEvent = BaseEvent & {
-  readonly event: "router.module.load.complete";
-  readonly path: string;
-  readonly kind: "component" | "layout" | "guard" | "loading" | "error" | "not_found";
-  readonly duration_ms: number;
-  readonly is_prefetch: boolean;
-  readonly attempt: number;
-};
-
-type RouterModuleLoadTimeoutEvent = BaseEvent & {
-  readonly event: "router.module.load.timeout";
-  readonly path: string;
-  readonly kind: "component" | "layout" | "guard" | "loading" | "error" | "not_found";
-  readonly timeout_ms: number;
-  readonly is_prefetch: boolean;
-  readonly attempt: number;
-};
-
-type RouterModuleLoadCacheHitEvent = BaseEvent & {
-  readonly event: "router.module.load.cache_hit";
-  readonly path: string;
-  readonly kind: "component" | "layout" | "guard" | "loading" | "error" | "not_found";
-  readonly is_prefetch: boolean;
-};
-
-type RouterPrefetchStartEvent = BaseEvent & {
-  readonly event: "router.prefetch.start";
-  readonly path: string;
-  readonly route_pattern: string;
-  readonly module_count: number;
-};
-
-type RouterPrefetchCompleteEvent = BaseEvent & {
-  readonly event: "router.prefetch.complete";
-  readonly path: string;
-};
-
-type RouterPrefetchNoMatchEvent = BaseEvent & {
-  readonly event: "router.prefetch.no_match";
-  readonly path: string;
-};
-
-type RouterPrefetchTriggerEvent = BaseEvent & {
-  readonly event: "router.prefetch.trigger";
-  readonly path: string;
-  readonly trigger: "render" | "intent_hover" | "intent_focus" | "viewport";
-};
-
-type RouterPrefetchErrorEvent = BaseEvent & {
-  readonly event: "router.prefetch.error";
-  readonly path: string;
-  readonly phase: "resolver" | "viewport";
-  readonly error_message: string;
-};
-
-/** F-001: Viewport prefetch trigger event */
-type RouterPrefetchViewportEvent = BaseEvent & {
-  readonly event: "router.prefetch.viewport";
-  readonly path: string;
-};
-
-/** F-001: Viewport observer lifecycle events */
-type RouterViewportObserverAddedEvent = BaseEvent & {
-  readonly event: "router.viewport.observer.added";
-};
-
-type RouterViewportObserverRemovedEvent = BaseEvent & {
-  readonly event: "router.viewport.observer.removed";
-};
-
-type RouterViewportObserverErrorEvent = BaseEvent & {
-  readonly event: "router.viewport.observer.error";
-  readonly operation: string;
-  readonly cause: unknown;
-};
-
-type RouterOutletStartEvent = BaseEvent & {
-  readonly event: "router.outlet.start";
-  readonly routes_count: number;
-};
-
-type RouterOutletNestedEvent = BaseEvent & {
-  readonly event: "router.outlet.nested";
-};
-
-type RouterOutletNoRoutesEvent = BaseEvent & {
-  readonly event: "router.outlet.no_routes";
-};
-
-type RouterOutletMatchingEvent = BaseEvent & {
-  readonly event: "router.outlet.matching";
-  readonly path: string;
-};
-
-/** Router async tracker events for debugging navigation */
-type RouterTrackerInterruptEvent = BaseEvent & {
-  readonly event: "router.tracker.interrupt";
-};
-
-type RouterTrackerLoadingEvent = BaseEvent & {
-  readonly event: "router.tracker.loading";
-};
-
-type RouterTrackerRefreshingEvent = BaseEvent & {
-  readonly event: "router.tracker.refreshing";
-};
-
-type RouterTrackerReadyEvent = BaseEvent & {
-  readonly event: "router.tracker.ready";
-};
-
-type RouterTrackerErrorEvent = BaseEvent & {
-  readonly event: "router.tracker.error";
-};
-
-/** Trace events for correlation and span tracking */
-type TraceSpanStartEvent = BaseEvent & {
-  readonly event: "trace.span.start";
-  readonly name: string;
-  readonly attributes?: Record<string, unknown>;
-};
-
-type TraceSpanEndEvent = BaseEvent & {
-  readonly event: "trace.span.end";
-  readonly name: string;
-  readonly status: "ok" | "error";
-  readonly error?: string;
-};
-
-/** Router scroll events */
-type RouterScrollTopEvent = BaseEvent & {
-  readonly event: "router.scroll.top";
-};
-
-type RouterScrollRestoreEvent = BaseEvent & {
-  readonly event: "router.scroll.restore";
-  readonly key: string;
-  readonly x: number;
-  readonly y: number;
-};
-
-type RouterScrollSaveEvent = BaseEvent & {
-  readonly event: "router.scroll.save";
-  readonly key: string;
-  readonly x: number;
-  readonly y: number;
-};
-
-type RouterScrollSaveErrorEvent = BaseEvent & {
-  readonly event: "router.scroll.save.error";
-  readonly cause: unknown;
-};
-
-/** Router outlet error — processRoute catchAllCause */
-type RouterOutletErrorEvent = BaseEvent & {
-  readonly event: "router.outlet.error";
-  readonly error: string;
-  readonly phase?: string;
-  readonly path?: string;
-};
-
-/** Unsafe quarantine events — observability for type-boundary crossings */
-type UnsafeMergeLayersEvent = BaseEvent & {
-  readonly event: "unsafe.mergeLayers";
-  readonly layer_count: number;
-};
-
-type UnsafeBuildContextEvent = BaseEvent & {
-  readonly event: "unsafe.buildContext";
-  readonly layer_count: number;
-};
-
-/**
- * All structured debug events emitted by the framework.
- *
- * @remarks
- * Use this union when consuming debug output in custom plugins or test helpers.
- *
- * @example
- * ```ts
- * const events: Array<Debug.DebugEvent> = []
- * ```
- *
- * @category Debugging
- * @public
- */
-type KnownDebugEvent =
-  // Signal events
-  | SignalCreateEvent
-  | SignalGetEvent
-  | SignalGetPhaseEvent
-  | SignalPeekEvent
-  | SignalSetEvent
-  | SignalSetSkippedEvent
-  | SignalUpdateEvent
-  | SignalUpdateSkippedEvent
-  | SignalNotifyEvent
-  | SignalDisposeEvent
-  | SignalDisposedAccessEvent
-  | SignalSubscribeEvent
-  | SignalUnsubscribeEvent
-  | SignalListenerErrorEvent
-  | SignalDeriveCreateEvent
-  | SignalDeriveCleanupEvent
-  | SignalDeriveAllCreateEvent
-  | SignalDeriveAllCleanupEvent
-  // Render events
-  | RenderComponentInitialEvent
-  | RenderComponentRerenderEvent
-  | RenderComponentCleanupEvent
-  | RenderComponentErrorEvent
-  | RenderComponentRerenderErrorEvent
-  | ProviderAcquireEvent
-  | ProviderReuseEvent
-  | ProviderFailureEvent
-  | ProviderReplaceEvent
-  | ProviderFinalizeEvent
-  | RenderSignalTextInitialEvent
-  | RenderSignalTextUpdateEvent
-  | RenderSignalElementInitialEvent
-  | RenderSignalElementSwapEvent
-  | RenderSignalElementReconcileEvent
-  | RenderSignalElementSwapStartEvent
-  | RenderSignalElementSwapCleanupEvent
-  | RenderSignalElementSwapRenderEvent
-  | RenderSignalElementSwapErrorEvent
-  | RenderSignalElementScopeStartEvent
-  | RenderSignalElementScopeRenderEvent
-  | RenderSignalElementScopeRenderedEvent
-  | RenderSignalElementInsertEvent
-  | RenderSignalElementCleanupEvent
-  | RenderIntrinsicEvent
-  | RenderIntrinsicCleanupStartEvent
-  | RenderIntrinsicCleanupRemoveEvent
-  | RenderSafeUrlBlockedEvent
-  | RenderDocumentEvent
-  | RenderDocumentSignalInitialEvent
-  | RenderDocumentSignalUpdateEvent
-  | RenderScheduleEvent
-  | RenderKeyedListUpdateEvent
-  | RenderKeyedListItemAddEvent
-  | RenderKeyedListItemRemoveEvent
-  | RenderKeyedListItemRerenderEvent
-  | RenderKeyedListItemRerenderErrorEvent
-  | RenderKeyedListSubscriptionAddEvent
-  | RenderKeyedListSubscriptionRemoveEvent
-  | RenderKeyedListReorderEvent
-  | RenderKeyedListUpdateErrorEvent
-  | RenderKeyedListStateEvent
-  // Error boundary events
-  | RenderErrorBoundaryInitialEvent
-  | RenderErrorBoundaryCaughtEvent
-  | RenderErrorBoundaryFallbackEvent
-  // Resource events
-  | ResourceRegistryGetExistingEvent
-  | ResourceRegistryCreateEntryEvent
-  | ResourceFetchCalledEvent
-  | ResourceFetchDedupeWaitEvent
-  | ResourceFetchCachedEvent
-  | ResourceFetchStartingEvent
-  | ResourceFetchStartEvent
-  | ResourceFetchForkRunningEvent
-  | ResourceFetchSuccessEvent
-  | ResourceFetchErrorEvent
-  | ResourceFetchSetSuccessEvent
-  | ResourceFetchInterruptedEvent
-  | ResourceFetchSetFailureEvent
-  | ResourceFetchCompleteEvent
-  | ResourceFetchDefectEvent
-  | ResourceFetchUnhandledEvent
-  // API middleware events
-  | ApiMiddlewareInitEvent
-  | ApiMiddlewareMountedEvent
-  | ApiMiddlewareErrorEvent
-  | ApiRequestReceivedEvent
-  | ApiRequestHandlerAvailableEvent
-  | ApiRequestHandlerMissingEvent
-  | ApiRequestErrorEvent
-  | ApiHandlerLoadingEvent
-  | ApiHandlerLoadedEvent
-  | ApiHandlerLoadErrorEvent
-  // Router events
-  | RouterNavigateEvent
-  | RouterNavigateCompleteEvent
-  | RouterMatchEvent
-  | RouterMatchNotFoundEvent
-  | RouterGuardStartEvent
-  | RouterGuardAllowEvent
-  | RouterGuardRedirectEvent
-  | RouterGuardSkipEvent
-  | RouterRenderStartEvent
-  | RouterRenderCompleteEvent
-  | RouterLinkClickEvent
-  | RouterErrorEvent
-  | RouterPopstateAddedEvent
-  | RouterPopstateRemovedEvent
-  | RouterPopstateErrorEvent
-  | RouterMatcherCompileEvent
-  | RouterMatcherCachedEvent
-  | Router404RenderEvent
-  | Router404FallbackEvent
-  | RouterLoadCancelledEvent
-  | RouterModuleLoadStartEvent
-  | RouterModuleLoadCompleteEvent
-  | RouterModuleLoadTimeoutEvent
-  | RouterModuleLoadCacheHitEvent
-  | RouterPrefetchStartEvent
-  | RouterPrefetchCompleteEvent
-  | RouterPrefetchNoMatchEvent
-  | RouterPrefetchTriggerEvent
-  | RouterPrefetchErrorEvent
-  | RouterPrefetchViewportEvent
-  | RouterViewportObserverAddedEvent
-  | RouterViewportObserverRemovedEvent
-  | RouterViewportObserverErrorEvent
-  | RouterTrackerInterruptEvent
-  | RouterTrackerLoadingEvent
-  | RouterTrackerRefreshingEvent
-  | RouterTrackerReadyEvent
-  | RouterTrackerErrorEvent
-  | RouterOutletStartEvent
-  | RouterOutletNestedEvent
-  | RouterOutletNoRoutesEvent
-  | RouterOutletMatchingEvent
-  | RouterOutletErrorEvent
-  // Scroll events
-  | RouterScrollTopEvent
-  | RouterScrollRestoreEvent
-  | RouterScrollSaveEvent
-  | RouterScrollSaveErrorEvent
-  // Trace events
-  | TraceSpanStartEvent
-  | TraceSpanEndEvent
-  // Unsafe quarantine events
-  | UnsafeMergeLayersEvent
-  | UnsafeBuildContextEvent;
-
-/**
- * String union of all debug event names.
- *
- * @remarks
- * Useful for filters, plugin signatures, and helpers that only need the event
- * discriminator instead of the full payload union.
- *
- * @example
- * ```ts
- * const eventType: Debug.EventType = "signal.set"
- * ```
- *
- * @category Debugging
- * @public
- */
-export type EventType = KnownDebugEvent["event"];
-
-/**
- * Loose input type for log function.
- * Accepts any event with optional fields - the discriminated union above
- * documents the expected shape for each event type.
- *
- * @remarks
- * `log` accepts this looser input and enriches it with timestamp and trace
- * context before dispatching it to plugins.
- *
- * @example
- * ```ts
- * const input: Debug.LogInput = { event: "signal.set", signal_id: "sig_1" }
- * ```
- *
- * @category Debugging
- * @public
- */
-export type LogInput = {
-  readonly event: EventType;
-  readonly duration_ms?: number;
-  // Allow any additional fields
-  readonly [key: string]: unknown;
-};
-
-export type DebugEvent = (KnownDebugEvent | (BaseEvent & LogInput)) & {
-  readonly [key: string]: unknown;
-};
-
-/**
- * Trace metadata attached to debug work.
- *
- * @remarks
- * `traceId`, `spanId`, and `parentSpanId` are threaded through Effect context
- * so plugins can correlate related events.
- *
- * @example
- * ```ts
- * const context: Debug.TraceContext = { traceId: "trace_1" }
- * ```
- *
- * @category Debugging
- * @public
- */
-export interface TraceContext {
-  readonly traceId?: string;
-  readonly spanId?: string;
-  readonly parentSpanId?: string;
-}
-
-// --- Plugin System ---
-
-/**
- * Debug plugin interface.
- * Plugins receive structured events and can output them to any destination.
- *
- * @remarks
- * Register plugins through `registerPlugin` or pass them to `DevMode` to fan
- * out framework events to consoles, collectors, or external telemetry sinks.
- *
- * @example
- * ```ts
- * const plugin: Debug.DebugPlugin = Debug.createPlugin("capture", () => {})
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export interface DebugPlugin {
-  /** Unique plugin identifier */
-  readonly name: string;
-
-  /**
-   * Handle a debug event.
-   * Called for each event that passes the current filter.
-   * Errors thrown here are caught and logged to console.error
-   * to prevent one plugin from breaking others.
-   */
-  readonly handle: (event: DebugEvent) => void;
-}
-
-/**
- * Create a debug plugin.
- * Helper function for constructing type-safe plugins.
- *
- * @remarks
- * Prefer this over hand-writing objects so plugin construction stays concise and
- * aligned with the public `DebugPlugin` shape.
- *
- * @example
- * ```ts
- * const plugin = Debug.createPlugin("capture", (event) => console.log(event.event))
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const createPlugin = (name: string, handle: (event: DebugEvent) => void): DebugPlugin => ({
-  name,
-  handle,
-});
-
-// --- Internal State ---
-
-let _enabled = false;
-let _filter: Set<string> | null = null;
-const _plugins: Map<string, DebugPlugin> = new Map();
-
-// --- Signal ID Generation ---
-
-/**
- * Allocate a fresh internal signal identifier.
- *
- * @remarks
- * Renderer and signal internals use this to attach stable IDs to debug events.
- *
- * @internal
- */
-let signalCounter = 0;
-
-/**
- * Allocate a fresh internal signal identifier.
- *
- * @remarks
- * Renderer and signal internals use this to attach stable IDs to debug events.
- *
- * @internal
- */
-export const nextSignalId = (): string => `sig_${++signalCounter}`;
-
-/** Store signal IDs on signal objects */
-const signalIds = new WeakMap<object, string>();
-
-/**
- * Get or assign the internal debug ID for a signal object.
- *
- * @remarks
- * Exported for framework internals that need stable signal identifiers in logs.
- *
- * @internal
- */
-export const getSignalId = (signal: object): string => {
-  let id = signalIds.get(signal);
-  if (id === undefined) {
-    id = nextSignalId();
-    signalIds.set(signal, id);
-  }
-  return id;
-};
-
-// --- Trace ID Generation ---
-
-/**
- * Allocate a fresh internal trace identifier.
- *
- * @remarks
- * Router and tracing internals use this when starting a new navigation trace.
- *
- * @internal
- */
-let traceCounter = 0;
-
-/**
- * Allocate a fresh internal trace identifier.
- *
- * @remarks
- * Router and tracing internals use this when starting a new navigation trace.
- *
- * @internal
- */
-export const nextTraceId = (): string => `trace_${++traceCounter}`;
-
-/**
- * Allocate a fresh internal span identifier.
- *
- * @remarks
- * Span helpers use this to correlate nested operations inside a trace.
- *
- * @internal
- */
-let spanCounter = 0;
-
-/**
- * Allocate a fresh internal span identifier.
- *
- * @remarks
- * Span helpers use this to correlate nested operations inside a trace.
- *
- * @internal
- */
-export const nextSpanId = (): string => `span_${++spanCounter}`;
-
-/**
- * Allocate a fresh internal provider identifier.
- *
- * @internal
- */
-let providerCounter = 0;
-
-/**
- * Allocate a fresh internal provider identifier.
- *
- * @remarks
- * Provider lifecycle tracing uses this to correlate acquire, reuse, replace,
- * failure, and finalize events for one mounted provider boundary.
- *
- * @internal
- */
-export const nextProviderId = (): string => `provider_${++providerCounter}`;
-
-// --- Trace Context References ---
-
-const getReference = <A>(reference: Context.Reference<A>): Effect.Effect<A> =>
-  getFiberRef(reference);
-
-const setReference = <A>(reference: Context.Reference<A>, value: A): Effect.Effect<void> =>
-  setFiberRef(reference, value);
-
-/**
- * Reference for current trace ID.
- * Set by router on navigate, propagated through Effect context.
- *
- * @remarks
- * Exported for low-level integrations that need direct access to the current
- * trace fiber ref.
- *
- * @internal
- * @since 1.0.0
- */
-export const CurrentTraceId = Context.Reference<string | undefined>("trygg/Debug/CurrentTraceId", {
-  defaultValue: () => undefined,
-});
-
-/**
- * Reference for current span ID.
- * Set by startSpan, propagated through Effect context.
- *
- * @remarks
- * Exported for low-level integrations that need direct access to the current
- * span fiber ref.
- *
- * @internal
- * @since 1.0.0
- */
-export const CurrentSpanId = Context.Reference<string | undefined>("trygg/Debug/CurrentSpanId", {
-  defaultValue: () => undefined,
-});
-
-/**
- * Reference for parent span ID.
- * Used for building span hierarchies.
- *
- * @remarks
- * Exported for low-level integrations that need direct access to parent span
- * context.
- *
- * @internal
- * @since 1.0.0
- */
-export const CurrentParentSpanId = Context.Reference<string | undefined>(
-  "trygg/Debug/CurrentParentSpanId",
-  {
-    defaultValue: () => undefined,
-  },
-);
-
-/**
- * Get current trace context from references.
- * Effect-based - reads from fiber-local state.
- *
- * @remarks
- * Use this when custom debug helpers or plugins need the same trace metadata the
- * framework attaches to logged events.
- *
- * @example
- * ```ts
- * const context = yield* Debug.getTraceContext
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const getTraceContext: Effect.Effect<TraceContext> = Effect.gen(function* () {
-  const traceId = yield* getReference(CurrentTraceId);
-  const spanId = yield* getReference(CurrentSpanId);
-  const parentSpanId = yield* getReference(CurrentParentSpanId);
-
-  return {
-    ...(traceId !== undefined ? { traceId } : {}),
-    ...(spanId !== undefined ? { spanId } : {}),
-    ...(parentSpanId !== undefined ? { parentSpanId } : {}),
-  };
-});
-
-/**
- * Set the current trace ID.
- * Called by router on navigate to start a new trace.
- *
- * @remarks
- * Advanced integrations can call this when work should join an existing trace
- * or begin a new one outside the router.
- *
- * @example
- * ```ts
- * yield* Debug.setTraceId("trace_1")
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const setTraceId = (traceId: string): Effect.Effect<void> =>
-  setReference(CurrentTraceId, traceId);
-
-/**
- * Clear the current trace context.
- *
- * @remarks
- * Use this when a unit of work should stop inheriting previously established
- * trace or span metadata.
- *
- * @example
- * ```ts
- * yield* Debug.clearTraceContext
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const clearTraceContext: Effect.Effect<void> = Effect.gen(function* () {
-  yield* setReference(CurrentTraceId, undefined);
-  yield* setReference(CurrentSpanId, undefined);
-  yield* setReference(CurrentParentSpanId, undefined);
-});
-
-// --- Enable/Disable API ---
-
-/**
- * Enable debug logging.
- * Called internally by DevMode component.
- *
- * @remarks
- * Call this directly when debugging should be enabled without mounting
- * `DevMode`, for example in tests or non-JSX tooling.
- *
- * @param filter - Optional filter for event types
- *   - undefined: log all events
- *   - string: log events matching prefix (e.g., "signal" matches "signal.set")
- *   - string[]: log events matching any prefix
- *
- * @example
- * ```ts
- * Debug.enable(["signal", "trace"])
- * ```
- *
- * @category Debugging
- * @public
- */
-export const enable = (filter?: string | ReadonlyArray<string>): void => {
-  _enabled = true;
-  if (filter === undefined) {
-    _filter = null;
-  } else if (typeof filter === "string") {
-    _filter = new Set([filter]);
-  } else {
-    _filter = new Set(filter);
-  }
-};
-
-/**
- * Disable debug logging.
- * Called internally by DevMode component cleanup.
- *
- * @remarks
- * This resets both the enabled flag and the current prefix filter.
- *
- * @example
- * ```ts
- * Debug.disable()
- * ```
- *
- * @category Debugging
- * @public
- */
-export const disable = (): void => {
-  _enabled = false;
-  _filter = null;
-};
-
-/**
- * Check if debug logging is enabled.
- *
- * @remarks
- * Useful for tests and custom tooling that need to assert or branch on current
- * debug state.
- *
- * @example
- * ```ts
- * const enabled = Debug.isEnabled()
- * ```
- *
- * @category Debugging
- * @public
- */
-export const isEnabled = (): boolean => _enabled;
-
-/**
- * Get current filter configuration.
- *
- * @remarks
- * Returns `null` when debug is enabled for all events.
- *
- * @example
- * ```ts
- * const filter = Debug.getFilter()
- * ```
- *
- * @category Debugging
- * @public
- */
-export const getFilter = (): ReadonlyArray<string> | null => {
-  return _filter !== null ? Array.from(_filter) : null;
-};
-
-// --- Plugin Registration ---
-
-/**
- * Register a debug plugin.
- * Plugins receive all events that pass the current filter.
- * Multiple plugins can be registered; each receives events independently.
- *
- * @remarks
- * Register plugins imperatively when debug output should be wired outside
- * `DevMode`.
- *
- * @example
- * ```ts
- * Debug.registerPlugin(Debug.consolePlugin)
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const registerPlugin = (plugin: DebugPlugin): void => {
-  _plugins.set(plugin.name, plugin);
-};
-
-/**
- * Unregister a debug plugin by name.
- *
- * @remarks
- * Use the plugin's `name` field to remove it from the global registry.
- *
- * @example
- * ```ts
- * Debug.unregisterPlugin("console")
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const unregisterPlugin = (name: string): void => {
-  _plugins.delete(name);
-};
-
-/**
- * Get all registered plugin names.
- *
- * @remarks
- * Useful in tests and setup code that need to inspect or reset the plugin
- * registry.
- *
- * @example
- * ```ts
- * const names = Debug.getPlugins()
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const getPlugins = (): ReadonlyArray<string> => {
-  return Array.from(_plugins.keys());
-};
-
-/**
- * Check if a plugin is registered.
- *
- * @remarks
- * This is a convenience query over the global plugin registry.
- *
- * @example
- * ```ts
- * const hasConsole = Debug.hasPlugin("console")
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const hasPlugin = (name: string): boolean => {
-  return _plugins.has(name);
-};
-
-// --- Environment Detection ---
-
-// --- Logging ---
-
-/**
- * Check if an event should be logged based on current filter.
- */
-const shouldLog = (event: EventType): boolean => {
-  if (!_enabled) return false;
-  if (_filter === null) return true;
-
-  // Check if event matches any filter prefix
-  for (const prefix of _filter) {
-    if (event === prefix || event.startsWith(prefix + ".")) {
-      return true;
-    }
-  }
-  return false;
-};
-
-// --- Console Formatting ---
-
+import { Effect, Schema } from "effect";
+import type * as Duration from "effect/Duration";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import type * as LogLevel from "effect/LogLevel";
+import * as References from "effect/References";
+import * as Trace from "../trace/index.js";
+
+// ── Console formatting ───────────────────────────────────────────────────────
+
+/** Badge colors keyed by the event-name prefix (the segment before the first dot). */
 const categoryColors: Record<string, { bg: string; fg: string }> = {
   render: { bg: "#818cf8", fg: "#1e1b4b" },
+  document: { bg: "#818cf8", fg: "#1e1b4b" },
   signal: { bg: "#34d399", fg: "#022c22" },
+  signalText: { bg: "#34d399", fg: "#022c22" },
+  signalElement: { bg: "#34d399", fg: "#022c22" },
   resource: { bg: "#fbbf24", fg: "#451a03" },
   router: { bg: "#a78bfa", fg: "#2e1065" },
-  trace: { bg: "#f472b6", fg: "#500724" },
+  route: { bg: "#a78bfa", fg: "#2e1065" },
+  outlet: { bg: "#a78bfa", fg: "#2e1065" },
+  history: { bg: "#a78bfa", fg: "#2e1065" },
+  navigation: { bg: "#a78bfa", fg: "#2e1065" },
+  scroll: { bg: "#a78bfa", fg: "#2e1065" },
+  contract: { bg: "#f472b6", fg: "#500724" },
+  event: { bg: "#f472b6", fg: "#500724" },
   api: { bg: "#60a5fa", fg: "#172554" },
+  component: { bg: "#f59e0b", fg: "#451a03" },
+  keyedList: { bg: "#2dd4bf", fg: "#042f2e" },
+  asyncLoader: { bg: "#fb7185", fg: "#4c0519" },
 };
 
-const badgeStyle = (bg: string, fg: string) =>
+const badgeStyle = (bg: string, fg: string): string =>
   `background:${bg};color:${fg};padding:1px 5px;border-radius:3px;font-weight:600;font-size:11px`;
 
 const subtypeStyle = "color:#c4b5fd;font-weight:500";
 const dimStyle = "color:#9ca3af;font-weight:400";
-const durationStyle = "color:#67e8f9;font-weight:400";
 const resetStyle = "color:inherit;font-weight:400";
 
-const formatDetails = (event: DebugEvent): string => {
-  const parts: Array<string> = [];
-  const e = event;
+const safeSync = <A>(evaluate: () => A, fallback: A): A =>
+  Effect.runSync(
+    Effect.try({
+      try: evaluate,
+      catch: () => undefined,
+    }).pipe(Effect.orElseSucceed(() => fallback)),
+  );
 
-  if (Object.hasOwn(e, "element_tag")) parts.push(`<${e.element_tag}>`);
-  if (Object.hasOwn(e, "signal_id")) parts.push(`${e.signal_id}`);
-  if (Object.hasOwn(e, "key")) parts.push(`key:${e.key}`);
-  if (Object.hasOwn(e, "accessed_signals")) parts.push(`signals:${e.accessed_signals}`);
-  if (Object.hasOwn(e, "listener_count")) parts.push(`listeners:${e.listener_count}`);
-  if (Object.hasOwn(e, "from_path") && Object.hasOwn(e, "to_path")) {
-    parts.push(`${e.from_path} → ${e.to_path}`);
-  } else if (Object.hasOwn(e, "path")) {
-    parts.push(`${e.path}`);
-  }
-  if (Object.hasOwn(e, "route_pattern")) parts.push(`${e.route_pattern}`);
-  if (Object.hasOwn(e, "trigger")) parts.push(`trigger:${e.trigger}`);
-  if (Object.hasOwn(e, "phase")) parts.push(`phase:${e.phase}`);
-  if (Object.hasOwn(e, "current_keys")) parts.push(`keys:${e.current_keys}`);
-  if (Object.hasOwn(e, "total_items")) parts.push(`items:${e.total_items}`);
-  if (Object.hasOwn(e, "moves")) parts.push(`moves:${e.moves}`);
-  if (Object.hasOwn(e, "stable_nodes")) parts.push(`stable:${e.stable_nodes}`);
-  if (Object.hasOwn(e, "move_count") && e.move_count !== undefined) {
-    parts.push(`move_count:${e.move_count}`);
-  }
-  if (Object.hasOwn(e, "key_order") && Array.isArray(e.key_order)) {
-    parts.push(`order:[${e.key_order.map(String).join(",")}]`);
-  }
-  if (Object.hasOwn(e, "new_keys") && Array.isArray(e.new_keys)) {
-    parts.push(`new:[${e.new_keys.map(String).join(",")}]`);
-  }
-  if (Object.hasOwn(e, "reason")) parts.push(`${e.reason}`);
-  if (Object.hasOwn(e, "value")) parts.push(`val:${JSON.stringify(e.value)}`);
-  if (Object.hasOwn(e, "error_message")) parts.push(`err:${e.error_message}`);
-
-  return parts.length > 0 ? parts.join("  ") : "";
+// Circular/bigint-safe stringify. Display-only payload rendering must never make
+// the framework fail, including hostile `toJSON` / stringification hooks.
+const safeStringify = (value: unknown): string => {
+  const seen = new WeakSet<object>();
+  const json = safeSync(
+    () =>
+      JSON.stringify(value, (_key, val) => {
+        if (typeof val === "bigint") return `${val}n`;
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+        return val;
+      }),
+    undefined,
+  );
+  return json ?? "[Unserializable]";
 };
 
-const formatEvent = (event: DebugEvent): void => {
-  const dotIdx = event.event.indexOf(".");
-  const category = dotIdx > 0 ? event.event.slice(0, dotIdx) : event.event;
-  const subtype = dotIdx > 0 ? event.event.slice(dotIdx + 1) : "";
+const renderValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) return safeStringify(value);
+  return safeSync(() => String(value), "[Unserializable]");
+};
+
+const formatPayload = (payload: Readonly<Record<string, unknown>> | undefined): string => {
+  if (payload === undefined) return "";
+  const parts: Array<string> = [];
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) continue;
+    parts.push(`${key}:${renderValue(value)}`);
+  }
+  return parts.join("  ");
+};
+
+/** A console.log invocation: format string plus its `%c` style arguments. */
+interface ConsoleLine {
+  readonly text: string;
+  readonly styles: ReadonlyArray<string>;
+}
+
+/** Format a catalog event with `%c` category badges. */
+const formatTrace = (record: Trace.TraceRecord): ConsoleLine => {
+  const dotIdx = record.name.indexOf(".");
+  const category = dotIdx > 0 ? record.name.slice(0, dotIdx) : record.name;
+  const subtype = dotIdx > 0 ? record.name.slice(dotIdx + 1) : "";
 
   const colors = categoryColors[category] ?? { bg: "#6b7280", fg: "#ffffff" };
-  const details = formatDetails(event);
-  const duration = event.duration_ms !== undefined ? `${event.duration_ms.toFixed(2)}ms` : "";
+  const details = formatPayload(record.payload);
 
   const parts = [`%ctrygg%c %c${category}%c ${subtype}`];
   const styles: Array<string> = [
@@ -1642,323 +131,194 @@ const formatEvent = (event: DebugEvent): void => {
     parts.push(`%c${details}`);
     styles.push(dimStyle);
   }
-  if (duration) {
-    parts.push(`%c${duration}`);
-    styles.push(durationStyle);
-  }
-  // Reset at end
   parts.push("%c");
   styles.push(resetStyle);
 
-  // Pass DOM element as trailing arg so browsers show it on hover
-  const e: Record<string, unknown> = { ...event };
-  if (e.element instanceof Element) {
-    console.log(parts.join(" "), ...styles, e.element);
-  } else {
-    console.log(parts.join(" "), ...styles);
-  }
+  return { text: parts.join(" "), styles };
 };
 
-// --- Built-in Plugins ---
+/** Format a non-trace log (a user `Effect.log`) plainly, tagged with its level. */
+const formatPlain = (options: Logger.Options<unknown>): ConsoleLine => {
+  const message = Array.isArray(options.message)
+    ? options.message.map(renderValue).join(" ")
+    : renderValue(options.message);
+  return { text: `%c[${options.logLevel}]%c ${message}`, styles: [dimStyle, resetStyle] };
+};
+
+// ── Filtering ────────────────────────────────────────────────────────────────
 
 /**
- * Console plugin - outputs events with color-coded category badges.
- * Uses %c CSS styling for compact, readable output.
- * This is the default plugin used when no custom plugins are registered.
+ * A name prefix — or list of prefixes — restricting which catalog events the
+ * console logger displays.
  *
  * @remarks
- * Include this plugin explicitly when custom plugin lists should still preserve
- * human-readable console output.
+ * A prefix matches an event whose name equals it or begins with `${prefix}.`,
+ * so `"router"` matches `router.navigate.request` and `router.navigate.commit`.
+ * Non-trace logs (a user `Effect.log`) are never filtered — only catalog events
+ * are matched against the prefixes.
  *
  * @example
  * ```ts
- * Debug.registerPlugin(Debug.consolePlugin)
+ * Debug.layer({ filter: "signal" })             // one family
+ * Debug.layer({ filter: ["signal", "render"] }) // several
  * ```
  *
  * @category Debugging
  * @public
  * @since 1.0.0
  */
-export const consolePlugin: DebugPlugin = createPlugin("console", formatEvent);
+export type DebugFilter = string | ReadonlyArray<string>;
+
+const matchesFilter = (name: string, filter: DebugFilter): boolean => {
+  const prefixes = typeof filter === "string" ? [filter] : filter;
+  return prefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
+};
 
 /**
- * Create a custom plugin that collects events into an array.
- * Useful for testing or building custom event processors.
- *
- * @remarks
- * This is the simplest way to capture debug events for assertions.
- *
- * @example
- * ```ts
- * const plugin = Debug.createCollectorPlugin("capture", [])
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
+ * Turn a log's options into a {@link ConsoleLine}, or `undefined` to skip it.
+ * Non-trace logs always pass; catalog events pass only when they match `filter`.
  */
-export const createCollectorPlugin = (name: string, events: DebugEvent[]): DebugPlugin =>
-  createPlugin(name, (event) => {
-    events.push(event);
-  });
+const formatLine = (
+  options: Logger.Options<unknown>,
+  filter: DebugFilter | undefined,
+): ConsoleLine | undefined => {
+  const record = Trace.recordOf(options);
+  if (record === undefined) return formatPlain(options);
+  if (filter !== undefined && !matchesFilter(record.name, filter)) return undefined;
+  return formatTrace(record);
+};
 
-/**
- * Internal: dispatch event to plugins (sync operation).
- */
-class DebugPluginError extends Schema.TaggedErrorClass<DebugPluginError>()("DebugPluginError", {
-  plugin: Schema.String,
+class ConsoleWriteError extends Schema.TaggedErrorClass<ConsoleWriteError>()("ConsoleWriteError", {
   cause: Schema.Unknown,
 }) {}
 
-const dispatchToPlugin = Effect.fnUntraced(function* (plugin: DebugPlugin, fullEvent: DebugEvent) {
-  yield* Effect.try({
-    try: () => plugin.handle(fullEvent),
-    catch: (cause) => new DebugPluginError({ plugin: plugin.name, cause }),
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.sync(() => {
-        // Isolate plugin errors - one failing plugin shouldn't break others
-        console.error(`[trygg] Plugin "${plugin.name}" error:`, error.cause);
-      }),
-    ),
+const writeLine = (line: ConsoleLine | undefined): void => {
+  if (line === undefined) return;
+  Effect.runSyncExit(
+    Effect.try({
+      try: () => console.log(line.text, ...line.styles),
+      catch: (cause) => new ConsoleWriteError({ cause }),
+    }),
   );
-});
+};
 
-const dispatchToPlugins: (fullEvent: DebugEvent) => Effect.Effect<void> = Effect.fnUntraced(
-  function* (fullEvent: DebugEvent) {
-    if (_plugins.size > 0) {
-      for (const plugin of _plugins.values()) {
-        yield* dispatchToPlugin(plugin, fullEvent);
-      }
-    } else {
-      // Default: use console plugin when no plugins registered
-      yield* dispatchToPlugin(consolePlugin, fullEvent);
-    }
-  },
+// ── Loggers & layer ───────────────────────────────────────────────────────────
+
+/**
+ * A {@link Logger} that pretty-prints catalog events to the browser console with
+ * `%c` category badges, passing other logs through plainly.
+ *
+ * @remarks
+ * This is what the framework installs by default in the generated entry module
+ * and what {@link layer} configures. It reconstructs each
+ * {@link Trace.TraceRecord} from the log's annotations, colour-codes it by
+ * event-name category, and renders the payload inline. Non-trace logs (a user
+ * `Effect.log`) print plainly, tagged with their level.
+ *
+ * @example
+ * ```ts
+ * import * as Logger from "effect/Logger"
+ *
+ * effect.pipe(Effect.provide(Logger.layer([Debug.consoleLogger])))
+ * ```
+ *
+ * @category Debugging
+ * @public
+ * @since 1.0.0
+ */
+export const consoleLogger: Logger.Logger<unknown, void> = Logger.make((options) =>
+  writeLine(formatLine(options, undefined)),
 );
 
 /**
- * Log a wide event (Effect-based).
- * Reads trace context from references and dispatches to plugins.
- * No-op if debug is disabled or event is filtered out.
+ * Options for {@link layer}.
  *
  * @remarks
- * Use this for custom instrumentation that should flow through the same plugin
- * and filtering pipeline as framework-generated events.
+ * Every field is optional: with no options, {@link layer} installs the console
+ * logger and inherits the ambient minimum log level. `minLevel` tunes which
+ * events are seen, `filter` restricts catalog output to named families, and
+ * `batchWindow` coalesces writes over a time window.
  *
  * @example
  * ```ts
- * yield* Debug.log({ event: "trace.span.start", name: "custom" })
+ * Debug.layer({ minLevel: "Trace", filter: "signal", batchWindow: "100 millis" })
  * ```
  *
  * @category Debugging
  * @public
  * @since 1.0.0
  */
-export const log: (event: LogInput) => Effect.Effect<void> = Effect.fnUntraced(function* (
-  event: LogInput,
-) {
-  if (!shouldLog(event.event)) return;
-
-  // Read trace context from references
-  const traceContext = yield* getTraceContext;
-
-  const timestamp = DateTime.formatIso(yield* DateTime.now);
-  const fullEvent: DebugEvent = {
-    timestamp,
-    ...traceContext,
-    ...event,
-  };
-
-  yield* dispatchToPlugins(fullEvent);
-});
+export interface DebugOptions {
+  /**
+   * Minimum log level for the subtree. Lower it (e.g. `"Debug"` or `"Trace"`) to
+   * see `cost` events; raise it to quieten output. Omit to inherit the ambient
+   * minimum log level.
+   */
+  readonly minLevel?: LogLevel.Severity;
+  /** Restrict console output to catalog events under these name prefixes. */
+  readonly filter?: DebugFilter;
+  /**
+   * Batch console writes over this time window instead of writing each event
+   * synchronously. Uses Effect's built-in {@link Logger.batched}.
+   */
+  readonly batchWindow?: Duration.Input;
+}
 
 /**
- * Start a new span within the current trace.
- * Returns an Effect that yields a function to end the span.
+ * Build a `Layer` that installs the colour console logger and tunes debug
+ * output. Provide it to a component subtree with `Component.provide`.
  *
  * @remarks
- * Prefer `withSpan` for most callers. Use `startSpan` directly when span start
- * and end need to be separated across a larger control flow.
+ * The returned layer removes Effect's default console logger, preserves ambient
+ * loggers such as trace recorders/tracers, and adds the colour console logger.
+ * When `minLevel` is set it also lowers the subtree's
+ * {@link References.MinimumLogLevel} so lower-severity events become visible;
+ * when `batchWindow` is set, writes are coalesced with {@link Logger.batched}
+ * and flushed once per window.
  *
  * @example
- * ```ts
- * const endSpan = yield* Debug.startSpan("load-user")
+ * ```tsx
+ * export default Layout.pipe(
+ *   Component.provide(Debug.layer({ minLevel: "Trace", filter: "signal" })),
+ * )
  * ```
  *
  * @category Debugging
  * @public
  * @since 1.0.0
  */
-export const startSpan: (
-  name: string,
-  attributes?: Record<string, unknown>,
-) => Effect.Effect<Effect.Effect<void>> = Effect.fnUntraced(function* (
-  name: string,
-  attributes?: Record<string, unknown>,
-) {
-  const newSpanId = nextSpanId();
-  const previousSpanId = yield* getReference(CurrentSpanId);
-  const previousParentSpanId = yield* getReference(CurrentParentSpanId);
+export const layer = (options?: DebugOptions): Layer.Layer<never> => {
+  const filter = options?.filter;
+  const debugLogger =
+    options?.batchWindow === undefined
+      ? Effect.succeed(Logger.make((opts) => writeLine(formatLine(opts, filter))))
+      : Logger.batched(
+          Logger.make((opts: Logger.Options<unknown>) => formatLine(opts, filter)),
+          {
+            window: options.batchWindow,
+            flush: (lines) =>
+              Effect.sync(() => {
+                for (const line of lines) writeLine(line);
+              }),
+          },
+        );
 
-  // Set new span as current, with previous span as parent
-  yield* setReference(CurrentParentSpanId, previousSpanId);
-  yield* setReference(CurrentSpanId, newSpanId);
-
-  yield* log({
-    event: "trace.span.start",
-    name,
-    ...(attributes !== undefined ? { attributes } : {}),
-  });
-
-  // Return Effect to end span (intentionally returns Effect for later execution)
-  return yield* Effect.succeed(
-    Effect.all(
-      [
-        log({ event: "trace.span.end", name, status: "ok" }),
-        setReference(CurrentSpanId, previousSpanId),
-        setReference(CurrentParentSpanId, previousParentSpanId),
-      ],
-      { discard: true },
+  const loggerLayer = Layer.effect(
+    Logger.CurrentLoggers,
+    Effect.flatMap(debugLogger, (activeDebugLogger) =>
+      Effect.withFiber((fiber) => {
+        const current = fiber.getRef(Logger.CurrentLoggers);
+        const next = new Set<Logger.Logger<unknown, unknown>>();
+        for (const logger of current) {
+          if (logger !== Logger.defaultLogger) next.add(logger);
+        }
+        next.add(activeDebugLogger);
+        return Effect.succeed(next);
+      }),
     ),
   );
-});
 
-/**
- * Run an effect within a span.
- * Automatically ends the span when the effect completes or fails.
- *
- * @remarks
- * This is the main public helper for attaching span boundaries to existing
- * Effects.
- *
- * @example
- * ```ts
- * const result = yield* Debug.withSpan("load-user", userEffect)
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const withSpan: <A, E, R>(
-  name: string,
-  effect: Effect.Effect<A, E, R>,
-  attributes?: Record<string, unknown>,
-) => Effect.Effect<A, E, R> = Effect.fn("Debug.withSpan")(function* <A, E, R>(
-  name: string,
-  effect: Effect.Effect<A, E, R>,
-  attributes?: Record<string, unknown>,
-) {
-  const newSpanId = nextSpanId();
-  const previousSpanId = yield* getReference(CurrentSpanId);
-  const previousParentSpanId = yield* getReference(CurrentParentSpanId);
-
-  // Set new span as current
-  yield* setReference(CurrentParentSpanId, previousSpanId);
-  yield* setReference(CurrentSpanId, newSpanId);
-
-  yield* log({
-    event: "trace.span.start",
-    name,
-    ...(attributes !== undefined ? { attributes } : {}),
-  });
-
-  return yield* effect.pipe(
-    Effect.tap(() =>
-      log({
-        event: "trace.span.end",
-        name,
-        status: "ok",
-      }),
-    ),
-    Effect.tapError((error) =>
-      log({
-        event: "trace.span.end",
-        name,
-        status: "error",
-        error: Cause.pretty(Cause.fail(error)),
-      }),
-    ),
-    Effect.ensuring(
-      Effect.all(
-        [
-          setReference(CurrentSpanId, previousSpanId),
-          setReference(CurrentParentSpanId, previousParentSpanId),
-        ],
-        { discard: true },
-      ),
-    ),
-  );
-});
-
-/**
- * Measure duration of an effect and log it.
- * No-op if debug is disabled or event is filtered out.
- *
- * @remarks
- * Use this when custom instrumentation should emit the same `duration_ms`
- * field shape as framework timing events.
- *
- * @example
- * ```ts
- * const result = yield* Debug.measure({ event: "trace.span.end", name: "custom" }, work)
- * ```
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const measure: <A, E, R>(
-  event: LogInput,
-  effect: Effect.Effect<A, E, R>,
-) => Effect.Effect<A, E, R> = Effect.fn("Debug.measure")(function* <A, E, R>(
-  event: LogInput,
-  effect: Effect.Effect<A, E, R>,
-) {
-  if (!shouldLog(event.event)) {
-    return yield* effect;
-  }
-
-  const start = performance.now();
-  const result = yield* effect;
-  const duration_ms = performance.now() - start;
-
-  yield* log({ ...event, duration_ms });
-  return result;
-});
-
-// --- Layers ---
-
-/**
- * Default debug layer that registers the console plugin.
- *
- * This is the standard sink for development - events are logged to the
- * browser console with color coding by event category.
- *
- * Use this layer explicitly when you want console output:
- *
- * @example
- * ```typescript
- * Effect.provide(myEffect, Debug.defaultLayer)
- * ```
- *
- * @remarks
- * Provide this layer when console logging should be enabled through Effect layer
- * wiring instead of imperative plugin registration.
- *
- * @category Debugging
- * @public
- * @since 1.0.0
- */
-export const defaultLayer: Layer.Layer<never> = Layer.effectDiscard(
-  Effect.gen(function* () {
-    registerPlugin(consolePlugin);
-
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        unregisterPlugin(consolePlugin.name);
-      }),
-    );
-  }),
-);
+  return options?.minLevel === undefined
+    ? loggerLayer
+    : Layer.merge(loggerLayer, Layer.succeed(References.MinimumLogLevel, options.minLevel));
+};

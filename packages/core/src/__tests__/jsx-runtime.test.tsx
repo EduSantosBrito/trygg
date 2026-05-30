@@ -15,6 +15,44 @@ import { jsxDEV } from "../jsx-dev-runtime.js";
 import { Fragment, jsx, jsxs } from "../jsx-runtime.js";
 import { render } from "../testing/index.js";
 
+const countErrorConstructions = (run: () => void): Effect.Effect<number> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const NativeError = globalThis.Error;
+      let count = 0;
+
+      function CountingError(message?: string): Error {
+        count++;
+        return new NativeError(message);
+      }
+
+      Object.setPrototypeOf(CountingError, NativeError);
+      CountingError.prototype = NativeError.prototype;
+
+      Object.defineProperty(globalThis, "Error", {
+        value: CountingError,
+        configurable: true,
+        writable: true,
+      });
+
+      return {
+        run: () => {
+          run();
+          return count;
+        },
+        restore: () => {
+          Object.defineProperty(globalThis, "Error", {
+            value: NativeError,
+            configurable: true,
+            writable: true,
+          });
+        },
+      };
+    }),
+    (state) => Effect.sync(state.run),
+    (state) => Effect.sync(state.restore),
+  );
+
 describe("JSX component validation", () => {
   it.effect("should reject direct Effect<Element> with InvalidComponentError", () =>
     Effect.gen(function* () {
@@ -189,6 +227,40 @@ describe("JSX component validation", () => {
     assert.strictEqual(element.key, 9);
     assert.strictEqual(element.children.length, 2);
   });
+
+  it.effect("should avoid stack-capture work while constructing benchmark row JSX", () =>
+    Effect.gen(function* () {
+      // Test: should avoid stack-capture work while constructing benchmark row JSX.
+      // Scope: locks the RF-2 hot JSX construction path with a deterministic proxy for traced-span overhead.
+      // Assertion: building one js-framework-benchmark-shaped row performs at most a tiny number of Error stack captures.
+      let rowTag = "";
+
+      const captures = yield* countErrorConstructions(() => {
+        const row = (
+          <tr>
+            <td className="col-md-1">1</td>
+            <td className="col-md-4">
+              <a>pretty red table</a>
+            </td>
+            <td className="col-md-1">
+              <a>
+                <span className="glyphicon glyphicon-remove" aria-hidden="true" />
+              </a>
+            </td>
+            <td className="col-md-6" />
+          </tr>
+        );
+        rowTag = row._tag;
+      });
+
+      assert.strictEqual(rowTag, "Intrinsic");
+      assert.isAtMost(
+        captures,
+        2,
+        `expected benchmark row JSX to avoid stack captures, got ${captures}`,
+      );
+    }),
+  );
 
   it.effect("should align jsxDEV with jsx while Fragment children props are hostile", () =>
     Effect.gen(function* () {

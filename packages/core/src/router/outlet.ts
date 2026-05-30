@@ -13,6 +13,7 @@
 import {
   Array as Arr,
   Cause,
+  Context,
   Deferred,
   Effect,
   Layer,
@@ -21,10 +22,10 @@ import {
   Result,
   Schema,
   Scope,
+  Semaphore,
   SubscriptionRef,
 } from "effect";
-import * as Debug from "../debug/debug.js";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import {
   Element,
   type Element as ElementType,
@@ -45,7 +46,7 @@ import {
   type RouteMatcherShape,
   type ResolvedRoute,
 } from "./matching.js";
-import { get as getRouter, CurrentOutletChild } from "./service.js";
+import { get as getRouter, CurrentRouter, takeCurrentOutletChild } from "./service.js";
 import { runPrefetch } from "./prefetch.js";
 import { parsePath } from "./utils.js";
 import {
@@ -62,8 +63,12 @@ import {
   renderComponent,
   renderError,
   renderLayout,
+  renderLayoutReactive,
+  routeRenderIdentity,
+  routeRenderKey,
   type AsyncLoaderShape,
   type BoundaryResolverShape,
+  type RouteRenderIdentity,
 } from "./outlet-services.js";
 import { RenderLoadError } from "./render-strategy.js";
 import {
@@ -80,7 +85,7 @@ import {
   type RouteComponent,
   type RouteParams,
 } from "./types.js";
-import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
+import { getFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR } from "../internal/unsafe.js";
 
 const outletRuntimeIdentity = Symbol("trygg/router/Outlet.runtime");
@@ -367,10 +372,9 @@ export const buildPrefetchResolver =
       const parsed = yield* parsePath(path);
       const matchOption = yield* matcher.match(parsed.path);
       if (Option.isNone(matchOption)) {
-        yield* Debug.log({
-          event: "router.prefetch.no_match",
+        yield* Trace.emit("router.prefetch.no_match", () => ({
           path,
-        });
+        }));
         return;
       }
 
@@ -390,12 +394,11 @@ export const buildPrefetchResolver =
                   catch: (cause) => new RenderLoadError({ cause }),
                 }).pipe(
                   Effect.catchTag("RenderLoadError", (error) =>
-                    Debug.log({
-                      event: "router.prefetch.error",
+                    Trace.emit("router.prefetch.error", () => ({
                       path,
                       phase: "load_module",
                       error_message: String(error.cause),
-                    }),
+                    })),
                   ),
                 ),
               { concurrency: "unbounded" },
@@ -422,18 +425,16 @@ export const buildPrefetchResolver =
       });
 
       yield* Effect.all([loadModules, runRoutePrefetch], { concurrency: "unbounded" });
-      yield* Debug.log({
-        event: "router.prefetch.complete",
+      yield* Trace.emit("router.prefetch.complete", () => ({
         path,
-      });
+      }));
     }).pipe(
       Effect.catchCause((cause) =>
-        Debug.log({
-          event: "router.prefetch.error",
+        Trace.emit("router.prefetch.error", () => ({
           path,
           phase: "resolver",
           error_message: String(Cause.squash(cause)),
-        }),
+        })),
       ),
     );
 
@@ -540,16 +541,30 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       query: queryStr,
     });
 
+  /** Route context identity for layout preservation. */
+  const buildRouteContextKey = (match: RouteMatch, queryString: string): string => {
+    const params = Object.keys(match.params)
+      .sort()
+      .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(match.params[key] ?? "")}`)
+      .join("&");
+    return queryString === ""
+      ? `${match.route.path}|${params}`
+      : `${match.route.path}|${params}?${queryString}`;
+  };
+
   // Main outlet effect
   const outletEffect = Effect.gen(function* () {
     // Instance-scoped state (persists across re-renders of this outlet)
     const cachedMatcherRef = yield* Ref.make<Option.Option<RouteMatcherShape>>(Option.none());
     const cachedManifestRef = yield* Ref.make<Option.Option<RoutesManifest>>(Option.none());
-    const asyncLoaderRef = yield* Ref.make<Option.Option<AsyncLoaderShape>>(Option.none());
+    type AsyncLoaderSlot = {
+      readonly loadingComp: ComponentInput;
+      readonly loader: AsyncLoaderShape;
+    };
+    const asyncLoaderRef = yield* Ref.make<Option.Option<AsyncLoaderSlot>>(Option.none());
     // Nested outlet check: if there's child content, render it
-    const childContent = yield* getFiberRef(CurrentOutletChild);
+    const childContent = yield* takeCurrentOutletChild();
     if (Option.isSome(childContent)) {
-      yield* setFiberRef(CurrentOutletChild, Option.none());
       return childContent.value;
     }
 
@@ -586,7 +601,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       return text("No routes configured");
     }
     const matcher = matcherOpt.value;
-    const routeActivation = yield* makeRouteActivation({ emitTraceEvents: true }, matcher);
+    const routeActivation = yield* makeRouteActivation(matcher);
     const boundaries: BoundaryResolverShape = BoundaryResolver.make(manifest);
     const routeActivationBoundary = yield* makeRouteActivationBoundary(
       { interruptStaleLoads: true },
@@ -626,6 +641,18 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     );
 
     const router = yield* getRouter;
+    const currentRouteRenderKey = Effect.map(SubscriptionRef.get(router.current._ref), (current) =>
+      routeRenderKey(current.path, current.query),
+    );
+
+    // Context fragment carrying CurrentRouter for this outlet's router service.
+    // Threaded into every route/layout render (renderComponent/renderLayout) so
+    // the route staleness gate reads the live router.current on each child's
+    // render AND re-render fiber — see mergeRouterContext in outlet-services.
+    // Render fibers fork from a structurally-captured context, so setting this on
+    // the outlet's own fiber would not reach them; the Provide boundary that each
+    // route/layout element already is IS the channel that does.
+    const routerContext = Context.add(Context.empty(), CurrentRouter, Option.some(router));
 
     // Register prefetch resolver so router.prefetch() can warm lazy modules
     if (Option.isSome(yield* Ref.get(cachedMatcherRef))) {
@@ -650,15 +677,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         return yield* router.outletCoordination.applyScroll({ strategy });
       }).pipe(
         Effect.catchCause((cause) =>
-          ContractTrace.emit({
-            event: "effect.error.ignored",
-            level: "semantic",
-            payload: {
-              owner: "router.outlet",
-              operation: "applyScroll",
-              cause: Cause.pretty(cause),
-            },
-          }),
+          Trace.emit("effect.error.ignored", () => ({
+            owner: "router.outlet",
+            operation: "applyScroll",
+            cause: Cause.pretty(cause),
+          })),
         ),
       );
 
@@ -674,18 +697,29 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // (signal skips → no swap → Deferred never resolves).
     // -----------------------------------------------------------------------
 
-    /** Deferred resolved by onSwap after DOM swap completes. */
-    let swapDeferred: Deferred.Deferred<void> | null = null;
+    // -----------------------------------------------------------------------
+    // Per-swap-target swap completion.
+    //
+    // Each driven SignalElement — the root viewSignal AND every persistent
+    // layout frame's childSignal (see frameStack below) — needs its OWN
+    // completion Deferred: setting a deep frame's childSignal fires THAT
+    // SignalElement's onSwap, not the root's. A single shared Deferred would
+    // let scroll fire before the real DOM commit under throttle. Each target
+    // owns a SwapSlot; its SignalElement is wired with makeOnSwap(slot).
+    // -----------------------------------------------------------------------
 
-    /** Called by the SignalElement renderer after insertBefore. */
-    const onSwapEffect: Effect.Effect<void> = Effect.suspend(() => {
-      if (swapDeferred !== null) {
-        const d = swapDeferred;
-        swapDeferred = null;
-        return Deferred.succeed(d, undefined).pipe(Effect.asVoid);
-      }
-      return Effect.void;
-    });
+    type SwapSlot = { deferred: Deferred.Deferred<void> | null };
+
+    /** Build an onSwap callback bound to a specific target's slot. */
+    const makeOnSwap = (slot: SwapSlot): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        if (slot.deferred !== null) {
+          const d = slot.deferred;
+          slot.deferred = null;
+          return Deferred.succeed(d, undefined).pipe(Effect.asVoid);
+        }
+        return Effect.void;
+      });
 
     /** rAF fallback for when signal value is unchanged (dedup, same element). */
     const afterFrame: Effect.Effect<void> = Effect.promise(
@@ -693,19 +727,48 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     );
 
     /**
-     * Set viewSignal and wait for the DOM swap to complete before returning.
-     * Uses Deferred (resolved by onSwap) raced against a rAF fallback.
+     * Set a target signal and wait for ITS DOM swap to complete before
+     * returning. Uses the target's per-slot Deferred (resolved by its onSwap)
+     * raced against a rAF fallback (no-swap dedup case).
      */
-    const setViewAndAwaitSwap: (
+    const setSlotSignalAndAwaitSwap = Effect.fnUntraced(function* (
+      slot: SwapSlot,
+      signal: Signal.Signal<Element>,
       element: Element,
-    ) => Effect.Effect<void, Signal.SignalDisposedError> = Effect.fn("Outlet.setViewAndAwaitSwap")(
-      function* (element: Element) {
-        const d = yield* Deferred.make<void>();
-        swapDeferred = d;
-        yield* Signal.set(viewSignal, element);
-        yield* Effect.raceFirst(Deferred.await(d), afterFrame);
-      },
-    );
+    ) {
+      const d = yield* Deferred.make<void>();
+      slot.deferred = d;
+      yield* Signal.set(signal, element);
+      yield* Effect.raceFirst(Deferred.await(d), afterFrame);
+    });
+
+    /** Root view target (the outlet's top-level SignalElement). */
+    const rootSlot: SwapSlot = { deferred: null };
+    const onRootSwap = makeOnSwap(rootSlot);
+
+    /** Set the root viewSignal and await its swap. Used by every non-layout-preserving path. */
+    const setViewAndAwaitSwap = (element: Element): Effect.Effect<void> =>
+      setSlotSignalAndAwaitSwap(rootSlot, viewSignal, element);
+
+    // -----------------------------------------------------------------------
+    // Persistent layout frames (layout-preservation).
+    //
+    // Each frame is one layout level kept mounted across sibling navigations
+    // while its decoded route context is unchanged. A frame's childSignal drives
+    // the SignalElement that the layout's nested <Outlet/> resolves to. On a
+    // same-context sibling nav only the DEEPEST frame's childSignal is updated
+    // with the new leaf — the layout DOM (header/sidebar/rail) stays mounted.
+    // Mutated only under frameLock.
+    // -----------------------------------------------------------------------
+
+    type LayoutFrame = {
+      readonly rawLayout: ComponentInput;
+      readonly routeContextKey: string;
+      readonly childSignal: Signal.Signal<Element>;
+      readonly slot: SwapSlot;
+    };
+    let frameStack: ReadonlyArray<LayoutFrame> = [];
+    const frameLock = Semaphore.makeUnsafe(1);
 
     // Pending scroll intent for AsyncLoader path.
     // Set in processRoute, consumed by loader.view subscription after Ready state.
@@ -729,93 +792,227 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     // Sub-effects for processRoute (closures capturing outletEffect scope)
     // -------------------------------------------------------------------------
 
-    /** Resolve component + layouts and stack root-to-leaf. */
-    const buildRouteElement = (
+    /** Render a deferred (lazy) leaf component as a self-driving SignalElement. */
+    const renderLazyLeaf = (
+      loader: ComponentLoader,
+      routeIdentity: RouteRenderIdentity,
+      decodedParams: Record<string, unknown>,
+      decodedQuery: Record<string, unknown>,
+      request: RouteActivationRequest,
+    ): Element =>
+      Element.fromEffect(
+        Effect.gen(function* () {
+          const childSignal = yield* Signal.make<Element>(text(""));
+
+          yield* Effect.forkScoped(
+            Effect.gen(function* () {
+              const component = yield* routeActivationBoundary.loadComponent(request, loader);
+              const leafElement = yield* renderComponent(
+                component,
+                decodedParams,
+                decodedQuery,
+                routeIdentity,
+                routerContext,
+              );
+              yield* Signal.set(childSignal, leafElement);
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Signal.set(
+                  childSignal,
+                  Element.fail(Cause.squash(cause), {
+                    identity: outletLazyLeafIdentity,
+                    inputs: { routeIdentity, phase: "error" },
+                  }),
+                ),
+              ),
+            ),
+          );
+
+          return signalElement(childSignal);
+        }),
+        {
+          identity: outletLazyLeafIdentity,
+          inputs: { loader, params: decodedParams, query: decodedQuery, routeIdentity },
+        },
+      );
+
+    /** Build the route's leaf element (component only — no layout wrapping). */
+    const buildLeaf = Effect.fnUntraced(function* (
       match: RouteMatch,
       decodedParams: Record<string, unknown>,
       decodedQuery: Record<string, unknown>,
       routePath: string,
       options: { readonly deferLazyLeaf: boolean; readonly request: RouteActivationRequest },
-    ): Effect.Effect<Element, unknown, never> => {
-      const renderLazyLeaf = (
-        loader: ComponentLoader,
-        routeIdentity: { readonly path: string },
-      ): Element =>
-        Element.fromEffect(
-          Effect.gen(function* () {
-            const childSignal = yield* Signal.make<Element>(text(""));
+    ) {
+      const rawComponent = match.route.definition.component;
+      if (rawComponent === undefined) return text("");
+      const routeIdentity = routeRenderIdentity(
+        routePath,
+        options.request.query,
+        currentRouteRenderKey,
+      );
+      return options.deferLazyLeaf && isComponentLoader(rawComponent)
+        ? renderLazyLeaf(rawComponent, routeIdentity, decodedParams, decodedQuery, options.request)
+        : yield* Effect.flatMap(resolveComponent(rawComponent), (component) =>
+            renderComponent(component, decodedParams, decodedQuery, routeIdentity, routerContext),
+          );
+    });
 
-            yield* Effect.forkScoped(
-              Effect.gen(function* () {
-                const component = yield* routeActivationBoundary.loadComponent(
-                  options.request,
-                  loader,
-                );
-                const leafElement = yield* renderComponent(
-                  component,
-                  decodedParams,
-                  decodedQuery,
-                  routeIdentity,
-                );
-                yield* Signal.set(childSignal, leafElement);
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Signal.set(
-                    childSignal,
-                    Element.fail(Cause.squash(cause), {
-                      identity: outletLazyLeafIdentity,
-                      inputs: { routeIdentity, phase: "error" },
-                    }),
-                  ),
-                ),
-              ),
-            );
+    /** Raw (unresolved) layout chain for a match, outermost → innermost. */
+    const computeRawLayouts = (match: RouteMatch): ReadonlyArray<ComponentInput> => {
+      const ancestorRawLayouts = Arr.filterMap(match.route.ancestors, (a) =>
+        a !== undefined && a.definition.layout !== undefined
+          ? Result.succeed(a.definition.layout)
+          : Result.failVoid,
+      );
+      return match.route.definition.layout !== undefined
+        ? [...ancestorRawLayouts, match.route.definition.layout]
+        : ancestorRawLayouts;
+    };
 
-            return signalElement(childSignal);
-          }),
-          {
-            identity: outletLazyLeafIdentity,
-            inputs: { loader, params: decodedParams, query: decodedQuery, routeIdentity },
-          },
+    /** Resolve component + layouts and stack root-to-leaf (boundary path). */
+    const buildRouteElement = Effect.fnUntraced(function* (
+      match: RouteMatch,
+      decodedParams: Record<string, unknown>,
+      decodedQuery: Record<string, unknown>,
+      routePath: string,
+      options: { readonly deferLazyLeaf: boolean; readonly request: RouteActivationRequest },
+    ) {
+      if (match.route.definition.component === undefined) return text("");
+
+      const routeIdentity = routeRenderIdentity(
+        routePath,
+        options.request.query,
+        currentRouteRenderKey,
+      );
+      const leafElement = yield* buildLeaf(match, decodedParams, decodedQuery, routePath, options);
+
+      const allLayouts = yield* Effect.all(
+        computeRawLayouts(match).map((l) => resolveComponent(l)),
+        { concurrency: "unbounded" },
+      );
+
+      const leafEffect: Effect.Effect<Element, unknown, never> = Effect.succeed(leafElement);
+      return yield* Arr.reduceRight(allLayouts, leafEffect, (acc, layout) =>
+        Effect.flatMap(acc, (child) =>
+          renderLayout(layout, child, decodedParams, decodedQuery, routeIdentity, routerContext),
+        ),
+      );
+    });
+
+    /**
+     * Layout-preserving commit (no loading/error boundary on this route).
+     *
+     * Diffs the route's raw layout chain against the mounted frameStack by raw
+     * reference (longest common prefix). Reused frames stay mounted; only the
+     * divergent suffix is rebuilt and its deepest child region swaps. The leaf
+     * is always rebuilt with the new params and driven into the deepest frame.
+     * Caller MUST hold frameLock.
+     */
+    const commitWithLayoutPreservation = Effect.fnUntraced(function* (
+      match: RouteMatch,
+      decodedParams: Record<string, unknown>,
+      decodedQuery: Record<string, unknown>,
+      routePath: string,
+      activationId: string,
+      request: RouteActivationRequest,
+    ) {
+      const scrollStrategy = resolveScrollStrategy(match.route);
+
+      // No component: mirror buildRouteElement's early text("") and drop frames.
+      if (match.route.definition.component === undefined) {
+        frameStack = [];
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: routePath },
+          setViewAndAwaitSwap(text("")),
+          applyScroll(scrollStrategy),
         );
+        return;
+      }
 
-      const renderBase: Effect.Effect<Element, unknown, never> = Effect.gen(function* () {
-        const rawComponent = match.route.definition.component;
-        if (rawComponent === undefined) return text("");
+      const allRawLayouts = computeRawLayouts(match);
+      const routeContextKey = buildRouteContextKey(match, request.query.toString());
 
-        const routeIdentity = { path: routePath };
-        const leafElement =
-          options.deferLazyLeaf && isComponentLoader(rawComponent)
-            ? renderLazyLeaf(rawComponent, routeIdentity)
-            : yield* Effect.flatMap(resolveComponent(rawComponent), (component) =>
-                renderComponent(component, decodedParams, decodedQuery, routeIdentity),
-              );
-
-        const ancestorRawLayouts = Arr.filterMap(match.route.ancestors, (a) =>
-          a !== undefined && a.definition.layout !== undefined
-            ? Result.succeed(a.definition.layout)
-            : Result.failVoid,
-        );
-        const allRawLayouts =
-          match.route.definition.layout !== undefined
-            ? [...ancestorRawLayouts, match.route.definition.layout]
-            : ancestorRawLayouts;
-
-        const allLayouts = yield* Effect.all(
-          allRawLayouts.map((l) => resolveComponent(l)),
-          { concurrency: "unbounded" },
-        );
-
-        const leafEffect: Effect.Effect<Element, unknown, never> = Effect.succeed(leafElement);
-        return yield* Arr.reduceRight(allLayouts, leafEffect, (acc, layout) =>
-          Effect.flatMap(acc, (child) =>
-            renderLayout(layout, child, decodedParams, decodedQuery, routeIdentity),
-          ),
-        );
+      // Without an error boundary, lazy leaves must render as self-loading
+      // components so loader failures stay contained inside the route view
+      // instead of failing the outlet process. Routes with an error boundary use
+      // the boundary path below, where the loader is awaited so errors render
+      // through that boundary.
+      const leaf = yield* buildLeaf(match, decodedParams, decodedQuery, routePath, {
+        deferLazyLeaf: true,
+        request,
       });
 
-      return renderBase;
-    };
+      // Longest common prefix of the layout chain by raw reference.
+      let common = 0;
+      while (common < frameStack.length && common < allRawLayouts.length) {
+        const frame = frameStack[common];
+        if (
+          frame === undefined ||
+          frame.rawLayout !== allRawLayouts[common] ||
+          frame.routeContextKey !== routeContextKey
+        ) {
+          break;
+        }
+        common++;
+      }
+
+      // Case A: entire layout chain reused → swap only the deepest child.
+      const deepest =
+        allRawLayouts.length > 0 && common === allRawLayouts.length && common === frameStack.length
+          ? frameStack[frameStack.length - 1]
+          : undefined;
+      if (deepest !== undefined) {
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: routePath },
+          setSlotSignalAndAwaitSwap(deepest.slot, deepest.childSignal, leaf),
+          applyScroll(scrollStrategy),
+        );
+        return;
+      }
+
+      // Case B: rebuild the divergent suffix (layers common..end), innermost
+      // wrapping the leaf. Frames 0..common-1 stay mounted and untouched.
+      const reused = frameStack.slice(0, common);
+      const suffix = allRawLayouts.slice(common);
+      const newFrames: Array<LayoutFrame> = [];
+      let child: Element = leaf;
+      for (const rawLayout of suffix.slice().reverse()) {
+        const layout = yield* resolveComponent(rawLayout);
+        const childSignal = yield* Signal.make<Element>(text(""));
+        const slot: SwapSlot = { deferred: null };
+        const layoutEl = yield* renderLayoutReactive(
+          layout,
+          signalElement(childSignal, { onSwap: makeOnSwap(slot) }),
+          decodedParams,
+          decodedQuery,
+          routeContextKey,
+        );
+        // Seed BEFORE mount: the SignalElement's initial render reads this
+        // value (peek); a fresh, unmounted frame fires no swap to await.
+        yield* Signal.set(childSignal, child);
+        newFrames.unshift({ rawLayout, routeContextKey, childSignal, slot });
+        child = layoutEl;
+      }
+      frameStack = [...reused, ...newFrames];
+
+      // Attach point: the deepest reused frame's child slot, or the root view
+      // when no outer frame was reused (`child` is then the whole tree).
+      const parent = common > 0 ? reused[common - 1] : undefined;
+      if (parent === undefined) {
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: routePath },
+          setSlotSignalAndAwaitSwap(rootSlot, viewSignal, child),
+          applyScroll(scrollStrategy),
+        );
+      } else {
+        yield* routeActivation.commitAfterDomSwap(
+          { activationId, path: routePath },
+          setSlotSignalAndAwaitSwap(parent.slot, parent.childSignal, child),
+          applyScroll(scrollStrategy),
+        );
+      }
+    });
 
     /** Wrap render effect with nearest-wins error boundary. */
     const wrapWithErrorBoundary = (
@@ -852,12 +1049,15 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       "Outlet.getOrCreateAsyncLoader",
     )(function* (loadingComp: ComponentInput) {
       const current = yield* Ref.get(asyncLoaderRef);
-      if (Option.isSome(current)) return current.value;
+      if (Option.isSome(current) && current.value.loadingComp === loadingComp) {
+        return current.value.loader;
+      }
 
       const resolvedLoading = yield* resolveComponent(loadingComp);
       const loadingElement = yield* renderComponent(resolvedLoading, {}, {});
       const loader = yield* AsyncLoader.make(loadingElement, scope);
-      yield* Ref.set(asyncLoaderRef, Option.some(loader));
+      const slot: AsyncLoaderSlot = { loadingComp, loader };
+      yield* Ref.set(asyncLoaderRef, Option.some(slot));
 
       // Propagate loader.view -> viewSignal. Deferred scroll is consumed only
       // once the loader reaches Ready so loading/refreshing frames do not
@@ -865,6 +1065,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       const _unsubLoader = yield* Signal.subscribe(loader.view, () =>
         unsafeEraseR(
           Effect.gen(function* () {
+            const activeSlot = yield* Ref.get(asyncLoaderRef);
+            if (Option.isNone(activeSlot) || activeSlot.value.loader !== loader) return;
             const state = yield* SubscriptionRef.get(loader.state._ref);
             const val = yield* SubscriptionRef.get(loader.view._ref);
             if (pendingScroll !== null && AsyncLoadState.$is("Ready")(state)) {
@@ -1046,12 +1248,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
               renderError(resolved, Cause.fail(decodedParamsResult.failure), route.path),
             )
-          : yield* Debug.log({
-              event: "router.outlet.error",
+          : yield* Trace.emit("router.outlet.error", () => ({
               phase: "decode_params",
               path: route.path,
               error: decodedParamsResult.failure,
-            }).pipe(Effect.as(text("Error")));
+            })).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1074,12 +1275,11 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           ? yield* Effect.flatMap(resolveComponent(errorIntent.component), (resolved) =>
               renderError(resolved, Cause.fail(decodedQueryResult.failure), route.path),
             )
-          : yield* Debug.log({
-              event: "router.outlet.error",
+          : yield* Trace.emit("router.outlet.error", () => ({
               phase: "decode_query",
               path: route.path,
               error: decodedQueryResult.failure,
-            }).pipe(Effect.as(text("Error")));
+            })).pipe(Effect.as(text("Error")));
         yield* routeActivation.commitAfterDomSwap(
           { activationId, path: route.path },
           setViewAndAwaitSwap(el),
@@ -1093,14 +1293,47 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       // Build → wrap → commit
       const hasLoadingBoundary = Option.isSome(boundaries.resolveLoading(match.route));
+      const hasErrorBoundary = Option.isSome(boundaries.resolveError(match.route));
+      const request: RouteActivationRequest = {
+        activationId,
+        path: route.path,
+        query: route.query,
+        scrollIntent: Option.none(),
+      };
+
+      // Layout-preserving path: only when neither a loading nor an error
+      // boundary applies. Reuses mounted layout frames and swaps just the
+      // changed region. Serialized via frameLock so concurrent navigations
+      // cannot corrupt the shared frame stack.
+      if (!hasLoadingBoundary && !hasErrorBoundary) {
+        yield* frameLock.withPermits(1)(
+          commitWithLayoutPreservation(
+            match,
+            decodedParams,
+            decodedQuery,
+            route.path,
+            activationId,
+            request,
+          ),
+        );
+        return;
+      }
+
+      // Boundary path (loading and/or error): full tree rebuild driven through
+      // viewSignal. Drop persistent frames so a later return to a plain layout
+      // rebuilds cleanly; the viewSignal replace tears down the old subtree.
+      yield* frameLock.withPermits(1)(
+        Effect.sync(() => {
+          frameStack = [];
+        }),
+      );
       const routeElement = buildRouteElement(match, decodedParams, decodedQuery, route.path, {
-        deferLazyLeaf: !hasLoadingBoundary,
-        request: {
-          activationId,
-          path: route.path,
-          query: route.query,
-          scrollIntent: Option.none(),
-        },
+        // Same blank-flash guard as the layout-preserving path: with no loading
+        // boundary AND no layout chrome, a deferred lazy leaf would blank the
+        // whole view until the import resolves. Await the load instead so the
+        // swap is atomic (and load failures route to the error boundary).
+        deferLazyLeaf: !hasLoadingBoundary && computeRawLayouts(match).length > 0,
+        request,
       });
       const withError = wrapWithErrorBoundary(routeElement, match, route.path);
       yield* commitView(withError, match, queryString, epoch, activationId, route.path);
@@ -1108,22 +1341,17 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const currentRoute = yield* SubscriptionRef.get(router.current._ref);
-          yield* ContractTrace.emit({
-            event: "effect.error.ignored",
-            level: "semantic",
-            payload: {
-              owner: "router.outlet",
-              operation: "processRoute",
-              path: currentRoute.path,
-              cause: Cause.pretty(cause),
-            },
-          });
-          yield* Debug.log({
-            event: "router.outlet.error",
+          yield* Trace.emit("effect.error.ignored", () => ({
+            owner: "router.outlet",
+            operation: "processRoute",
+            path: currentRoute.path,
+            cause: Cause.pretty(cause),
+          }));
+          yield* Trace.emit("router.outlet.error", () => ({
             phase: "process_route",
             path: currentRoute.path,
             error: Cause.pretty(cause),
-          });
+          }));
         }),
       ),
     );
@@ -1137,7 +1365,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     const unsubRouter = yield* Signal.subscribe(router.current, () => unsafeEraseR(processRoute));
     yield* Scope.addFinalizer(scope, unsubRouter);
 
-    return signalElement(viewSignal, { onSwap: onSwapEffect });
+    return signalElement(viewSignal, { onSwap: onRootSwap });
   });
 
   return Element.fromEffect(outletEffect, { identity: outletRuntimeIdentity, inputs: props });

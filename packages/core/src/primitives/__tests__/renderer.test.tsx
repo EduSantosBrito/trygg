@@ -20,7 +20,7 @@ import { assert, describe } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer, Option, Scope, Schema } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
-import * as Debug from "../../debug/debug.js";
+import * as Trace from "../../trace/index.js";
 import { Element, Fragment } from "../../index.js";
 import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
 import * as Router from "../../router/index.js";
@@ -126,38 +126,37 @@ describe("mount", () => {
 });
 
 describe("SafeUrl attribute handling", () => {
-  scoped("emits unsafe href failures through Debug without console.warn", () =>
+  scoped("emits unsafe href failures through trace without console.warn", () =>
     Effect.gen(function* () {
-      const events: Array<Debug.DebugEvent> = [];
+      const recorder = Trace.makeRecorder();
       const originalWarn = console.warn;
       let warned = false;
 
       console.warn = () => {
         warned = true;
       };
-      Debug.disable();
-      for (const name of Debug.getPlugins()) {
-        Debug.unregisterPlugin(name);
-      }
-      Debug.registerPlugin(Debug.createCollectorPlugin("safe-url-test", events));
-      Debug.enable("render.safeurl");
 
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           console.warn = originalWarn;
-          Debug.disable();
-          Debug.unregisterPlugin("safe-url-test");
         }),
       );
 
-      const { getByTestId } = yield* render(
-        <a data-testid="unsafe-link" href="javascript:alert(1)">
-          unsafe
-        </a>,
+      const link = yield* Trace.record(
+        Effect.gen(function* () {
+          const { getByTestId } = yield* render(
+            <a data-testid="unsafe-link" href="javascript:alert(1)">
+              unsafe
+            </a>,
+          );
+          return yield* getByTestId("unsafe-link");
+        }),
+        recorder,
       );
 
-      const link = yield* getByTestId("unsafe-link");
-      const safeUrlEvents = events.filter((event) => event.event === "render.safeurl.blocked");
+      const safeUrlEvents = recorder
+        .records()
+        .filter((record) => record.name === "safeUrl.blocked");
 
       assert.isFalse(warned);
       assert.isNull(link.getAttribute("href"));

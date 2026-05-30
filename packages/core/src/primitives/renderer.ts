@@ -10,11 +10,11 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Effect, Layer, Match, Option, Schema, Scope } from "effect";
+import { Cause, Effect, Layer, Match, Option, Schema, Scheduler, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
 import * as Signal from "./signal.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
 import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
 import * as SafeUrl from "../security/safe-url.js";
@@ -91,10 +91,15 @@ const runForkInRenderContext = <A, E>(
   effect: Effect.Effect<A, E, RuntimeRequirements>,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
+  options?: { readonly preventSchedulerYield?: boolean },
 ): void => {
-  Effect.runForkWith(mergeRenderServices(renderContext, context))(
-    effect.pipe(Scope.provide(renderContext.scope)),
-  );
+  const services = mergeRenderServices(renderContext, context);
+  const forkServices =
+    options?.preventSchedulerYield === true
+      ? Context.add(services, Scheduler.PreventSchedulerYield, true)
+      : services;
+
+  Effect.runForkWith(forkServices)(effect.pipe(Scope.provide(renderContext.scope)));
 };
 
 /**
@@ -247,11 +252,10 @@ const renderDocumentElement = Effect.fn("renderDocumentElement")(function* (
   // For <html> and <body>, attributes are applied and children are rendered into the target.
   const renderTarget = tag === "head" ? document.head : targetNode;
 
-  yield* Debug.log({
-    event: "render.document",
+  yield* Trace.emit("document.render", () => ({
     element_tag: tag,
     target: targetNode.tagName,
-  });
+  }));
 
   // Strip framework-specific 'mode' prop before applying
   const { mode: _mode, ...domProps } = props;
@@ -273,24 +277,22 @@ const renderDocumentElement = Effect.fn("renderDocumentElement")(function* (
         }
         appliedAttrs.push({ key: attrName, prev });
 
-        yield* Debug.log({
-          event: "render.document.signal.initial",
+        yield* Trace.emit("document.signal.initial", () => ({
           signal_id: value._debugId,
           value: initialValue,
           element_tag: tag,
           trigger: `prop:${key}`,
-        });
+        }));
 
         const unsubscribe = yield* Signal.subscribe(value, () =>
           Effect.gen(function* () {
             const newValue = yield* Signal.get(value);
-            yield* Debug.log({
-              event: "render.document.signal.update",
+            yield* Trace.emit("document.signal.update", () => ({
               signal_id: value._debugId,
               value: newValue,
               element_tag: tag,
               trigger: `prop:${key}`,
-            });
+            }));
             const blocked = applyPropValue(targetNode, key, newValue, renderContext.safeUrlConfig);
             if (Option.isSome(blocked)) {
               yield* logBlockedSafeUrlAttribute(blocked.value);
@@ -385,22 +387,20 @@ const renderElement = (
         parent.appendChild(node);
         let currentSignal = signal;
 
-        yield* Debug.log({
-          event: "render.signaltext.initial",
+        yield* Trace.emit("signalText.initial", () => ({
           signal_id: signal._debugId,
           value: initialValue,
-        });
+        }));
 
         // Subscribe to signal changes for fine-grained updates
         // Listener returns Effect which is run inside notifyListeners
         const unsubscribe = yield* Signal.subscribe(signal, () =>
           Effect.gen(function* () {
             const value = yield* Signal.get(signal);
-            yield* Debug.log({
-              event: "render.signaltext.update",
+            yield* Trace.emit("signalText.update", () => ({
               signal_id: signal._debugId,
               value: value,
-            });
+            }));
             node.textContent = String(value);
           }),
         );
@@ -581,6 +581,26 @@ const makeBrowserRenderer = Effect.fn("Renderer.browserLayer")(function* () {
   return Renderer.of({ mount: mountElement, render: renderToParent });
 });
 
+/**
+ * The browser `Renderer` layer — the DOM-backed implementation of the
+ * {@link RendererService} contract.
+ *
+ * @remarks
+ * Provide this layer to run an app against a real DOM. It wires the
+ * DOM-specific renderer used by the higher-level `mount` / `render` helpers; on
+ * non-browser platforms provide a different `Renderer` implementation instead.
+ *
+ * @example
+ * ```ts
+ * Effect.runFork(
+ *   render(container, App).pipe(Effect.provide(browserLayer)),
+ * )
+ * ```
+ *
+ * @category Rendering
+ * @public
+ * @since 1.0.0
+ */
 export const browserLayer: Layer.Layer<Renderer> = Layer.effect(
   Renderer,
   makeBrowserRenderer().pipe(Effect.annotateLogs({ service: "Renderer" })),
@@ -654,12 +674,6 @@ const isEffectValue = (
  * })
  *
  * mount(document.getElementById("root")!, Counter)
- *
- * // With DevMode
- * mount(document.getElementById("root")!, <>
- *   <Counter />
- *   <DevMode />
- * </>)
  *
  * // With custom layers
  * mount(

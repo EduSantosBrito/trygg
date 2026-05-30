@@ -127,7 +127,6 @@ Reactivity and rendering guidance is source-owned now:
 
 Supporting public docs are source-owned too:
 
-- `DevMode`: [`src/components/dev-mode.ts`](./src/components/dev-mode.ts), [`src/components/dev-mode.docs.md`](./src/components/dev-mode.docs.md)
 - `ErrorBoundary`: [`src/primitives/error-boundary.ts`](./src/primitives/error-boundary.ts), [`src/primitives/error-boundary.docs.md`](./src/primitives/error-boundary.docs.md)
 - `Portal`: [`src/primitives/portal.ts`](./src/primitives/portal.ts), [`src/primitives/portal.docs.md`](./src/primitives/portal.docs.md)
 - `Head`: [`src/primitives/head.ts`](./src/primitives/head.ts), [`src/primitives/head.docs.md`](./src/primitives/head.docs.md)
@@ -188,6 +187,7 @@ JSX lowering details now live with the entrypoints themselves: [`src/jsx-runtime
 | `Signal.update(signal, fn)`           | Update signal with function                         |
 | `Signal.derive(source, fn)`           | Computed signal from a source                       |
 | `Signal.deriveAll(sources, fn)`       | Computed signal from multiple sources               |
+| `Signal.selector(source, fn?)`        | Value-keyed selector for single-selection lists     |
 | `Signal.each(source, fn, opts)`       | Efficient list rendering                            |
 | `Signal.suspend(component, handlers)` | Async component suspension                          |
 | `Resource.make(fn, opts)`             | Data fetching with cache and dedup                  |
@@ -195,11 +195,10 @@ JSX lowering details now live with the entrypoints themselves: [`src/jsx-runtime
 | `Resource.match(state, handlers)`     | Pattern-match on `Pending` / `Success` / `Failure`  |
 | `Resource.invalidate(key)`            | Stale-while-revalidate a cached resource            |
 | `Resource.refresh(key)`               | Force re-fetch a cached resource                    |
-| `DevMode`                             | Enable debug output from JSX                        |
 | `ErrorBoundary`                       | Match tagged render failures                        |
 | `Portal`                              | Render into another DOM target                      |
 | `Head`                                | Head hoisting and dedup helpers                     |
-| `Debug`                               | Low-level debug events, plugins, spans              |
+| `Debug`                               | Console logger over the trace flight recorder       |
 | `Metrics`                             | Low-level framework metrics and sinks               |
 
 ### Router Exports

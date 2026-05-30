@@ -1,20 +1,16 @@
 /**
  * Built-in Components Unit Tests
  *
- * Tests for ErrorBoundary, Portal, and DevMode components.
+ * Tests for the ErrorBoundary component.
  *
  * Goals: Reliability, stability
  * - Verify error handling works correctly
- * - Verify portal renders to correct target
- * - Verify DevMode enables/disables debug
  */
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Option, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import * as Signal from "../../primitives/signal.js";
 import * as ErrorBoundary from "../../primitives/error-boundary.js";
-import { DevMode } from "../dev-mode.js";
-import * as Debug from "../../debug/debug.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../../primitives/component.js";
 
@@ -23,21 +19,6 @@ class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {
   detail: Schema.String,
 }) {}
 class OtherError extends Schema.TaggedErrorClass<OtherError>()("OtherError", {}) {}
-
-// Helper to reset debug state
-const withDebugReset: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R> =
-  Effect.fn("withDebugReset")(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-    const result = yield* effect;
-    Debug.disable();
-    for (const name of Debug.getPlugins()) {
-      Debug.unregisterPlugin(name);
-    }
-    return result;
-  });
 
 const catchAllView = (render_: (cause: Cause.Cause<unknown>) => JSX.Element) =>
   Component.gen(function* (Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {
@@ -312,94 +293,4 @@ describe("ErrorBoundary", () => {
 
   // duplicate-handler is now a compile error via Exclude<ErrorTags<E>, HandledTags>
   // — .on("TestError", v1).on("TestError", v2) won't typecheck
-});
-
-// =============================================================================
-// DevMode
-// =============================================================================
-// Scope: Enabling debug observability
-
-describe("DevMode", () => {
-  it.effect("should enable debug logging on mount", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        assert.isFalse(Debug.isEnabled());
-
-        yield* render(<DevMode />);
-
-        assert.isTrue(Debug.isEnabled());
-      }),
-    ),
-  );
-
-  it("should render empty element", () => {
-    const element = <DevMode />;
-
-    // DevMode returns a Component that renders to empty
-    assert.strictEqual(element._tag, "Component");
-  });
-
-  it.effect("should pass filter to Debug.enable", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        yield* render(<DevMode filter="signal" />);
-
-        const filter = Debug.getFilter();
-        assert.deepStrictEqual(filter, ["signal"]);
-      }),
-    ),
-  );
-
-  it.effect("should support array of filters", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        yield* render(<DevMode filter={["signal", "render"]} />);
-
-        const filter = Debug.getFilter();
-        assert.isNotNull(filter);
-        assert.isTrue(filter?.includes("signal"));
-        assert.isTrue(filter?.includes("render"));
-      }),
-    ),
-  );
-
-  it.effect("should not enable debug when enabled is false", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        const { container } = yield* render(<DevMode enabled={false} />);
-
-        assert.strictEqual(container.querySelectorAll("*").length, 0);
-        assert.isFalse(Debug.isEnabled());
-      }),
-    ),
-  );
-
-  it.effect("should register custom plugins", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        const events: Debug.DebugEvent[] = [];
-        const plugin = Debug.createCollectorPlugin("custom", events);
-
-        yield* render(<DevMode plugins={[plugin]} />);
-
-        assert.isTrue(Debug.hasPlugin("custom"));
-      }),
-    ),
-  );
-
-  it.effect("should register multiple plugins", () =>
-    withDebugReset(
-      Effect.gen(function* () {
-        const events1: Debug.DebugEvent[] = [];
-        const events2: Debug.DebugEvent[] = [];
-        const plugin1 = Debug.createCollectorPlugin("plugin1", events1);
-        const plugin2 = Debug.createCollectorPlugin("plugin2", events2);
-
-        yield* render(<DevMode plugins={[plugin1, plugin2]} />);
-
-        assert.isTrue(Debug.hasPlugin("plugin1"));
-        assert.isTrue(Debug.hasPlugin("plugin2"));
-      }),
-    ),
-  );
 });

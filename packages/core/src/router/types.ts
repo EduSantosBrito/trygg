@@ -22,7 +22,7 @@
  */
 import { Effect, Schema, type Cause, type Scope } from "effect";
 import { Component } from "../primitives/component.js";
-import type { Signal, SignalDisposedError } from "../primitives/signal.js";
+import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
 import type { NavigationPrefetchState } from "./navigation-outlet-coordination.js";
@@ -507,7 +507,7 @@ export interface RouteErrorInfo {
   /** The route path that errored */
   readonly path: string;
   /** Reset effect to retry rendering the route - use in onClick handler */
-  readonly reset: Effect.Effect<void, SignalDisposedError, never>;
+  readonly reset: Effect.Effect<void, never, never>;
 }
 
 /**
@@ -546,13 +546,13 @@ export interface RouterService {
   readonly navigate: (
     path: string,
     options?: NavigateOptions,
-  ) => Effect.Effect<void, NavigationError | SignalDisposedError>;
+  ) => Effect.Effect<void, NavigationError>;
 
   /** Go back in history */
-  readonly back: () => Effect.Effect<void, NavigationError | SignalDisposedError>;
+  readonly back: () => Effect.Effect<void, NavigationError>;
 
   /** Go forward in history */
-  readonly forward: () => Effect.Effect<void, NavigationError | SignalDisposedError>;
+  readonly forward: () => Effect.Effect<void, NavigationError>;
 
   /** Get current route params (type-safe by path pattern) */
   readonly params: <Path extends RoutePath>(path: Path) => Effect.Effect<RouteParamsFor<Path>>;
@@ -574,7 +574,7 @@ export interface RouterService {
   readonly isActive: (
     path: string,
     options?: IsActiveOptions,
-  ) => Effect.Effect<Signal<boolean>, NavigationError | SignalDisposedError, Scope.Scope>;
+  ) => Effect.Effect<Signal<boolean>, NavigationError, Scope.Scope>;
 
   /**
    * Prefetch route modules for a path.

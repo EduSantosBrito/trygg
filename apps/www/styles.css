@@ -538,6 +538,38 @@ html {
   margin-top: 1.75rem;
 }
 
+.docs-code-fallback {
+  overflow: hidden;
+  border: 1px solid var(--color-code-rule-strong);
+  border-radius: 8px;
+  background: var(--color-code-bg);
+  color: var(--color-code-ink);
+}
+
+.docs-code-fallback__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--color-code-rule);
+  background: var(--color-code-surface);
+  color: var(--color-code-ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.docs-code-fallback pre {
+  overflow: auto;
+  margin: 0;
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
 .docs-article__code-wrapper + p {
   margin-top: 1.75rem;
 }
@@ -637,8 +669,11 @@ html {
   border-bottom: 1px solid var(--color-rule);
 }
 
+/* The compact hero sits directly above the first ruled step section; drop its
+ * own bottom rule so the two hairlines don't stack at the seam. */
 .docs-hero--compact {
   padding-bottom: clamp(2rem, 4vw, 3rem);
+  border-bottom: 0;
 }
 
 .docs-hero__grid {
@@ -1188,42 +1223,44 @@ html {
   gap: 0;
 }
 
+/* Small lists carry their own dash markers and spacing; no per-item rules so
+ * they don't read as boxed-in. */
 .docs-note-list li,
 .docs-requirements li {
-  padding: 0.875rem 0 0.875rem 1.5rem;
+  padding: 0.5rem 0 0 1.5rem;
   border: 0;
-  border-top: 1px solid var(--color-rule);
   border-radius: 0;
   background: transparent;
 }
 
-.docs-note-list li:last-child,
-.docs-requirements li:last-child {
-  border-bottom: 1px solid var(--color-rule);
+.docs-note-list li:first-child,
+.docs-requirements li:first-child {
+  padding-top: 0;
 }
 
 .docs-note-list li::before,
 .docs-requirements li::before {
-  top: 0.875rem;
+  top: 0.5rem;
   left: 0;
+}
+
+.docs-note-list li:first-child::before,
+.docs-requirements li:first-child::before {
+  top: 0;
 }
 
 .docs-next-row {
   display: grid;
-  gap: 0;
+  gap: 1.5rem;
 }
 
+/* "What's next" items separate by spacing, not a rule between each one. */
 .docs-next-link {
   display: block;
-  padding: 1.25rem 0;
+  padding: 0;
   border: 0;
-  border-top: 1px solid var(--color-rule);
   border-radius: 0;
   background: transparent;
-}
-
-.docs-next-link:last-child {
-  border-bottom: 1px solid var(--color-rule);
 }
 
 .docs-next-link:hover {
@@ -1689,6 +1726,14 @@ a.canary-badge:focus-visible {
   background: var(--color-paper);
 }
 
+/* The site header is fixed (4rem tall), so the landing content flows beneath
+ * it. Clear the header and add deliberate breathing room above the hero so the
+ * headline never sits flush under the bar. The section's own top padding is
+ * dropped below to avoid doubling up. */
+.home-page.landing-page main {
+  padding-top: calc(4rem + clamp(2.5rem, 6vw, 5rem));
+}
+
 .home-nav,
 .home-workbench-section {
   position: relative;
@@ -1807,7 +1852,9 @@ html[data-theme="dark"] .theme-toggle__icon--moon {
 .home-workbench-section {
   display: grid;
   gap: clamp(3rem, 6vw, 5rem);
-  padding-block: clamp(3rem, 6vw, 5rem) clamp(4rem, 8vw, 6rem);
+  /* Top spacing now lives on `.home-page.landing-page main` so it can clear the
+   * fixed header; this only keeps the section's bottom padding. */
+  padding-block: 0 clamp(4rem, 8vw, 6rem);
 }
 
 .home-workbench-intro {

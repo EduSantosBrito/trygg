@@ -3,8 +3,6 @@
  *
  * Pre-renders code at module load time for static examples
  */
-import { createHighlighterCore, type HighlighterCore } from "shiki/core";
-import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { Effect, Schema } from "effect";
 import {
   Component,
@@ -13,11 +11,20 @@ import {
   type ComponentProps,
   type Element as TryggElement,
 } from "trygg";
-import type { Element as HastElement, Text as HastText, RootContent, Root as HastRoot } from "hast";
 
 import { getTheme, type Theme } from "../lib/theme";
+import {
+  createDocsHighlighter,
+  highlightToLines,
+  isHastNode,
+  normalizeLanguage,
+  type HastNode,
+  type HighlightedLine,
+} from "../lib/shiki-highlight";
 
-type HastNode = HastElement | HastText;
+// Re-export so existing importers (docs-article, tabs, changelog-detail) keep
+// resolving HighlightedLine from this module.
+export type { HighlightedLine };
 
 class HighlightCodeError extends Schema.TaggedErrorClass<HighlightCodeError>()(
   "HighlightCodeError",
@@ -25,35 +32,6 @@ class HighlightCodeError extends Schema.TaggedErrorClass<HighlightCodeError>()(
     cause: Schema.Unknown,
   },
 ) {}
-
-// Type guards for HAST nodes
-const isHastElement = (node: RootContent): node is HastElement => node.type === "element";
-
-const isHastNode = (node: RootContent): node is HastNode =>
-  node.type === "element" || node.type === "text";
-
-// Pre-initialize highlighter with only what we need
-let highlighter: HighlighterCore | null = null;
-
-// Code surfaces are always dark workbench, even on light pages.
-const shikiTheme = (_theme: Theme) => "github-dark";
-
-const getHighlighter = async () => {
-  if (!highlighter) {
-    highlighter = await createHighlighterCore({
-      themes: [import("shiki/themes/github-dark.mjs"), import("shiki/themes/github-light.mjs")],
-      langs: [
-        import("shiki/langs/tsx.mjs"),
-        import("shiki/langs/ts.mjs"),
-        import("shiki/langs/js.mjs"),
-        import("shiki/langs/json.mjs"),
-        import("shiki/langs/bash.mjs"),
-      ],
-      engine: createOnigurumaEngine(import("shiki/wasm")),
-    });
-  }
-  return highlighter;
-};
 
 export interface IdentifierTooltip {
   readonly kind: string;
@@ -395,64 +373,14 @@ function parseStyle(styleStr: string): Record<string, string> {
   return style;
 }
 
-export interface HighlightedLine {
-  lineNumber: number;
-  nodes: HastNode[];
-}
-
 const highlightedLinesCache = new Map<string, Promise<HighlightedLine[]>>();
-
-const normalizeLanguage = (lang: string): string => {
-  if (lang === "" || lang === "sh") return "bash";
-  const supported = ["tsx", "ts", "js", "json", "bash"];
-  return supported.includes(lang) ? lang : "text";
-};
 
 async function highlightCodeUncached(
   code: string,
   normalizedLang: string,
-  theme: Theme,
 ): Promise<HighlightedLine[]> {
-  const hl = await getHighlighter();
-  const hast: HastRoot = hl.codeToHast(code, {
-    lang: normalizedLang,
-    theme: shikiTheme(theme),
-  });
-
-  // Shiki always produces: root > pre > code > (text|span)*
-  const preNode = hast.children.find(isHastElement);
-  if (!preNode) return [];
-
-  const codeNode = preNode.children.find(isHastElement);
-  if (!codeNode) return [];
-
-  // Split by newlines to get lines
-  const lines: HighlightedLine[] = [];
-  let currentLine: HastNode[] = [];
-  let lineNumber = 1;
-
-  for (const child of codeNode.children.filter(isHastNode)) {
-    if (child.type === "text") {
-      const parts = child.value.split("\n");
-      parts.forEach((part, i) => {
-        if (i > 0) {
-          lines.push({ lineNumber: lineNumber++, nodes: currentLine });
-          currentLine = [];
-        }
-        if (part) {
-          currentLine.push({ type: "text", value: part });
-        }
-      });
-    } else {
-      currentLine.push(child);
-    }
-  }
-
-  if (currentLine.length > 0) {
-    lines.push({ lineNumber, nodes: currentLine });
-  }
-
-  return lines;
+  const hl = await createDocsHighlighter();
+  return highlightToLines(hl, code, normalizedLang);
 }
 
 export function highlightCode(
@@ -467,7 +395,7 @@ export function highlightCode(
 
   const highlighted = Effect.runPromise(
     Effect.tryPromise({
-      try: () => highlightCodeUncached(code, normalizedLang, theme),
+      try: () => highlightCodeUncached(code, normalizedLang),
       catch: (cause) => new HighlightCodeError({ cause }),
     }).pipe(
       Effect.tapError(() =>

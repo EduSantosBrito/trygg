@@ -2,10 +2,11 @@ import { Cause, Effect, Exit, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element } from "./element.js";
 import * as Signal from "./signal.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import { moveRange } from "./render-utils.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { makeRenderTransaction } from "./render-transaction.js";
+import { unsafeWidenContext } from "../internal/unsafe.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -28,6 +29,7 @@ interface RenderKeyedListDeps<E, R> {
     effect: Effect.Effect<void, E2, R2>,
     renderContext: RenderContext,
     context: Context.Context<unknown> | null,
+    options?: { readonly preventSchedulerYield?: boolean },
   ) => void;
 }
 
@@ -70,10 +72,10 @@ export const computeLIS = (arr: ReadonlyArray<number>): ReadonlyArray<number> =>
   return lisIndices;
 };
 
-export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
-  source: Signal.Signal<ReadonlyArray<unknown>>,
-  renderFn: (item: unknown, index: number) => Effect.Effect<unknown, E, R>,
-  keyFn: (item: unknown, index: number) => string | number,
+export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
+  source: Signal.Signal<ReadonlyArray<T>>,
+  renderFn: (item: T, index: number) => Effect.Effect<unknown, E, R>,
+  keyFn: (item: T, index: number) => string | number,
   parent: Node,
   runtime: RenderContext,
   context: Context.Context<unknown> | null,
@@ -83,7 +85,7 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
   // Create anchor comment for the list
   const anchor = document.createComment("keyed-list");
   parent.appendChild(anchor);
-  const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
+  const renderTransaction = makeRenderTransaction();
 
   // Track item states by key
   type ItemState = {
@@ -93,7 +95,7 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
     startMarker: Comment;
     /** Comment marking end of this item's DOM range (always after content) */
     endMarker: Comment;
-    item: unknown;
+    item: T;
     /** Current index in the list (updated on reorder) */
     currentIndex: number;
     /** Whether a re-render is in progress */
@@ -115,8 +117,8 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
   let pendingUpdate = false;
 
   // Helper to render a single item with a stable render phase
-  const renderItem = Effect.fn("renderItem")(function* (
-    item: unknown,
+  const renderItem = Effect.fnUntraced(function* (
+    item: T,
     index: number,
     existingPhase: Signal.RenderPhase | null,
     itemScope: Scope.Closeable,
@@ -158,6 +160,51 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
     return { renderPhase, result, startMarker, endMarker };
   });
 
+  const currentStatesInDomOrder = (): Array<ItemState> => {
+    const states: Array<ItemState> = [];
+    const seen = new Set<ItemState>();
+
+    for (const key of keyOrder) {
+      const state = itemStates.get(key);
+      if (state !== undefined) {
+        states.push(state);
+        seen.add(state);
+      }
+    }
+
+    for (const state of itemStates.values()) {
+      if (!seen.has(state)) {
+        states.push(state);
+      }
+    }
+
+    return states;
+  };
+
+  const detachContiguousItemRange = (states: ReadonlyArray<ItemState>): void => {
+    const listParent = anchor.parentNode;
+    if (listParent === null || states.length === 0) return;
+
+    for (const state of states) {
+      if (
+        state.startMarker.parentNode !== listParent ||
+        state.endMarker.parentNode !== listParent
+      ) {
+        return;
+      }
+    }
+
+    const firstState = states[0];
+    const lastState = states[states.length - 1];
+    if (firstState === undefined || lastState === undefined) return;
+
+    const range = document.createRange();
+    range.setStartBefore(firstState.startMarker);
+    range.setEndAfter(lastState.endMarker);
+    range.extractContents();
+    range.detach();
+  };
+
   /**
    * Diff subscriptions: unsubscribe from removed signals, subscribe to new ones.
    * Reuses existing subscriptions for signals that are still accessed.
@@ -187,11 +234,7 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
     for (const [signalId, unsubscribe] of oldSubs) {
       if (!newSignalIds.has(signalId)) {
         yield* unsubscribe;
-        yield* Debug.log({
-          event: "render.keyedlist.subscription.remove",
-          key,
-          signal_id: signalId,
-        });
+        yield* Trace.emit("keyedList.subscription.remove", () => ({ key, signal_id: signalId }));
       }
     }
 
@@ -205,11 +248,10 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
         // New subscription needed
         const unsubscribe = yield* Signal.subscribe(signal, scheduleRerender);
         newSubs.set(signal._debugId, unsubscribe);
-        yield* Debug.log({
-          event: "render.keyedlist.subscription.add",
+        yield* Trace.emit("keyedList.subscription.add", () => ({
           key,
           signal_id: signal._debugId,
-        });
+        }));
       }
     }
 
@@ -219,7 +261,10 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
   // Function to update the list
   // Note: updateList is sync because it's called from signal listener,
   // but it immediately forks an Effect for the actual work.
-  function updateList(): void {
+  function updateList(
+    preventSchedulerYield = false,
+    forkContext: Context.Context<unknown> | null = null,
+  ): void {
     if (isUnmounted) return;
 
     if (isUpdating) {
@@ -227,290 +272,314 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
       return;
     }
 
+    const shouldPreventSchedulerYield = preventSchedulerYield || keyOrder.length === 0;
     isUpdating = true;
 
-    deps.runForkInRenderContext(
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* Debug.log({
-            event: "render.keyedlist.update",
-            current_keys: keyOrder.length,
-          });
+    const updateEffect = Effect.scoped(
+      Effect.gen(function* () {
+        yield* Trace.emit("keyedList.update", () => ({ current_keys: keyOrder.length }));
 
-          yield* Debug.log({
-            event: "render.keyedlist.state",
-            phase: "start",
-            key_order: [...keyOrder],
-          });
+        yield* Trace.emit("keyedList.state", () => ({
+          phase: "start",
+          key_order: [...keyOrder],
+        }));
 
-          if (isUnmounted || anchor.parentNode === null) {
+        if (isUnmounted || anchor.parentNode === null) {
+          return;
+        }
+
+        // Get current items from source signal. peek (not get): the keyed list
+        // owns its own subscription via Signal.subscribe(source) below. Using
+        // Signal.get here would *also* add `source` to the enclosing component's
+        // render phase (whichever phase is current when the initial updateList
+        // runs), subscribing that component to the source. The component would
+        // then re-render — and a component re-render whose body produces fresh
+        // SignalElement/keyed-list children cannot reconcile, so it falls back to
+        // a full REPLACE that tears down and rebuilds the entire shared subtree
+        // on every source change, instead of this in-place list diff.
+        const items = yield* Signal.peek(source);
+
+        // Compute new keys
+        const newKeys = items.map((item, i) => keyFn(item, i));
+        const newKeySet = new Set(newKeys);
+
+        yield* Trace.emit("keyedList.state", () => ({
+          phase: "computed",
+          key_order: [...keyOrder],
+          new_keys: newKeys,
+        }));
+
+        // Build map of old key -> old index for LIS calculation
+        const oldKeyToIndex = new Map<string | number, number>();
+        for (let i = 0; i < keyOrder.length; i++) {
+          const key = keyOrder[i];
+          if (key !== undefined) {
+            oldKeyToIndex.set(key, i);
+          }
+        }
+
+        // Remove items that are no longer in the list
+        const removedItems: Array<{
+          readonly key: string | number;
+          readonly state: ItemState;
+        }> = [];
+        for (const key of keyOrder) {
+          if (!newKeySet.has(key)) {
+            const state = itemStates.get(key);
+            if (state !== undefined) {
+              removedItems.push({ key, state });
+            }
+          }
+        }
+
+        if (removedItems.length === keyOrder.length) {
+          detachContiguousItemRange(removedItems.map((item) => item.state));
+        }
+
+        for (const { key, state } of removedItems) {
+          // Clean up subscriptions
+          for (const [, unsubscribe] of state.subscriptions) {
+            yield* unsubscribe;
+          }
+          // Clean up rendered content + markers
+          yield* renderTransaction.cleanup(state.result);
+          state.startMarker.remove();
+          state.endMarker.remove();
+          yield* Scope.close(state.scope, Exit.void);
+          itemStates.delete(key);
+          yield* Trace.emit("keyedList.item.remove", () => ({ key }));
+        }
+
+        // Compute old indices for existing items in new order
+        // -1 means new item (not in old list)
+        const oldIndicesInNewOrder: Array<number> = [];
+        for (const key of newKeys) {
+          if (key === undefined) continue;
+          const oldIndex = oldKeyToIndex.get(key);
+          oldIndicesInNewOrder.push(oldIndex ?? -1);
+        }
+
+        // Filter to only existing items (non-negative indices) for LIS
+        const existingIndices = oldIndicesInNewOrder.filter((i) => i >= 0);
+        const lisIndices = new Set(computeLIS(existingIndices));
+
+        // Track which existing items (by their old index) are in LIS
+        const stableOldIndices = new Set<number>();
+        let lisIdx = 0;
+        for (const oldIdx of existingIndices) {
+          if (lisIndices.has(lisIdx)) {
+            stableOldIndices.add(oldIdx);
+          }
+          lisIdx++;
+        }
+
+        // Render new items and collect all states in new order
+        const stagedParent = document.createDocumentFragment();
+        const newItemStates: Array<{
+          key: string | number;
+          state: ItemState;
+          isNew: boolean;
+          needsMove: boolean;
+          needsRerender: boolean;
+        }> = [];
+
+        for (const [i, item] of items.entries()) {
+          const key = newKeys[i];
+
+          if (key === undefined) continue;
+
+          const existingState = itemStates.get(key);
+          const oldIndex = oldKeyToIndex.get(key);
+
+          if (existingState !== undefined && oldIndex !== undefined) {
+            // Item exists - update stored item reference
+            // If item identity changed, schedule rerender later.
+            const needsRerender = !Object.is(existingState.item, item);
+            existingState.item = item;
+            // Check if this item needs to move (not in LIS)
+            const needsMove = !stableOldIndices.has(oldIndex);
+            newItemStates.push({
+              key,
+              state: existingState,
+              isNew: false,
+              needsMove,
+              needsRerender,
+            });
+          } else {
+            // New item - create new state
+            const itemScope = yield* Scope.fork(listScope);
+            const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
+              item,
+              i,
+              null,
+              itemScope,
+              stagedParent,
+            ).pipe(Effect.onError(() => Scope.close(itemScope, Exit.void)));
+
+            // Set up subscriptions for this item's accessed signals.
+            // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
+            // signal notification chain. Actual re-render forks via Runtime.runFork.
+            // Batching via isRerendering/pendingRerender coalesces rapid updates.
+            const scheduleItemRerender: () => Effect.Effect<void> = Effect.fnUntraced(function* () {
+              const currentState = yield* Effect.sync(() => {
+                if (isUnmounted) return null;
+                const state = itemStates.get(key);
+                if (state === undefined) return null;
+
+                // Coalesce rapid signal changes - mark pending if already rerendering
+                if (state.isRerendering) {
+                  state.pendingRerender = true;
+                  return null;
+                }
+                state.isRerendering = true;
+                return state;
+              });
+              if (currentState === null) return;
+
+              yield* Effect.sync(() =>
+                deps.runForkInRenderContext(
+                  Effect.scoped(
+                    Effect.gen(function* () {
+                      // Re-render with same phase (preserves signals).
+                      // renderItem appends [startMarker, content, endMarker] to listParent.
+                      // We then move the new nodes before the old startMarker and
+                      // clean up the old range to preserve DOM order.
+                      const oldStartMarker = currentState.startMarker;
+                      const oldEndMarker = currentState.endMarker;
+
+                      // Track new nodes for cleanup on error
+                      let newResult: RenderResult | null = null;
+                      let newStartMarker: Comment | null = null;
+                      let newEndMarker: Comment | null = null;
+
+                      yield* Effect.gen(function* () {
+                        const rendered = yield* renderItem(
+                          currentState.item,
+                          currentState.currentIndex,
+                          currentState.renderPhase,
+                          currentState.scope,
+                        );
+                        newResult = rendered.result;
+                        newStartMarker = rendered.startMarker;
+                        newEndMarker = rendered.endMarker;
+
+                        // Move new range [newStartMarker..newEndMarker] before old start
+                        moveRange(newStartMarker, newEndMarker, oldStartMarker);
+
+                        // Clean up old render (removes old content)
+                        yield* renderTransaction.cleanup(currentState.result);
+                        oldStartMarker.remove();
+                        oldEndMarker.remove();
+
+                        // Update state
+                        currentState.result = newResult;
+                        currentState.startMarker = newStartMarker;
+                        currentState.endMarker = newEndMarker;
+
+                        // Check if another re-render was requested during this render
+                        const needsAnotherRender = currentState.pendingRerender;
+                        currentState.isRerendering = false;
+                        currentState.pendingRerender = false;
+
+                        yield* Trace.emit("keyedList.item.rerender", () => ({ key }));
+
+                        // Diff subscriptions (reuse stable ones)
+                        yield* diffSubscriptions(
+                          key,
+                          currentState,
+                          currentState.renderPhase.accessed,
+                          scheduleItemRerender,
+                        );
+
+                        // If a signal changed during re-render, schedule another
+                        if (needsAnotherRender) {
+                          yield* scheduleItemRerender();
+                        }
+                      }).pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.gen(function* () {
+                            // Cleanup new render result, ensuring markers are removed
+                            // even if cleanup fails (prevents DOM leaks)
+                            yield* Effect.ensuring(
+                              newResult !== null
+                                ? renderTransaction.cleanup(newResult)
+                                : Effect.void,
+                              Effect.sync(() => {
+                                if (newStartMarker !== null) newStartMarker.remove();
+                                if (newEndMarker !== null) newEndMarker.remove();
+                              }),
+                            );
+                            // Reset flags on error to allow retry
+                            currentState.isRerendering = false;
+                            currentState.pendingRerender = false;
+                            yield* Trace.emit("keyedList.item.rerender.error", () => ({
+                              key,
+                              reason: Cause.pretty(cause),
+                            }));
+                          }),
+                        ),
+                      );
+                    }),
+                  ),
+                  runtime,
+                  context,
+                ),
+              );
+            });
+
+            const state: ItemState = {
+              renderPhase,
+              result,
+              startMarker,
+              endMarker,
+              item,
+              currentIndex: i,
+              isRerendering: false,
+              pendingRerender: false,
+              subscriptions: new Map(),
+              scope: itemScope,
+              scheduleRerender: scheduleItemRerender,
+            };
+
+            // Initial subscription setup
+            yield* diffSubscriptions(key, state, renderPhase.accessed, scheduleItemRerender);
+
+            itemStates.set(key, state);
+            newItemStates.push({
+              key,
+              state,
+              isNew: true,
+              needsMove: false,
+              needsRerender: false,
+            });
+            yield* Trace.emit("keyedList.item.add", () => ({ key }));
+          }
+        }
+
+        // Reorder DOM nodes using minimal moves (LIS optimization).
+        // Initial create is already rendered in order into a DocumentFragment;
+        // insert it once so the create path is not counted as N DOM moves.
+        let moveCount = 0;
+        const rerenderStates: Array<ItemState> = [];
+
+        if (keyOrder.length === 0) {
+          const currentParent = anchor.parentNode;
+          if (isUnmounted || currentParent === null) {
             return;
           }
 
-          // Get current items from source signal
-          const items = yield* Signal.get(source);
-
-          // Compute new keys
-          const newKeys = items.map((item, i) => keyFn(item, i));
-          const newKeySet = new Set(newKeys);
-
-          yield* Debug.log({
-            event: "render.keyedlist.state",
-            phase: "computed",
-            key_order: [...keyOrder],
-            new_keys: newKeys,
-          });
-
-          // Build map of old key -> old index for LIS calculation
-          const oldKeyToIndex = new Map<string | number, number>();
-          for (let i = 0; i < keyOrder.length; i++) {
-            const key = keyOrder[i];
-            if (key !== undefined) {
-              oldKeyToIndex.set(key, i);
-            }
+          if (stagedParent.firstChild !== null) {
+            currentParent.insertBefore(stagedParent, anchor);
           }
 
-          // Remove items that are no longer in the list
-          for (const key of keyOrder) {
-            if (!newKeySet.has(key)) {
-              const state = itemStates.get(key);
-              if (state) {
-                // Clean up subscriptions
-                for (const [, unsubscribe] of state.subscriptions) {
-                  yield* unsubscribe;
-                }
-                // Clean up rendered content + markers
-                yield* renderTransaction.cleanup(state.result);
-                state.startMarker.remove();
-                state.endMarker.remove();
-                yield* Scope.close(state.scope, Exit.void);
-                itemStates.delete(key);
-                yield* Debug.log({
-                  event: "render.keyedlist.item.remove",
-                  key,
-                });
-              }
-            }
+          for (const [i, entry] of newItemStates.entries()) {
+            entry.state.currentIndex = i;
           }
-
-          // Compute old indices for existing items in new order
-          // -1 means new item (not in old list)
-          const oldIndicesInNewOrder: Array<number> = [];
-          for (const key of newKeys) {
-            if (key === undefined) continue;
-            const oldIndex = oldKeyToIndex.get(key);
-            oldIndicesInNewOrder.push(oldIndex ?? -1);
-          }
-
-          // Filter to only existing items (non-negative indices) for LIS
-          const existingIndices = oldIndicesInNewOrder.filter((i) => i >= 0);
-          const lisIndices = new Set(computeLIS(existingIndices));
-
-          // Track which existing items (by their old index) are in LIS
-          const stableOldIndices = new Set<number>();
-          let lisIdx = 0;
-          for (const oldIdx of existingIndices) {
-            if (lisIndices.has(lisIdx)) {
-              stableOldIndices.add(oldIdx);
-            }
-            lisIdx++;
-          }
-
-          // Render new items and collect all states in new order
-          const stagedParent = document.createDocumentFragment();
-          const newItemStates: Array<{
-            key: string | number;
-            state: ItemState;
-            isNew: boolean;
-            needsMove: boolean;
-            needsRerender: boolean;
-          }> = [];
-
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            const key = newKeys[i];
-
-            if (key === undefined) continue;
-
-            const existingState = itemStates.get(key);
-            const oldIndex = oldKeyToIndex.get(key);
-
-            if (existingState !== undefined && oldIndex !== undefined) {
-              // Item exists - update stored item reference
-              // If item identity changed, schedule rerender later.
-              const needsRerender = !Object.is(existingState.item, item);
-              existingState.item = item;
-              // Check if this item needs to move (not in LIS)
-              const needsMove = !stableOldIndices.has(oldIndex);
-              newItemStates.push({
-                key,
-                state: existingState,
-                isNew: false,
-                needsMove,
-                needsRerender,
-              });
-            } else {
-              // New item - create new state
-              const itemScope = yield* Scope.fork(listScope);
-              const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
-                item,
-                i,
-                null,
-                itemScope,
-                stagedParent,
-              ).pipe(Effect.onError(() => Scope.close(itemScope, Exit.void)));
-
-              // Set up subscriptions for this item's accessed signals.
-              // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
-              // signal notification chain. Actual re-render forks via Runtime.runFork.
-              // Batching via isRerendering/pendingRerender coalesces rapid updates.
-              const scheduleItemRerender: () => Effect.Effect<void> = Effect.fnUntraced(
-                function* () {
-                  const currentState = yield* Effect.sync(() => {
-                    if (isUnmounted) return null;
-                    const state = itemStates.get(key);
-                    if (state === undefined) return null;
-
-                    // Coalesce rapid signal changes - mark pending if already rerendering
-                    if (state.isRerendering) {
-                      state.pendingRerender = true;
-                      return null;
-                    }
-                    state.isRerendering = true;
-                    return state;
-                  });
-                  if (currentState === null) return;
-
-                  yield* Effect.sync(() =>
-                    deps.runForkInRenderContext(
-                      Effect.scoped(
-                        Effect.gen(function* () {
-                          // Re-render with same phase (preserves signals).
-                          // renderItem appends [startMarker, content, endMarker] to listParent.
-                          // We then move the new nodes before the old startMarker and
-                          // clean up the old range to preserve DOM order.
-                          const oldStartMarker = currentState.startMarker;
-                          const oldEndMarker = currentState.endMarker;
-
-                          // Track new nodes for cleanup on error
-                          let newResult: RenderResult | null = null;
-                          let newStartMarker: Comment | null = null;
-                          let newEndMarker: Comment | null = null;
-
-                          yield* Effect.gen(function* () {
-                            const rendered = yield* renderItem(
-                              currentState.item,
-                              currentState.currentIndex,
-                              currentState.renderPhase,
-                              currentState.scope,
-                            );
-                            newResult = rendered.result;
-                            newStartMarker = rendered.startMarker;
-                            newEndMarker = rendered.endMarker;
-
-                            // Move new range [newStartMarker..newEndMarker] before old start
-                            moveRange(newStartMarker, newEndMarker, oldStartMarker);
-
-                            // Clean up old render (removes old content)
-                            yield* renderTransaction.cleanup(currentState.result);
-                            oldStartMarker.remove();
-                            oldEndMarker.remove();
-
-                            // Update state
-                            currentState.result = newResult;
-                            currentState.startMarker = newStartMarker;
-                            currentState.endMarker = newEndMarker;
-
-                            // Check if another re-render was requested during this render
-                            const needsAnotherRender = currentState.pendingRerender;
-                            currentState.isRerendering = false;
-                            currentState.pendingRerender = false;
-
-                            // Diff subscriptions (reuse stable ones)
-                            yield* diffSubscriptions(
-                              key,
-                              currentState,
-                              currentState.renderPhase.accessed,
-                              scheduleItemRerender,
-                            );
-
-                            // If a signal changed during re-render, schedule another
-                            if (needsAnotherRender) {
-                              yield* scheduleItemRerender();
-                            }
-                          }).pipe(
-                            Effect.catchCause((cause) =>
-                              Effect.gen(function* () {
-                                // Cleanup new render result, ensuring markers are removed
-                                // even if cleanup fails (prevents DOM leaks)
-                                yield* Effect.ensuring(
-                                  newResult !== null
-                                    ? renderTransaction.cleanup(newResult)
-                                    : Effect.void,
-                                  Effect.sync(() => {
-                                    if (newStartMarker !== null) newStartMarker.remove();
-                                    if (newEndMarker !== null) newEndMarker.remove();
-                                  }),
-                                );
-                                // Reset flags on error to allow retry
-                                currentState.isRerendering = false;
-                                currentState.pendingRerender = false;
-                                yield* Debug.log({
-                                  event: "render.keyedlist.item.rerender.error",
-                                  key,
-                                  reason: Cause.pretty(cause),
-                                });
-                              }),
-                            ),
-                          );
-                        }),
-                      ),
-                      runtime,
-                      context,
-                    ),
-                  );
-                },
-              );
-
-              const state: ItemState = {
-                renderPhase,
-                result,
-                startMarker,
-                endMarker,
-                item,
-                currentIndex: i,
-                isRerendering: false,
-                pendingRerender: false,
-                subscriptions: new Map(),
-                scope: itemScope,
-                scheduleRerender: scheduleItemRerender,
-              };
-
-              // Initial subscription setup
-              yield* diffSubscriptions(key, state, renderPhase.accessed, scheduleItemRerender);
-
-              itemStates.set(key, state);
-              newItemStates.push({
-                key,
-                state,
-                isNew: true,
-                needsMove: false,
-                needsRerender: false,
-              });
-              yield* Debug.log({
-                event: "render.keyedlist.item.add",
-                key,
-              });
-            }
-          }
-
-          // Reorder DOM nodes using minimal moves (LIS optimization)
-          // Process from end to start, keeping track of next sibling reference
-          // Nodes in LIS stay in place; only move nodes not in LIS
-          // Move the full range [startMarker..node] so content stays with its anchor
-          let moveCount = 0;
+        } else {
+          // Process from end to start, keeping track of next sibling reference.
+          // Nodes in LIS stay in place; only move nodes not in LIS. Move the
+          // full range [startMarker..endMarker] so content stays with its anchor.
           let nextSibling: Node = anchor;
-          const rerenderStates: Array<ItemState> = [];
 
           // Iterate in reverse to build correct order
           for (let i = newItemStates.length - 1; i >= 0; i--) {
@@ -559,74 +628,80 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
               rerenderStates.push(state);
             }
           }
+        }
 
-          yield* Debug.log({
-            event: "render.keyedlist.reorder",
-            total_items: newItemStates.length,
-            moves: moveCount,
-            stable_nodes: newItemStates.length - moveCount,
-          });
+        yield* Trace.emit("keyedList.reorder", () => ({
+          total_items: newItemStates.length,
+          moves: moveCount,
+          stable_nodes: newItemStates.length - moveCount,
+        }));
 
-          yield* Debug.log({
-            event: "render.keyedlist.state",
-            phase: "after-reorder",
-            key_order: [...keyOrder],
-            new_keys: newKeys,
-            move_count: moveCount,
-          });
+        yield* Trace.emit("keyedList.state", () => ({
+          phase: "after-reorder",
+          key_order: [...keyOrder],
+          new_keys: newKeys,
+          move_count: moveCount,
+        }));
 
-          // Re-render changed items only when order is stable.
-          // When reorder happened, defer to next source update to avoid
-          // interfering with move sequencing for fragment ranges.
-          if (moveCount === 0) {
-            for (const state of rerenderStates) {
-              yield* state.scheduleRerender();
-            }
+        // Re-render changed items only when order is stable.
+        // When reorder happened, defer to next source update to avoid
+        // interfering with move sequencing for fragment ranges.
+        if (moveCount === 0) {
+          for (const state of rerenderStates) {
+            yield* state.scheduleRerender();
           }
+        }
 
-          // Update key order
-          keyOrder.length = 0;
-          for (const key of newKeys) {
-            if (key !== undefined) {
-              keyOrder.push(key);
-            }
+        // Update key order
+        keyOrder.length = 0;
+        for (const key of newKeys) {
+          if (key !== undefined) {
+            keyOrder.push(key);
           }
+        }
 
-          yield* Debug.log({
-            event: "render.keyedlist.state",
-            phase: "committed",
-            key_order: [...keyOrder],
-          });
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Debug.log({
-              event: "render.keyedlist.update.error",
-              reason: Cause.pretty(cause),
-            }),
-          ),
-        ),
-      ).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            isUpdating = false;
-            if (pendingUpdate && !isUnmounted) {
-              pendingUpdate = false;
-              updateList();
-            }
-          }),
+        yield* Trace.emit("keyedList.state", () => ({
+          phase: "committed",
+          key_order: [...keyOrder],
+        }));
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Trace.emit("keyedList.update.error", () => ({ reason: Cause.pretty(cause) })),
         ),
       ),
-      runtime,
-      context,
+    ).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          isUpdating = false;
+          if (pendingUpdate && !isUnmounted) {
+            pendingUpdate = false;
+            updateList();
+          }
+        }),
+      ),
     );
+
+    const forkRuntime =
+      forkContext === null
+        ? runtime
+        : { ...runtime, services: Context.merge(runtime.services, forkContext) };
+
+    deps.runForkInRenderContext(updateEffect, forkRuntime, context, {
+      preventSchedulerYield: shouldPreventSchedulerYield,
+    });
   }
 
-  // Initial render
-  yield* Effect.sync(updateList);
+  // Initial render: bulk create must not yield through the browser scheduler.
+  yield* Effect.sync(() => updateList(true));
 
-  // Subscribe to source signal changes
-  // updateList returns void but is wrapped in sync Effect by the listener
-  const unsubscribeSource = yield* Signal.subscribe(source, () => Effect.sync(updateList));
+  // Subscribe to source signal changes. Capture the listener fiber context so
+  // verifier annotations such as Trace.withAction follow the forked update.
+  const unsubscribeSource = yield* Signal.subscribe(source, () =>
+    Effect.gen(function* () {
+      const forkContext = yield* Effect.context<never>();
+      updateList(false, unsafeWidenContext(forkContext));
+    }),
+  );
 
   return {
     node: anchor,
@@ -635,7 +710,10 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <E, R>(
       yield* unsubscribeSource;
 
       // Clean up all items
-      for (const [, state] of itemStates) {
+      const mountedStates = currentStatesInDomOrder();
+      detachContiguousItemRange(mountedStates);
+
+      for (const state of mountedStates) {
         for (const [, unsubscribe] of state.subscriptions) {
           yield* unsubscribe;
         }

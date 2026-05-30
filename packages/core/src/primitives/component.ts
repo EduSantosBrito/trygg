@@ -234,7 +234,7 @@ export declare namespace Component {
  * @since 1.0.0
  */
 export const isEffectComponent = (value: unknown): value is Component.Type<unknown> =>
-  Predicate.isTagged(value, effectComponentTag);
+  typeof value === "function" && Predicate.isTagged(value, effectComponentTag);
 
 // =============================================================================
 // Component.gen API

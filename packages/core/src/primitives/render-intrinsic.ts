@@ -2,7 +2,7 @@ import { Effect, Fiber, Option, Predicate, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, getKey, type ElementProps, type EventHandler } from "./element.js";
 import * as Signal from "./signal.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import {
   applyPropValue,
   clearPropValue,
@@ -109,7 +109,7 @@ const clearRemovedProps = (
   }
 };
 
-const applyProps = Effect.fn("applyProps")(function* <E, R>(
+const applyProps = Effect.fnUntraced(function* <E, R>(
   node: globalThis.Element,
   props: ElementProps,
   renderContext: RenderContext,
@@ -117,7 +117,7 @@ const applyProps = Effect.fn("applyProps")(function* <E, R>(
   _deps: RenderIntrinsicDeps<E, R>,
 ) {
   const cleanups: Array<Effect.Effect<void>> = [];
-  const contextTransaction = makeRenderContextTransaction({ emitLifecycleTraceEvents: true });
+  const contextTransaction = makeRenderContextTransaction();
   const eventSnapshot = {
     ...renderContext,
     services:
@@ -144,30 +144,34 @@ const applyProps = Effect.fn("applyProps")(function* <E, R>(
       node.addEventListener(eventName, listener);
       cleanups.push(Effect.sync(() => node.removeEventListener(eventName, listener)));
     } else if (Signal.isSignal(value)) {
-      const initialValue = yield* Signal.get(value);
+      // peek (not get): this attribute binding owns its own subscription via
+      // Signal.subscribe(value) below. Signal.get would subscribe the enclosing
+      // component's render phase, re-rendering the whole component on every
+      // attribute change instead of updating this attribute in place.
+      const initialValue = yield* Signal.peek(value);
       const blocked = applyPropValue(node, key, initialValue, renderContext.safeUrlConfig);
       if (Option.isSome(blocked)) {
         yield* logBlockedSafeUrlAttribute(blocked.value);
       }
 
-      yield* Debug.log({
-        event: "render.signaltext.initial",
+      yield* Trace.emit("signalText.initial", () => ({
         signal_id: value._debugId,
         value: initialValue,
         element_tag: node.tagName.toLowerCase(),
         trigger: `prop:${key}`,
-      });
+      }));
 
       const unsubscribe = yield* Signal.subscribe(value, () =>
         Effect.gen(function* () {
-          const newValue = yield* Signal.get(value);
-          yield* Debug.log({
-            event: "render.signaltext.update",
+          // peek (not get): subscription already owned; never re-subscribe an
+          // ambient render phase when reading the updated value.
+          const newValue = yield* Signal.peek(value);
+          yield* Trace.emit("signalText.update", () => ({
             signal_id: value._debugId,
             value: newValue,
             element_tag: node.tagName.toLowerCase(),
             trigger: `prop:${key}`,
-          });
+          }));
           const blocked = applyPropValue(node, key, newValue, renderContext.safeUrlConfig);
           if (Option.isSome(blocked)) {
             yield* logBlockedSafeUrlAttribute(blocked.value);
@@ -178,7 +182,9 @@ const applyProps = Effect.fn("applyProps")(function* <E, R>(
     } else if (isEffectProp(value)) {
       const resolved = yield* value;
       if (Signal.isSignal(resolved)) {
-        const initialValue = yield* Signal.get(resolved);
+        // peek (not get): binding owns its subscription below; do not subscribe
+        // the enclosing component's render phase to this resolved signal.
+        const initialValue = yield* Signal.peek(resolved);
         const blocked = applyPropValue(node, key, initialValue, renderContext.safeUrlConfig);
         if (Option.isSome(blocked)) {
           yield* logBlockedSafeUrlAttribute(blocked.value);
@@ -186,7 +192,9 @@ const applyProps = Effect.fn("applyProps")(function* <E, R>(
 
         const unsubscribe = yield* Signal.subscribe(resolved, () =>
           Effect.gen(function* () {
-            const newValue = yield* Signal.get(resolved);
+            // peek (not get): subscription already owned; never re-subscribe an
+            // ambient render phase when reading the updated value.
+            const newValue = yield* Signal.peek(resolved);
             const blocked = applyPropValue(node, key, newValue, renderContext.safeUrlConfig);
             if (Option.isSome(blocked)) {
               yield* logBlockedSafeUrlAttribute(blocked.value);
@@ -211,7 +219,7 @@ const applyProps = Effect.fn("applyProps")(function* <E, R>(
   return cleanups;
 });
 
-export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* <E, R>(
+export const renderIntrinsic = Effect.fnUntraced(function* <E, R>(
   tag: string,
   props: ElementProps,
   children: ReadonlyArray<Element>,
@@ -237,9 +245,9 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* <E, R>(
   }
 
   const node = createElement(tag);
-  const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
+  const renderTransaction = makeRenderTransaction();
 
-  yield* Debug.log({ event: "render.intrinsic", element_tag: tag, element: node });
+  yield* Trace.emit("intrinsic.render", () => ({ element_tag: tag }));
 
   const domProps = props.mode !== undefined ? omitMode(props) : props;
   const appliedProps =
@@ -341,13 +349,22 @@ export const renderIntrinsic = Effect.fn("renderIntrinsic")(function* <E, R>(
   return {
     node,
     cleanup: Effect.gen(function* () {
+      // Detach this subtree's root from the document FIRST, as a single
+      // synchronous DOM mutation, BEFORE recursing into child/prop cleanup.
+      // Child cleanup is an Effect that `yield*`s once per child — every yield is
+      // a scheduler boundary where the browser can paint, so cleaning up children
+      // while still attached makes a large subtree disappear node-by-node (a
+      // 60-line code block visibly tearing down line-by-line under load). Removing
+      // `node` up front means every descendant removal happens off-document and is
+      // never painted; the outermost intrinsic in any torn-down subtree thus
+      // vanishes atomically and the inner `node.remove()`s become no-ops.
+      node.remove();
       if (hasKeyedChildren) {
         for (const childSlot of childSlots) yield* cleanupChildSlot(childSlot);
       } else {
         for (const child of childResults) yield* renderTransaction.cleanup(child);
       }
       for (const cleanup of propCleanups) yield* cleanup;
-      node.remove();
     }),
     reconcile: Effect.fnUntraced(function* (
       nextElement: Element,

@@ -1,7 +1,7 @@
 import { Effect, Equal, Option, Predicate } from "effect";
 import * as Context from "effect/Context";
 import * as SafeUrl from "../security/safe-url.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import type { Element } from "./element.js";
 
 export interface BlockedSafeUrlAttribute {
@@ -15,12 +15,11 @@ export const logBlockedSafeUrlAttribute = ({
   url,
   allowedSchemes,
 }: BlockedSafeUrlAttribute): Effect.Effect<void> =>
-  Debug.log({
-    event: "render.safeurl.blocked",
+  Trace.emit("safeUrl.blocked", () => ({
     attribute: key,
     url,
     allowed_schemes: allowedSchemes,
-  });
+  }));
 
 export const equalOrChanged = (left: unknown, right: unknown): boolean =>
   Option.match(Option.liftThrowable(Equal.equals)(left, right), {

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Context, Effect, Option, Predicate, Scope } from "effect";
-import * as ContractTrace from "../../contract/trace.js";
+import * as Trace from "../../trace/index.js";
 import { unsafeWidenContext } from "../../internal/unsafe.js";
 import { makeRenderTransaction } from "../render-transaction.js";
 import * as SafeUrl from "../../security/safe-url.js";
@@ -19,15 +19,14 @@ const makeContext: Effect.Effect<RenderContext> = Effect.gen(function* () {
 const traceEventsFor = Effect.fn("RenderTransactionTest.traceEventsFor")(function* <E, R>(
   effect: Effect.Effect<void, E, R>,
 ) {
-  const collector = yield* ContractTrace.createInMemoryCollector("render-transaction");
-  yield* ContractTrace.withCollector(effect, collector);
-  return yield* collector.snapshot;
+  const recorder = Trace.makeRecorder();
+  yield* Trace.record(effect, recorder);
+  return recorder.records();
 });
 
 const eventNames = (
-  records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
-): ReadonlyArray<ContractTrace.ContractTraceEventName> =>
-  records.map((record) => record.event.event);
+  records: ReadonlyArray<Trace.TraceRecord>,
+): ReadonlyArray<Trace.TraceEventName> => records.map((record) => record.name);
 
 const result = (node: Node, cleanupLog: Array<string>, label: string): RenderResult => ({
   node,
@@ -45,7 +44,7 @@ describe("RenderTransaction", () => {
       previousNode.textContent = "old";
       parent.appendChild(previousNode);
       const cleanupSnapshots: Array<string> = [];
-      const transaction = makeRenderTransaction({ emitTraceEvents: false });
+      const transaction = makeRenderTransaction();
       const previous = result(previousNode, cleanupSnapshots, "old");
       const context = yield* makeContext;
 
@@ -71,7 +70,7 @@ describe("RenderTransaction", () => {
   it.effect("represents reconcile success and skipped fallback explicitly", () =>
     Effect.gen(function* () {
       const node = document.createElement("div");
-      const transaction = makeRenderTransaction({ emitTraceEvents: false });
+      const transaction = makeRenderTransaction();
       const context = yield* makeContext;
       const previous = {
         ...result(node, [], "previous"),
@@ -102,7 +101,7 @@ describe("RenderTransaction", () => {
       const previousNode = document.createElement("span");
       previousNode.textContent = "old";
       parent.appendChild(previousNode);
-      const transaction = makeRenderTransaction({ emitTraceEvents: true });
+      const transaction = makeRenderTransaction();
       const context = yield* makeContext;
 
       const records = yield* traceEventsFor(
@@ -136,7 +135,7 @@ describe("RenderTransaction", () => {
       const previousNode = document.createElement("span");
       previousNode.textContent = "old";
       parent.appendChild(previousNode);
-      const transaction = makeRenderTransaction({ emitTraceEvents: true });
+      const transaction = makeRenderTransaction();
       const context = yield* makeContext;
 
       const records = yield* traceEventsFor(
@@ -164,7 +163,7 @@ describe("RenderTransaction", () => {
       const previousNode = document.createElement("span");
       previousNode.textContent = "old";
       parent.appendChild(previousNode);
-      const transaction = makeRenderTransaction({ emitTraceEvents: false });
+      const transaction = makeRenderTransaction();
       const context = yield* makeContext;
 
       const outcome = yield* transaction

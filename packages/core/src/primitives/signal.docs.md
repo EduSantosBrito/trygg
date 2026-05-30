@@ -64,6 +64,23 @@ const TodoList = Component.gen(function* () {
 });
 ```
 
+For single-selection lists, prefer `Signal.selector` over one `Signal.derive` per row on the shared selected-id signal. The selector owns one source subscription and creates per-key output signals; when the selected id changes, only the previous and next key buckets update:
+
+```tsx
+const selectedId = yield * Signal.make(0);
+const classFor = yield * Signal.selector(selectedId, (selected) => (selected ? "danger" : ""));
+
+const rows = Signal.each(
+  items,
+  (row) =>
+    Effect.gen(function* () {
+      const className = yield* classFor(row.id);
+      return <tr className={className}>{row.label}</tr>;
+    }),
+  { key: (row) => row.id },
+);
+```
+
 There is no separate "signal middleware" primitive. The predictable cross-component pattern is to keep the raw signal private inside a service and expose typed Effect methods that intercept, transform, validate, log, or batch updates before writing. This gives you middleware behavior with full type safety:
 
 ```tsx
@@ -182,15 +199,15 @@ const DebouncedSearchStoreLive = Layer.effect(
 
 Because the raw signal is never exported, all mutations flow through the service boundary. Components read the signal directly for fine-grained updates, use `Signal.get` for structural rerenders, and use `Signal.peek` inside service methods or event handlers for imperative snapshots. This makes interception, transformation, and cross-component coordination predictable and testable.
 
-Disposed signal access is a lifecycle bug, not an ordinary user-recoverable error. `Signal.get`, `Signal.peek`, `Signal.set`, `Signal.update`, and `Signal.modify` keep clean `Effect` signatures for application DX; if a stale reference touches a disposed signal, Trygg emits `signal.disposed_access` diagnostics and fails loudly as a defect carrying `Signal.SignalDisposedError`.
+Disposed signal access is a lifecycle edge case, not an ordinary user-recoverable error. `Signal.get`, `Signal.peek`, `Signal.set`, `Signal.update`, and `Signal.modify` keep clean `Effect` signatures for application DX; if a stale reference touches a disposed signal, Trygg emits `signal.disposed_access` diagnostics, returns the last snapshot for reads, and ignores writes as no-ops.
 
 ## Related exports
 
 - `Signal.make`
-- `Signal.SignalDisposedError`
 - `Signal.get`
 - `Signal.peek`
 - `Signal.modify`
 - `Signal.derive`
+- `Signal.selector`
 - `Signal.suspend`
 - `Signal.each`

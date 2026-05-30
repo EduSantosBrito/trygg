@@ -66,7 +66,7 @@ describe("ReactiveMatcher", () => {
         TestState,
         Signal.Signal<ElementType>,
         ElementType,
-        Signal.SignalDisposedError,
+        never,
         Scope.Scope
       >(
         source,

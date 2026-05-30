@@ -41,7 +41,8 @@
 | **ErrorBoundary** | An explicit component matcher that turns tagged render failures into fallback UI. | error handler, try/catch |
 | **Head** | The document metadata surface that hoists and deduplicates title and meta tags from components. | SEO helper, head manager |
 | **Portal** | A component-owned rendering surface that places UI into another DOM target. | teleport, overlay mount |
-| **DevMode** | A component that enables debug logging while mounted without rendering visible UI. | debugger, devtools |
+| **Trace** | The framework's internal flight recorder: one ordered catalog event per meaningful step, asserted by tests and read back for debugging. | logging, telemetry |
+| **Debug** | A console logger over the trace stream that pretty-prints catalog events for humans. | DevMode, debugger, devtools |
 
 ## Relationships
 

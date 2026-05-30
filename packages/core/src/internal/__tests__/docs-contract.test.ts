@@ -222,11 +222,10 @@ describe("docs contract", () => {
         "trygg/testing.render",
         "trygg/config.defineConfig",
         "trygg/vite-plugin.trygg",
-        "trygg.DevMode",
         "trygg.ErrorBoundary.catchAll",
         "trygg.Portal.make",
         "trygg.Head.browserHeadLayer",
-        "trygg.Debug.withSpan",
+        "trygg.Debug.consoleLogger",
         "trygg.Metrics.snapshot",
       ]) {
         assert.include(report.reachableExports, publicName);

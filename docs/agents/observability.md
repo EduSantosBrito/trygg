@@ -18,29 +18,27 @@
 ## Event Shape Rules
 
 - Emit structured events, never free-form debug strings.
-- Name events by domain and phase, for example `resource.fetch.success` or `router.navigate.complete`.
+- Name events by domain and phase, for example `resource.fetch.success` or `router.navigate.stateApplied`.
 - Include enough fields to explain the operation in one record: identifiers, trigger, outcome, counts, duration, and error details where relevant.
 - Prefer stable, queryable field names like `signal_id`, `path`, `listener_count`, `reason`, `error`, `duration_ms`.
-- Include business or framework context that would matter during diagnosis, not incidental implementation trivia.
-- Reuse existing trace context instead of inventing parallel correlation fields when `traceId` / `spanId` already solve it.
+- Keep event ownership singular: one framework state transition should have one canonical emitter.
 
 ## How To Add A New Wide Event
 
-1. Define the event shape in `packages/core/src/debug/debug.ts`.
-2. Add the new event type to the `DebugEvent` union so it becomes part of the typed public surface.
-3. Emit it at the operation boundary with `yield* Debug.log({ ... })`.
-4. If the operation is long-running or nested, wrap the work in `Debug.withSpan(...)` or attach it to an existing trace flow.
-5. Verify the event is visible through existing consumers like `DevMode`, custom plugins, or collector plugins.
-6. Add or update tests for the emitted event and its key fields.
-7. Update source-owned debug docs if the new event changes the public debugging contract or recommended workflow.
+1. Add the event name and metadata to `packages/core/src/trace/catalog.ts`.
+2. Emit it at the operation boundary with `yield* Trace.emit("event.name", () => ({ ... }))`.
+3. If the operation is long-running or nested, use `Trace.withAction(...)` or Effect spans where appropriate.
+4. Verify the event through `Trace.makeRecorder` + `Trace.record` or `trygg/testing.withRecording`.
+5. Add or update tests for the emitted event and its key fields.
+6. Update source-owned trace/debug docs if the new event changes the debugging contract or recommended workflow.
 
 ## Implementation Notes
 
-- `Debug.log` is the main entry point for custom instrumentation.
-- `Debug.log` only accepts known `EventType` values, so adding a new event starts in `packages/core/src/debug/debug.ts`.
-- `Debug.withSpan` and `Debug.setTraceId` are the preferred trace helpers.
-- `DevMode` is the simplest way to inspect events during app development.
-- `Metrics` complements wide events; it does not replace them.
+- `Trace.emit` is the main entry point for framework instrumentation.
+- The catalog is the typed event vocabulary; do not invent ad-hoc strings outside it.
+- `Debug.consoleLogger` / `Debug.layer` are human-facing Effect loggers over the trace stream.
+- Tests should prefer scoped recorders over process-global state.
+- Metrics complements wide events; it does not replace them.
 
 ## Good Candidates
 
@@ -59,8 +57,6 @@
 
 ## Source Of Truth
 
-- Philosophy and public debug surface: `packages/core/src/debug/debug.docs.md`
+- Trace catalog and recorder: `packages/core/src/trace/`
+- Human console output: `packages/core/src/debug/debug.ts` and `packages/core/src/debug/debug.docs.md`
 - Metrics public surface: `packages/core/src/debug/metrics.docs.md`
-- Event union, `EventType`, `LogInput`, spans, plugins: `packages/core/src/debug/debug.ts`
-- `DevMode` API: `packages/core/src/components/dev-mode.ts`
-- Metrics exports and sinks: `packages/core/src/debug/metrics.ts`

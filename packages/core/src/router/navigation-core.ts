@@ -10,9 +10,8 @@
  * @since 1.0.0
  * @module trygg/router/navigation-core
  */
-import { Clock, Effect, Layer, Match, Option, Schema, SynchronizedRef } from "effect";
+import { Clock, Effect, Layer, Option, Schema, SynchronizedRef } from "effect";
 import * as Context from "effect/Context";
-import * as ContractTrace from "../contract/trace.js";
 import { interpolateParams } from "./types.js";
 import { buildPath, parsePath } from "./utils.js";
 
@@ -52,63 +51,6 @@ export const NavigationCoreConfigInput = Schema.Struct({
 });
 
 type NavigationCoreConfig = typeof NavigationCoreConfigInput.Type;
-
-type NavigationOperation = "push" | "replace" | "back" | "forward" | "refresh";
-
-const queryString = (query: URLSearchParams): string => query.toString();
-
-const snapshotPayload = (snapshot: NavigationSnapshot): Record<string, unknown> => ({
-  path: snapshot.path,
-  query: queryString(snapshot.query),
-  hash: snapshot.hash,
-  scrollKey: snapshot.scrollKey,
-  isPopstate: snapshot.isPopstate,
-});
-
-const emitNavigationTrace: (
-  event: ContractTrace.ContractTraceEventName,
-  payload: Record<string, unknown>,
-) => Effect.Effect<void> = Effect.fnUntraced(function* (event, payload) {
-  yield* ContractTrace.emit({ event, level: "semantic", payload });
-});
-
-const historyEventFor = (
-  operation: Exclude<NavigationOperation, "refresh">,
-): ContractTrace.ContractTraceEventName =>
-  Match.value(operation).pipe(
-    Match.when("push", (): "history.push" => "history.push"),
-    Match.when("replace", (): "history.replace" => "history.replace"),
-    Match.when("back", (): "history.back" => "history.back"),
-    Match.when("forward", (): "history.forward" => "history.forward"),
-    Match.exhaustive,
-  );
-
-const emitSnapshotChanges: (
-  operation: NavigationOperation,
-  previous: NavigationSnapshot,
-  next: NavigationSnapshot,
-  notifyUnchangedQuery: boolean,
-) => Effect.Effect<void> = Effect.fn("NavigationCore.emitSnapshotChanges")(
-  function* (operation, previous, next, notifyUnchangedQuery) {
-    if (previous.path !== next.path || previous.hash !== next.hash) {
-      yield* emitNavigationTrace("router.current.set", {
-        operation,
-        previous: snapshotPayload(previous),
-        next: snapshotPayload(next),
-      });
-    }
-
-    const queryChanged = !sameQuery(previous.query, next.query);
-    if (queryChanged || notifyUnchangedQuery) {
-      yield* emitNavigationTrace("router.query.set", {
-        operation,
-        previousQuery: queryString(previous.query),
-        nextQuery: queryString(next.query),
-        changed: queryChanged,
-      });
-    }
-  },
-);
 
 export interface NavigationCoreShape {
   readonly current: Effect.Effect<NavigationSnapshot>;
@@ -162,60 +104,38 @@ export const makeNavigationCore: (
 ) => Effect.Effect<NavigationCoreShape, NavigationCoreError> = Effect.fn(
   "NavigationCore.makeNavigationCore",
 )(function* (input, adapter) {
-  const config = NavigationCoreConfigInput.make(input);
+  NavigationCoreConfigInput.make(input);
   const state = yield* SynchronizedRef.make(yield* adapter.read);
 
   const refresh = SynchronizedRef.updateEffect(state, () => adapter.read);
 
-  const commitSnapshot: (
-    operation: NavigationOperation,
-  ) => Effect.Effect<NavigationSnapshot, NavigationCoreError> = Effect.fn(
+  const commitSnapshot: () => Effect.Effect<NavigationSnapshot, NavigationCoreError> = Effect.fn(
     "NavigationCore.commitSnapshot",
-  )(function* (operation) {
-    const previous = yield* SynchronizedRef.get(state);
+  )(function* () {
     yield* refresh;
-    const next = yield* SynchronizedRef.get(state);
-    yield* emitSnapshotChanges(operation, previous, next, config.notifyUnchangedQuery);
-    yield* emitNavigationTrace("router.navigate.commit", {
-      operation,
-      previous: snapshotPayload(previous),
-      next: snapshotPayload(next),
-    });
-    return next;
+    return yield* SynchronizedRef.get(state);
   });
 
   return {
     current: SynchronizedRef.get(state),
     navigate: Effect.fn("NavigationCore.navigate")(function* (target) {
       const url = yield* resolveNavigationTarget(target);
-      const operation = target.replace ? "replace" : "push";
       const now = yield* Clock.currentTimeMillis;
       const historyState = { _scrollKey: `memory-${now.toString(36)}` };
-      yield* emitNavigationTrace("router.navigate.request", {
-        operation,
-        url,
-        replace: target.replace,
-        patternOrPath: target.patternOrPath,
-      });
       if (target.replace) {
         yield* adapter.replace(url, historyState);
       } else {
         yield* adapter.push(url, historyState);
       }
-      yield* emitNavigationTrace(historyEventFor(operation), { operation, url });
-      yield* commitSnapshot(operation);
+      yield* commitSnapshot();
     }),
     back: Effect.gen(function* () {
-      yield* emitNavigationTrace("router.navigate.request", { operation: "back" });
       yield* adapter.back;
-      yield* emitNavigationTrace("history.back", { operation: "back" });
-      yield* commitSnapshot("back");
+      yield* commitSnapshot();
     }).pipe(Effect.withSpan("NavigationCore.back")),
     forward: Effect.gen(function* () {
-      yield* emitNavigationTrace("router.navigate.request", { operation: "forward" });
       yield* adapter.forward;
-      yield* emitNavigationTrace("history.forward", { operation: "forward" });
-      yield* commitSnapshot("forward");
+      yield* commitSnapshot();
     }).pipe(Effect.withSpan("NavigationCore.forward")),
     isActive: Effect.fn("NavigationCore.isActive")(function* (target, exact) {
       const url = yield* resolveNavigationTarget(target);
@@ -225,7 +145,7 @@ export const makeNavigationCore: (
       const snapshot = yield* SynchronizedRef.get(state);
       return exact ? snapshot.path === path : snapshot.path.startsWith(path);
     }),
-    refresh: commitSnapshot("refresh").pipe(Effect.asVoid),
+    refresh: commitSnapshot().pipe(Effect.asVoid),
   };
 });
 

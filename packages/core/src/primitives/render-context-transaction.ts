@@ -1,6 +1,6 @@
 import { Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import type { RenderContext } from "./renderer.js";
 
 export type RenderContextSnapshot = RenderContext;
@@ -27,19 +27,6 @@ export class RenderContextOwnershipError extends Schema.TaggedErrorClass<RenderC
   },
 ) {}
 
-export const RenderContextTransactionConfigInput = Schema.Struct({
-  emitLifecycleTraceEvents: Schema.Boolean,
-});
-
-type RenderContextTransactionConfig = typeof RenderContextTransactionConfigInput.Type;
-
-const emitLifecycleTrace = (
-  enabled: boolean,
-  event: ContractTrace.ContractTraceEventName,
-  payload: Record<string, unknown>,
-): Effect.Effect<void> =>
-  enabled ? ContractTrace.emit({ event, level: "semantic", payload }) : Effect.void;
-
 export interface RenderContextTransactionShape {
   readonly forkContext: (
     request: RenderContextForkRequest,
@@ -51,16 +38,10 @@ export interface RenderContextTransactionShape {
   readonly finalizeOwnedScope: (snapshot: RenderContextSnapshot) => Effect.Effect<void, never>;
 }
 
-export const makeRenderContextTransaction = (
-  configInput: RenderContextTransactionConfig,
-): RenderContextTransactionShape => {
-  const config = RenderContextTransactionConfigInput.make(configInput);
-
+export const makeRenderContextTransaction = (): RenderContextTransactionShape => {
   return {
-    forkContext: Effect.fn("RenderContextTransaction.forkContext")(function* (request) {
-      yield* emitLifecycleTrace(config.emitLifecycleTraceEvents, "effect.fork.scoped", {
-        owner: request.scopeOwner,
-      });
+    forkContext: Effect.fnUntraced(function* (request) {
+      yield* Trace.emit("effect.fork.scoped", () => ({ owner: request.scopeOwner }));
       const scope = yield* Scope.fork(request.parent.scope).pipe(
         Effect.mapError(
           (cause) => new RenderContextOwnershipError({ owner: request.scopeOwner, cause }),
@@ -78,14 +59,10 @@ export const makeRenderContextTransaction = (
     }),
     runEventHandler: (snapshot, handler) =>
       handler.pipe(Scope.provide(snapshot.scope), Effect.provide(snapshot.services)),
-    finalizeOwnedScope: Effect.fn("RenderContextTransaction.finalizeOwnedScope")(
-      function* (snapshot) {
-        yield* Scope.close(snapshot.scope, Exit.void);
-        yield* emitLifecycleTrace(config.emitLifecycleTraceEvents, "effect.scope.close", {
-          owner: "render-context",
-        });
-      },
-    ),
+    finalizeOwnedScope: Effect.fnUntraced(function* (snapshot) {
+      yield* Scope.close(snapshot.scope, Exit.void);
+      yield* Trace.emit("effect.scope.close", () => ({ owner: "render-context" }));
+    }),
   };
 };
 
@@ -102,8 +79,6 @@ export class RenderContextTransaction extends Context.Service<
     readonly finalizeOwnedScope: (snapshot: RenderContextSnapshot) => Effect.Effect<void, never>;
   }
 >()("trygg/RenderContextTransaction") {
-  static readonly layer = (
-    configInput: RenderContextTransactionConfig,
-  ): Layer.Layer<RenderContextTransaction> =>
-    Layer.succeed(RenderContextTransaction, makeRenderContextTransaction(configInput));
+  static readonly layer = (): Layer.Layer<RenderContextTransaction> =>
+    Layer.succeed(RenderContextTransaction, makeRenderContextTransaction());
 }

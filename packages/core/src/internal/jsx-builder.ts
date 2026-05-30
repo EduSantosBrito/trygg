@@ -1,4 +1,4 @@
-import { Effect, Exit, Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import * as Component from "../primitives/component.js";
 import { Element, keyed, type ElementKey } from "../primitives/element.js";
@@ -35,18 +35,37 @@ const isElementKey = (value: unknown): value is ElementKey =>
 const isRecord = (value: unknown): value is RuntimeProps =>
   typeof value === "object" && value !== null;
 
-const collectProps = Effect.fn("JsxBuilder.collectProps")(function* (props: RuntimeProps) {
+const PropReadFailedTypeId: unique symbol = Symbol("trygg/PropReadFailed");
+
+interface PropReadFailed {
+  readonly [PropReadFailedTypeId]: true;
+}
+
+const PropReadFailed: PropReadFailed = { [PropReadFailedTypeId]: true };
+
+const readPropKeys = (props: RuntimeProps): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.try({
+    try: () => Object.keys(props),
+    catch: () => PropReadFailed,
+  }).pipe(Effect.catch(() => Effect.succeed([])));
+
+const readPropValue = (
+  props: RuntimeProps,
+  property: string,
+): Effect.Effect<unknown | PropReadFailed> =>
+  Effect.try({
+    try: () => props[property],
+    catch: () => PropReadFailed,
+  }).pipe(Effect.catch((failed: PropReadFailed) => Effect.succeed(failed)));
+
+const collectProps = Effect.fnUntraced(function* (props: RuntimeProps) {
   const result: RuntimeProps = {};
-  const keys = yield* Effect.exit(Effect.sync(() => Object.keys(props)));
+  const keys = yield* readPropKeys(props);
 
-  if (Exit.isFailure(keys)) {
-    return result;
-  }
-
-  for (const property of keys.value) {
-    const value = yield* Effect.exit(Effect.sync(() => props[property]));
-    if (Exit.isSuccess(value)) {
-      result[property] = value.value;
+  for (const property of keys) {
+    const value = yield* readPropValue(props, property);
+    if (value !== PropReadFailed) {
+      result[property] = value;
     }
   }
 
@@ -54,7 +73,7 @@ const collectProps = Effect.fn("JsxBuilder.collectProps")(function* (props: Runt
 });
 
 const normalizeInput: (props: unknown, key?: ElementKey) => Effect.Effect<NormalizedJsxInput> =
-  Effect.fn("JsxBuilder.normalizeInput")(function* (props: unknown, key?: ElementKey) {
+  Effect.fnUntraced(function* (props: unknown, key?: ElementKey) {
     const resolvedProps = isRecord(props) ? yield* collectProps(props) : {};
     const children = resolvedProps.children;
     const propsKeyRaw = resolvedProps.key;
@@ -76,10 +95,7 @@ const normalizeInput: (props: unknown, key?: ElementKey) => Effect.Effect<Normal
     };
   });
 
-const buildIntrinsic = Effect.fn("JsxBuilder.buildIntrinsic")(function* (
-  tag: string,
-  input: NormalizedJsxInput,
-) {
+const buildIntrinsic = Effect.fnUntraced(function* (tag: string, input: NormalizedJsxInput) {
   return Element.Intrinsic({
     tag,
     props: input.elementProps,
@@ -88,7 +104,7 @@ const buildIntrinsic = Effect.fn("JsxBuilder.buildIntrinsic")(function* (
   });
 });
 
-const buildComponent = Effect.fn("JsxBuilder.buildComponent")(function* (
+const buildComponent = Effect.fnUntraced(function* (
   type: Component.Component.Type<unknown>,
   input: NormalizedJsxInput,
 ) {
@@ -100,32 +116,34 @@ const build: (
   type: unknown,
   props: unknown,
   key?: ElementKey,
-) => Effect.Effect<ElementType, InvalidJsxComponentInput> = Effect.fn("JsxBuilder.build")(
-  function* (type: unknown, props: unknown, key?: ElementKey) {
-    const input = yield* normalizeInput(props, key);
+) => Effect.Effect<ElementType, InvalidJsxComponentInput> = Effect.fnUntraced(function* (
+  type: unknown,
+  props: unknown,
+  key?: ElementKey,
+) {
+  const input = yield* normalizeInput(props, key);
 
-    if (typeof type === "string") {
-      return yield* buildIntrinsic(type, input);
-    }
+  if (typeof type === "string") {
+    return yield* buildIntrinsic(type, input);
+  }
 
-    if (Effect.isEffect(type)) {
-      return yield* new InvalidJsxComponentInput({
-        reason: "effect",
-        key: input.resolvedKey,
-      });
-    }
-
-    if (Component.isEffectComponent(type)) {
-      return yield* buildComponent(type, input);
-    }
-
+  if (Effect.isEffect(type)) {
     return yield* new InvalidJsxComponentInput({
-      reason: typeof type === "function" ? "plain-function" : "unknown",
-      displayName: typeof type === "function" ? type.name : undefined,
+      reason: "effect",
       key: input.resolvedKey,
     });
-  },
-);
+  }
+
+  if (Component.isEffectComponent(type)) {
+    return yield* buildComponent(type, input);
+  }
+
+  return yield* new InvalidJsxComponentInput({
+    reason: typeof type === "function" ? "plain-function" : "unknown",
+    displayName: typeof type === "function" ? type.name : undefined,
+    key: input.resolvedKey,
+  });
+});
 
 export const JsxBuilder = {
   build,

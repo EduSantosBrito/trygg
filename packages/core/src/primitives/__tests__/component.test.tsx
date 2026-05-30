@@ -305,7 +305,7 @@ describe("Component.provide", () => {
           Store,
           {
             readonly count: Signal.Signal<number>;
-            readonly increment: Effect.Effect<void, Signal.SignalDisposedError>;
+            readonly increment: Effect.Effect<void>;
           }
         >()("component.test/Store") {}
 

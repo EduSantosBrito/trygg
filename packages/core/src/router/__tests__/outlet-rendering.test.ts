@@ -20,7 +20,7 @@ import { Outlet } from "../outlet.js";
 import { OutletRenderer } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
 import { Element, text } from "../../primitives/element.js";
-import { getFiberRef, setFiberRef } from "../../internal/fiber-ref.js";
+import { setFiberRef } from "../../internal/fiber-ref.js";
 import { InvalidRouteComponent, type RouteComponent } from "../types.js";
 
 // =============================================================================
@@ -32,9 +32,8 @@ const textComp = (content: string): RouteComponent => Effect.succeed(text(conten
 
 /** Create a layout RouteComponent that reads CurrentOutletChild */
 const renderLayoutChild = Effect.fn("outletRendering.renderLayoutChild")(function* () {
-  const childContent = yield* getFiberRef(Router.CurrentOutletChild);
+  const childContent = yield* Router.takeCurrentOutletChild();
   if (Option.isSome(childContent)) {
-    yield* setFiberRef(Router.CurrentOutletChild, Option.none());
     return childContent.value;
   }
   return text("empty-layout");
@@ -342,7 +341,7 @@ describe("Outlet - Rendering", () => {
   scoped("should render child content when CurrentOutletChild is set", () =>
     Effect.gen(function* () {
       // Pre-set CurrentOutletChild (simulates layout setting child)
-      yield* setFiberRef(Router.CurrentOutletChild, Option.some(text("Child from parent")));
+      yield* Router.setCurrentOutletChild(Option.some(text("Child from parent")));
 
       const outlet = Outlet({});
       const result = yield* runOutletEffect(outlet);
@@ -354,12 +353,12 @@ describe("Outlet - Rendering", () => {
 
   scoped("should clear CurrentOutletChild after reading", () =>
     Effect.gen(function* () {
-      yield* setFiberRef(Router.CurrentOutletChild, Option.some(text("Child")));
+      yield* Router.setCurrentOutletChild(Option.some(text("Child")));
 
       const outlet = Outlet({});
       yield* runOutletEffect(outlet);
 
-      const remaining = yield* getFiberRef(Router.CurrentOutletChild);
+      const remaining = yield* Router.takeCurrentOutletChild();
       assert.isTrue(Option.isNone(remaining));
     }).pipe(Effect.provide(Router.testLayer("/"))),
   );

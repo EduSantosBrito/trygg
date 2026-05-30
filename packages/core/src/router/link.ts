@@ -51,8 +51,7 @@ import {
   type AttributeInput,
 } from "../primitives/element.js";
 
-import * as Debug from "../debug/debug.js";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import { get as getRouter } from "./service.js";
 import { buildPath } from "./utils.js";
 import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
@@ -243,11 +242,10 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
     ) {
       if (prefetchTriggered) return;
       prefetchTriggered = true;
-      yield* Debug.log({
-        event: "router.prefetch.trigger",
+      yield* Trace.emit("router.prefetch.trigger", () => ({
         path: href,
         trigger,
-      });
+      }));
       yield* router.prefetch(href);
     });
 
@@ -299,27 +297,24 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
       // Don't intercept if modifier keys are pressed (open in new tab, etc.)
       if (event instanceof MouseEvent) {
         if (event.metaKey || event.ctrlKey || event.shiftKey) {
-          yield* Debug.log({
-            event: "router.link.click",
+          yield* Trace.emit("router.link.click", () => ({
             to_path: resolvedPath,
             reason: "modifier key pressed, allowing default",
-          });
+          }));
           return;
         }
       }
 
-      yield* Debug.log({
-        event: "router.link.click",
+      yield* Trace.emit("router.link.click", () => ({
         to_path: resolvedPath,
         ...(replace !== undefined ? { replace } : {}),
-      });
+      }));
 
       event.preventDefault();
-      yield* ContractTrace.emit({
-        event: "event.preventDefault",
-        level: "semantic",
-        payload: { eventType: event.type, target: resolvedPath },
-      });
+      yield* Trace.emit("event.preventDefault", () => ({
+        eventType: event.type,
+        target: resolvedPath,
+      }));
       const options = {
         ...(replace !== undefined ? { replace } : {}),
         ...(queryParams !== undefined ? { query: queryParams } : {}),
@@ -328,15 +323,11 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
         .pipe(
           Effect.catchCause((cause) =>
-            ContractTrace.emit({
-              event: "effect.error.ignored",
-              level: "semantic",
-              payload: {
-                owner: "router.link",
-                operation: "navigate",
-                cause: Cause.pretty(cause),
-              },
-            }),
+            Trace.emit("effect.error.ignored", () => ({
+              owner: "router.link",
+              operation: "navigate",
+              cause: Cause.pretty(cause),
+            })),
           ),
         );
     });

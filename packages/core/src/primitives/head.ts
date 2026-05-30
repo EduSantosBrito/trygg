@@ -93,6 +93,28 @@ export type HeadStrategyService = Data.TaggedEnum<{
 
 const HeadStrategyService = Data.taggedEnum<HeadStrategyService>();
 
+/**
+ * Service tag for the active head-computation strategy.
+ *
+ * @remarks
+ * Resolve this tag to learn whether head elements are computed server-side (in
+ * the initial HTML) or client-side (after JS). It follows {@link RenderStrategy}
+ * by default — SSR maps to the server strategy, Lazy/Eager to the client one —
+ * and can be overridden per route. Use the `HeadStrategy.Server` /
+ * `HeadStrategy.Client` constructors to build a value.
+ *
+ * @example
+ * ```ts
+ * const strategy = yield* HeadStrategy
+ * if (strategy.isServer) {
+ *   // compute the document <head> during SSR
+ * }
+ * ```
+ *
+ * @category Head Management
+ * @public
+ * @since 1.0.0
+ */
 export class HeadStrategy extends Context.Service<
   HeadStrategy,
   {

@@ -5,6 +5,7 @@ import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../component.js";
 import type { ComponentProps } from "../component.js";
+import type { Element } from "../element.js";
 import * as Signal from "../signal.js";
 
 class SyntheticReconcileFailure extends Schema.TaggedErrorClass<SyntheticReconcileFailure>()(
@@ -23,6 +24,27 @@ describe("render-signal-element", () => {
       assert.strictEqual((yield* getByTestId("before")).textContent, "before");
       yield* Signal.set(view, <strong data-testid="after">after</strong>);
       yield* TestClock.adjust(20);
+
+      assert.strictEqual((yield* getByTestId("after")).textContent, "after");
+      assert.isTrue(Option.isNone(yield* queryByTestId("before")));
+    }),
+  );
+
+  scoped("does not miss updates that land while initial content is rendering", () =>
+    Effect.gen(function* () {
+      let view: Signal.Signal<Element>;
+
+      const Initial = Component.gen(function* () {
+        yield* Signal.set(view, <strong data-testid="after">after</strong>);
+        return <span data-testid="before">before</span>;
+      });
+
+      view = yield* Signal.make<Element>(<Initial />);
+      const { getByTestId, queryByTestId } = yield* render(<div>{view}</div>);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(20);
+      yield* Effect.yieldNow;
 
       assert.strictEqual((yield* getByTestId("after")).textContent, "after");
       assert.isTrue(Option.isNone(yield* queryByTestId("before")));

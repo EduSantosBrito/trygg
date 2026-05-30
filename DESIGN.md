@@ -1,6 +1,6 @@
 ---
 name: trygg
-description: Effect-native UI documentation for developers who want components to compose like Effects. Editorial-typographic on paper-warm, with oxblood as the architectural signature. One sans family carries display, prose, and UI; one mono carries code.
+description: Effect-native UI documentation for developers who want components to compose like Effects. Editorial paper surfaces, oxblood architecture, dark workbench code, and a pixel-ladder mark.
 colors:
   paper: "oklch(97% 0.005 70)"
   paper-subtle: "oklch(95% 0.006 70)"
@@ -14,70 +14,97 @@ colors:
   signature: "oklch(42% 0.14 25)"
   signature-strong: "oklch(34% 0.15 25)"
   signature-mark: "oklch(42% 0.14 25 / 0.12)"
-  mark: "oklch(64% 0.13 75)"
-  mark-bg: "oklch(64% 0.13 75 / 0.1)"
+  signature-rule: "oklch(42% 0.14 25 / 0.42)"
+  mark: "oklch(58% 0.13 70)"
+  mark-bg: "oklch(58% 0.13 70 / 0.12)"
+  mark-rule: "oklch(58% 0.13 70 / 0.4)"
   code-bg: "oklch(16% 0.01 50)"
   code-surface: "oklch(19% 0.012 50)"
+  code-elevated: "oklch(22% 0.014 50)"
   code-ink: "oklch(94% 0.005 70)"
-  code-ink-muted: "oklch(65% 0.012 50)"
-  code-signature: "oklch(70% 0.14 28)"
+  code-ink-muted: "oklch(68% 0.012 55)"
+  code-ink-subtle: "oklch(52% 0.012 50)"
+  code-signature: "oklch(72% 0.14 28)"
+  code-signature-rule: "oklch(72% 0.14 28 / 0.45)"
   code-mark: "oklch(78% 0.12 80)"
   code-rule: "oklch(94% 0.005 70 / 0.1)"
+  code-rule-strong: "oklch(94% 0.005 70 / 0.22)"
+  header-bg: "oklch(99% 0.003 70 / 0.96)"
+  brand-mark: "#892122"
+  dark-paper: "oklch(11% 0.008 50)"
+  dark-paper-subtle: "oklch(14% 0.01 50)"
+  dark-paper-elevated: "oklch(16% 0.012 50)"
+  dark-paper-deep: "oklch(19% 0.014 50)"
+  dark-ink: "oklch(94% 0.005 70)"
+  dark-ink-muted: "oklch(70% 0.012 60)"
+  dark-ink-subtle: "oklch(55% 0.012 50)"
+  dark-rule: "oklch(94% 0.005 70 / 0.1)"
+  dark-rule-strong: "oklch(94% 0.005 70 / 0.22)"
+  dark-signature: "oklch(72% 0.14 28)"
+  dark-signature-strong: "oklch(78% 0.14 28)"
+  dark-signature-mark: "oklch(72% 0.14 28 / 0.16)"
+  dark-signature-rule: "oklch(72% 0.14 28 / 0.46)"
+  dark-mark: "oklch(78% 0.12 80)"
+  dark-mark-bg: "oklch(78% 0.12 80 / 0.14)"
+  dark-mark-rule: "oklch(78% 0.12 80 / 0.4)"
+  dark-header-bg: "oklch(11% 0.008 50 / 0.92)"
 typography:
   display:
-    fontFamily: "IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "56px"
+    fontFamily: "IBM Plex Sans, system-ui, -apple-system, sans-serif"
+    fontSize: "clamp(2.5rem, calc(1.5rem + 3vw), 4.5rem)"
     fontWeight: 700
-    lineHeight: 1.04
-    letterSpacing: "-0.025em"
+    lineHeight: 1
+    letterSpacing: "-0.035em"
   headline:
-    fontFamily: "IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "36px"
+    fontFamily: "IBM Plex Sans, system-ui, -apple-system, sans-serif"
+    fontSize: "clamp(2rem, 4vw, 3rem)"
     fontWeight: 700
-    lineHeight: 1.1
-    letterSpacing: "-0.02em"
+    lineHeight: 1.05
+    letterSpacing: "-0.03em"
   title:
-    fontFamily: "IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "20px"
+    fontFamily: "IBM Plex Sans, system-ui, -apple-system, sans-serif"
+    fontSize: "1.125rem"
     fontWeight: 600
     lineHeight: 1.3
-    letterSpacing: "-0.01em"
+    letterSpacing: "-0.005em"
   body:
-    fontFamily: "IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "16px"
+    fontFamily: "IBM Plex Sans, system-ui, -apple-system, sans-serif"
+    fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.65
     letterSpacing: "normal"
   prose:
-    fontFamily: "IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "17px"
+    fontFamily: "IBM Plex Sans, system-ui, -apple-system, sans-serif"
+    fontSize: "1.0625rem"
     fontWeight: 400
     lineHeight: 1.7
     letterSpacing: "normal"
   wordmark:
     fontFamily: "Space Grotesk, IBM Plex Sans, system-ui, sans-serif"
-    fontSize: "17px"
+    fontSize: "1.125rem"
     fontWeight: 700
     lineHeight: 1
     letterSpacing: "-0.015em"
   label:
-    fontFamily: "IBM Plex Mono, ui-monospace, monospace"
-    fontSize: "12px"
+    fontFamily: "IBM Plex Mono, ui-monospace, SF Mono, monospace"
+    fontSize: "0.6875rem"
     fontWeight: 500
     lineHeight: 1.4
     letterSpacing: "0.14em"
   mono:
-    fontFamily: "IBM Plex Mono, ui-monospace, monospace"
-    fontSize: "13px"
+    fontFamily: "IBM Plex Mono, ui-monospace, SF Mono, monospace"
+    fontSize: "0.8125rem"
     fontWeight: 400
-    lineHeight: 1.6
+    lineHeight: 1.65
     letterSpacing: "0"
 rounded:
   none: "0px"
-  xs: "2px"
+  hair: "2px"
+  xs: "3px"
   sm: "4px"
   md: "6px"
-  code: "8px"
+  lg: "8px"
+  pill: "999px"
 spacing:
   hair: "2px"
   xs: "4px"
@@ -94,245 +121,240 @@ components:
     textColor: "{colors.paper-elevated}"
     typography: "{typography.body}"
     rounded: "{rounded.sm}"
-    padding: "10px 18px"
-  button-primary-hover:
-    backgroundColor: "{colors.signature-strong}"
+    padding: "0.6875rem 1.375rem"
   button-secondary:
     backgroundColor: "transparent"
     textColor: "{colors.ink}"
-    borderColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.sm}"
-    padding: "10px 18px"
-  link:
-    textColor: "{colors.ink}"
-    textDecoration: "underline"
-    textDecorationColor: "{colors.rule-strong}"
-  link-hover:
-    textDecorationColor: "{colors.signature}"
-    textDecorationThickness: "2px"
-  sidebar-active:
-    leftMark: "4px {colors.signature}"
-    textColor: "{colors.ink}"
+    padding: "0.6875rem 1.375rem"
+  button-compact:
     backgroundColor: "transparent"
+    textColor: "{colors.ink}"
+    typography: "{typography.mono}"
+    rounded: "{rounded.sm}"
+    padding: "0.5rem 0.75rem"
   canary-badge:
     backgroundColor: "{colors.mark-bg}"
     textColor: "{colors.mark}"
-    borderColor: "{colors.mark}"
     typography: "{typography.label}"
     rounded: "{rounded.none}"
-    padding: "3px 8px"
+    padding: "0.1875rem 0.5rem"
+  search-trigger:
+    backgroundColor: "{colors.paper-elevated}"
+    textColor: "{colors.ink-muted}"
+    typography: "{typography.mono}"
+    rounded: "{rounded.sm}"
+    padding: "0.375rem 0.75rem"
+  command:
+    backgroundColor: "{colors.code-bg}"
+    textColor: "{colors.code-ink}"
+    typography: "{typography.mono}"
+    rounded: "{rounded.md}"
+    padding: "0.875rem 0.875rem 0.875rem 1.125rem"
   code-block:
     backgroundColor: "{colors.code-bg}"
     textColor: "{colors.code-ink}"
     typography: "{typography.mono}"
-    rounded: "{rounded.code}"
-    padding: "18px 22px"
+    rounded: "{rounded.lg}"
+    padding: "1rem 1.25rem"
+  workbench-tab-active:
+    backgroundColor: "transparent"
+    textColor: "{colors.code-ink}"
+    typography: "{typography.label}"
+    rounded: "{rounded.none}"
+    padding: "0.5rem 0.75rem 0.5rem 0.875rem"
+  theme-toggle:
+    backgroundColor: "transparent"
+    textColor: "{colors.ink-muted}"
+    rounded: "{rounded.sm}"
+    height: "2.75rem"
+    width: "2.75rem"
+  inline-code:
+    backgroundColor: "{colors.paper-deep}"
+    textColor: "{colors.ink}"
+    typography: "{typography.mono}"
+    rounded: "{rounded.sm}"
+    padding: "0.125rem 0.375rem"
 ---
 
 # Design System: trygg
 
 ## 1. Overview
 
-**Creative North Star: "Typed on paper"**
+**Creative North Star: "The typed workbench"**
 
-trygg's visual system is an editorial-typographic surface that reads like a serious technical journal. Pages are set on paper-warm. Every word of display, prose, and UI is rendered in IBM Plex Sans; every line of code is rendered in IBM Plex Mono. The "trygg" wordmark is the one named exception: it uses Space Grotesk 700 as a logotype, never as a display face on body or headings. Hierarchy elsewhere comes from scale + weight contrast within Plex Sans, never from a second display face, never from italic emphasis. A single deeply saturated oxblood carries every primary action, current-state mark, and architectural rule. Code is the one place where the canvas flips: code blocks and the workbench preview render as dark warm-ink surfaces with oxblood gutter marks, regardless of page theme. There is no third color, no decorative effect, and no editorial-serif lane.
+trygg now reads as a product documentation system built around one proof: component capabilities are visible in the type. The page surface is quiet editorial paper; the product truth appears inside dark workbench panels, type signatures, file tabs, terminal rows, and inline symbol tooltips. The brand mark is a pixel ladder in oxblood, so the identity feels computational without becoming terminal cosplay.
 
-The scene that justifies this: a senior Effect developer reads typed-API articles on a 14-inch laptop in afternoon sun, with the editor in dark-ink mode beside the prose. Pages need editorial calm; code needs unambiguous syntax. Paper for pages, ink for code.
+The physical scene is concrete: an Effect developer is reading docs beside an editor, checking whether props, typed failures, and service requirements stay explicit. The interface must let the code carry authority. Oxblood marks primary action and current state; ochre marks canary status and typed-failure annotations; paper and ink do the rest.
 
-The system rejects every category reflex: not purple (Vercel), not lime (foldkit), not mint (Mintlify), not gradient cards (OpenAI), not neon-on-black (terminal hacker), not navy-and-gold (banking). It rejects identical card grids, gradient text, decorative glass, side-stripe accents, and big-number SaaS heroes. It also rejects the second-order reflex of "editorial serif + italic emphasis" — the current AI-slop tell for any framework site that's already left the SaaS lane. Sans + weight contrast is the durable lane.
+The current source of truth is `apps/www/styles.css`, `apps/www/public/mark.svg`, and the components under `apps/www/app/components`. The older "Typed on paper" language is still directionally right, but the live brand is more workbench-forward: command rows, code panes, active file tabs, and typed-signature legends are the signature pieces.
 
-**Key characteristics:**
+**Key Characteristics:**
 
-- Paper-warm surfaces with hairline ink rules instead of containers.
-- One signature color, oxblood, used architecturally — never decoratively.
-- Editorial typographic patterns (indexed list, mapped pair, annotated timeline, topic index) instead of card grids.
-- Code surfaces are intrinsically dark, even on light pages.
-- Confident, restrained motion (150–250ms ease-out-quart).
-- Keyboard-first focus rings with paper offset.
+- Paper surfaces with fixed hairline rules, not raised card stacks.
+- Oxblood as architectural signature: primary action, active nav, focus, typed service marks, code gutters.
+- A pixel-ladder mark in fixed oxblood, paired with a Space Grotesk wordmark only.
+- Dark workbench code surfaces on every theme.
+- Editorial lists, mapped pairs, timelines, and topic indexes instead of repeated icon cards.
+- Product-speed motion: 150ms to 220ms state changes, no entrance choreography.
+- Keyboard-first controls: visible focus, tabbed workbench, command search, mobile docs drawer.
 
 ## 2. Colors
 
-The palette is Restrained with a single Committed signature. Paper-warm carries 90% of every surface; oxblood does the architectural work.
+The palette is restrained and source-owned in OKLCH. Paper carries the site, warm ink carries text, and oxblood carries structure. Dark mode is a docs reading mode that flips paper and ink while keeping code surfaces dark.
 
-### Paper layer (default page surfaces)
+### Primary
 
-- **Paper** (`paper`): The default page background. Warm white with a touch of yellow tint, never pure `#fff`.
-- **Paper Subtle** (`paper-subtle`): The first tonal step below paper. For sidebars, search inputs, and quiet panels.
-- **Paper Elevated** (`paper-elevated`): Slightly brighter than paper, for header surfaces and overlay panels.
-- **Paper Deep** (`paper-deep`): The deepest paper step, for hover backgrounds on quiet rows.
+- **Oxblood Signature** (`signature`, `signature-strong`, `signature-rule`, `signature-mark`): Primary actions, active navigation, focus rings, hero accent words, typed-service annotations, code gutter marks, and link hover underlines. It is structural, not decorative.
+- **Pixel-Ladder Mark** (`brand-mark`): The SVG logo uses fixed oxblood rectangles with opacity steps. Treat the mark as an asset, not a general color ramp.
 
-### Ink layer (text and rules)
+### Secondary
 
-- **Ink** (`ink`): The primary text color, a warm near-black. Body, headings, prose, controls.
-- **Ink Muted** (`ink-muted`): Secondary prose, descriptions, sidebar labels.
-- **Ink Subtle** (`ink-subtle`): Metadata, dates, kicker labels above titles.
-- **Rule** (`rule`): The default hairline color, ink at 14% opacity. Use under headings, between list items, around the rare card.
-- **Rule Strong** (`rule-strong`): A heavier rule for hover and current-state borders.
+- **Canary Ochre** (`mark`, `mark-bg`, `mark-rule`): Canary badge, warning-adjacent status, and typed-failure highlights inside the component type legend. It is not a success, info, or decoration color.
 
-### Signature (oxblood)
+### Neutral
 
-- **Signature** (`signature`): The single architectural accent. Use for: primary action backgrounds, current-state left marks (sidebar, rail), focus rings, link hover underlines, code gutter marks, and editorial pull-marks above kicker labels.
-- **Signature Strong** (`signature-strong`): The hover and active continuation of signature.
-- **Signature Mark** (`signature-mark`): A 12%-opacity oxblood for soft background marks on selected rows.
+- **Paper Layer** (`paper`, `paper-subtle`, `paper-elevated`, `paper-deep`): Default page, sidebar, header, hover, and quiet panel surfaces. Use one paper step at a time; do not stack tonal panels to fake depth.
+- **Ink Layer** (`ink`, `ink-muted`, `ink-subtle`, `rule`, `rule-strong`): Headings and controls use `ink`; body and secondary prose use `ink-muted`; labels and metadata may use `ink-subtle` only when the text is short and non-critical.
+- **Dark Reading Layer** (`dark-paper`, `dark-ink`, `dark-signature`, `dark-mark`): Opt-in docs reading mode. It flips page tokens only. The code layer does not change.
+- **Code Layer** (`code-bg`, `code-surface`, `code-elevated`, `code-ink`, `code-ink-muted`, `code-ink-subtle`, `code-signature`, `code-mark`, `code-rule`): Always dark workbench surfaces for code blocks, install commands, home workbench, copied tooltip, and token tooltips.
 
-### Mark (ochre)
+### Named Rules
 
-- **Mark** (`mark`): A muted ochre. Reserved for the canary badge, warning marks, and inline type-signature highlights (`<T>` annotations).
-- **Mark Bg** (`mark-bg`): A 10%-opacity ochre for badge backgrounds.
+**The Workbench-Is-Dark Rule.** Code, terminal rows, typed signatures, and symbol tooltips stay on the dark code layer in every page theme. Do not create light code panels.
 
-### Code layer (always dark workbench mode)
+**The One Structural Accent Rule.** Oxblood is for action and state: primary buttons, active nav, focus, selected file, service type marks. Do not use it as a wash, decorative background, or body text emphasis.
 
-These tokens override the page theme inside code blocks and the workbench preview. They never appear on prose surfaces.
+**The Ochre-Is-Canary Rule.** Ochre exists for canary status and typed-failure annotations. Do not add green success, blue info, purple framework accents, or extra state hues unless the source code grows a real semantic system.
 
-- **Code Bg** (`code-bg`): The warm-ink background of all code surfaces.
-- **Code Surface** (`code-surface`): One step above the code background, for sidebar files and titlebars.
-- **Code Ink** (`code-ink`): The default text color on code surfaces.
-- **Code Ink Muted** (`code-ink-muted`): Line numbers, file-path strings, comments.
-- **Code Signature** (`code-signature`): Oxblood lifted for AA on dark — used for gutter marks, current-step indicators.
-- **Code Mark** (`code-mark`): Ochre lifted for dark — used for type signatures inline.
-- **Code Rule** (`code-rule`): Hairline rules between editor panes.
-
-### Dark page mode (opt-in)
-
-A docs-only reading mode that flips the paper layer to warm ink. The signature and mark layers shift to their code-lifted variants. The code layer is unchanged.
-
-### Named rules
-
-**The One Architectural Accent Rule.** Oxblood is structural, not decorative. It marks current state, primary action, and the gutter of typed code. Do not use it as a background wash, a hover highlight on quiet items, or text emphasis on regular prose.
-
-**The Paper Carries the Page Rule.** A surface earns elevation through ink rules and spacing, not through tonal layering. Avoid stacking `paper → paper-subtle → paper-elevated` to imitate cards. One step of paper is enough.
-
-**The Code Is Dark Rule.** Code blocks are always warm-ink. Page theme does not change them. This is the workbench mode, and it is unconditional.
-
-**The No Third Color Rule.** Ochre exists only for the canary badge, warning marks, and inline type-signature annotations. Do not introduce a fourth hue (no green for success, no blue for info). If a state needs distinction beyond signature + mark, use weight, position, or a sharp rule.
+**The Contrast Floor Rule.** Body text must use `ink` or `ink-muted` on paper. `ink-subtle` is metadata only, never placeholder text, paragraph copy, or button text.
 
 ## 3. Typography
 
-**Two reading families, one logotype.** IBM Plex Sans carries display, headline, title, body, and prose. IBM Plex Mono carries code, install commands, kickers, and metadata labels. The "trygg" wordmark is the single named exception: it uses Space Grotesk 700 as a logotype only — never as a display face on body, headings, or any text that someone reads. The wordmark is identity, not type.
+- **Display Font:** IBM Plex Sans with system fallbacks
+- **Body Font:** IBM Plex Sans with system fallbacks
+- **Label/Mono Font:** IBM Plex Mono with SF Mono fallback
+- **Wordmark Font:** Space Grotesk 700, only for the `trygg` wordmark
 
-Hierarchy in reading type is built from scale and weight contrast inside the sans family. Display is Plex Sans 700 at 56px; body is Plex Sans 400 at 16px. The ≥1.25 step ratio is held across the scale so the page reads at a glance.
+The typography is a single-sans product documentation system. Plex Sans handles display, docs prose, nav, buttons, and dense UI labels. Plex Mono handles code, terminal commands, metadata labels, file paths, keycaps, and type signatures. Space Grotesk is a fixed wordmark treatment, never a display face.
 
 ### Hierarchy
 
-- **Display** (Sans, 700, 56px, 1.04, -0.025em): Hero headline only. One per page.
-- **Headline** (Sans, 700, 36px, 1.1, -0.02em): Major section headers and article H1s.
-- **Title** (Sans, 600, 20px, 1.3, -0.01em): Card-rare titles, FAQ questions, docs subsection labels.
-- **Body** (Sans, 400, 16px, 1.65): UI prose, sidebar text, form labels, control text.
-- **Prose** (Sans, 400, 17px, 1.7): Long-form docs reading. Slightly larger than UI body, same family — the page reads as a journal through line height and measure, not through serifs.
-- **Wordmark** (Space Grotesk, 700, 17px, 1, -0.015em): The "trygg" logo text in header, home nav, and footer. Loaded as a single weight from Google Fonts. Falls back to Plex Sans 700 if Grotesk fails to load.
-- **Label** (Mono, 500, 12px, 0.14em, uppercase): Kickers above titles, metadata, dates, version tags.
-- **Mono** (Mono, 400, 13px, 1.6): Inline code, install commands, file paths.
+- **Display** (700, `clamp(2.5rem, calc(1.5rem + 3vw), 4.5rem)`, 1, -0.035em): Home hero only. The accent word may turn oxblood, but the sentence stays readable without the color.
+- **Docs H1** (700, `clamp(2.25rem, 5vw, 3.5rem)`, 1.02, -0.025em): Docs landing and article headers.
+- **Headline** (700, `clamp(2rem, 4vw, 3rem)`, 1.05, -0.03em): Major landing sections and changelog titles.
+- **Section Title** (600, `1.125rem` to `1.5rem`, 1.3, slight negative tracking): Step rows, topic links, FAQ-style titles, docs subsections.
+- **Body** (400, `1rem`, 1.65): UI copy, controls, footer copy, list descriptions.
+- **Prose** (400, `1.0625rem`, 1.7 to 1.75): Long-form docs and article bodies. Keep line length around 65 to 75ch.
+- **Label** (Mono 500, `0.6875rem`, 0.14em, uppercase): Group labels, kickers, keycaps, status chips, and metadata. Use it sparingly so it reads as orientation, not decoration.
+- **Mono** (Mono 400, `0.8125rem`, 1.65): Code blocks, file paths, install commands, inline code, tooltip signatures.
+- **Wordmark** (Space Grotesk 700, `1.125rem` in header, `1.25rem` in footer): Logo text only.
 
-### Named rules
+### Named Rules
 
-**The Scale-And-Weight Rule.** Hierarchy in reading type is built from scale (≥1.25 step ratio) and weight contrast (400 vs 600/700) inside Plex Sans. Do not introduce italic emphasis, a second display face for headings, or weight steps below 400 to create distinction.
+**The Plex-For-Reading Rule.** Anything someone reads uses Plex Sans or Plex Mono. Do not introduce a serif lane, display novelty, or italic emphasis.
 
-**The Mono Carries Code Rule.** Mono appears in code blocks, install commands, type signatures inline, file paths, kicker labels, and version tags. It is never used as a decorative UI flavor on body prose.
+**The Wordmark-Stays-A-Mark Rule.** Space Grotesk appears only as the `trygg` wordmark in header and footer. Do not extend it to headings, body, buttons, or labels.
 
-**The Plex-For-Reading Rule.** Anything someone reads (display, headline, title, body, prose, mono, label) uses an IBM Plex family — Sans for words, Mono for code. The serif lane was tried and rejected: serif body + italics is the current AI-slop tell for any framework site that's already left the SaaS-cream lane. Sans + weight contrast is the durable lane.
-
-**The Wordmark-Is-A-Logotype Rule.** The "trygg" wordmark uses Space Grotesk 700 at -0.015em tracking. Space Grotesk is loaded as a single weight and used in exactly three places: site header, home nav, and footer. It is a logotype, not a display face — it never appears on body text, headlines, or any reading surface. Treat the wordmark as a fixed mark; do not extend Grotesk to other UI.
+**The Label-Sparsity Rule.** Monospace uppercase labels are allowed for navigation and code-adjacent orientation. They are forbidden as default section seasoning.
 
 ## 4. Elevation
 
-trygg is rule-led, not shadow-led. Visual separation comes from hairline rules, vertical spacing, and type hierarchy. Shadows appear only on the rare floating overlay (search dialog, mobile drawer) where stacking must be explained.
+trygg is flat by default. Separation comes from hairline rules, spacing, and state color. Shadows appear only when an element physically floats above the document, such as search, mobile drawer, and code-token tooltips.
 
-### Shadow vocabulary
+### Shadow Vocabulary
 
-- **Floating Overlay** (`0 8px 32px oklch(20% 0.012 60 / 0.12)`): Use only for the search dialog and mobile docs drawer.
-- **No card shadows.** Cards rely on rules and backgrounds. No ambient lift, no glow, no glass.
+- **Search Overlay** (`0 12px 40px oklch(20% 0.012 60 / 0.16)`): Search dialog panel over the scrim.
+- **Mobile Drawer** (`0 0 24px oklch(20% 0.012 60 / 0.16)`): Mobile docs drawer only.
+- **Code Tooltip** (`0 14px 32px oklch(0% 0 0 / 0.4)`): Token tooltip on code-elevated surface.
+- **None Elsewhere:** Buttons, lists, docs panels, topic rows, changelog entries, and code blocks do not get ambient shadows.
 
-### Named rules
+### Named Rules
 
-**The Rule-First Rule.** If something needs separation, draw a hairline rule first. Add a background tint only when the rule isn't enough. Reach for a shadow only when one element floats over another.
+**The Rule-First Rule.** If a surface needs separation, draw a hairline rule before adding a background. Add a shadow only when an element overlays other content.
 
-**The No Glass Rule.** No `backdrop-filter`. The header is a solid paper-elevated surface with a bottom rule. Search dialog uses a paper-elevated panel over a paper-ink scrim, no blur.
+**The No-Glass Rule.** No decorative `backdrop-filter`. Current source has small code overlay badges with translucent fills; do not expand that into glass panels, blurred headers, or frosted cards.
+
+**The No-Card-Stack Rule.** Repeated content uses rules, indexes, mapped pairs, and timelines. Cards are rare and flat.
 
 ## 5. Components
 
+### Brand Mark and Wordmark
+
+The mark is a 40 by 48 pixel ladder made from 7px rectangles in oxblood opacity steps. It sits next to the Space Grotesk `trygg` wordmark in header and footer. Do not redraw it as an icon, gradient, mascot, shield, or monogram.
+
 ### Buttons
 
-- **Primary**: Oxblood background, paper text, 4px radius, 10px×18px padding. Hover shifts to signature-strong.
-- **Secondary**: Transparent background, ink text, 1px ink border, same shape as primary. Hover fills with paper-deep.
-- **Tertiary**: Ink text, rule-strong underline, hover underline shifts to oxblood with 2px thickness.
-- **Focus**: Always 2px oxblood ring with 2px paper offset, on every interactive element.
+- **Shape:** Compact rectangle with a 4px radius.
+- **Primary:** Oxblood fill, paper text, 0.9375rem Plex Sans 500, 0.6875rem by 1.375rem padding on landing, 0.625rem by 1.125rem in docs.
+- **Secondary:** Transparent, 1px ink border, ink text, same shape. Hover fills with `paper-deep`.
+- **Compact:** 0.8125rem text, 0.5rem by 0.75rem padding, used for small controls.
+- **Focus:** 2px oxblood outline with 2px offset, always visible on keyboard focus.
 
-### Badges
+### Header, Footer, and Theme Toggle
 
-- **Canary**: Ochre text on mark-bg, 1px ochre border, sharp 0 radius, mono 11px uppercase. Sharp corners signal seriousness.
-- **Version**: Mono 12px, oxblood text, no background, used inline next to changelog dates.
+- **Header:** Fixed, 4rem minimum height, `header-bg`, 1px bottom rule, no blur. Active nav uses a 2px oxblood underline with 6px offset.
+- **Theme Toggle:** 2.75rem square, 4px radius, transparent background, 1px rule border, current theme icon only.
+- **Footer:** Paper-elevated with a top rule, brand block on the left, resource and community nav groups on the right, mono uppercase section labels.
 
-### Links
+### Canary Badge
 
-- Body links: ink color, rule-strong underline at 1px offset of 2px. Hover thickens underline to 2px and shifts color to oxblood. No color-only change.
-- Code links inside articles: same pattern.
-- Navigation links: no underline by default; the active state is a left mark (4px oxblood, full row height), not a fill.
+Sharp rectangular badge with mono uppercase text, ochre border, ochre translucent background, and 0 radius. It appears by the wordmark and links to the changelog. Do not make it a pill, glowing status, or generic yellow warning.
 
-### Tabs (package manager, code variants)
+### Search
 
-- Container: paper-subtle background, 1px rule, 4px radius.
-- Inactive: ink-muted, no background.
-- Active: ink text, 2px oxblood rule below (bottom-border style), no fill.
-- Focus: 2px oxblood ring, 0 offset (contained in the tab group).
-
-### Cards (used sparingly)
-
-Cards exist only when content is genuinely card-shaped (a release entry, a search result panel). When they appear:
-
-- 0 radius (sharp corners) or 4px (soft).
-- 1px rule border, paper-elevated background.
-- No shadow. No nested cards.
-- Hover: rule color shifts to rule-strong; no background change.
-
-### Code blocks
-
-Code blocks are always dark workbench surfaces.
-
-- Background: code-bg (warm ink, always — never the page paper).
-- Body: Plex Mono 13px, code-ink color, generous horizontal padding.
-- Header: code-surface bg, mono 12px, file path in code-ink-muted, copy mark top-right.
-- Line numbers: code-ink-muted, mono 11px, right-aligned.
-- Gutter mark: 2px oxblood left rule on typed-result lines (where shown).
-- Type signatures inline: code-mark (ochre).
+- **Trigger:** Paper-elevated rectangle, 4px radius, 1px strong rule, body-sized text plus a mono keycap.
+- **Dialog:** Fixed overlay with ink scrim, paper-elevated panel, 4px radius, search shadow, and a top input with a bottom rule.
+- **Results:** Full-width rows, no cards. Active and hover states use `paper-subtle`, not color fills.
 
 ### Navigation
 
-- **Site header**: Paper-elevated background, 1px rule bottom, 64px tall, no backdrop-blur. Wordmark in Space Grotesk 700.
-- **Docs sidebar**: 240px wide, paper-subtle bg, mono 11px group labels, sans 14px links. Active link gets a 4px oxblood left mark and ink text — no pill, no background fill. Landmark must carry `aria-label="Documentation navigation"`.
-- **Docs rail (on-this-page)**: Ink-subtle text, 2px ink-subtle left rule, current heading shifts to ink color with oxblood left rule. Landmark labelled "On this page".
-- **Footer**: Paper-elevated bg, 1px rule top, two thin rows: link columns + copyright row. Wordmark in Space Grotesk 700.
+- **Docs Sidebar:** Sticky column, grouped by mono uppercase labels. Active item uses a 2px oxblood left rule, stronger text, and no pill fill.
+- **On This Page Rail:** Left-rule list, current heading uses a 2px oxblood rule and stronger text.
+- **Mobile Drawer:** Full-height paper-elevated drawer with right rule and drawer shadow. Backdrop uses ink opacity, not blur.
 
-### Editorial patterns (in place of card grids)
+### Code Blocks and Workbench
 
-These compositions replace the identical-card-grid trap:
+- **Code Blocks:** Dark `code-bg`, 8px radius, strong code rule border, Plex Mono, line numbers in `code-ink-subtle`, optional header row with file metadata and copy control.
+- **Home Workbench:** Dark editor window with code-surface titlebar, file tabs, code editor, and terminal row. Active file uses a 2px code-signature rule. On narrow viewports, file tabs move from a left rail to a horizontal tab strip.
+- **Terminal Command:** Dark code row, 6px radius, prompt in code-signature, command in code-ink, copy button as a small bordered control.
+- **Token Tooltips:** Fixed-position dark tooltip on `code-elevated`, dismissable with Escape, hoverable, focusable, and shadowed only because it floats.
 
-- **Indexed list**: `01 / 02 / 03` numbered runs. Each item gets a full-width rule above and a mono label. Used for: home feature run, docs topic index, 404 escape list.
-- **Mapped pair**: Two-column layout where left is a sticky kicker (mono label + 1-2 word title) and right is full prose. Used for: docs section intros.
-- **Editor cutaway**: Real editor pane (code-bg) embedded in flow with an oxblood gutter mark on typed lines. Used for: home workbench, docs examples.
-- **Annotated timeline**: Left-rule with date stamps and prose blocks. Used for: changelog. Replaces release-card-per-version.
-- **Topic index**: Editorial index (kicker + title + leader-dots + reading-time mark). Used for: docs landing. Replaces 3-col docs cards.
+### Editorial Patterns
+
+- **Typed Signature Legend:** Dark signature block plus rule-separated label rows. The three slots are props, typed failures, and service requirements.
+- **Indexed Lists:** Full-width rows with mono numbers and hairline rules. Used for getting-started paths, seam steps, not-found links, and docs indexes.
+- **Mapped Pairs:** Sticky left labels with prose and examples on the right. Used for step sections and docs teaching flow.
+- **Annotated Timeline:** Changelog uses a vertical rule with date column and dot markers, not release cards.
+- **Topic Index:** Docs landing groups links by model area, with rules and metadata rather than a card grid.
 
 ## 6. Do's and Don'ts
 
 ### Do:
 
-- **Do** use oxblood for primary action, current state, focus, and code gutter marks.
-- **Do** treat prose pages like journal pages: sans body at 17px, generous line height, 65–75ch max line length.
-- **Do** keep code surfaces dark even on light pages — the workbench is intrinsically inked.
-- **Do** use indexed lists, mapped pairs, and annotated timelines instead of card grids.
-- **Do** render canary status as a sharp ochre badge with mono label, not a pill with a glow.
-- **Do** build hierarchy from scale and weight (400 vs 600/700) inside Plex Sans.
+- **Do** use `apps/www/styles.css` as the visual source of truth before editing this file again.
+- **Do** use oxblood for primary action, active state, focus, selected file, and type-service marks.
+- **Do** keep all code, terminal, command, and tooltip surfaces on the dark workbench layer.
+- **Do** use paper, rules, and spacing for structure before reaching for a panel.
+- **Do** keep body copy concrete: props, typed errors, service dependencies, layers, signals, generated clients.
+- **Do** use indexed lists, mapped pairs, topic indexes, and timelines instead of repeated icon-heading-text cards.
+- **Do** keep motion to state feedback in the 150ms to 220ms range, with reduced-motion fallbacks.
+- **Do** keep every interactive control keyboard reachable with visible focus.
 
 ### Don't:
 
-- **Don't** use purple in any UI surface (avoid Vercel mimicry).
-- **Don't** use lime, mint, or any bright green (avoid foldkit + Mintlify mimicry).
-- **Don't** use gradient backgrounds, gradient text, glass blur, or ambient card shadows.
-- **Don't** wrap groups of features into identical-card grids.
-- **Don't** put side-stripe colored borders on list items, cards, or callouts.
-- **Don't** introduce a third hue beyond signature + mark.
-- **Don't** introduce a serif lane — Plex Serif was tried and rejected (AI-slop second-order reflex).
-- **Don't** extend Space Grotesk past the "trygg" wordmark. It is a logotype, not a display face for headings or body.
-- **Don't** use italic emphasis to differentiate prose — weight contrast is the lane.
-- **Don't** flip code blocks to a light surface in light mode — code is always dark.
+- **Don't** make generic SaaS landing pages with vague productivity claims.
+- **Don't** frame trygg as a React clone or explain the product only through comparison.
+- **Don't** use academic functional-programming presentation that feels distant from building apps.
+- **Don't** use purple Vercel mimicry.
+- **Don't** use lime-on-cream foldkit mimicry, or any framework site identity owned by a competitor.
+- **Don't** use mint-wash Mintlify mimicry or gradient-card OpenAI mimicry.
+- **Don't** use terminal-only hacker aesthetic that makes the product feel narrower than it is.
+- **Don't** add decorative complexity that hides the mental model or weakens navigation.
+- **Don't** use identical icon-heading-text card grids to fill space.
+- **Don't** use gradient text, decorative glass, ambient card shadows, or colored side stripes on cards, callouts, or alerts.
+- **Don't** introduce a serif lane, italic prose emphasis, or extra display fonts.
+- **Don't** extend Space Grotesk beyond the wordmark.
+- **Don't** turn ochre into a generic warning system or add green, blue, purple, or neon state colors without a real semantic need.
+- **Don't** use `ink-subtle` for placeholder text, paragraph copy, or small critical labels.

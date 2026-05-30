@@ -190,7 +190,6 @@ export {
   RouteActivationError,
   LazyRouteLoadError,
   BoundaryResolutionError,
-  RouteActivationConfigInput,
   RouteActivationBoundaryConfigInput,
   makeRouteActivation,
   makeRouteActivationBoundary,

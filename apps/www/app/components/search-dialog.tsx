@@ -1,5 +1,6 @@
-import { Effect } from "effect";
+import { Cause, Effect, Scope } from "effect";
 import { Component, Signal, type ComponentProps } from "trygg";
+import * as Router from "trygg/router";
 
 import { sidebarGroups } from "../content/sidebar";
 
@@ -18,6 +19,8 @@ const searchIndex: ReadonlyArray<SearchResult> = sidebarGroups.flatMap((group) =
     description: link.description,
   })),
 );
+
+const SEARCH_INPUT_ID = "docs-search-input";
 
 interface SearchDialogProps {
   readonly open: Signal.Signal<boolean>;
@@ -53,9 +56,11 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
 
   const selectAndClose = Effect.fn("SearchDialog.selectAndClose")(function* (href: string) {
     yield* close();
-    yield* Effect.sync(() => {
-      window.location.href = href;
-    });
+    yield* Router.navigate(href).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError(`[SearchDialog] navigation failed: ${Cause.pretty(cause)}`),
+      ),
+    );
   });
 
   const handleKeyDown = Effect.fn("SearchDialog.handleKeyDown")(function* (e: Event) {
@@ -118,6 +123,36 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
     ),
   );
 
+  // The dialog stays mounted and is shown/hidden via a CSS class, so the
+  // input's `autoFocus` attribute never fires when it opens. Move focus into
+  // the input whenever the dialog opens, and restore it to whatever was
+  // focused (the search trigger) when it closes.
+  if (typeof document !== "undefined") {
+    let lastFocused: HTMLElement | null = null;
+    const unsubscribeFocus = yield* Signal.subscribe(open, () =>
+      Effect.gen(function* () {
+        const isOpen = yield* Signal.peek(open);
+        yield* Effect.sync(() => {
+          if (isOpen) {
+            lastFocused =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            requestAnimationFrame(() => document.getElementById(SEARCH_INPUT_ID)?.focus());
+          } else if (lastFocused !== null) {
+            lastFocused.focus();
+            lastFocused = null;
+          }
+        });
+      }),
+    );
+
+    const renderScope = yield* Signal.CurrentRenderScope;
+    if (renderScope === null) {
+      yield* Effect.addFinalizer(() => unsubscribeFocus);
+    } else {
+      yield* Scope.addFinalizer(renderScope, unsubscribeFocus);
+    }
+  }
+
   return (
     <div className={dialogClass} role="dialog" aria-modal="true" aria-label="Search docs">
       <button
@@ -129,6 +164,7 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
       <div className="search-dialog__panel" onKeyDown={handleKeyDown}>
         <input
           type="text"
+          id={SEARCH_INPUT_ID}
           className="search-dialog__input"
           placeholder="Search docs..."
           aria-label="Search docs"

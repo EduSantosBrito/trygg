@@ -3,7 +3,7 @@ import { Cause, Effect, Exit, Layer, Scope } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
-import * as ContractTrace from "../../contract/trace.js";
+import * as Trace from "../../trace/index.js";
 import { click, render, type as typeInput } from "../../testing/index.js";
 import * as Component from "../component.js";
 import * as ErrorBoundary from "../error-boundary.js";
@@ -173,7 +173,7 @@ describe("render-component", () => {
 
   scoped("replaces provider scope when component key changes", () =>
     Effect.gen(function* () {
-      const collector = yield* ContractTrace.createInMemoryCollector("provider-key-change");
+      const recorder = Trace.makeRecorder();
       const selectedKey = yield* Signal.make<"first" | "second">("first");
       const acquireLog: Array<string> = [];
       const finalizeLog: Array<string> = [];
@@ -205,7 +205,7 @@ describe("render-component", () => {
         return <ProvidedLabel key={key} />;
       });
 
-      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      const { getByTestId } = yield* Trace.record(render(<Host />), recorder);
       assert.strictEqual((yield* getByTestId("key-label")).textContent, "label");
       assert.deepStrictEqual(acquireLog, ["label"]);
 
@@ -213,14 +213,13 @@ describe("render-component", () => {
       yield* TestClock.adjust(20);
 
       assert.strictEqual((yield* getByTestId("key-label")).textContent, "label");
-      const records = yield* collector.snapshot;
+      const records = recorder.records();
       assert.deepStrictEqual(acquireLog, ["label", "label"]);
       assert.deepStrictEqual(finalizeLog, ["label"]);
 
       const replacementReasons = records.flatMap((record) =>
-        record.event.event === "provider.replace" &&
-        typeof record.event.payload?.reason === "string"
-          ? [record.event.payload.reason]
+        record.name === "provider.replace" && typeof record.payload?.reason === "string"
+          ? [record.payload.reason]
           : [],
       );
       assert.include(replacementReasons, "key-change");
@@ -229,7 +228,7 @@ describe("render-component", () => {
 
   scoped("replaces provider scope when layer identity changes", () =>
     Effect.gen(function* () {
-      const collector = yield* ContractTrace.createInMemoryCollector("provider-identity-change");
+      const recorder = Trace.makeRecorder();
       const selected = yield* Signal.make<"first" | "second">("first");
       const acquireLog: Array<string> = [];
       const finalizeLog: Array<string> = [];
@@ -266,7 +265,7 @@ describe("render-component", () => {
         return value === "first" ? <FirstLabel key="stable" /> : <SecondLabel key="stable" />;
       });
 
-      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      const { getByTestId } = yield* Trace.record(render(<Host />), recorder);
       assert.strictEqual((yield* getByTestId("identity-label")).textContent, "first");
       assert.deepStrictEqual(acquireLog, ["first"]);
 
@@ -277,11 +276,10 @@ describe("render-component", () => {
       assert.deepStrictEqual(acquireLog, ["first", "second"]);
       assert.deepStrictEqual(finalizeLog, ["first"]);
 
-      const records = yield* collector.snapshot;
+      const records = recorder.records();
       const replacementReasons = records.flatMap((record) =>
-        record.event.event === "provider.replace" &&
-        typeof record.event.payload?.reason === "string"
-          ? [record.event.payload.reason]
+        record.name === "provider.replace" && typeof record.payload?.reason === "string"
+          ? [record.payload.reason]
           : [],
       );
       assert.include(replacementReasons, "identity-change");
@@ -290,7 +288,7 @@ describe("render-component", () => {
 
   scoped("routes provider acquisition failure through error boundary and retries on reset", () =>
     Effect.gen(function* () {
-      const collector = yield* ContractTrace.createInMemoryCollector("provider-failure-retry");
+      const recorder = Trace.makeRecorder();
       const providerShouldFail = yield* Signal.make(true);
       const retryKey = yield* Signal.make(0);
       let acquireAttempts = 0;
@@ -342,7 +340,7 @@ describe("render-component", () => {
         return <SafeRisky key={key} />;
       });
 
-      const { getByTestId } = yield* ContractTrace.withCollector(render(<Host />), collector);
+      const { getByTestId } = yield* Trace.record(render(<Host />), recorder);
       assert.strictEqual((yield* getByTestId("provider-retry")).textContent, "Retry provider");
       assert.strictEqual(acquireAttempts, 1);
 
@@ -352,7 +350,7 @@ describe("render-component", () => {
       assert.strictEqual((yield* getByTestId("provider-ready")).textContent, "ready");
       assert.strictEqual(acquireAttempts, 2);
 
-      const events = (yield* collector.snapshot).map((record) => record.event.event);
+      const events = recorder.records().map((record) => record.name);
       assert.strictEqual(events.filter((event) => event === "provider.failure").length, 1);
       assert.strictEqual(events.filter((event) => event === "provider.acquire").length, 1);
     }),

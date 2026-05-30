@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Data, Effect, Exit, Option, Predicate, Ref } from "effect";
-import * as ContractTrace from "../../contract/trace.js";
+import * as Trace from "../../trace/index.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { Element } from "../../primitives/element.js";
 import type { RouteMatch, RouteMatcherShape } from "../matching.js";
@@ -71,15 +71,14 @@ const makeMatcher = (
 const traceEventsFor = Effect.fn("RouteActivationTest.traceEventsFor")(function* <E, R>(
   effect: Effect.Effect<void, E, R>,
 ) {
-  const collector = yield* ContractTrace.createInMemoryCollector("route-activation");
-  yield* ContractTrace.withCollector(effect, collector);
-  return yield* collector.snapshot;
+  const recorder = Trace.makeRecorder();
+  yield* Trace.record(effect, recorder);
+  return recorder.records();
 });
 
 const eventNames = (
-  records: ReadonlyArray<ContractTrace.ContractTraceRecord>,
-): ReadonlyArray<ContractTrace.ContractTraceEventName> =>
-  records.map((record) => record.event.event);
+  records: ReadonlyArray<Trace.TraceRecord>,
+): ReadonlyArray<Trace.TraceEventName> => records.map((record) => record.name);
 
 const makeBoundary = (overrides: Partial<Parameters<typeof makeRouteActivationBoundary>[1]> = {}) =>
   makeRouteActivationBoundary(
@@ -104,7 +103,7 @@ describe("RouteActivation", () => {
   it.effect("commits the latest activation", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         yield* activation.activate(request("nav-1", "/docs"));
         const outcome = yield* activation.commit({ activationId: "nav-1", path: "/docs" });
 
@@ -120,7 +119,7 @@ describe("RouteActivation", () => {
   it.effect("drops stale activations when a newer activation wins", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.activate(request("nav-2", "/fast"));
         const outcome = yield* activation.commit({ activationId: "nav-1", path: "/slow" });
@@ -136,10 +135,7 @@ describe("RouteActivation", () => {
   it.effect("returns NotFound when the canonical matcher has no match", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation(
-          { emitTraceEvents: true },
-          makeMatcher("/known"),
-        );
+        const activation = yield* makeRouteActivation(makeMatcher("/known"));
         const outcome = yield* activation.activate(request("nav-1", "/missing"));
 
         assert.deepStrictEqual(
@@ -153,7 +149,7 @@ describe("RouteActivation", () => {
   it.effect("controls loading fallback display for the latest activation", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.showLoadingFallback(
@@ -169,7 +165,7 @@ describe("RouteActivation", () => {
   it.effect("suppresses stale loading fallback display", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.activate(request("nav-2", "/fast"));
@@ -186,7 +182,7 @@ describe("RouteActivation", () => {
   it.effect("runs scroll work only after the activation DOM swap", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/docs"));
         yield* activation.commitAfterDomSwap(
@@ -203,7 +199,7 @@ describe("RouteActivation", () => {
   it.effect("suppresses scroll if the activation becomes stale during DOM swap", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+        const activation = yield* makeRouteActivation();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.commitAfterDomSwap(
@@ -494,10 +490,7 @@ describe("RouteActivation", () => {
     unsafeEraseR(
       traceEventsFor(
         Effect.gen(function* () {
-          const activation = yield* makeRouteActivation(
-            { emitTraceEvents: true },
-            makeMatcher("/fast"),
-          );
+          const activation = yield* makeRouteActivation(makeMatcher("/fast"));
           yield* activation.activate(request("nav-1", "/slow")).pipe(Effect.result);
           yield* activation
             .activate(request("nav-2", "/fast"))
@@ -517,7 +510,7 @@ describe("RouteActivation", () => {
             "outlet.match.found",
             "outlet.process.dropStale",
           ]);
-          const payload = records[4]?.event.payload;
+          const payload = records[4]?.payload;
           assert.strictEqual(payload?.activationId, "nav-1");
           assert.strictEqual(payload?.path, "/slow");
           assert.strictEqual(payload?.supersededBy, "nav-2");
@@ -552,12 +545,12 @@ describe("RouteActivation", () => {
           "outlet.lazyLeaf.load.ready",
           "outlet.boundary.resolve",
         ]);
-        const firstPayload = records[0]?.event.payload;
+        const firstPayload = records[0]?.payload;
         assert.strictEqual(firstPayload?.activationId, "nav-1");
         assert.strictEqual(firstPayload?.path, "/lazy");
         assert.strictEqual(firstPayload?.phase, "render");
         assert.strictEqual(firstPayload?.outcome, "Loading");
-        const lastPayload = records[3]?.event.payload;
+        const lastPayload = records[3]?.payload;
         assert.strictEqual(lastPayload?.phase, "error");
         assert.strictEqual(lastPayload?.outcome, "NoBoundary");
       }),
@@ -570,7 +563,7 @@ describe("RouteActivation", () => {
         const events: Array<string> = [];
         const records = yield* traceEventsFor(
           Effect.gen(function* () {
-            const activation = yield* makeRouteActivation({ emitTraceEvents: true });
+            const activation = yield* makeRouteActivation();
             yield* activation.activate(request("nav-1", "/docs"));
             yield* activation.commitAfterDomSwap(
               { activationId: "nav-1", path: "/docs" },
@@ -589,7 +582,7 @@ describe("RouteActivation", () => {
           "scroll.apply",
           "outlet.process.commit",
         ]);
-        assert.deepStrictEqual(records[1]?.event.payload, {
+        assert.deepStrictEqual(records[1]?.payload, {
           activationId: "nav-1",
           path: "/docs",
           kind: "Auto",
@@ -601,10 +594,7 @@ describe("RouteActivation", () => {
   it.effect("integrates with the canonical matcher for matched routes", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation(
-          { emitTraceEvents: true },
-          makeMatcher("/known"),
-        );
+        const activation = yield* makeRouteActivation(makeMatcher("/known"));
         const outcome = yield* activation.activate(request("nav-1", "/known"));
 
         assert.isTrue(Predicate.isTagged(outcome, "Committed"));

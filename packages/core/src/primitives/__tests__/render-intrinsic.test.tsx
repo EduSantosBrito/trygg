@@ -5,6 +5,43 @@ import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
 import * as Signal from "../signal.js";
 
+const measureErrorConstructions = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<{ readonly value: A; readonly count: number }, E, R> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const NativeError = globalThis.Error;
+      let count = 0;
+
+      function CountingError(message?: string): Error {
+        count++;
+        return new NativeError(message);
+      }
+
+      Object.setPrototypeOf(CountingError, NativeError);
+      CountingError.prototype = NativeError.prototype;
+
+      Object.defineProperty(globalThis, "Error", {
+        value: CountingError,
+        configurable: true,
+        writable: true,
+      });
+
+      return {
+        count: () => count,
+        restore: () => {
+          Object.defineProperty(globalThis, "Error", {
+            value: NativeError,
+            configurable: true,
+            writable: true,
+          });
+        },
+      };
+    }),
+    ({ count }) => effect.pipe(Effect.map((value) => ({ value, count: count() }))),
+    ({ restore }) => Effect.sync(restore),
+  );
+
 describe("renderIntrinsic", () => {
   scoped("creates standard and void DOM elements", () =>
     Effect.gen(function* () {
@@ -18,6 +55,41 @@ describe("renderIntrinsic", () => {
       const input = yield* getByTestId("void");
       assert.strictEqual(input.tagName, "INPUT");
       assert.strictEqual(input.getAttribute("disabled"), "");
+    }),
+  );
+
+  scoped("avoids per-intrinsic stack-capture work while rendering benchmark rows", () =>
+    Effect.gen(function* () {
+      // Test: should avoid per-intrinsic stack-capture work while rendering benchmark rows.
+      // Scope: locks the RF-2 DOM render pass with a deterministic proxy for traced-span overhead.
+      // Assertion: rendering a js-framework-benchmark-shaped table row performs only a small fixed number of Error stack captures.
+      const row = (
+        <table>
+          <tbody>
+            <tr>
+              <td className="col-md-1">1</td>
+              <td className="col-md-4">
+                <a>pretty red table</a>
+              </td>
+              <td className="col-md-1">
+                <a>
+                  <span className="glyphicon glyphicon-remove" aria-hidden="true" />
+                </a>
+              </td>
+              <td className="col-md-6" />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      const { value, count } = yield* measureErrorConstructions(render(row));
+
+      assert.strictEqual(value.container.querySelectorAll("tr").length, 1);
+      assert.isAtMost(
+        count,
+        20,
+        `expected benchmark row render to avoid stack captures, got ${count}`,
+      );
     }),
   );
 

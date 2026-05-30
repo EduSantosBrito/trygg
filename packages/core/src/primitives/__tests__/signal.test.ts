@@ -31,7 +31,6 @@ import {
   Layer,
   Option,
   Ref,
-  Result,
   Schema,
   Scope,
 } from "effect";
@@ -41,7 +40,7 @@ import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
 import { Element, text } from "../element.js";
 import * as Component from "../component.js";
-import * as ContractTrace from "../../contract/trace.js";
+import * as Trace from "../../trace/index.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
 
@@ -199,24 +198,37 @@ describe("Signal.make ownership", () => {
     }),
   );
 
-  scoped("should fail disposed signal access after owner scope closes", () =>
+  scoped("should ignore disposed signal access after owner scope closes", () =>
     Effect.gen(function* () {
-      // Test: should fail user reads after signal owner disposal.
-      // Scope: verifies leaked signal references fail clearly after scope close.
-      // Assertion: access defects with SignalDisposedError carrying the signal id.
+      // Test: should keep stale signal references from surfacing typed errors to app code.
+      // Scope: verifies leaked signal references are diagnostic-only after scope close.
+      // Assertion: reads return the final snapshot and writes become no-ops.
       const scope = yield* Scope.make();
       const signal = yield* Signal.make({ initialized: true }).pipe(Scope.provide(scope));
       yield* Scope.close(scope, Exit.void);
 
-      const exit = yield* Signal.peek(signal).pipe(Effect.exit);
-      assert.isTrue(Exit.isFailure(exit));
-      if (Exit.isFailure(exit)) {
-        const defect = Cause.findDefect(exit.cause);
-        assert.isTrue(Result.isSuccess(defect));
-        if (Result.isSuccess(defect)) {
-          assert.instanceOf(defect.success, Signal.SignalDisposedError);
-        }
+      const peekExit = yield* Signal.peek(signal).pipe(Effect.exit);
+      assert.isTrue(Exit.isSuccess(peekExit));
+      if (Exit.isSuccess(peekExit)) {
+        assert.deepStrictEqual(peekExit.value, { initialized: true });
       }
+
+      const setExit = yield* Signal.set(signal, { initialized: false }).pipe(Effect.exit);
+      assert.isTrue(Exit.isSuccess(setExit));
+
+      const updateExit = yield* Signal.update(signal, () => ({ initialized: false })).pipe(
+        Effect.exit,
+      );
+      assert.isTrue(Exit.isSuccess(updateExit));
+
+      const modified = yield* Signal.modify(signal, (current) => [
+        current.initialized,
+        {
+          initialized: false,
+        },
+      ]);
+      assert.isTrue(modified);
+      assert.deepStrictEqual(yield* Signal.peek(signal), { initialized: true });
     }),
   );
 
@@ -224,20 +236,20 @@ describe("Signal.make ownership", () => {
     Effect.gen(function* () {
       // Test: should emit lifecycle trace records for create, dispose, and stale access.
       // Scope: verifies observability ICD events are produced, not just the error value.
-      // Assertion: ContractTrace records the signal event family in order for one signal.
-      const collector = yield* ContractTrace.createInMemoryCollector("signal-disposal");
+      // Assertion: Trace records the signal event family in order for one signal.
+      const recorder = Trace.makeRecorder();
 
-      yield* ContractTrace.withCollector(
+      yield* Trace.record(
         Effect.gen(function* () {
           const scope = yield* Scope.make();
           const signal = yield* Signal.make("owned").pipe(Scope.provide(scope));
           yield* Scope.close(scope, Exit.void);
           yield* Signal.peek(signal).pipe(Effect.exit);
         }),
-        collector,
+        recorder,
       );
 
-      const events = (yield* collector.snapshot).map((record) => record.event.event);
+      const events = recorder.records().map((record) => record.name);
       assert.deepStrictEqual(events, ["signal.create", "signal.dispose", "signal.disposed_access"]);
     }),
   );
@@ -748,6 +760,95 @@ describe("Signal.derive", () => {
 
       const updated = yield* Signal.get(quadrupled);
       assert.strictEqual(updated, 20);
+    }),
+  );
+});
+
+// =============================================================================
+// Signal.selector - Value-keyed derived signals
+// =============================================================================
+// Scope: Creating keyed selector signals from one shared source
+
+describe("Signal.selector", () => {
+  scoped("should keep one source subscription while updating only flipped key signals", () =>
+    Effect.gen(function* () {
+      // Test: should update only previous and next key outputs for a single-selection change.
+      // Scope: locks the value-keyed selector contract that avoids per-row source fan-out.
+      // Assertion: one source listener serves all keys; only the two flipped row signals recompute and notify.
+      const selected = yield* Signal.make(1);
+      const initialSourceListeners = selected._listeners.size;
+      let projectCalls = 0;
+      const classFor = yield* Signal.selector(selected, (isSelected): string => {
+        projectCalls += 1;
+        return isSelected ? "danger" : "";
+      });
+      assert.strictEqual(selected._listeners.size, initialSourceListeners + 1);
+
+      const rowCount = 20;
+      const notifications = new Map<number, number>();
+      const classes = new Map<number, Signal.Signal<string>>();
+
+      for (let id = 1; id <= rowCount; id++) {
+        notifications.set(id, 0);
+        const className = yield* classFor(id);
+        classes.set(id, className);
+        yield* Signal.subscribe(className, () =>
+          Effect.sync(() => {
+            notifications.set(id, (notifications.get(id) ?? 0) + 1);
+          }),
+        ).pipe(Effect.asVoid);
+      }
+
+      assert.strictEqual(selected._listeners.size, initialSourceListeners + 1);
+
+      projectCalls = 0;
+      yield* Signal.set(selected, 2);
+
+      assert.strictEqual(projectCalls, 2);
+
+      let totalNotifications = 0;
+      for (const count of notifications.values()) {
+        totalNotifications += count;
+      }
+
+      assert.strictEqual(totalNotifications, 2);
+      assert.strictEqual(notifications.get(1), 1);
+      assert.strictEqual(notifications.get(2), 1);
+      for (let id = 3; id <= rowCount; id++) {
+        assert.strictEqual(notifications.get(id), 0);
+      }
+
+      const previous = classes.get(1);
+      const next = classes.get(2);
+      assert.isDefined(previous);
+      assert.isDefined(next);
+      if (previous !== undefined) {
+        assert.strictEqual(yield* Signal.peek(previous), "");
+      }
+      if (next !== undefined) {
+        assert.strictEqual(yield* Signal.peek(next), "danger");
+      }
+    }),
+  );
+
+  scoped("should remove the source subscription when selector scope closes", () =>
+    Effect.gen(function* () {
+      // Test: should release selector-owned source subscription with its owning scope.
+      // Scope: verifies value-keyed selector bookkeeping follows Effect Scope lifecycle.
+      // Assertion: closing the selector scope restores the source listener count.
+      const selected = yield* Signal.make("a");
+      const initialSourceListeners = selected._listeners.size;
+      const selectorScope = yield* Scope.make();
+
+      const isSelected = yield* Signal.selector(selected, { scope: selectorScope });
+      yield* isSelected("a");
+      yield* isSelected("b");
+
+      assert.strictEqual(selected._listeners.size, initialSourceListeners + 1);
+
+      yield* Scope.close(selectorScope, Exit.void);
+
+      assert.strictEqual(selected._listeners.size, initialSourceListeners);
     }),
   );
 });

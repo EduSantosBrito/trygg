@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
 import { assert, describe, it, vi } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { click, renderElement, testLayer, waitFor } from "trygg/testing";
 
 import GettingStartedPage from "./getting-started";
@@ -229,7 +230,11 @@ describe("GettingStartedPage", () => {
       ]);
       yield* waitFor(() => assert.strictEqual(button.textContent, "Copied!"));
 
-      yield* waitFor(() => assert.strictEqual(button.textContent, "Copy"), { timeout: 3_000 });
+      const resetFiber = yield* Effect.forkChild(
+        waitFor(() => assert.strictEqual(button.textContent, "Copy"), { timeout: 3_000 }),
+      );
+      yield* TestClock.adjust(3_000);
+      yield* Fiber.join(resetFiber);
     }),
   );
 });

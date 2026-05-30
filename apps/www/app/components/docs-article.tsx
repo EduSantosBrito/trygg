@@ -1,8 +1,9 @@
-import { Effect } from "effect";
-import { Component, type ComponentProps } from "trygg";
+import { Data, Effect, Match } from "effect";
+import { Component, Signal, type ComponentProps } from "trygg";
 
-import { CodeBlock, highlightCode } from "./code-block";
+import { CodeBlock, highlightCode, type HighlightedLine } from "./code-block";
 import type { HeadingEntry } from "../content/headings";
+import { highlightCodeSync } from "../lib/docs-highlights";
 import { parseMarkdown, parseInline, type Block, type HeadingBlock } from "../lib/markdown";
 
 const isRailHeading = (
@@ -29,6 +30,34 @@ function renderInline(text: string) {
   });
 }
 
+type DocsCodeBlockState = Data.TaggedEnum<{
+  readonly Pending: {};
+  readonly Ready: { readonly lines: ReadonlyArray<HighlightedLine> };
+  readonly Failed: {};
+}>;
+
+const DocsCodeBlockState = Data.taggedEnum<DocsCodeBlockState>();
+
+const renderDocsCodeBlockFallback = ({
+  content,
+  language,
+  label,
+}: {
+  readonly content: string;
+  readonly language?: string;
+  readonly label: string;
+}) => (
+  <figure className="docs-code-fallback" role="figure" aria-label="Code example">
+    <div className="docs-code-fallback__header">
+      <span>{language || "tsx"}</span>
+      <span>{label}</span>
+    </div>
+    <pre>
+      <code>{content}</code>
+    </pre>
+  </figure>
+);
+
 const DocsCodeBlock = Component.gen(function* (
   Props: ComponentProps<{
     readonly content: string;
@@ -36,13 +65,50 @@ const DocsCodeBlock = Component.gen(function* (
   }>,
 ) {
   const { content, language } = yield* Props;
-  const lines = yield* Effect.promise(() => highlightCode(content, language || "tsx"));
 
-  return (
-    <div className="docs-article__code-wrapper">
-      <CodeBlock lines={lines} copyText={content} fileType={language || undefined} />
-    </div>
+  // Build-time prerendered highlight: render synchronously with no Shiki
+  // download, no async fork, and no "Highlighting…" flash. Covers every docs
+  // code block (the prerender plugin highlights them all at build time).
+  const prerendered = highlightCodeSync(content, language || "tsx");
+  if (prerendered !== undefined) {
+    return (
+      <div className="docs-article__code-wrapper">
+        <CodeBlock lines={prerendered} copyText={content} fileType={language || undefined} />
+      </div>
+    );
+  }
+
+  // Fallback: runtime highlight (e.g. a doc edited in dev before the plugin
+  // regenerates, or a block somehow absent from the prerender map).
+  const state = yield* Signal.make<DocsCodeBlockState>(DocsCodeBlockState.Pending());
+
+  const highlight = Effect.promise(() => highlightCode(content, language || "tsx")).pipe(
+    Effect.flatMap((lines) => Signal.set(state, DocsCodeBlockState.Ready({ lines }))),
+    Effect.catchCause(() => Signal.set(state, DocsCodeBlockState.Failed())),
   );
+
+  const codeView = yield* Signal.derive(state, (current) =>
+    Match.value(current).pipe(
+      Match.tag("Ready", ({ lines }) => (
+        <CodeBlock lines={lines} copyText={content} fileType={language || undefined} />
+      )),
+      Match.tag("Failed", () =>
+        renderDocsCodeBlockFallback({
+          content,
+          language,
+          label: "Syntax highlighting unavailable",
+        }),
+      ),
+      Match.tag("Pending", () =>
+        renderDocsCodeBlockFallback({ content, language, label: "Highlighting…" }),
+      ),
+      Match.exhaustive,
+    ),
+  );
+
+  yield* highlight.pipe(Effect.forkScoped({ startImmediately: true }));
+
+  return <div className="docs-article__code-wrapper">{codeView}</div>;
 });
 
 export const DocsArticle = Component.gen(function* (

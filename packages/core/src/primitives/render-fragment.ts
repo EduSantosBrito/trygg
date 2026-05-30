@@ -35,7 +35,7 @@ export const renderFragment: <E, R>(
   deps: RenderFragmentDeps<E, R>,
 ) {
   const childResults: Array<RenderResult> = [];
-  const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
+  const renderTransaction = makeRenderTransaction();
 
   const cleanupRenderedChildren = Effect.gen(function* () {
     for (const child of childResults) {

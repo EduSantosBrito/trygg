@@ -33,7 +33,7 @@
  * - {@link mount} - Mount an app to the DOM
  * - {@link Signal} - Reactive state primitives
  * - {@link Component} - Typed components with explicit DI
- * - {@link DevMode} - Debug event viewer
+ * - {@link Debug} - Console logging for the trace flight recorder
  *
  * @see README.md for full documentation
  * @see DESIGN.md for architecture details
@@ -102,9 +102,6 @@ export {
   type PropsMarker,
 } from "./primitives/component.js";
 
-// Components
-export { DevMode, type DevModeProps } from "./components/dev-mode.js";
-
 // ErrorBoundary
 export * as ErrorBoundary from "./primitives/error-boundary.js";
 
@@ -116,8 +113,13 @@ export {
   PortalTargetNotFoundError,
 } from "./primitives/portal.js";
 
-// Debug utilities
-// Enable by adding <DevMode /> to your app, or see OBSERVABILITY.md
+// Trace — the framework's internal, machine-assertable flight recorder
+// Emit sites live in framework internals; assert ordered events in tests with a
+// Trace.makeRecorder(), or stream them to the console via Debug.layer().
+export * as Trace from "./trace/index.js";
+
+// Debug utilities — the human-facing console logger for the Trace flight recorder
+// Tune via Component.provide(Debug.layer({ ... })); see ./debug/debug.docs.md
 export * as Debug from "./debug/debug.js";
 
 // Metrics for observability

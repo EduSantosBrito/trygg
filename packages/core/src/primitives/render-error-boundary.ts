@@ -1,7 +1,7 @@
 import { Cause, Effect, Exit, Scope } from "effect";
 import * as Context from "effect/Context";
 import type { Element } from "./element.js";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 
 interface RenderOptions {
@@ -116,14 +116,14 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
     onError === null ? Effect.void : Effect.provide(onError(cause), context ?? deps.emptyContext);
 
   const mountFallbackForCause = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-    yield* Debug.log({ event: "render.errorboundary.caught", reason: Cause.pretty(cause) });
+    yield* Trace.emit("errorBoundary.caught", () => ({ reason: Cause.pretty(cause) }));
     yield* runOnError(cause);
 
     const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
     const mounted = yield* mountFallback(fallbackElement);
     if (mounted === null) return null;
 
-    yield* Debug.log({ event: "render.errorboundary.fallback" });
+    yield* Trace.emit("errorBoundary.fallback");
     return mounted;
   });
 
@@ -189,7 +189,7 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
       yield* cleanupCurrent;
     }
 
-    yield* Debug.log({ event: "render.errorboundary.initial" });
+    yield* Trace.emit("errorBoundary.initial");
   }
 
   return {

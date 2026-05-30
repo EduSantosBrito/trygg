@@ -962,9 +962,9 @@ export const fail = <E>(
  * @public
  * @since 1.0.0
  */
-export const fromUnknown: (child: unknown) => Effect.Effect<Element> = Effect.fn(
-  "Element.fromUnknown",
-)(function* (child: unknown) {
+export const fromUnknown: (child: unknown) => Effect.Effect<Element> = Effect.fnUntraced(function* (
+  child: unknown,
+) {
   if (child == null || child === false) {
     return empty;
   }
@@ -1008,30 +1008,29 @@ export const fromUnknown: (child: unknown) => Effect.Effect<Element> = Effect.fn
  * @public
  * @since 1.0.0
  */
-export const fromChildren: (children: unknown) => Effect.Effect<ReadonlyArray<Element>> = Effect.fn(
-  "Element.fromChildren",
-)(function* (children: unknown) {
-  if (children == null) {
-    return [];
-  }
+export const fromChildren: (children: unknown) => Effect.Effect<ReadonlyArray<Element>> =
+  Effect.fnUntraced(function* (children: unknown) {
+    if (children == null) {
+      return [];
+    }
 
-  if (Array.isArray(children)) {
-    const normalizedChildren = yield* Effect.forEach(children, (child) =>
-      Effect.suspend(() =>
-        Array.isArray(child)
-          ? Element.fromChildren(child)
-          : Element.fromUnknown(child).pipe(
-              Effect.map((normalized) => (isEmpty(normalized) ? [] : [normalized])),
-            ),
-      ),
-    );
+    if (Array.isArray(children)) {
+      const normalizedChildren = yield* Effect.forEach(children, (child) =>
+        Effect.suspend(() =>
+          Array.isArray(child)
+            ? Element.fromChildren(child)
+            : Element.fromUnknown(child).pipe(
+                Effect.map((normalized) => (isEmpty(normalized) ? [] : [normalized])),
+              ),
+        ),
+      );
 
-    return normalizedChildren.flat();
-  }
+      return normalizedChildren.flat();
+    }
 
-  const normalized = yield* Element.fromUnknown(children);
-  return isEmpty(normalized) ? [] : [normalized];
-});
+    const normalized = yield* Element.fromUnknown(children);
+    return isEmpty(normalized) ? [] : [normalized];
+  });
 
 /**
  * Element constructors and utilities
@@ -1127,6 +1126,8 @@ const snapshotElementChildren = (children: ElementChildren): ElementChildren =>
 export const portal = (target: HTMLElement | string, children: ElementChildren) =>
   ElementBase.Portal({ target, children: snapshotElementChildren(children) });
 
+type KeyedListElement = Extract<Element, { readonly _tag: "KeyedList" }>;
+
 /**
  * Create a keyed list element for efficient list rendering.
  * Maintains stable scopes per key so nested signals are preserved across updates.
@@ -1144,8 +1145,6 @@ export const portal = (target: HTMLElement | string, children: ElementChildren) 
  * @public
  * @since 1.0.0
  */
-type KeyedListElement = Extract<Element, { readonly _tag: "KeyedList" }>;
-
 export const keyedList = <T, E, R>(
   source: Signal<ReadonlyArray<T>>,
   renderFn: (item: T, index: number) => Effect.Effect<Element, E, R>,

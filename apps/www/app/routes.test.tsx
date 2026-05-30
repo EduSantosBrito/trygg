@@ -2,6 +2,7 @@
 
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { render, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
 
@@ -12,6 +13,13 @@ import { routes } from "./routes";
 const sidebarLinks = sidebarGroups.flatMap((group) => group.links);
 
 const failWait = (message: string): never => assert.fail(message);
+
+const flushRouteDom = Effect.gen(function* () {
+  for (let i = 0; i < 50; i++) {
+    yield* Effect.yieldNow;
+    yield* TestClock.adjust(20);
+  }
+});
 
 const renderRoute = (path: string) =>
   Effect.gen(function* () {
@@ -62,6 +70,7 @@ describe("docs routes", () => {
       });
 
       yield* Router.navigate("/docs/api-types");
+      yield* flushRouteDom;
 
       yield* waitFor(() => {
         const rail = result.container.querySelector(".docs-rail__links");
@@ -72,6 +81,7 @@ describe("docs routes", () => {
       });
 
       yield* Router.navigate("/docs");
+      yield* flushRouteDom;
 
       yield* waitFor(() => {
         if (!result.container.textContent?.includes("Build UI the Effect way")) {
@@ -97,6 +107,7 @@ describe("docs routes", () => {
       });
 
       yield* Router.navigate("/docs/signals");
+      yield* flushRouteDom;
 
       yield* waitFor(() => {
         if (!result.container.textContent?.includes("Signals")) {
@@ -104,7 +115,7 @@ describe("docs routes", () => {
         }
         return true;
       });
-      yield* Effect.sleep("100 millis");
+      yield* flushRouteDom;
 
       assert.strictEqual(result.container.querySelectorAll(".docs-layout").length, 1);
       assert.strictEqual(result.container.querySelectorAll(".docs-layout__sidebar").length, 1);

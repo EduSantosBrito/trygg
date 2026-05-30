@@ -151,11 +151,6 @@
       "requiresSidecar": true
     },
     {
-      "name": "Development",
-      "ownerModule": "src/components/dev-mode.ts",
-      "requiresSidecar": true
-    },
-    {
       "name": "Debugging",
       "ownerModule": "src/debug/debug.ts",
       "requiresSidecar": true
@@ -573,16 +568,6 @@
         "trygg"
       ],
       "sidecar": "src/vite/plugin.docs.md"
-    },
-    {
-      "topic": "DevMode",
-      "category": "Development",
-      "entrypoint": ".",
-      "module": "src/components/dev-mode.ts",
-      "primaryExport": "DevMode",
-      "primaryKind": "named",
-      "namedExports": ["DevModeProps"],
-      "sidecar": "src/components/dev-mode.docs.md"
     },
     {
       "topic": "Debug",

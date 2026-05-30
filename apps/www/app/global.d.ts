@@ -14,6 +14,11 @@ declare module "*.tsx?raw" {
 
 declare module "*.css";
 
+declare module "virtual:trygg-docs-highlights" {
+  const map: Record<string, import("./lib/shiki-highlight").HighlightedLine[]>;
+  export default map;
+}
+
 interface ImportMeta {
   glob<T>(
     pattern: string,

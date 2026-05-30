@@ -10,14 +10,13 @@
  * @since 1.0.0
  * @module trygg/router/service
  */
-import { Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
+import { Deferred, Effect, Layer, Option, Random, Ref, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import { CurrentRouteQuery } from "./route.js";
 
 import * as Signal from "../primitives/signal.js";
-import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import { unsafeNarrowParams } from "../internal/unsafe.js";
 import type {
   Route,
@@ -42,7 +41,7 @@ import { History } from "../platform/history.js";
 import { Location } from "../platform/location.js";
 import { PlatformEventTarget } from "../platform/event-target.js";
 import { Observer } from "../platform/observer.js";
-import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
+import { getFiberRef, locallyFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import { ScrollStrategyType } from "./scroll-strategy.js";
 import {
   NavigationCoreError,
@@ -90,7 +89,7 @@ const PREFETCH_PATH_ATTR = "data-trygg-prefetch-path";
  * @internal
  */
 const logViewportPrefetchFailure = (operation: string, cause: DomError): Effect.Effect<void> =>
-  Debug.log({ event: "router.viewport.observer.error", operation, cause });
+  Trace.emit("router.viewport.observer.error", () => ({ operation, cause }));
 
 const setupViewportPrefetch: (
   router: RouterService,
@@ -126,15 +125,11 @@ const setupViewportPrefetch: (
     if (path === null) return;
 
     // Run prefetch directly (IntersectionObserver already fires async)
-    yield* Debug.log({
-      event: "router.prefetch.viewport",
-      path,
-    });
-    yield* Debug.log({
-      event: "router.prefetch.trigger",
+    yield* Trace.emit("router.prefetch.viewport", () => ({ path }));
+    yield* Trace.emit("router.prefetch.trigger", () => ({
       path,
       trigger: "viewport",
-    });
+    }));
     yield* router.prefetch(path);
   });
 
@@ -199,7 +194,7 @@ const setupViewportPrefetch: (
     ),
   );
 
-  yield* Debug.log({ event: "router.viewport.observer.added" });
+  yield* Trace.emit("router.viewport.observer.added");
 });
 
 /**
@@ -225,19 +220,15 @@ export interface Router extends Context.Service<
     readonly navigate: (
       path: string,
       options?: NavigateOptions,
-    ) => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
-    readonly back: () => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
-    readonly forward: () => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
+    ) => Effect.Effect<void, NavigationError>;
+    readonly back: () => Effect.Effect<void, NavigationError>;
+    readonly forward: () => Effect.Effect<void, NavigationError>;
     readonly params: <Path extends RoutePath>(path: Path) => Effect.Effect<RouteParamsFor<Path>>;
     readonly query: Signal.Signal<URLSearchParams>;
     readonly isActive: (
       path: string,
       options?: IsActiveOptions,
-    ) => Effect.Effect<
-      Signal.Signal<boolean>,
-      NavigationError | Signal.SignalDisposedError,
-      Scope.Scope
-    >;
+    ) => Effect.Effect<Signal.Signal<boolean>, NavigationError, Scope.Scope>;
     readonly prefetch: (path: string) => Effect.Effect<void>;
     readonly outletCoordination: {
       readonly prefetchState: Effect.Effect<OutletPrefetchState>;
@@ -259,19 +250,15 @@ export const Router = Context.Service<
     readonly navigate: (
       path: string,
       options?: NavigateOptions,
-    ) => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
-    readonly back: () => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
-    readonly forward: () => Effect.Effect<void, NavigationError | Signal.SignalDisposedError>;
+    ) => Effect.Effect<void, NavigationError>;
+    readonly back: () => Effect.Effect<void, NavigationError>;
+    readonly forward: () => Effect.Effect<void, NavigationError>;
     readonly params: <Path extends RoutePath>(path: Path) => Effect.Effect<RouteParamsFor<Path>>;
     readonly query: Signal.Signal<URLSearchParams>;
     readonly isActive: (
       path: string,
       options?: IsActiveOptions,
-    ) => Effect.Effect<
-      Signal.Signal<boolean>,
-      NavigationError | Signal.SignalDisposedError,
-      Scope.Scope
-    >;
+    ) => Effect.Effect<Signal.Signal<boolean>, NavigationError, Scope.Scope>;
     readonly prefetch: (path: string) => Effect.Effect<void>;
     readonly outletCoordination: {
       readonly prefetchState: Effect.Effect<OutletPrefetchState>;
@@ -336,12 +323,39 @@ export const CurrentRouteError = Context.Reference<Option.Option<RouteErrorInfo>
  * Uses GlobalValue to ensure single instance even with module duplication.
  * @internal
  */
-export const CurrentOutletChild = Context.Reference<Option.Option<Element>>(
+export const CurrentOutletChild = Context.Reference<Option.Option<Ref.Ref<Option.Option<Element>>>>(
   "trygg/Router/CurrentOutletChild",
   {
     defaultValue: Option.none,
   },
 );
+
+export const takeCurrentOutletChild: () => Effect.Effect<Option.Option<Element>> = Effect.fn(
+  "Router.takeCurrentOutletChild",
+)(function* () {
+  const outletChildRef = yield* getFiberRef(CurrentOutletChild);
+  if (Option.isNone(outletChildRef)) return Option.none();
+  return yield* Ref.getAndSet(outletChildRef.value, Option.none());
+});
+
+export const setCurrentOutletChild = (
+  child: Option.Option<Element>,
+): Effect.Effect<void, never, never> =>
+  Ref.make(child).pipe(
+    Effect.flatMap((outletChildRef) =>
+      setFiberRef(CurrentOutletChild, Option.some(outletChildRef)),
+    ),
+  );
+
+export const locallyCurrentOutletChild = <A, E, R>(
+  child: Element,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Ref.make<Option.Option<Element>>(Option.some(child)).pipe(
+    Effect.flatMap((outletChildRef) =>
+      locallyFiberRef(CurrentOutletChild, Option.some(outletChildRef), effect),
+    ),
+  );
 
 export class CurrentErrorOutsideBoundaryError extends Schema.TaggedErrorClass<CurrentErrorOutsideBoundaryError>()(
   "CurrentErrorOutsideBoundaryError",
@@ -418,12 +432,10 @@ export const current: Effect.Effect<Signal.Signal<Route>, never, Router> = Effec
  * @public
  * @since 1.0.0
  */
-export const currentRoute: Effect.Effect<Route, Signal.SignalDisposedError, Router> = Effect.gen(
-  function* () {
-    const router = yield* Router;
-    return yield* Signal.get(router.current);
-  },
-);
+export const currentRoute: Effect.Effect<Route, never, Router> = Effect.gen(function* () {
+  const router = yield* Router;
+  return yield* Signal.get(router.current);
+});
 
 /**
  * Get the raw query params signal (URLSearchParams).
@@ -489,7 +501,7 @@ export const query = <Path extends RoutePath>(
 export const navigate = (
   path: string,
   options?: NavigateOptions,
-): Effect.Effect<void, NavigationError | Signal.SignalDisposedError, Router> =>
+): Effect.Effect<void, NavigationError, Router> =>
   Effect.flatMap(Router.asEffect(), (router) => router.navigate(path, options));
 
 /**
@@ -507,8 +519,10 @@ export const navigate = (
  * @public
  * @since 1.0.0
  */
-export const back: Effect.Effect<void, NavigationError | Signal.SignalDisposedError, Router> =
-  Effect.flatMap(Router.asEffect(), (router) => router.back());
+export const back: Effect.Effect<void, NavigationError, Router> = Effect.flatMap(
+  Router.asEffect(),
+  (router) => router.back(),
+);
 
 /**
  * Go forward in history
@@ -525,8 +539,10 @@ export const back: Effect.Effect<void, NavigationError | Signal.SignalDisposedEr
  * @public
  * @since 1.0.0
  */
-export const forward: Effect.Effect<void, NavigationError | Signal.SignalDisposedError, Router> =
-  Effect.flatMap(Router.asEffect(), (router) => router.forward());
+export const forward: Effect.Effect<void, NavigationError, Router> = Effect.flatMap(
+  Router.asEffect(),
+  (router) => router.forward(),
+);
 
 /**
  * Get route params with type safety based on path pattern.
@@ -584,11 +600,8 @@ export const params = <Path extends RoutePath>(_path: Path): Effect.Effect<Route
 export const isActive = (
   path: string,
   options?: IsActiveOptions,
-): Effect.Effect<
-  Signal.Signal<boolean>,
-  NavigationError | Signal.SignalDisposedError,
-  Router | Scope.Scope
-> => Effect.flatMap(Router.asEffect(), (router) => router.isActive(path, options));
+): Effect.Effect<Signal.Signal<boolean>, NavigationError, Router | Scope.Scope> =>
+  Effect.flatMap(Router.asEffect(), (router) => router.isActive(path, options));
 
 /**
  * Prefetch route modules for a path.
@@ -664,9 +677,7 @@ export const link =
   (
     path: string,
     options?: NavigateOptions,
-  ): ((
-    event: Event,
-  ) => Effect.Effect<void, NavigationError | Signal.SignalDisposedError, Router>) =>
+  ): ((event: Event) => Effect.Effect<void, NavigationError, Router>) =>
   (event: Event) =>
     Effect.gen(function* () {
       event.preventDefault();
@@ -762,6 +773,65 @@ export const browserLayer: Layer.Layer<
       replayLatestPrefetchState: true,
     });
 
+    // Yield to requestAnimationFrame — lets forked render fibers (microtasks)
+    // complete DOM updates before we scroll. Effect.async suspends the current
+    // fiber, draining the microtask queue, then rAF fires after layout/paint.
+    const afterFrame: Effect.Effect<void> = Effect.promise(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
+    );
+
+    type PopstateWaiter = Deferred.Deferred<void>;
+    const popstateWaitersRef = yield* Ref.make<ReadonlyArray<PopstateWaiter>>([]);
+
+    const readLocationForPopstate = location.fullPath.pipe(
+      Effect.mapError(
+        (cause) => new NavigationCoreError({ operation: "location.fullPath", cause }),
+      ),
+    );
+    const readScrollKeyForPopstate = history.state.pipe(
+      Effect.map((state) =>
+        Option.match(decodeScrollState(state), {
+          onNone: () => "",
+          onSome: (scrollState) => scrollState._scrollKey,
+        }),
+      ),
+      Effect.mapError((cause) => new NavigationCoreError({ operation: "history.state", cause })),
+    );
+
+    const completePopstateWaiters = Effect.gen(function* () {
+      const waiters = yield* Ref.getAndSet(popstateWaitersRef, []);
+      yield* Effect.forEach(waiters, (waiter) => Deferred.succeed(waiter, undefined), {
+        discard: true,
+      });
+    });
+
+    const waitForPopstateAfter = Effect.fn("RouterService.waitForPopstateAfter")(function* (
+      operation: Effect.Effect<void, NavigationCoreError>,
+    ) {
+      const beforePath = yield* readLocationForPopstate;
+      const beforeScrollKey = yield* readScrollKeyForPopstate;
+      const waiter = yield* Deferred.make<void>();
+      yield* Ref.update(popstateWaitersRef, (waiters) => [...waiters, waiter]);
+
+      const removeWaiter = Ref.update(popstateWaitersRef, (waiters) =>
+        waiters.filter((candidate) => candidate !== waiter),
+      );
+
+      const noPopstateFallback = Effect.gen(function* () {
+        yield* afterFrame;
+        yield* afterFrame;
+        const afterPath = yield* readLocationForPopstate;
+        const afterScrollKey = yield* readScrollKeyForPopstate;
+        if (afterPath === beforePath && afterScrollKey === beforeScrollKey) return;
+        yield* Deferred.await(waiter);
+      });
+
+      yield* operation;
+      yield* Effect.raceFirst(Deferred.await(waiter), noPopstateFallback).pipe(
+        Effect.ensuring(removeWaiter),
+      );
+    });
+
     const navigationAdapter = {
       read: Effect.gen(function* () {
         const fullPath = yield* location.fullPath.pipe(
@@ -807,12 +877,16 @@ export const browserLayer: Layer.Layer<
           }),
           Effect.mapError((cause) => new NavigationCoreError({ operation: "replaceState", cause })),
         ),
-      back: history.back.pipe(
-        Effect.mapError((cause) => new NavigationCoreError({ operation: "history.back", cause })),
+      back: waitForPopstateAfter(
+        history.back.pipe(
+          Effect.mapError((cause) => new NavigationCoreError({ operation: "history.back", cause })),
+        ),
       ),
-      forward: history.forward.pipe(
-        Effect.mapError(
-          (cause) => new NavigationCoreError({ operation: "history.forward", cause }),
+      forward: waitForPopstateAfter(
+        history.forward.pipe(
+          Effect.mapError(
+            (cause) => new NavigationCoreError({ operation: "history.forward", cause }),
+          ),
         ),
       ),
     };
@@ -825,52 +899,46 @@ export const browserLayer: Layer.Layer<
       function* () {
         const current = yield* Signal.get(currentSignal);
         const snapshot = yield* navigationCore.current;
-        yield* Signal.set(currentSignal, {
+        const queryChanged = !sameQuery(current.query, snapshot.query);
+        const routeChanged = current.path !== snapshot.path || queryChanged;
+        const nextRoute: Route = {
           path: snapshot.path,
           params: {},
           query: snapshot.query,
-        });
-        yield* ContractTrace.emit({
-          event: "router.current.set",
-          level: "semantic",
-          payload: { fromPath: current.path, toPath: snapshot.path },
-        });
-        const queryChanged = !sameQuery(current.query, snapshot.query);
-        if (queryChanged) {
-          yield* Signal.set(querySignal, snapshot.query);
+        };
+        if (routeChanged) {
+          yield* Signal.modify(currentSignal, (): readonly [void, Route] => [undefined, nextRoute]);
         }
-        yield* ContractTrace.emit({
-          event: "router.query.set",
-          level: "semantic",
-          payload: {
-            fromQuery: current.query.toString(),
-            toQuery: snapshot.query.toString(),
-            changed: queryChanged,
-            notified: queryChanged,
-          },
-        });
+        yield* Trace.emit("router.current.set", () => ({
+          fromPath: current.path,
+          toPath: snapshot.path,
+        }));
+        if (queryChanged) {
+          yield* Signal.modify(querySignal, (): readonly [void, URLSearchParams] => [
+            undefined,
+            snapshot.query,
+          ]);
+        }
+        yield* Trace.emit("router.query.set", () => ({
+          fromQuery: current.query.toString(),
+          toQuery: snapshot.query.toString(),
+          changed: queryChanged,
+          notified: queryChanged,
+        }));
       },
     );
 
     // Save scroll using captured services. Failures are logged because scroll save is best-effort.
     const doSaveScroll = Effect.gen(function* () {
       const pos = yield* scroll.getPosition;
-      yield* Debug.log({
-        event: "router.scroll.save",
+      yield* Trace.emit("router.scroll.save", () => ({
         key: currentNavKey,
         x: pos.x,
         y: pos.y,
-      });
+      }));
       const encoded = yield* encodeScrollPositionJson(pos);
       yield* storage.set(`trygg:scroll:${currentNavKey}`, encoded);
-    }).pipe(Effect.catch((cause) => Debug.log({ event: "router.scroll.save.error", cause })));
-
-    // Yield to requestAnimationFrame — lets forked render fibers (microtasks)
-    // complete DOM updates before we scroll. Effect.async suspends the current
-    // fiber, draining the microtask queue, then rAF fires after layout/paint.
-    const afterFrame: Effect.Effect<void> = Effect.promise(
-      () => new Promise((resolve) => requestAnimationFrame(() => resolve())),
-    );
+    }).pipe(Effect.catch((cause) => Trace.emit("router.scroll.save.error", () => ({ cause }))));
 
     // Apply scroll behavior using captured services (best-effort).
     // Dispatches on ScrollStrategyType._tag — no sentinel strings.
@@ -914,12 +982,11 @@ export const browserLayer: Layer.Layer<
           const stored = yield* storage.get(`trygg:scroll:${storageKey}`);
           if (stored !== null) {
             const pos = yield* decodeScrollPositionJson(stored);
-            yield* Debug.log({
-              event: "router.scroll.restore",
+            yield* Trace.emit("router.scroll.restore", () => ({
               key: storageKey,
               x: pos.x,
               y: pos.y,
-            });
+            }));
             yield* scroll.scrollTo(pos.x, pos.y);
             const payload: ScrollApplyPayload = {
               ...payloadBase,
@@ -937,7 +1004,7 @@ export const browserLayer: Layer.Layer<
         }
 
         // New navigation: scroll to top
-        yield* Debug.log({ event: "router.scroll.top" });
+        yield* Trace.emit("router.scroll.top");
         yield* scroll.scrollTo(0, 0);
         const payload: ScrollApplyPayload = { ...payloadBase, kind: "top" };
         return payload;
@@ -983,10 +1050,13 @@ export const browserLayer: Layer.Layer<
         // Read current location and update shared navigation state/signals.
         yield* navigationCore.refresh.pipe(Effect.mapError(toNavigationError));
         yield* applyNavigationSnapshot();
-      }).pipe(Effect.catch((cause) => Debug.log({ event: "router.popstate.error", cause }))),
+      }).pipe(
+        Effect.ensuring(completePopstateWaiters),
+        Effect.catch((cause) => Trace.emit("router.popstate.error", () => ({ cause }))),
+      ),
     );
 
-    yield* Debug.log({ event: "router.popstate.added" });
+    yield* Trace.emit("router.popstate.added");
 
     const routerService: RouterService = {
       current: currentSignal,
@@ -996,10 +1066,6 @@ export const browserLayer: Layer.Layer<
         targetPath: string,
         options?: NavigateOptions,
       ) {
-        // Start a new trace for this navigation
-        const traceId = Debug.nextTraceId();
-        yield* Debug.setTraceId(traceId);
-
         const target = navigationTarget(targetPath, options);
         const fullPath = yield* resolveNavigationTarget(target).pipe(
           Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
@@ -1007,21 +1073,11 @@ export const browserLayer: Layer.Layer<
         const { path: resolvedPath } = yield* parsePath(fullPath);
 
         const current = yield* Signal.get(currentSignal);
-        yield* ContractTrace.emit({
-          event: "router.navigate.request",
-          level: "semantic",
-          payload: {
-            fromPath: current.path,
-            toPath: resolvedPath,
-            replace: options?.replace === true,
-          },
-        });
-        yield* Debug.log({
-          event: "router.navigate",
-          from_path: current.path,
-          to_path: resolvedPath,
-          ...(options?.replace !== undefined ? { replace: options.replace } : {}),
-        });
+        yield* Trace.emit("router.navigate.request", () => ({
+          fromPath: current.path,
+          toPath: resolvedPath,
+          replace: options?.replace === true,
+        }));
 
         // Record navigation metric
         yield* Metrics.recordNavigation;
@@ -1046,23 +1102,17 @@ export const browserLayer: Layer.Layer<
           hash,
           scrollKey: currentNavKey,
         });
-        yield* ContractTrace.emit({
-          event: options?.replace ? "history.replace" : "history.push",
-          level: "semantic",
-          payload: { path: fullPath },
-        });
+        yield* Trace.emit(options?.replace ? "history.replace" : "history.push", () => ({
+          path: fullPath,
+        }));
         yield* applyNavigationSnapshot();
         const snapshot = yield* navigationCore.current;
 
-        yield* ContractTrace.emit({
-          event: "router.navigate.commit",
-          level: "semantic",
-          payload: { path: fullPath, query: snapshot.query.toString() },
-        });
-        yield* Debug.log({
-          event: "router.navigate.complete",
+        yield* Trace.emit("router.navigate.commit", () => ({
           path: fullPath,
-        });
+          query: snapshot.query.toString(),
+        }));
+        yield* Trace.emit("router.navigate.stateApplied", () => ({ path: fullPath }));
       }),
 
       back: () =>
@@ -1070,11 +1120,10 @@ export const browserLayer: Layer.Layer<
           const before = yield* Signal.get(currentSignal);
           yield* navigationCore.back.pipe(Effect.mapError(toNavigationError));
           const after = yield* Signal.get(currentSignal);
-          yield* ContractTrace.emit({
-            event: "history.back",
-            level: "semantic",
-            payload: { fromPath: before.path, toPath: after.path },
-          });
+          yield* Trace.emit("history.back", () => ({
+            fromPath: before.path,
+            toPath: after.path,
+          }));
         }),
 
       forward: () =>
@@ -1082,11 +1131,10 @@ export const browserLayer: Layer.Layer<
           const before = yield* Signal.get(currentSignal);
           yield* navigationCore.forward.pipe(Effect.mapError(toNavigationError));
           const after = yield* Signal.get(currentSignal);
-          yield* ContractTrace.emit({
-            event: "history.forward",
-            level: "semantic",
-            payload: { fromPath: before.path, toPath: after.path },
-          });
+          yield* Trace.emit("history.forward", () => ({
+            fromPath: before.path,
+            toPath: after.path,
+          }));
         }),
 
       params: <Path extends RoutePath>(_path: Path) =>
@@ -1106,10 +1154,7 @@ export const browserLayer: Layer.Layer<
         }),
 
       prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
-        yield* Debug.log({
-          event: "router.prefetch.start",
-          path: targetPath,
-        });
+        yield* Trace.emit("router.prefetch.start", () => ({ path: targetPath }));
         yield* outletCoordination.prefetch(targetPath);
       }),
 
@@ -1141,7 +1186,7 @@ export const browserLayer: Layer.Layer<
     // Uses Observer + Dom services, auto-cleanup via Scope. Best-effort.
     yield* setupViewportPrefetch(routerService).pipe(
       Effect.catch((cause) =>
-        Debug.log({ event: "router.viewport.observer.error", operation: "setup", cause }),
+        Trace.emit("router.viewport.observer.error", () => ({ operation: "setup", cause })),
       ),
     );
 
@@ -1202,30 +1247,35 @@ export const testLayer = (
         function* () {
           const current = yield* Signal.get(currentSignal);
           const snapshot = yield* navigationCore.current;
-          yield* Signal.set(currentSignal, {
+          const queryChanged = !sameQuery(current.query, snapshot.query);
+          const routeChanged = current.path !== snapshot.path || queryChanged;
+          const nextRoute: Route = {
             path: snapshot.path,
             params: {},
             query: snapshot.query,
-          });
-          yield* ContractTrace.emit({
-            event: "router.current.set",
-            level: "semantic",
-            payload: { fromPath: current.path, toPath: snapshot.path },
-          });
-          const queryChanged = !sameQuery(current.query, snapshot.query);
-          if (queryChanged) {
-            yield* Signal.set(querySignal, snapshot.query);
+          };
+          if (routeChanged) {
+            yield* Signal.modify(currentSignal, (): readonly [void, Route] => [
+              undefined,
+              nextRoute,
+            ]);
           }
-          yield* ContractTrace.emit({
-            event: "router.query.set",
-            level: "semantic",
-            payload: {
-              fromQuery: current.query.toString(),
-              toQuery: snapshot.query.toString(),
-              changed: queryChanged,
-              notified: queryChanged,
-            },
-          });
+          yield* Trace.emit("router.current.set", () => ({
+            fromPath: current.path,
+            toPath: snapshot.path,
+          }));
+          if (queryChanged) {
+            yield* Signal.modify(querySignal, (): readonly [void, URLSearchParams] => [
+              undefined,
+              snapshot.query,
+            ]);
+          }
+          yield* Trace.emit("router.query.set", () => ({
+            fromQuery: current.query.toString(),
+            toQuery: snapshot.query.toString(),
+            changed: queryChanged,
+            notified: queryChanged,
+          }));
         },
       );
 
@@ -1237,30 +1287,16 @@ export const testLayer = (
           targetPath: string,
           options?: NavigateOptions,
         ) {
-          // Start a new trace for this navigation
-          const traceId = Debug.nextTraceId();
-          yield* Debug.setTraceId(traceId);
-
           const target = navigationTarget(targetPath, options);
           const resolvedPath = yield* resolveNavigationTarget(target).pipe(
             Effect.mapError((cause) => new NavigationError({ operation: cause.operation, cause })),
           );
           const current = yield* Signal.get(currentSignal);
-          yield* ContractTrace.emit({
-            event: "router.navigate.request",
-            level: "semantic",
-            payload: {
-              fromPath: current.path,
-              toPath: resolvedPath,
-              replace: options?.replace === true,
-            },
-          });
-          yield* Debug.log({
-            event: "router.navigate",
-            from_path: current.path,
-            to_path: resolvedPath,
-            ...(options?.replace !== undefined ? { replace: options.replace } : {}),
-          });
+          yield* Trace.emit("router.navigate.request", () => ({
+            fromPath: current.path,
+            toPath: resolvedPath,
+            replace: options?.replace === true,
+          }));
 
           // Record navigation metric
           yield* Metrics.recordNavigation;
@@ -1278,23 +1314,17 @@ export const testLayer = (
             hash: snapshotAfterNavigate.hash,
             scrollKey: snapshotAfterNavigate.scrollKey,
           });
-          yield* ContractTrace.emit({
-            event: options?.replace ? "history.replace" : "history.push",
-            level: "semantic",
-            payload: { path: resolvedPath },
-          });
+          yield* Trace.emit(options?.replace ? "history.replace" : "history.push", () => ({
+            path: resolvedPath,
+          }));
           yield* applyNavigationSnapshot();
           const snapshot = yield* navigationCore.current;
 
-          yield* ContractTrace.emit({
-            event: "router.navigate.commit",
-            level: "semantic",
-            payload: { path: resolvedPath, query: snapshot.query.toString() },
-          });
-          yield* Debug.log({
-            event: "router.navigate.complete",
+          yield* Trace.emit("router.navigate.commit", () => ({
             path: resolvedPath,
-          });
+            query: snapshot.query.toString(),
+          }));
+          yield* Trace.emit("router.navigate.stateApplied", () => ({ path: resolvedPath }));
         }),
 
         back: () =>
@@ -1303,11 +1333,10 @@ export const testLayer = (
             yield* navigationCore.back.pipe(Effect.mapError(toNavigationError));
             yield* applyNavigationSnapshot();
             const after = yield* Signal.get(currentSignal);
-            yield* ContractTrace.emit({
-              event: "history.back",
-              level: "semantic",
-              payload: { fromPath: before.path, toPath: after.path },
-            });
+            yield* Trace.emit("history.back", () => ({
+              fromPath: before.path,
+              toPath: after.path,
+            }));
           }),
 
         forward: () =>
@@ -1316,11 +1345,10 @@ export const testLayer = (
             yield* navigationCore.forward.pipe(Effect.mapError(toNavigationError));
             yield* applyNavigationSnapshot();
             const after = yield* Signal.get(currentSignal);
-            yield* ContractTrace.emit({
-              event: "history.forward",
-              level: "semantic",
-              payload: { fromPath: before.path, toPath: after.path },
-            });
+            yield* Trace.emit("history.forward", () => ({
+              fromPath: before.path,
+              toPath: after.path,
+            }));
           }),
 
         params: <Path extends RoutePath>(_path: Path) =>
@@ -1339,10 +1367,7 @@ export const testLayer = (
           }),
 
         prefetch: Effect.fn("RouterService.prefetch")(function* (targetPath: string) {
-          yield* Debug.log({
-            event: "router.prefetch.start",
-            path: targetPath,
-          });
+          yield* Trace.emit("router.prefetch.start", () => ({ path: targetPath }));
           yield* outletCoordination.prefetch(targetPath);
         }),
 

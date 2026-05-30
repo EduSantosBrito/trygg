@@ -1,6 +1,6 @@
 import "../styles.css";
 import { Effect } from "effect";
-import { Component, DevMode, Signal } from "trygg";
+import { Component, Signal } from "trygg";
 import * as Router from "trygg/router";
 import { ApiClientLive } from "trygg/api";
 import { AppTheme, AppThemeDark } from "./services/theme";
@@ -63,7 +63,6 @@ export default Component.gen(function* () {
         <meta name="description" content="Incident management built with trygg" />
       </head>
       <body>
-        <DevMode />
         <div className="app-shell">
           {/* Dark nav rail */}
           <aside className="nav-rail">

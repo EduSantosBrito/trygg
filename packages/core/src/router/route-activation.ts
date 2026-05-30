@@ -12,7 +12,7 @@
  */
 import { Data, Deferred, Effect, Layer, Option, Schema, Scope, SynchronizedRef } from "effect";
 import * as Context from "effect/Context";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import type { ScrollIntent } from "./navigation-outlet-coordination.js";
 import type { RouteMatch, RouteMatcherShape } from "./matching.js";
 import type { MiddlewareResult } from "./route.js";
@@ -47,28 +47,20 @@ export class RouteActivationError extends Schema.TaggedErrorClass<RouteActivatio
   },
 ) {}
 
-export const RouteActivationConfigInput = Schema.Struct({
-  emitTraceEvents: Schema.Boolean,
-});
-
-type RouteActivationConfig = typeof RouteActivationConfigInput.Type;
-
 const activationPayload = (request: Pick<RouteActivationRequest, "activationId" | "path">) => ({
   activationId: request.activationId,
   path: request.path,
 });
 
 const emitActivationTrace = (
-  enabled: boolean,
-  event: ContractTrace.ContractTraceEventName,
+  event: Trace.TraceEventName,
   payload: Record<string, unknown>,
-): Effect.Effect<void> =>
-  enabled ? ContractTrace.emit({ event, level: "semantic", payload }) : Effect.void;
+): Effect.Effect<void> => Trace.emit(event, () => payload);
 
 const emitBoundaryTrace = (
-  event: ContractTrace.ContractTraceEventName,
+  event: Trace.TraceEventName,
   payload: Record<string, unknown>,
-): Effect.Effect<void> => ContractTrace.emit({ event, level: "semantic", payload });
+): Effect.Effect<void> => Trace.emit(event, () => payload);
 
 type ContinueIntent = Data.TaggedEnum<{
   readonly Continue: {};
@@ -109,13 +101,10 @@ export interface RouteActivationShape {
 }
 
 export const makeRouteActivation: (
-  input: RouteActivationConfig,
   matcher?: RouteMatcherShape,
 ) => Effect.Effect<RouteActivationShape> = Effect.fn("RouteActivation.make")(function* (
-  input: RouteActivationConfig,
   matcher?: RouteMatcherShape,
 ) {
-  const config = RouteActivationConfigInput.make(input);
   const current = yield* SynchronizedRef.make<Option.Option<string>>(Option.none());
 
   const currentOrStale = Effect.fn("RouteActivation.currentOrStale")(function* (
@@ -128,7 +117,7 @@ export const makeRouteActivation: (
         activationId,
         supersededBy: latest.value,
       });
-      yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.dropStale", {
+      yield* emitActivationTrace("outlet.process.dropStale", {
         activationId,
         path,
         supersededBy: latest.value,
@@ -144,7 +133,7 @@ export const makeRouteActivation: (
 
   return {
     activate: Effect.fn("RouteActivation.activate")(function* (request) {
-      yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.start", {
+      yield* emitActivationTrace("outlet.process.start", {
         ...activationPayload(request),
         query: request.query.toString(),
         hasScrollIntent: Option.isSome(request.scrollIntent),
@@ -162,7 +151,7 @@ export const makeRouteActivation: (
           ),
         );
         if (Option.isNone(match)) {
-          yield* emitActivationTrace(config.emitTraceEvents, "outlet.match.notFound", {
+          yield* emitActivationTrace("outlet.match.notFound", {
             ...activationPayload(request),
           });
           return RouteActivationOutcome.NotFound({
@@ -170,7 +159,7 @@ export const makeRouteActivation: (
             path: request.path,
           });
         }
-        yield* emitActivationTrace(config.emitTraceEvents, "outlet.match.found", {
+        yield* emitActivationTrace("outlet.match.found", {
           ...activationPayload(request),
           routePattern: match.value.route.path,
         });
@@ -189,7 +178,7 @@ export const makeRouteActivation: (
     commit: Effect.fn("RouteActivation.commit")(function* (request) {
       const outcome = yield* currentOrStale(request.activationId, request.path);
       if (RouteActivationOutcome.$is("Committed")(outcome)) {
-        yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+        yield* emitActivationTrace("outlet.process.commit", {
           ...activationPayload(request),
         });
       }
@@ -206,7 +195,7 @@ export const makeRouteActivation: (
       const outcome = yield* currentOrStale(request.activationId, request.path);
       if (RouteActivationOutcome.$is("DroppedStale")(outcome)) return outcome;
       yield* show;
-      yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+      yield* emitActivationTrace("outlet.process.commit", {
         ...activationPayload(request),
         state: "Loading",
       });
@@ -228,11 +217,11 @@ export const makeRouteActivation: (
       const afterDomSwap = yield* currentOrStale(request.activationId, request.path);
       if (RouteActivationOutcome.$is("DroppedStale")(afterDomSwap)) return afterDomSwap;
       const scrollPayload = yield* afterSwap;
-      yield* emitActivationTrace(config.emitTraceEvents, "scroll.apply", {
+      yield* emitActivationTrace("scroll.apply", {
         ...activationPayload(request),
         ...(typeof scrollPayload === "object" && scrollPayload !== null ? scrollPayload : {}),
       });
-      yield* emitActivationTrace(config.emitTraceEvents, "outlet.process.commit", {
+      yield* emitActivationTrace("outlet.process.commit", {
         ...activationPayload(request),
       });
       return afterDomSwap;
@@ -262,11 +251,8 @@ export class RouteActivation extends Context.Service<
     ) => Effect.Effect<RouteActivationOutcome, ESwap | EAfter, RSwap | RAfter>;
   }
 >()("trygg/RouteActivation") {
-  static readonly layer = (
-    input: RouteActivationConfig,
-    matcher?: RouteMatcherShape,
-  ): Layer.Layer<RouteActivation> =>
-    Layer.effect(RouteActivation, makeRouteActivation(input, matcher));
+  static readonly layer = (matcher?: RouteMatcherShape): Layer.Layer<RouteActivation> =>
+    Layer.effect(RouteActivation, makeRouteActivation(matcher));
 }
 
 export type RouteActivationRenderIntent = Data.TaggedEnum<{

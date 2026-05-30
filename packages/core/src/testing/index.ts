@@ -11,9 +11,24 @@
  * @module trygg/testing
  */
 import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import { Element, isElement } from "../primitives/element.js";
 import { browserLayer, Renderer } from "../primitives/renderer.js";
+import * as Trace from "../trace/index.js";
+
+/**
+ * The framework's internal flight recorder, re-exported for assertions.
+ *
+ * @remarks
+ * Pair with {@link withRecording} (or {@link Trace.makeRecorder}) to capture the
+ * ordered list of framework steps a test triggers, then assert on their names.
+ *
+ * @category Testing
+ * @public
+ * @since 1.0.0
+ */
+export { Trace };
 
 /**
  * Query helpers returned by `render` and `renderElement`.
@@ -362,6 +377,17 @@ export const renderElement: (
  */
 export const testLayer: Layer.Layer<Renderer> = browserLayer;
 
+const flushDomMicrotask: Effect.Effect<void> = Effect.callback((resume) => {
+  queueMicrotask(() => resume(Effect.void));
+});
+
+const flushInteractionEffects: Effect.Effect<void> = Effect.gen(function* () {
+  yield* flushDomMicrotask;
+  // In @effect/vitest, TestClock.adjust(0) is the deterministic scheduler drain:
+  // Effect's TestClock first awaits a forked `Effect.yieldNow`, then runs due sleepers.
+  yield* TestClock.adjust(0);
+});
+
 /**
  * Simulate a click event on an element.
  *
@@ -382,6 +408,41 @@ export const testLayer: Layer.Layer<Renderer> = browserLayer;
 export const click = (element: HTMLElement): Effect.Effect<void> =>
   Effect.sync(() => {
     element.click();
+  }).pipe(Effect.andThen(flushInteractionEffects));
+
+/**
+ * Run `effect` with a fresh in-memory {@link Trace.Recorder} installed and the
+ * minimum log level dropped to `Trace`, then resolve with the ordered list of
+ * framework records it produced.
+ *
+ * @remarks
+ * The recorder replaces the ambient logger set for this scope only, so
+ * concurrent tests stay isolated — only work under this `withRecording` scope is
+ * observed. For finer control (asserting names mid-scenario, reusing a recorder
+ * across steps) build the recorder yourself with {@link Trace.makeRecorder} and
+ * {@link Trace.record}.
+ *
+ * @example
+ * ```tsx
+ * const records = yield* withRecording(
+ *   Effect.gen(function* () {
+ *     const result = yield* render(<Counter />)
+ *     yield* click(yield* result.getByText("Increment"))
+ *   }),
+ * )
+ * expect(records.map((r) => r.name)).toEqual(["signal.set", "signalText.update"])
+ * ```
+ *
+ * @category Testing
+ * @public
+ * @since 1.0.0
+ */
+export const withRecording = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<ReadonlyArray<Trace.TraceRecord>, E, R> =>
+  Effect.suspend(() => {
+    const recorder = Trace.makeRecorder();
+    return Trace.record(effect, recorder).pipe(Effect.andThen(recorder.snapshot));
   });
 
 /**

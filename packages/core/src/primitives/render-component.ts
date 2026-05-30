@@ -1,8 +1,8 @@
-import { Cause, Effect, Equal, Exit, Option, Schema, Scope } from "effect";
+import { Cause, Effect, Equal, Exit, Option, Predicate, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
-import * as Debug from "../debug/debug.js";
 import * as Metrics from "../debug/metrics.js";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
+import * as Ids from "../internal/ids.js";
 import type { Element } from "./element.js";
 import { unsafeBuildProviderContext } from "../internal/unsafe.js";
 import { Element as ElementService } from "./element.js";
@@ -52,6 +52,36 @@ export class ComponentAnchorError extends Schema.TaggedErrorClass<ComponentAncho
   { message: Schema.String },
 ) {}
 
+// A "transient" reconcile failure does NOT indicate a defect in the component
+// itself — it means a newer, latest-wins render has already superseded this one
+// mid-flight:
+//   - ComponentAnchorError: a concurrent render detached this component's anchor.
+//   - StaleRouteRender (router/outlet-services): the router advanced to another
+//     route while this layout/route element was still rendering.
+// On these, the reconcile-driven defect path must PRESERVE the current subtree
+// (let the newer render win) instead of tearing it down. Tearing down here is
+// what blanked the whole layout under fast docs navigation, then laundered the
+// re-raise into a full REPLACE/remount with duplicate orphan nodes. Tags are
+// matched by string so the renderer stays decoupled from the router and survives
+// module duplication (instanceof can fail across duplicated module copies).
+const TRANSIENT_FAILURE_TAGS: ReadonlySet<string> = new Set([
+  "ComponentAnchorError",
+  "StaleRouteRender",
+]);
+
+const hasTransientTag = (error: unknown): boolean =>
+  Predicate.hasProperty(error, "_tag") &&
+  typeof error._tag === "string" &&
+  TRANSIENT_FAILURE_TAGS.has(error._tag);
+
+const isTransientRenderFailure = (cause: Cause.Cause<unknown>): boolean => {
+  // squash extracts the representative reason (a failure is preferred over a
+  // defect), which is how StaleRouteRender / ComponentAnchorError surface here.
+  if (hasTransientTag(Cause.squash(cause))) return true;
+  const firstError = Cause.findErrorOption(cause);
+  return Option.isSome(firstError) && hasTransientTag(firstError.value);
+};
+
 const equalOrChanged = (left: unknown, right: unknown): boolean =>
   Effect.runSync(
     Effect.try({
@@ -82,11 +112,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   let currentInputs = inputs;
   let currentContext = context;
   let providerContext: Context.Context<unknown> | null = null;
-  const renderTransaction = makeRenderTransaction({ emitTraceEvents: true });
+  const renderTransaction = makeRenderTransaction();
 
   const componentScope = yield* Scope.fork(yield* Effect.scope);
   const providerScope = provider === null ? null : yield* Scope.fork(componentScope);
-  const providerId = provider === null ? null : Debug.nextProviderId();
+  const providerId = provider === null ? null : Ids.nextProviderId();
   const mergeProviderContext = (parentContext: Context.Context<unknown> | null) =>
     providerContext === null
       ? parentContext
@@ -111,50 +141,25 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
       Effect.provideService(Signal.CurrentComponentScope, null),
       Effect.provideService(Signal.CurrentSignalOwner, "provider"),
       Effect.tapCause((cause) =>
-        Effect.gen(function* () {
-          const durationMs = performance.now() - acquireStart;
-          yield* Debug.log({
-            event: "provider.failure",
-            provider_id: providerId,
-            component: provider.displayName,
-            reason: "failure",
-            duration_ms: durationMs,
-            cause: Cause.pretty(cause),
-          });
-          yield* ContractTrace.emit({
-            event: "provider.failure",
-            level: "semantic",
-            payload: {
-              provider_id: providerId,
-              component: provider.displayName,
-              reason: "failure",
-              duration_ms: durationMs,
-            },
-          });
-        }),
+        Trace.emit("provider.failure", () => ({
+          provider_id: providerId,
+          component: provider.displayName,
+          reason: "failure",
+          duration_ms: performance.now() - acquireStart,
+          cause: Cause.pretty(cause),
+        })),
       ),
     );
     currentContext = mergeProviderContext(currentContext);
     const durationMs = performance.now() - acquireStart;
     yield* Metrics.recordProviderAcquisition;
     yield* Metrics.recordProviderAcquisitionDuration(durationMs);
-    yield* Debug.log({
-      event: "provider.acquire",
+    yield* Trace.emit("provider.acquire", () => ({
       provider_id: providerId,
       component: provider.displayName,
       reason: "mount",
       duration_ms: durationMs,
-    });
-    yield* ContractTrace.emit({
-      event: "provider.acquire",
-      level: "semantic",
-      payload: {
-        provider_id: providerId,
-        component: provider.displayName,
-        reason: "mount",
-        duration_ms: durationMs,
-      },
-    });
+    }));
   }
 
   const renderPhase = yield* Signal.makeRenderPhase;
@@ -204,6 +209,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
       Scope.provide(componentScope),
       Effect.onError(() => Scope.close(renderScope, Exit.void)),
     );
+    yield* Trace.emit("component.render", () => ({ component: currentRun.name }));
     return { element, scope: renderScope };
   });
 
@@ -230,7 +236,14 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
           }).pipe(Effect.catch((inserted) => Effect.succeed(inserted)));
 
     const firstInsert = yield* tryInsert(anchor.parentNode);
-    const inserted = firstInsert ? true : yield* tryInsert(anchor.parentNode);
+    let inserted = firstInsert ? true : yield* tryInsert(anchor.parentNode);
+
+    if (!inserted && anchor.parentNode === null) {
+      yield* Effect.sync(() => {
+        actualParent.appendChild(anchor);
+      }).pipe(Effect.catchCause(() => Effect.void));
+      inserted = yield* tryInsert(anchor.parentNode);
+    }
 
     if (!inserted) {
       yield* result.cleanup;
@@ -241,11 +254,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   });
 
   const onRerenderFailure = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-    yield* Debug.log({
-      event: "render.component.rerender",
-      trigger: "error",
-      reason: Cause.pretty(cause),
-    });
+    yield* Trace.emit("component.rerender.error", () => ({ reason: Cause.pretty(cause) }));
 
     if (options.errorHandler !== null) {
       options.errorHandler(cause);
@@ -266,21 +275,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
     const rerenderStart = performance.now();
     if (provider !== null && providerId !== null) {
-      yield* Debug.log({
-        event: "provider.reuse",
+      yield* Trace.emit("provider.reuse", () => ({
         provider_id: providerId,
         component: provider.displayName,
         reason: "rerender",
-      });
-      yield* ContractTrace.emit({
-        event: "provider.reuse",
-        level: "semantic",
-        payload: {
-          provider_id: providerId,
-          component: provider.displayName,
-          reason: "rerender",
-        },
-      });
+      }));
     }
     yield* Signal.resetRenderPhase(renderPhase);
 
@@ -345,6 +344,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
     }
 
     const rerenderDuration = performance.now() - rerenderStart;
+    yield* Trace.emit("component.rerender", () => ({ duration_ms: rerenderDuration }));
     yield* Metrics.recordComponentRender;
     yield* Metrics.recordRenderDuration(rerenderDuration);
 
@@ -361,18 +361,38 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
   const rerenderEffect = (failureMode: RerenderFailureMode) =>
     rerenderEffectBody().pipe(
-      Effect.catchCause((cause) =>
-        failureMode === "defect" && options.errorHandler === null
-          ? Effect.ensuring(
-              Effect.failCause(cause),
-              Effect.gen(function* () {
-                isRerendering = false;
-                pendingRerender = false;
-                yield* cleanupCurrent.pipe(Effect.catchCause(() => Effect.void));
-              }),
-            )
-          : onRerenderFailure(cause),
-      ),
+      Effect.catchCause((cause) => {
+        if (failureMode !== "defect" || options.errorHandler !== null) {
+          return onRerenderFailure(cause);
+        }
+        if (isTransientRenderFailure(cause)) {
+          // Superseded by a newer latest-wins render. Preserve currentResult and
+          // re-raise so the caller (render-signal-element) keeps the current DOM
+          // when a newer swap is pending, or replaces it cleanly. Do NOT tear
+          // down — that blanked the layout under fast docs navigation and forced
+          // a full REPLACE/remount with duplicate orphan nodes.
+          return Effect.gen(function* () {
+            isRerendering = false;
+            pendingRerender = false;
+            yield* Trace.emit("component.superseded", () => ({ reason: Cause.pretty(cause) }));
+            return yield* Effect.failCause(cause);
+          });
+        }
+        // Genuine defect without an error boundary: tear down and elevate to a
+        // defect so the failure surfaces (and the caller can REPLACE to recover)
+        // even when the original cause was a typed failure raised mid-render.
+        // `failCause(Cause.die(...))` is the explicit defect constructor — same
+        // result as `Effect.die`, but the typed-failure-collapse lint is for
+        // accidental collapses; elevation here is the deliberate contract.
+        return Effect.ensuring(
+          Effect.failCause(Cause.die(Cause.squash(cause))),
+          Effect.gen(function* () {
+            isRerendering = false;
+            pendingRerender = false;
+            yield* cleanupCurrent.pipe(Effect.catchCause(() => Effect.void));
+          }),
+        );
+      }),
       Scope.provide(rendererScope),
     );
 
@@ -425,11 +445,10 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   const renderDuration = performance.now() - renderStart;
   renderCount++;
 
-  yield* Debug.log({
-    event: "render.component.initial",
+  yield* Trace.emit("component.initial", () => ({
     accessed_signals: renderPhase.accessed.size,
     duration_ms: renderDuration,
-  });
+  }));
 
   yield* Metrics.recordComponentRender;
   yield* Metrics.recordRenderDuration(renderDuration);
@@ -450,23 +469,12 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
         const durationMs = performance.now() - providerFinalizeStart;
         yield* Metrics.recordProviderFinalization;
         yield* Metrics.recordProviderFinalizationDuration(durationMs);
-        yield* Debug.log({
-          event: "provider.finalize",
+        yield* Trace.emit("provider.finalize", () => ({
           provider_id: providerId,
           component: provider.displayName,
           reason: "unmount",
           duration_ms: durationMs,
-        });
-        yield* ContractTrace.emit({
-          event: "provider.finalize",
-          level: "semantic",
-          payload: {
-            provider_id: providerId,
-            component: provider.displayName,
-            reason: "unmount",
-            duration_ms: durationMs,
-          },
-        });
+        }));
       }
       anchor.remove();
     }),
@@ -482,42 +490,22 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
         if (resolvedNextElement.key !== key) {
           if (provider !== null && providerId !== null) {
-            yield* Debug.log({
-              event: "provider.replace",
+            yield* Trace.emit("provider.replace", () => ({
               provider_id: providerId,
               component: provider.displayName,
               reason: "key-change",
-            });
-            yield* ContractTrace.emit({
-              event: "provider.replace",
-              level: "semantic",
-              payload: {
-                provider_id: providerId,
-                component: provider.displayName,
-                reason: "key-change",
-              },
-            });
+            }));
           }
           return false;
         }
 
         if (resolvedNextElement.provider?.layer !== provider?.layer) {
           if (provider !== null && providerId !== null) {
-            yield* Debug.log({
-              event: "provider.replace",
+            yield* Trace.emit("provider.replace", () => ({
               provider_id: providerId,
               component: provider.displayName,
               reason: "identity-change",
-            });
-            yield* ContractTrace.emit({
-              event: "provider.replace",
-              level: "semantic",
-              payload: {
-                provider_id: providerId,
-                component: provider.displayName,
-                reason: "identity-change",
-              },
-            });
+            }));
           }
           return false;
         }
@@ -529,21 +517,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
         if (!sameIdentity) {
           if (provider !== null && providerId !== null) {
-            yield* Debug.log({
-              event: "provider.replace",
+            yield* Trace.emit("provider.replace", () => ({
               provider_id: providerId,
               component: provider.displayName,
               reason: "identity-change",
-            });
-            yield* ContractTrace.emit({
-              event: "provider.replace",
-              level: "semantic",
-              payload: {
-                provider_id: providerId,
-                component: provider.displayName,
-                reason: "identity-change",
-              },
-            });
+            }));
           }
           return false;
         }
@@ -561,21 +539,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
         if (!inputsChanged && !contextChanged) {
           if (provider !== null && providerId !== null) {
-            yield* Debug.log({
-              event: "provider.reuse",
+            yield* Trace.emit("provider.reuse", () => ({
               provider_id: providerId,
               component: provider.displayName,
               reason: "rerender",
-            });
-            yield* ContractTrace.emit({
-              event: "provider.reuse",
-              level: "semantic",
-              payload: {
-                provider_id: providerId,
-                component: provider.displayName,
-                reason: "rerender",
-              },
-            });
+            }));
           }
           return true;
         }

@@ -5,12 +5,12 @@
  *
  * Rules:
  * - Every function MUST have a SAFETY comment explaining the invariant
- * - Runtime-effectful operations use Debug.log for observability
+ * - Runtime-effectful operations use Trace.emit for observability
  * - Callers enter through named helpers instead of inline assertions
  */
 import { Context, Data, Effect, Layer, Predicate, Scope } from "effect";
 import * as Match from "effect/Match";
-import * as Debug from "../debug/debug.js";
+import * as Trace from "../trace/index.js";
 import type { Component } from "../primitives/component.js";
 import type { Element, ElementWithRequirements } from "../primitives/element.js";
 import type { ResourceState } from "../primitives/resource.js";
@@ -46,10 +46,9 @@ export const unsafeMergeLayers: (
 ) => Effect.Effect<Layer.Layer<never, unknown, never>, never, never> = Effect.fn(
   "unsafe.mergeLayers",
 )(function* (layers: ReadonlyArray<Layer.Layer<never, unknown, never>>) {
-  yield* Debug.log({
-    event: "unsafe.mergeLayers",
+  yield* Trace.emit("unsafe.mergeLayers", () => ({
     layer_count: layers.length,
-  });
+  }));
 
   const [first, second, ...rest] = layers;
   if (first === undefined) return Layer.empty;
@@ -69,10 +68,9 @@ export const unsafeMergeLayers: (
 const unsafeBuildContextImpl = Effect.fn("unsafe.buildContext")(function* (
   layers: ReadonlyArray<Layer.Layer<never, unknown, never>>,
 ) {
-  yield* Debug.log({
-    event: "unsafe.buildContext",
+  yield* Trace.emit("unsafe.buildContext", () => ({
     layer_count: layers.length,
-  });
+  }));
 
   if (layers.length === 0) {
     return Context.makeUnsafe<never>(new Map());

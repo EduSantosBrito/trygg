@@ -1,6 +1,6 @@
 import { Cause, Data, Effect, Exit, Layer, Option, Schema } from "effect";
 import * as Context from "effect/Context";
-import * as ContractTrace from "../contract/trace.js";
+import * as Trace from "../trace/index.js";
 import type { Element } from "./element.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
 
@@ -39,23 +39,10 @@ export class RenderTransactionError extends Schema.TaggedErrorClass<RenderTransa
   },
 ) {}
 
-export const RenderTransactionConfigInput = Schema.Struct({
-  emitTraceEvents: Schema.Boolean,
-});
-
-type RenderTransactionConfig = typeof RenderTransactionConfigInput.Type;
-
 const UnknownRuntimeContext = Context.Service<unknown>(
   "trygg/RenderTransaction/UnknownRuntimeContext",
 );
 const emptyRuntimeContext = Context.make(UnknownRuntimeContext, undefined);
-
-const emitRenderTrace = (
-  enabled: boolean,
-  event: ContractTrace.ContractTraceEventName,
-  payload: Record<string, unknown>,
-): Effect.Effect<void> =>
-  enabled ? ContractTrace.emit({ event, level: "semantic", payload }) : Effect.void;
 
 export interface RenderTransactionShape {
   readonly replace: <R>(
@@ -67,33 +54,27 @@ export interface RenderTransactionShape {
   readonly cleanup: (result: RenderResult) => Effect.Effect<void, unknown>;
 }
 
-export const makeRenderTransaction = (
-  configInput: RenderTransactionConfig,
-): RenderTransactionShape => {
-  const config = RenderTransactionConfigInput.make(configInput);
-
+export const makeRenderTransaction = (): RenderTransactionShape => {
   return {
-    replace: Effect.fn("RenderTransaction.replace")(function* (request) {
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.start", {
+    replace: Effect.fnUntraced(function* (request) {
+      yield* Trace.emit("signalElement.swap.start", () => ({
         operation: "replace",
         hasPrevious: Option.isSome(request.previous),
-      });
+      }));
       const rendered = yield* Effect.exit(
         request.renderNext.pipe(Effect.provide(request.context.services)),
       );
       if (Exit.isFailure(rendered)) {
         const cause = Cause.squash(rendered.cause);
-        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
+        yield* Trace.emit("signalElement.swap.failBeforeCommit", () => ({
           operation: "replace",
           phase: "render",
           cause: Cause.pretty(rendered.cause),
-        });
+        }));
         return RenderTransactionOutcome.FailedBeforeCommit({ cause });
       }
 
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
-        operation: "replace",
-      });
+      yield* Trace.emit("signalElement.swap.render", () => ({ operation: "replace" }));
       const next = rendered.value;
       const previous = Option.getOrUndefined(request.previous);
 
@@ -110,15 +91,13 @@ export const makeRenderTransaction = (
         catch: (cause) => new RenderTransactionError({ phase: "commit", cause }),
       });
 
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.commit", {
-        operation: "replace",
-      });
+      yield* Trace.emit("signalElement.swap.commit", () => ({ operation: "replace" }));
 
       if (previous !== undefined) {
-        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.cleanup", {
+        yield* Trace.emit("signalElement.cleanup", () => ({
           operation: "replace",
           reason: "previous-result",
-        });
+        }));
         yield* previous.cleanup.pipe(
           Effect.provide(request.context.services),
           Effect.mapError((cause) => new RenderTransactionError({ phase: "cleanup", cause })),
@@ -127,10 +106,8 @@ export const makeRenderTransaction = (
 
       return RenderTransactionOutcome.Committed({ result: next });
     }),
-    reconcile: Effect.fn("RenderTransaction.reconcile")(function* (request) {
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.start", {
-        operation: "reconcile",
-      });
+    reconcile: Effect.fnUntraced(function* (request) {
+      yield* Trace.emit("signalElement.swap.start", () => ({ operation: "reconcile" }));
       if (request.previous.reconcile === undefined) {
         return RenderTransactionOutcome.NotReconciled({ result: request.previous });
       }
@@ -142,32 +119,30 @@ export const makeRenderTransaction = (
       );
       if (Exit.isFailure(reconciled)) {
         const cause = Cause.squash(reconciled.cause);
-        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.failBeforeCommit", {
+        yield* Trace.emit("signalElement.swap.failBeforeCommit", () => ({
           operation: "reconcile",
           phase: "render",
           cause: Cause.pretty(reconciled.cause),
-        });
+        }));
         return RenderTransactionOutcome.FailedBeforeCommit({ cause });
       }
 
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.render", {
+      yield* Trace.emit("signalElement.swap.render", () => ({
         operation: "reconcile",
         reconciled: reconciled.value,
-      });
+      }));
       if (reconciled.value) {
-        yield* emitRenderTrace(config.emitTraceEvents, "signalElement.swap.commit", {
-          operation: "reconcile",
-        });
+        yield* Trace.emit("signalElement.swap.commit", () => ({ operation: "reconcile" }));
       }
       return reconciled.value
         ? RenderTransactionOutcome.Reconciled({ result: request.previous })
         : RenderTransactionOutcome.NotReconciled({ result: request.previous });
     }),
-    cleanup: Effect.fn("RenderTransaction.cleanup")(function* (result) {
-      yield* emitRenderTrace(config.emitTraceEvents, "signalElement.cleanup", {
+    cleanup: Effect.fnUntraced(function* (result) {
+      yield* Trace.emit("signalElement.cleanup", () => ({
         operation: "cleanup",
         reason: "explicit",
-      });
+      }));
       yield* result.cleanup.pipe(Effect.provide(emptyRuntimeContext));
     }),
   };
@@ -185,6 +160,6 @@ export class RenderTransaction extends Context.Service<
     readonly cleanup: (result: RenderResult) => Effect.Effect<void, unknown>;
   }
 >()("trygg/RenderTransaction") {
-  static readonly layer = (configInput: RenderTransactionConfig): Layer.Layer<RenderTransaction> =>
-    Layer.succeed(RenderTransaction, makeRenderTransaction(configInput));
+  static readonly layer = (): Layer.Layer<RenderTransaction> =>
+    Layer.succeed(RenderTransaction, makeRenderTransaction());
 }
