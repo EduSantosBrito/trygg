@@ -211,6 +211,36 @@ describe("scaffoldProject", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
   );
 
+  it.effect("generated package pins Effect dependencies to one beta", () =>
+    Effect.gen(function* () {
+      // Scope: guards published scaffolds against mixed Effect beta installs.
+      // Assertion: generated package.json uses exact Effect versions and pins node-shared.
+      const fs = yield* FileSystem.FileSystem;
+      const targetDir = yield* fs.makeTempDirectoryScoped({
+        directory: WORKSPACE_TEMP_DIR,
+        prefix: "trygg-scaffold-test-",
+      });
+
+      yield* runScaffold(targetDir, "blank");
+
+      const pkgText = yield* fs.readFileString(path.join(targetDir, "package.json"));
+      const pkg = yield* parseJsonObject(pkgText);
+      const dependencies = yield* requireRecord(pkg.dependencies, "package.json dependencies");
+      const devDependencies = yield* requireRecord(
+        pkg.devDependencies,
+        "package.json devDependencies",
+      );
+      const scripts = yield* requireRecord(pkg.scripts, "package.json scripts");
+
+      assert.strictEqual(scripts.build, "bunx --bun vite build");
+      assert.strictEqual(dependencies.effect, "4.0.0-beta.58");
+      assert.strictEqual(dependencies["@effect/platform-browser"], "4.0.0-beta.58");
+      assert.strictEqual(dependencies["@effect/platform-bun"], "4.0.0-beta.58");
+      assert.strictEqual(dependencies["@effect/platform-node-shared"], "4.0.0-beta.58");
+      assert.strictEqual(devDependencies["@effect/language-service"], "0.85.1");
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystemLayer)),
+  );
+
   it.effect("blank scaffold demonstrates Component.gen with Theme service", () =>
     Effect.gen(function* () {
       // Scope: verifies the default blank app teaches trygg DI basics.

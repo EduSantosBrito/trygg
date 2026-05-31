@@ -8,12 +8,13 @@
  */
 
 /** trygg framework version (from packages/core/package.json) */
-export const TRYGG_VERSION = "^0.5.0-canary.1";
+export const TRYGG_VERSION = "^0.5.0-canary.2";
 
 /** Effect ecosystem versions */
-export const EFFECT_VERSION = "^4.0.0-beta.58";
-export const EFFECT_PLATFORM_BROWSER_VERSION = "^4.0.0-beta.58";
-export const EFFECT_LANGUAGE_SERVICE_VERSION = "^0.85.1";
+export const EFFECT_VERSION = "4.0.0-beta.58";
+export const EFFECT_PLATFORM_BROWSER_VERSION = "4.0.0-beta.58";
+export const EFFECT_PLATFORM_NODE_SHARED_VERSION = "4.0.0-beta.58";
+export const EFFECT_LANGUAGE_SERVICE_VERSION = "0.85.1";
 
 /** Dev tooling versions */
 export const TYPESCRIPT_VERSION = "^5.7.0";
