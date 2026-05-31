@@ -932,6 +932,51 @@ describe("Outlet - Navigation integration", () => {
     }).pipe(Effect.provide(testLayerAt("/docs/resources"))),
   );
 
+  scoped("renders layout loaders that resolve directly to a named export", () =>
+    Effect.gen(function* () {
+      // Test: should render a lazy layout whose loader resolves directly to a RouteComponent.
+      // Scope: covers named-export Vite transform output for nested layout routes.
+      // Assertion: both the layout shell and child route content appear in the DOM.
+      const DocsLayout = Components.gen(function* () {
+        return (
+          <>
+            <header data-testid="docs-header">Docs header</header>
+            <section data-testid="docs-shell">
+              <aside data-testid="docs-sidebar">Docs sidebar</aside>
+              <main id="main-content">
+                <Outlet />
+              </main>
+            </section>
+          </>
+        );
+      });
+
+      const ResourcesPage = Components.gen(function* () {
+        return <article data-testid="resources-page">Resources</article>;
+      });
+
+      const LazyDocsLayout = () => Promise.resolve(DocsLayout);
+
+      const manifest = Routes.make().add(
+        Route.make("/docs")
+          .layout(LazyDocsLayout)
+          .children(Route.make("/resources").component(ResourcesPage)),
+      ).manifest;
+
+      const { container } = yield* render(<Outlet routes={manifest} />);
+      yield* TestClock.adjust(100);
+
+      assert.isNotNull(
+        container.querySelector("[data-testid='docs-shell']"),
+        `Docs shell should render from a named-export layout loader. DOM: ${container.innerHTML}`,
+      );
+      assert.isNotNull(
+        container.querySelector("[data-testid='resources-page']"),
+        `Resources page should render inside the named-export layout. DOM: ${container.innerHTML}`,
+      );
+    }).pipe(Effect.provide(testLayerAt("/docs/resources"))),
+  );
+
   scoped("commits docs layout chrome before a lazy initial route module resolves", () =>
     Effect.gen(function* () {
       const moduleRequested = yield* Deferred.make<void>();

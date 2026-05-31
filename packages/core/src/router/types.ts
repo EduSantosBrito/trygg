@@ -143,23 +143,26 @@ export type RouteComponent<R = unknown> =
 
 /**
  * Lazy loader function produced by the vite transform.
- * At build time, `.component(X)` becomes `.component(() => import("./X"))`.
- * The default export must be a RouteComponent.
+ * At build time, default imports become `.component(() => import("./page"))`,
+ * while named imports become `.component(() => import("./page").then((m) => m.Page))`.
  *
  * @remarks
  * `ComponentLoader` is the lazy route-component shape used after the Vite
- * transform rewrites eager component references.
+ * transform rewrites eager component references. A loader may resolve to an ESM
+ * module object with a default export or directly to a RouteComponent from a
+ * named export.
  *
  * @example
  * ```ts
- * const loader: ComponentLoader = () => import("./page")
+ * const defaultLoader: ComponentLoader = () => import("./page")
+ * const namedLoader: ComponentLoader = () => import("./page").then((m) => m.Page)
  * ```
  *
  * @category Route Types
  * @public
  * @since 1.0.0
  */
-export type ComponentLoader = () => Promise<{ readonly default: unknown }>;
+export type ComponentLoader = () => Promise<RouteComponent | { readonly default: unknown }>;
 
 /**
  * Value stored in RouteDefinition component fields.
