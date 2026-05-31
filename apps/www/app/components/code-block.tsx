@@ -420,8 +420,13 @@ export const CodeBlock = Component.gen(function* (
   const { lines, header, fileType, copyText } = yield* Props;
   const copied = yield* Signal.make(false);
 
+  const isCommand = ["sh", "bash", "shell", "zsh", "console"].includes(
+    fileType?.toLowerCase() ?? "",
+  );
+  const copyIdle = isCommand ? "Copy command to clipboard" : "Copy code to clipboard";
+  const copyDone = isCommand ? "Command copied" : "Code copied";
   const copyLabel = yield* Signal.derive(copied, (value) =>
-    value ? "Command copied" : "Copy command to clipboard",
+    value ? copyDone : copyIdle,
   );
 
   const CopiedTooltip = yield* Signal.derive(copied, (value) =>

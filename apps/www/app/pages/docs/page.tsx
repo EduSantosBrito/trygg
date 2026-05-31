@@ -1,10 +1,13 @@
+import { Effect } from "effect";
 import { Component, Signal } from "trygg";
 import * as Router from "trygg/router";
+import { CodeBlock, highlightCode } from "../../components/code-block";
 import { DocsSidebar } from "../../components/docs-sidebar";
 import { Footer } from "../../components/footer";
 import { Header } from "../../components/header";
+import { docsContent } from "../../content/docs-content";
 import { setDocsHeadings } from "../../content/headings";
-import { sidebarGroups } from "../../content/sidebar";
+import { sidebarGroups, type SidebarGroup } from "../../content/sidebar";
 
 const quickPath = [
   {
@@ -13,62 +16,70 @@ const quickPath = [
     href: "/docs/getting-started",
   },
   {
-    label: "Read the component model",
-    body: "See how Component.gen threads props, services, errors, and JSX through Effect.",
-    href: "/docs/components",
+    label: "Understand the model",
+    body: "See how JSX, the renderer, and signals fit together — and why components run once.",
+    href: "/docs/concepts/how-it-works",
   },
   {
-    label: "Follow source-owned docs",
-    body: "Canonical behavior lives beside the code that owns it. This site summarizes the path.",
-    href: "/docs/testing",
+    label: "Learn the core primitives",
+    body: "Components, signals, resources, and error boundaries — the surface you build with daily.",
+    href: "/docs/components",
   },
 ];
 
-const sectionSummaries: ReadonlyArray<{
-  readonly label: string;
-  readonly intro: string;
-  readonly href: string;
-  readonly time: string;
-}> = [
-  {
-    label: "Start",
-    intro: "Orient yourself and run the canary app locally before reading further.",
-    href: "/docs/getting-started",
-    time: "4 min read",
-  },
-  {
-    label: "Core model",
-    intro:
-      "Components, elements, signals, resources, and error boundaries — the primitives the framework is built on.",
-    href: "/docs/components",
-    time: "15 min read",
-  },
-  {
-    label: "Composition",
-    intro: "Portals, document head, classname utilities, and browser-facing security constraints.",
-    href: "/docs/portal",
-    time: "10 min read",
-  },
-  {
-    label: "Routing",
-    intro:
-      "Declare route trees, navigate with typed links, guard with middleware, prefetch, and recover from misses.",
-    href: "/docs/router/routes",
-    time: "22 min read",
-  },
-  {
-    label: "Integration",
-    intro:
-      "JSX runtime, API types, config, Vite plugin, testing, debug, and metrics — the surfaces that connect trygg to your toolchain.",
-    href: "/docs/jsx-runtime",
-    time: "18 min read",
-  },
-];
+// The one idea everything else builds on, shown before the prose explains it:
+// a Component is an Effect that runs once, reads signals with yield*, and
+// returns the element tree to mount.
+const componentSnippet = `import { Component, Signal } from "trygg";
 
-const sectionCounts = sidebarGroups.map((group) => group.links.length);
+const Counter = Component.gen(function* () {
+  const count = yield* Signal.make(0);
+
+  return (
+    <button onClick={() => Signal.update(count, (n) => n + 1)}>
+      Clicked {count} times
+    </button>
+  );
+});`;
+
+// Honest read-times: derived from the actual word count of each section's pages
+// rather than hand-maintained estimates, so they stay accurate as docs change.
+const WORDS_PER_MINUTE = 200;
+
+const groupReadMinutes = (group: SidebarGroup): number => {
+  const words = group.links.reduce((total, link) => {
+    const content = docsContent[link.href];
+    if (!content) return total;
+    return total + content.trim().split(/\s+/).filter(Boolean).length;
+  }, 0);
+  return Math.max(1, Math.round(words / WORDS_PER_MINUTE));
+};
+
+const sectionIntros: Readonly<Record<string, string>> = {
+  Concepts: "How rendering, reactivity, and Effect fit together — read this before the reference.",
+  "Core model":
+    "Components, elements, rendering, signals, resources, and error boundaries — the primitives the framework is built on.",
+  Composition: "Portals, document head, class names, and browser-facing security constraints.",
+  Routing:
+    "Define routes, navigate with typed links, share layouts, and tune prefetch, render, and scroll behavior.",
+  Tooling: "Config, the Vite plugin, generated API types, and testing — the toolchain surfaces.",
+  Patterns: "Reusable solutions to recurring problems, starting with app-wide shared state.",
+};
+
+const sectionSummaries = sidebarGroups
+  .filter((group) => group.label !== "Start")
+  .map((group) => ({
+    label: group.label,
+    intro: sectionIntros[group.label] ?? "",
+    href: group.links[0]?.href ?? "/docs",
+    count: group.links.length,
+    time: `${groupReadMinutes(group)} min read`,
+  }));
 
 export default Component.gen(function* () {
   yield* setDocsHeadings([]);
+
+  const snippetLines = yield* Effect.promise(() => highlightCode(componentSnippet, "tsx"));
 
   const drawerOpen = yield* Signal.make(false);
   const drawerClass = yield* Signal.derive(drawerOpen, (open): string =>
@@ -90,7 +101,7 @@ export default Component.gen(function* () {
         </p>
         <div className="docs-hero__actions" aria-label="Primary docs actions">
           <Router.Link to="/docs/getting-started" className="docs-button docs-button--primary">
-            Getting started
+            Get started
           </Router.Link>
           <a
             href="https://github.com/EduSantosBrito/trygg/tree/main/packages/core/src"
@@ -102,6 +113,23 @@ export default Component.gen(function* () {
           </a>
         </div>
       </header>
+
+      <section className="docs-section" aria-labelledby="docs-snippet-title">
+        <div className="docs-section__header">
+          <p className="docs-section__kicker">The whole idea</p>
+          <h2 id="docs-snippet-title">A component is an Effect</h2>
+          <p>
+            It runs once, reads state and services with <code>yield*</code>, and returns the element
+            tree to mount. Signals patch the DOM in place — no virtual DOM, no re-renders.
+          </p>
+        </div>
+        <CodeBlock
+          lines={snippetLines}
+          header="counter.tsx"
+          fileType="tsx"
+          copyText={componentSnippet}
+        />
+      </section>
 
       <section className="docs-section" aria-labelledby="docs-fast-path-title">
         <div className="docs-section__header">
@@ -127,49 +155,30 @@ export default Component.gen(function* () {
         <div className="docs-section__header">
           <p className="docs-section__kicker">Map</p>
           <h2 id="docs-map-title">Sections</h2>
-          <p>Five sections. Read in order, or jump straight to the one you need.</p>
+          <p>{`${sectionSummaries.length} sections. Read in order, or jump straight to the one you need.`}</p>
         </div>
 
         <ol className="docs-section-index" role="list">
-          {sectionSummaries.map((section, index) => {
-            const count = sectionCounts[index] ?? 0;
-            return (
-              <li key={section.href}>
-                <Router.Link to={section.href} className="docs-section-index__item">
-                  <span className="docs-section-index__num">0{index + 1}</span>
-                  <span className="docs-section-index__body">
-                    <strong>{section.label}</strong>
-                    <span className="docs-section-index__intro">{section.intro}</span>
-                    <span className="docs-section-index__meta">
-                      <span>
-                        {count} {count === 1 ? "topic" : "topics"}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>{section.time}</span>
-                    </span>
+          {sectionSummaries.map((section) => (
+            <li key={section.href}>
+              <Router.Link to={section.href} className="docs-section-index__item">
+                <span className="docs-section-index__body">
+                  <strong>{section.label}</strong>
+                  <span className="docs-section-index__intro">{section.intro}</span>
+                  <span className="docs-section-index__meta">
+                    <span>{`${section.count} ${section.count === 1 ? "topic" : "topics"}`}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{section.time}</span>
                   </span>
-                  <span className="docs-section-index__arrow" aria-hidden="true">
-                    →
-                  </span>
-                </Router.Link>
-              </li>
-            );
-          })}
+                </span>
+                <span className="docs-section-index__arrow" aria-hidden="true">
+                  →
+                </span>
+              </Router.Link>
+            </li>
+          ))}
         </ol>
       </section>
-
-      <aside
-        className="docs-authoring-note"
-        aria-labelledby="docs-contract-title"
-        style={{ marginTop: "clamp(2.75rem, 5vw, 4.5rem)" }}
-      >
-        <p className="docs-authoring-note__label">Docs contract</p>
-        <h2 id="docs-contract-title">Source-owned first</h2>
-        <p>
-          The website is the guide layer. Canonical semantics stay in the owner module TSDoc and
-          sidecar *.docs.md files. Update source docs before expanding website copy.
-        </p>
-      </aside>
     </article>
   );
 

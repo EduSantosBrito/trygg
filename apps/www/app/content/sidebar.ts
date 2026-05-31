@@ -24,6 +24,35 @@ export const sidebarGroups: readonly SidebarGroup[] = [
         href: "/docs/getting-started",
         description: "Create a canary app, install dependencies, and run the local dev server.",
       },
+      {
+        label: "Tutorial",
+        href: "/docs/tutorial",
+        description:
+          "Build an incident tracker end to end: routing, a service, a resource, signals, and a typed error boundary.",
+      },
+    ],
+  },
+  {
+    label: "Concepts",
+    links: [
+      {
+        label: "How trygg works",
+        href: "/docs/concepts/how-it-works",
+        description:
+          "JSX becomes an element tree, the renderer mounts it once, and signals update real DOM nodes directly. No virtual DOM, no re-renders.",
+      },
+      {
+        label: "You already know Effect",
+        href: "/docs/concepts/effect",
+        description:
+          "Components are Effects. Services, typed errors, and layers work the way they already do, so the framework has almost no new surface to learn.",
+      },
+      {
+        label: "Thinking in trygg",
+        href: "/docs/concepts/thinking",
+        description:
+          "The mental shifts coming from React, Solid, or Vue: components run once, state is signals, cleanup is scope-based.",
+      },
     ],
   },
   {
@@ -38,8 +67,15 @@ export const sidebarGroups: readonly SidebarGroup[] = [
       {
         label: "Elements",
         href: "/docs/elements",
-        description: "The low-level element model produced by the JSX runtime.",
+        description: "Construct, inspect, and transform the tree JSX compiles to, for codegen and tooling.",
         primaryExport: "Element",
+      },
+      {
+        label: "Renderer",
+        href: "/docs/renderer",
+        description:
+          "Mount trygg element trees, wire browser layers, and understand the render boundary.",
+        primaryExport: "Renderer",
       },
       {
         label: "Signals",
@@ -77,9 +113,9 @@ export const sidebarGroups: readonly SidebarGroup[] = [
         primaryExport: "Head",
       },
       {
-        label: "cx",
+        label: "Class names",
         href: "/docs/cx",
-        description: "Compose class names from values, arrays, objects, and signals.",
+        description: "Compose conditional className strings without a runtime dependency.",
         primaryExport: "cx",
       },
       {
@@ -93,9 +129,20 @@ export const sidebarGroups: readonly SidebarGroup[] = [
     label: "Routing",
     links: [
       {
-        label: "Routes",
+        label: "Overview",
+        href: "/docs/router/overview",
+        description: "The routing mental model: how routes, layouts, and the outlet fit together.",
+      },
+      {
+        label: "Defining routes",
         href: "/docs/router/routes",
-        description: "Declare route trees, layouts, and route components.",
+        description: "Build a route with the fluent builder: components, typed params, and guards.",
+      },
+      {
+        label: "Route collections",
+        href: "/docs/router/collections",
+        description:
+          "Assemble routes into a tree, declare the not-found route, and emit the manifest.",
       },
       {
         label: "Links",
@@ -108,60 +155,40 @@ export const sidebarGroups: readonly SidebarGroup[] = [
         description: "Move between routes from Effect-aware UI code.",
       },
       {
-        label: "Params",
-        href: "/docs/router/params",
-        description: "Read path params with schema-backed route definitions.",
-      },
-      {
-        label: "Query params",
-        href: "/docs/router/query-params",
-        description: "Model search params without hiding URL state.",
-      },
-      {
-        label: "Layouts",
+        label: "Layouts and outlet",
         href: "/docs/router/layouts",
-        description: "Share route chrome through nested layout boundaries.",
+        description: "Share route chrome through nested layout boundaries and the outlet.",
       },
       {
-        label: "Middleware",
-        href: "/docs/router/middleware",
-        description: "Redirect or guard routes before rendering.",
-      },
-      {
-        label: "Prefetch",
+        label: "Prefetching",
         href: "/docs/router/prefetch",
-        description: "Warm route modules when navigation intent is clear.",
+        description: "Warm a route's component and data before the click so navigation feels instant.",
       },
       {
-        label: "Scroll",
-        href: "/docs/router/scroll",
-        description: "Control route scroll behavior and document anchors.",
+        label: "Render strategies",
+        href: "/docs/router/render-strategy",
+        description: "Choose when a route's component loads and renders: eager, lazy, or on intent.",
       },
       {
-        label: "Not found",
-        href: "/docs/router/not-found",
-        description: "Handle route misses with clear recovery paths.",
+        label: "Scroll restoration",
+        href: "/docs/router/scroll-strategy",
+        description: "Control scroll position across navigations: restore, reset, or preserve.",
+      },
+      {
+        label: "Route matching",
+        href: "/docs/router/matching",
+        description: "The lower-level matcher for custom navigation surfaces.",
+      },
+      {
+        label: "Route types",
+        href: "/docs/router/types",
+        description: "The type vocabulary that makes wrong paths and missing params compile errors.",
       },
     ],
   },
   {
-    label: "Integration",
+    label: "Tooling",
     links: [
-      {
-        label: "JSX runtime",
-        href: "/docs/jsx-runtime",
-        description: "How JSX lowers into trygg elements at build time.",
-      },
-      {
-        label: "JSX dev runtime",
-        href: "/docs/jsx-dev",
-        description: "Development metadata and diagnostics for JSX output.",
-      },
-      {
-        label: "API types",
-        href: "/docs/api-types",
-        description: "Generated same-origin API client types for app APIs.",
-      },
       {
         label: "Config",
         href: "/docs/config",
@@ -173,19 +200,36 @@ export const sidebarGroups: readonly SidebarGroup[] = [
         description: "Wire route generation, API modules, and build artifacts into Vite.",
       },
       {
+        label: "API types",
+        href: "/docs/api-types",
+        description: "Generated same-origin API client types for app APIs.",
+      },
+      {
         label: "Testing",
         href: "/docs/testing",
         description: "Render components under test layers and assert UI behavior.",
       },
       {
-        label: "Debug",
-        href: "/docs/debug",
-        description: "Observe framework-level events while developing.",
+        label: "Deployment",
+        href: "/docs/deployment",
+        description: "Choose a platform and output mode, build, and run the production server or static assets.",
+      },
+    ],
+  },
+  {
+    label: "Patterns",
+    links: [
+      {
+        label: "Global storage",
+        href: "/docs/patterns/global-storage",
+        description:
+          "Share state across the tree with a Service that owns Signals and typed write methods.",
       },
       {
-        label: "Metrics",
-        href: "/docs/metrics",
-        description: "Collect low-level framework metrics and sinks.",
+        label: "Forms and inputs",
+        href: "/docs/patterns/forms",
+        description:
+          "Bind inputs to signals, read values in handlers, and validate on submit with typed errors.",
       },
     ],
   },

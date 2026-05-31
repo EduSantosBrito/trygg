@@ -1,5 +1,9 @@
 # Docs Authoring
 
+This guide owns the **structure** of source-owned docs: where they live, the required
+shape, and how the checker enforces them. For **content** — voice, benefit-first
+writing, compiling examples, storyline — see [agents/docs-content.md](agents/docs-content.md).
+
 Canonical docs live with the code that owns behavior.
 
 For `packages/core`, source-owned docs have 3 units:
@@ -87,32 +91,46 @@ Example shape:
 
 Some categories require a sidecar guide. Check `packages/core/docs.contract.json`.
 
-Required shape:
+A sidecar leads with a one-sentence **benefit hook** and the **smallest runnable
+example**, both above the locked headings, then the locked sections. Required shape:
 
 ```md
 # Topic Name
 
+One-sentence benefit hook: what this lets the reader do.
+
+​```tsx
+// the smallest runnable example that delivers that benefit
+​```
+
 ## When to use
 
-Short usage guidance.
+Short usage guidance, and when to pick something else.
 
 ## Behavior
 
-Short behavior and tradeoff guidance.
+Short behavior and tradeoff guidance, including the sharp edges and their workarounds.
 
 ## Related exports
 
 - `PrimaryExport`
 - `RelatedExport`
+
+## Troubleshooting
+
+Optional. Symptom → cause → fix for mistakes this API actually produces.
 ```
 
-Required headings are enforced exactly:
+Enforced by the docs checker:
 
-- `## When to use`
-- `## Behavior`
-- `## Related exports`
+- A non-empty lead paragraph (the benefit hook) before the first `##` heading.
+- At least one fenced code block (the minimal example) before the first `##` heading.
+- The headings `## When to use`, `## Behavior`, and `## Related exports`, exactly.
+- The `#` title must match the owner topic name from `docs.contract.json`.
 
-The `#` title must match the owner topic name from `docs.contract.json`.
+`## Troubleshooting` is an optional convention — add it when an API has recurring
+footguns worth a symptom/fix table. See [agents/docs-content.md](agents/docs-content.md)
+for how to write each section well.
 
 ## Workflow
 
@@ -142,8 +160,9 @@ bun run --cwd packages/core docs:check:json
 Use these files when migrating or reviewing docs:
 
 - Contract and taxonomy: `packages/core/docs.contract.json`
-- Public surface inventory: `packages/core/PUBLIC_SURFACE_INVENTORY.md`
 - Enforcement logic: `packages/core/src/internal/docs-contract.ts`
+- Reachable public surface: `bun run --cwd packages/core docs:check:json` (the
+  `reachableExports` array is the live inventory)
 
 ## Writing Guidance
 
@@ -152,3 +171,6 @@ Use these files when migrating or reviewing docs:
 - Mark unstable helpers `@internal` instead of documenting them as public API
 - Put canonical meaning in source first; update README and other derived docs after
 - Follow existing owner-module patterns before inventing new structure
+- `Trace` is intentionally `@internal` (see UBIQUITOUS_LANGUAGE.md). Document it as an
+  advanced/internal observability topic; do not promote its surface to `@public` to
+  register it as a contract owner. App-facing observability is `Debug` and `Metrics`.

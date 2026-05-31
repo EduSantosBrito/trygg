@@ -34,8 +34,8 @@ import type { Effect, Types } from "effect";
  *   error: NotFoundError,
  * })
  *
- * export const handler: Handler<typeof endpoint> = ({ path }) =>
- *   UserService.findById(path.id)
+ * export const handler: Handler<typeof endpoint> = ({ params }) =>
+ *   UserService.findById(params.id)
  * ```
  *
  * @category API Types

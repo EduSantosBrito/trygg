@@ -12,7 +12,9 @@ type DocsViolationCode =
   | "missing_remarks"
   | "missing_sidecar"
   | "missing_summary"
+  | "sidecar_example"
   | "sidecar_heading"
+  | "sidecar_intro"
   | "unknown_tag"
   | "visibility_tag"
   | "wrong_category";
@@ -877,6 +879,48 @@ const validateSidecar = (
         publicName: primaryPublicName,
       });
     }
+  }
+
+  // A sidecar must lead with a benefit before mechanics: a non-empty intro
+  // paragraph and a fenced code example, both above the first `##` section.
+  const titleIndex = lines.findIndex((line) => line.startsWith("# "));
+  const firstHeadingIndex = lines.findIndex((line) => line.startsWith("## "));
+  const leadEnd = firstHeadingIndex === -1 ? lines.length : firstHeadingIndex;
+  const leadLines = titleIndex === -1 ? [] : lines.slice(titleIndex + 1, leadEnd);
+
+  let inFence = false;
+  let hasIntroParagraph = false;
+  let hasExample = false;
+  for (const line of leadLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```")) {
+      if (!inFence) {
+        hasExample = true;
+      }
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && trimmed.length > 0 && !trimmed.startsWith("#")) {
+      hasIntroParagraph = true;
+    }
+  }
+
+  if (!hasIntroParagraph) {
+    violations.push({
+      code: "sidecar_intro",
+      file: owner.sidecar,
+      message: `Expected a benefit lead paragraph before the first ## in ${owner.topic}`,
+      publicName: primaryPublicName,
+    });
+  }
+
+  if (!hasExample) {
+    violations.push({
+      code: "sidecar_example",
+      file: owner.sidecar,
+      message: `Expected a fenced code example before the first ## in ${owner.topic}`,
+      publicName: primaryPublicName,
+    });
   }
 
   return violations;

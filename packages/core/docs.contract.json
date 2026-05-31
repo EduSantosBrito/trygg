@@ -63,7 +63,7 @@
     {
       "name": "Class Composition",
       "ownerModule": "src/primitives/cx.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "JSX Runtime",
@@ -88,7 +88,7 @@
     {
       "name": "Route Collections",
       "ownerModule": "src/router/routes.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "Router Navigation",
@@ -113,22 +113,22 @@
     {
       "name": "Render Strategies",
       "ownerModule": "src/router/render-strategy.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "Scroll Strategies",
       "ownerModule": "src/router/scroll-strategy.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "Route Types",
       "ownerModule": "src/router/types.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "Route Prefetch",
       "ownerModule": "src/router/prefetch.ts",
-      "requiresSidecar": false
+      "requiresSidecar": true
     },
     {
       "name": "API Types",

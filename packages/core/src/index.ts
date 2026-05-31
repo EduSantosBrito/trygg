@@ -37,7 +37,7 @@
  *
  * @see README.md for full documentation
  * @see DESIGN.md for architecture details
- * @see OBSERVABILITY.md for debugging guide
+ * @see ./debug/debug.docs.md for the debugging and observability guide
  *
  * @module trygg
  */

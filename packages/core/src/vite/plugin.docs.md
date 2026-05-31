@@ -1,8 +1,19 @@
 # Vite Plugin
 
+Add trygg's JSX transform, route code-splitting, generated entry module, and dev API wiring to a Vite app with one plugin in `vite.config.ts`.
+
+```ts
+import { defineConfig } from "vite";
+import { trygg } from "trygg/vite-plugin";
+
+export default defineConfig({
+  plugins: [trygg()],
+});
+```
+
 ## When to use
 
-Use `trygg/vite-plugin` in `vite.config.ts` when you want trygg's JSX transform, generated entry module, route types, and optional dev API wiring applied as one Vite plugin.
+Add `trygg()` to `vite.config.ts` for every trygg app built on Vite — it is required, not optional. Without it, `.tsx` files never lower to trygg's JSX runtime, routes are not code-split, and the dev API path is not wired. There is nothing to configure for the common case; pass `TryggOptions` only to opt into non-default behavior.
 
 ## Behavior
 

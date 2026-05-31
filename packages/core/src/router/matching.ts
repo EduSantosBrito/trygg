@@ -121,8 +121,8 @@ export interface RouteMatcherShape {
 /**
  * RouteMatcher — route matching logic as a testable service.
  *
- * - `RouteMatcher.make(manifest)`: trie-based matching (production)
- * - `RouteMatcher.test(routes)`: linear scan (testing)
+ * - `RouteMatcher.make(manifest)`: resolves a manifest, then linear-scan matching (production)
+ * - `RouteMatcher.test(routes)`: linear-scan matching over pre-resolved routes (testing)
  *
  * @remarks
  * Use `RouteMatcher` when you want matching as an injectable service instead of
@@ -144,7 +144,7 @@ export class RouteMatcher extends Context.Service<
     readonly routes: Effect.Effect<ReadonlyArray<ResolvedRoute>>;
   }
 >()("trygg/RouteMatcher") {
-  /** Create a RouteMatcher Layer from a RoutesManifest using trie-based matching. */
+  /** Create a RouteMatcher Layer from a RoutesManifest using linear-scan matching. */
   static readonly make = (
     manifest: RoutesManifest,
   ): LayerType<RouteMatcher, InvalidRoutePathPattern> =>

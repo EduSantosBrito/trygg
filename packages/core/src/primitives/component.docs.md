@@ -1,170 +1,67 @@
 # Component
 
+Define a UI unit that yields its props and services as an Effect, then produces an Element the renderer mounts.
+
+```tsx
+import { Component, Signal } from "trygg";
+
+const Counter = Component.gen(function* () {
+  const count = yield* Signal.make(0);
+  return <button onClick={() => Signal.update(count, (n) => n + 1)}>Count: {count}</button>;
+});
+```
+
 ## When to use
 
-Use `Component` when UI needs explicit Effect requirements, parent-provided services, typed props, or local `Signal` state. It is the right surface for forms, service-backed pages, and trees where parents satisfy child requirements with `Component.provide(layer)`.
+Reach for `Component` whenever UI needs typed props, local `Signal` state, or services read from Effect context. A `Component.gen` body runs once per instance: yield `Signal.make` for state, `yield*` a `ComponentProps<P>` handle to read props, and `yield*` any service the parent provides.
+
+Pass props through `ComponentProps<P>` when a component takes inputs, and lift state into a `Signal` so the renderer updates the bound DOM node in place rather than re-running the body. If the data is async, keyed, and cacheable, prefer a `Resource`; for static markup with no requirements, a plain element function is enough.
 
 ## Behavior
 
-`Component.gen` runs once per component instance, yields props and services through Effect, and hands fine-grained updates off to `Signal` and the renderer instead of re-running the whole component body for every DOM change. Use `Signal.make` for local state, pass signals directly to JSX for surgical DOM updates, and call `Signal.get` only when the component must re-run for structural branching.
+`Component.gen` returns a callable you use in JSX. Calling it builds an Element backed by an Effect; the renderer runs that Effect once when the component mounts, threading its props in through the `ComponentProps<P>` service. The generator's failures and requirements surface on the component's type, so a typed error or an unsatisfied service is visible at the call site, not at runtime.
 
-Type-safe forms keep raw input in signals and validate at boundaries. The simplest pattern validates only on submit with `Schema.decodeUnknownEffect`:
+Props read from `ComponentProps<P>` are read once at mount. To make a value reactive, pass a `Signal` in as a prop and `yield* Signal.get` it inside the body, or keep state in a `Signal` the component owns:
 
 ```tsx
-import { Effect, Layer, Schema } from "effect";
-import * as Context from "effect/Context";
-import { Component, Signal } from "trygg";
+import { Component, type ComponentProps } from "trygg";
+import { Schema } from "effect";
 
-const Signup = Schema.Struct({
+class EmailInvalid extends Schema.TaggedErrorClass<EmailInvalid>()("EmailInvalid", {
   email: Schema.String,
-  password: Schema.String,
-});
+}) {}
 
-type Signup = Schema.Schema.Type<typeof Signup>;
-
-class SignupApi extends Context.Service<
-  SignupApi,
-  { readonly save: (payload: Signup) => Effect.Effect<void, Error> }
->()("example/SignupApi") {}
-
-const SignupForm = Component.gen(function* () {
-  const api = yield* SignupApi;
-  const email = yield* Signal.make("");
-  const password = yield* Signal.make("");
-  const error = yield* Signal.make<string | null>(null);
-
-  const onEmailInput = (event: Event) =>
-    event.target instanceof HTMLInputElement ? Signal.set(email, event.target.value) : Effect.void;
-
-  const onPasswordInput = (event: Event) =>
-    event.target instanceof HTMLInputElement
-      ? Signal.set(password, event.target.value)
-      : Effect.void;
-
-  const onSubmit = (event: Event) =>
-    Effect.gen(function* () {
-      event.preventDefault();
-
-      const payload = yield* Schema.decodeUnknownEffect(Signup)({
-        email: yield* Signal.peek(email),
-        password: yield* Signal.peek(password),
-      });
-
-      yield* api.save(payload);
-      yield* Signal.set(error, null);
-    }).pipe(Effect.catch((cause) => Signal.set(error, String(cause))));
-
-  return (
-    <form onSubmit={onSubmit}>
-      <input type="email" value={email} onInput={onEmailInput} />
-      <input type="password" value={password} onInput={onPasswordInput} />
-      <p>{error}</p>
-      <button type="submit">Create account</button>
-    </form>
-  );
+// Component.Type<{ email: string }, EmailInvalid, never>
+const EmailBadge = Component.gen(function* (Props: ComponentProps<{ email: string }>) {
+  const { email } = yield* Props;
+  if (!email.includes("@")) {
+    return yield* new EmailInvalid({ email });
+  }
+  return <span>{email}</span>;
 });
 ```
 
-For richer UX, validate per-field with typed tagged errors and keep field-level error state in `Option` signals. Validation stays in Effect so errors are composable and testable:
+`EmailInvalid` appears in the component's error channel because the generator can `yield*` it; the renderer surfaces unrecovered render failures, or you can match them with `ErrorBoundary`. The third type parameter (`R`) collects every service the body still needs.
+
+Services are satisfied with a Layer. A child `yield*`s a service; a parent provides it with `Component.provide(layer)`, which narrows the remaining `R`. By the time the tree reaches the Mount boundary, the root component must have `R = never` — any missing Layer is a type error pointing at the unsatisfied service:
 
 ```tsx
-import { Data, Effect, Match, Option, Result } from "effect";
-
-class EmailRequired extends Data.TaggedError("EmailRequired") {}
-class EmailInvalid extends Data.TaggedError("EmailInvalid")<{ readonly email: string }>() {}
-class PasswordTooShort extends Data.TaggedError("PasswordTooShort")<{ readonly min: number }>() {}
-
-type FieldError = EmailRequired | EmailInvalid | PasswordTooShort;
-
-const validateEmail = (raw: string): Effect.Effect<string, EmailRequired | EmailInvalid> =>
-  raw.trim() === ""
-    ? Effect.fail(new EmailRequired())
-    : !raw.includes("@")
-      ? Effect.fail(new EmailInvalid({ email: raw }))
-      : Effect.succeed(raw);
-
-const validatePassword = (raw: string): Effect.Effect<string, PasswordTooShort> =>
-  raw.length < 8 ? Effect.fail(new PasswordTooShort({ min: 8 })) : Effect.succeed(raw);
-
-const getFieldErrorMessage = Match.type<FieldError>().pipe(
-  Match.tag("EmailRequired", () => "Email is required"),
-  Match.tag("EmailInvalid", ({ email }) => `"${email}" is invalid`),
-  Match.tag("PasswordTooShort", ({ min }) => `Must be at least ${min} characters`),
-  Match.exhaustive,
-);
-
-const ValidatedForm = Component.gen(function* () {
-  const email = yield* Signal.make("");
-  const password = yield* Signal.make("");
-  const emailError = yield* Signal.make<Option.Option<string>>(Option.none());
-  const passwordError = yield* Signal.make<Option.Option<string>>(Option.none());
-
-  const validateField = <E extends FieldError>(
-    raw: string,
-    validate: (raw: string) => Effect.Effect<string, E>,
-    errorSignal: Signal.Signal<Option.Option<string>>,
-  ) =>
-    Effect.gen(function* () {
-      const result = yield* validate(raw).pipe(Effect.result);
-      if (Result.isFailure(result)) {
-        yield* Signal.set(errorSignal, Option.some(getFieldErrorMessage(result.failure)));
-      } else {
-        yield* Signal.set(errorSignal, Option.none());
-      }
-    });
-
-  const onBlurEmail = () =>
-    Effect.gen(function* () {
-      const raw = yield* Signal.peek(email);
-      yield* validateField(raw, validateEmail, emailError);
-    });
-
-  const onSubmit = (event: Event) =>
-    Effect.gen(function* () {
-      event.preventDefault();
-      const [e, p] = yield* Effect.all([Signal.peek(email), Signal.peek(password)]);
-      yield* Effect.all(
-        [
-          validateField(e, validateEmail, emailError),
-          validateField(p, validatePassword, passwordError),
-        ],
-        { concurrency: 2 },
-      );
-    });
-
-  return (
-    <form onSubmit={onSubmit}>
-      <input type="email" value={email} onBlur={onBlurEmail} />
-      {Option.getOrElse(yield* Signal.get(emailError), () => "")}
-      <input type="password" value={password} />
-      {Option.getOrElse(yield* Signal.get(passwordError), () => "")}
-      <button type="submit">Submit</button>
-    </form>
-  );
-});
-```
-
-For dependency injection, children `yield*` services and parents decide where to provide them. Each `.pipe(Component.provide(layer))` narrows the remaining `R`; by the time an app reaches `mount`, the root effect must have `R = never`.
-
-A provided component owns a mounted provider boundary. Trygg acquires that layer once when the provided component mounts, reuses the provider scope while the component key and layer identity stay stable, and finalizes the scope on unmount. If the component key changes or a different layer instance is provided, Trygg treats that as replacement: the old provider finalizes and the replacement boundary acquires a fresh scope. Keep interactive state inside scoped services/signals provided by a stable boundary instead of swapping provider layers during render.
-
-Complex trees often need multiple interdependent services. Define services with `Context.Tag`, build layers that depend on other layers with `Layer.provideMerge`, and let the type system enforce that every requirement is satisfied before `mount`:
-
-```tsx
+import { Component, Signal, type ComponentProps } from "trygg";
 import { Context, Effect, Layer, Schedule } from "effect";
-import { Component, Signal } from "trygg";
 
-class HttpClient extends Context.Tag("HttpClient")<
+class HttpClient extends Context.Service<
   HttpClient,
   { readonly request: (path: string) => Effect.Effect<string> }
->() {}
+>()("app/HttpClient") {}
 
-class UserRepository extends Context.Tag("UserRepository")<
+class UserRepository extends Context.Service<
   UserRepository,
-  {
-    readonly getUser: (id: string) => Effect.Effect<{ readonly id: string; readonly name: string }>;
-  }
->() {}
+  { readonly getUser: (id: string) => Effect.Effect<{ readonly id: string; readonly name: string }> }
+>()("app/UserRepository") {}
+
+const HttpClientLive = Layer.succeed(HttpClient, {
+  request: (path) => Effect.succeed(`Response for ${path}`),
+});
 
 const UserRepositoryLive = Layer.effect(
   UserRepository,
@@ -180,12 +77,8 @@ const UserRepositoryLive = Layer.effect(
   }),
 ).pipe(Layer.provide(HttpClientLive));
 
-const HttpClientLive = Layer.succeed(HttpClient, {
-  request: (path) => Effect.succeed(`Response for ${path}`),
-});
-
 const UserProfile = Component.gen(function* (
-  Props: ComponentProps<{ readonly userId: Signal.Signal<string> }>,
+  Props: ComponentProps<{ userId: Signal.Signal<string> }>,
 ) {
   const { userId } = yield* Props;
   const repo = yield* UserRepository;
@@ -200,11 +93,20 @@ const App = Component.gen(function* () {
 }).pipe(Component.provide(UserRepositoryLive));
 ```
 
-`App` has `R = never` because `UserRepositoryLive` satisfies `UserRepository`, and `UserRepositoryLive` itself is satisfied by `HttpClientLive`. If a layer were missing, the type error would point to the exact unsatisfied tag at the `mount` call.
+`App` has `R = never`: `UserRepositoryLive` satisfies `UserRepository`, and its own `HttpClient` requirement is satisfied by `HttpClientLive` through `Layer.provide`.
+
+`Component.provide` owns a mounted Layer boundary. The Layer is acquired once when the provided component mounts, its scope is reused while the component key and Layer identity stay stable, and it is finalized on unmount. Changing the component key or providing a different Layer instance is treated as replacement: the old scope finalizes and a fresh one is acquired. Keep interactive state in scoped services or signals behind a stable boundary rather than swapping Layers during render.
 
 ## Related exports
 
 - `Component`
-- `Component.gen`
-- `ComponentProps`
+- `Component.gen` — define a component from a generator yielding props and services
+- `Component.provide` — satisfy a child's services at a mounted Layer boundary
+- `ComponentProps` — the service handle a body yields to read props
 - `isEffectComponent`
+
+## Troubleshooting
+
+- A prop doesn't update when the parent changes it: props from `ComponentProps<P>` are read once at mount. Pass a `Signal` as the prop and `yield* Signal.get` it, or resolve the value upfront.
+- A `Component.gen` call type-errors at the Mount boundary with a leftover service in `R`: a Layer is missing. Provide it with `Component.provide(layer)` (or at the Mount boundary) so the root reaches `R = never`.
+- `Component.gen` returns a component that fails when rendered: it was not called with a generator function, or the curried `Component.gen<P>()` form was used without the trailing generator. Pass `function* () { ... }` directly.

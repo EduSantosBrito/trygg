@@ -1,19 +1,37 @@
 # Renderer
 
+Attach a trygg app to the DOM with the browser runtime, router layer, and resource registry already installed, so Signals, Resources, and routing work from the first frame.
+
+```tsx
+import { mount, Component } from "trygg";
+
+const App = Component.gen(function* () {
+  return <h1>Hello</h1>;
+});
+
+mount(document.getElementById("root")!, <App />);
+```
+
 ## When to use
 
-Use `mount` for normal apps, `mountDocument` for root-layout ownership, and `Renderer` or `browserLayer` only when you need lower-level composition or custom runtime wiring.
+Most apps never call this surface: the Vite plugin generates the entry point and calls `mountDocument` for you, so you write Components and Routes and never touch the Mount boundary by hand.
+
+Reach for it directly only when you own the runtime wiring:
+
+- `mount` — attach an app to a container element for a custom entry point or a non-standard build.
+- `mountDocument` — same, for a root layout that renders `<html>`, `<head>`, and `<body>` into the existing document instead of a container.
+- `browserLayer`, `Renderer`, `renderDocument` — when you compose the runtime yourself (custom Layers, a non-browser `Renderer`, or manual scope management) instead of using the one-call helpers.
 
 ## Behavior
 
-The renderer turns `Element` trees into DOM, preserves render scope for event handlers and subscriptions, and installs the browser/runtime layers needed for signals, resources, and routing.
+`mount` accepts an `Element` or an `Effect` that produces one. `mount(root, <App />)` passes an `Element` (JSX evaluates to one); the Effect form is an `Effect` that returns an `Element`, such as `mount(root, app.pipe(Effect.provide(layer)))` where `app` is an `Effect.gen`. It does not accept a bare Component value — a `Component` is callable JSX, neither an `Element` nor an `Effect`. `Component.provide(layer)` narrows a Component's requirements but still returns a `Component`, so render it with `<App />` before mounting.
 
-`mount` is also the service boundary: the app passed to it must already have `R = never`. In practice, children `yield*` services, parents satisfy them with `Component.provide(layer)`, and the final root effect is what you mount.
+`mount` is also the Mount boundary: the app must already have `R = never`. Children `yield*` the Services they need; a parent satisfies them with `Component.provide(layer)`; the fully-provided root is what you mount. If a requirement is still unsatisfied, TypeScript reports the missing Service before anything runs.
 
 ```tsx
 import { Effect, Layer } from "effect";
 import * as Context from "effect/Context";
-import { Component } from "trygg";
+import { mount, Component } from "trygg";
 
 class Api extends Context.Service<Api, { readonly ping: Effect.Effect<string> }>()("example/Api") {}
 
@@ -22,24 +40,33 @@ const Header = Component.gen(function* () {
   return <h1>{yield* api.ping}</h1>;
 });
 
-const App = Header.pipe(
-  Component.provide(
-    Layer.succeed(Api, {
-      ping: Effect.succeed("ready"),
-    }),
-  ),
-);
+const App = Header.pipe(Component.provide(Layer.succeed(Api, { ping: Effect.succeed("ready") })));
+
+mount(document.getElementById("root")!, <App />);
 ```
 
-If a component still has unsatisfied requirements, that should be resolved before it crosses the mount boundary. The Vite plugin generates the entry point and calls `mountDocument` automatically — you do not call `mount` manually in normal apps. You only need `mount` or `mountDocument` directly when writing custom runtime wiring or non-standard build setups.
+`mount` and `mountDocument` are fire-and-forget — they return `void`, dynamically import the browser runtime, and keep the app alive until the process is interrupted. They install `browserLayer`, the router layer, and the resource registry, so you do not provide those yourself. The renderer turns the `Element` tree into DOM and preserves the render scope, so event handlers and Signal subscriptions run in the same Effect context the Component was rendered in. Because setup happens inside that dynamic import, errors during runtime wiring surface asynchronously, not at the call site.
 
-The mount boundary enforces `R = never` at the type level. If `App` still requires services, TypeScript will report the missing `Context.Tag` before the app runs.
+`mountDocument` differs from `mount` in one way: the root layout's `<html>`, `<head>`, and `<body>` map onto the existing document nodes instead of creating new elements, and it takes an optional `{ manifest }` to feed `Router.Outlet` without props.
+
+`renderDocument` is the composable Effect form of `mountDocument`: it yields the `Renderer` service, so you provide `browserLayer` (and any other Layers) and manage the scope yourself.
+
+`Renderer` is the service tag for the active renderer implementation; `browserLayer` is its DOM-backed implementation of the `RendererService` contract. Yield `Renderer` only when you need the low-level `mount` / `render` methods directly. `RenderContext`, `RenderResult`, and the internal `CurrentRenderContext` FiberRef are renderer-internal plumbing — you touch them when writing a custom `Renderer`, not in app code.
 
 ## Related exports
 
-- `Renderer`
-- `RendererService`
-- `browserLayer`
-- `mount`
-- `renderDocument`
-- `mountDocument`
+- `Renderer` — service tag for the active renderer implementation
+- `RendererService` — the contract a renderer implementation satisfies
+- `browserLayer` — the DOM-backed `Renderer` implementation
+- `mount` — attach an app to a container element
+- `mountDocument` — mount a root layout onto the existing document
+- `renderDocument` — the composable Effect form of `mountDocument`
+- `RenderContext` — renderer-internal plumbing for a custom Renderer
+- `RenderResult` — renderer-internal mount result for a custom Renderer
+- `CurrentRenderContext` — internal FiberRef tracking the active render context
+
+## Troubleshooting
+
+- Type error at the `mount` call, "Type 'X' is not assignable to ... never": the app still has unsatisfied Service requirements. Provide every Service with `Component.provide(layer)` (or `Effect.provide`) before the Mount boundary so `R = never`.
+- `mount(root, App)` where `App` is a Component value: a provided Component (`Component.provide(...)`) is still a Component, not an `Element` or `Effect`. Render it with `<App />`, or pass an `Effect.gen` that returns an `Element`.
+- `<html>`/`<head>`/`<body>` appearing duplicated or unstyled: use `mountDocument`, not `mount`, when the root layout owns the document shell — only `mountDocument` maps those tags onto the existing document nodes.

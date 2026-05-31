@@ -493,6 +493,7 @@ html {
 }
 
 .docs-article__body {
+  margin-top: clamp(2rem, 4vw, 3rem);
   font-family: var(--font-prose);
   font-size: 1.0625rem;
   line-height: 1.75;
@@ -601,6 +602,68 @@ html {
   color: var(--color-signature);
   content: "—";
   font-family: var(--font-mono);
+}
+
+/* Prose links ------------------------------------------------------- */
+
+.docs-article__body a {
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--color-signature-rule);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.docs-article__body a:hover,
+.docs-article__body a:focus-visible {
+  text-decoration-color: var(--color-signature);
+}
+
+/* Tables (GFM) ------------------------------------------------------ */
+
+.docs-table-wrap {
+  margin-top: 1.5rem;
+  overflow-x: auto;
+}
+
+.docs-table-wrap:focus-visible {
+  outline: 2px solid var(--color-signature);
+  outline-offset: 2px;
+}
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-prose);
+  font-size: 0.9375rem;
+}
+
+.docs-table th,
+.docs-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.docs-table thead th {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-ink-muted);
+  border-bottom: 1px solid var(--color-rule-strong);
+}
+
+.docs-table tbody td {
+  color: var(--color-ink-muted);
+}
+
+.docs-table code {
+  white-space: nowrap;
 }
 
 .docs-heading-anchor {
@@ -922,7 +985,7 @@ html {
   transition: color var(--motion-fast) var(--ease-out-quart);
 }
 
-/* Section index (5 summaries, with counts + reading time) ---------- */
+/* Section index (summaries with topic counts + reading time) ------- */
 
 .docs-section-index {
   display: grid;
@@ -934,7 +997,7 @@ html {
 
 .docs-section-index__item {
   display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr) 1.5rem;
+  grid-template-columns: minmax(0, 1fr) 1.5rem;
   gap: 1.5rem;
   padding: 1.5rem 0;
   border-top: 1px solid var(--color-rule);
@@ -951,22 +1014,9 @@ html {
   border-top-color: var(--color-rule-strong);
 }
 
-.docs-section-index__item:hover .docs-section-index__num {
-  color: var(--color-signature);
-}
-
 .docs-section-index__item:hover .docs-section-index__arrow {
   color: var(--color-signature);
   transform: translateX(2px);
-}
-
-.docs-section-index__num {
-  color: var(--color-ink-subtle);
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  letter-spacing: 0.1em;
-  font-weight: 500;
-  transition: color var(--motion-fast) var(--ease-out-quart);
 }
 
 .docs-section-index__body {
@@ -997,7 +1047,7 @@ html {
   gap: 0.5rem;
   align-items: center;
   margin-top: 0.625rem;
-  color: var(--color-ink-subtle);
+  color: var(--color-ink-muted);
   font-family: var(--font-mono);
   font-size: 0.75rem;
   letter-spacing: 0.04em;

@@ -168,8 +168,8 @@ describe("GettingStartedPage", () => {
     Effect.gen(function* () {
       const result = yield* renderGettingStarted();
 
-      assert.include(result.container.textContent, "Explore the app");
-      assert.include(result.container.textContent, "app/examples/getting-started.tsx");
+      assert.include(result.container.textContent, "greeting.tsx");
+      assert.include(result.container.textContent, "Component.provide");
       assert.include(result.container.textContent, "Component.gen");
       assert.include(result.container.textContent, "Signal.make");
       assert.include(result.container.textContent, "Theme service");
@@ -180,7 +180,7 @@ describe("GettingStartedPage", () => {
     Effect.gen(function* () {
       const result = yield* renderGettingStarted();
 
-      assert.include(result.container.textContent, "Run dev");
+      assert.include(result.container.textContent, "Run the dev server");
       assert.include(result.container.textContent, "bun run dev");
       assert.include(result.container.textContent, "localhost:5173");
     }),

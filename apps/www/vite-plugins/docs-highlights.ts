@@ -30,12 +30,14 @@ const RESOLVED_ID = "\0" + VIRTUAL_ID;
 
 // The exact set of docs markdown shipped to the docs section, read straight from
 // the `?raw` imports in docs-content.ts so the plugin and the app never drift.
+// Matches both source-owned `*.docs.md` sidecars and website-owned `*.md` guide
+// pages (e.g. the Concepts pages under app/content/concepts).
 function docsMarkdownFiles(root: string): string[] {
   const docsContentPath = resolve(root, "app/content/docs-content.ts");
   const src = readFileSync(docsContentPath, "utf8");
   const dir = dirname(docsContentPath);
   const files: string[] = [];
-  const re = /from\s+"([^"]+\.docs\.md)\?raw"/g;
+  const re = /from\s+"([^"]+\.md)\?raw"/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(src)) !== null) {
     files.push(resolve(dir, match[1]));
@@ -76,7 +78,7 @@ export function docsHighlightsPlugin(): Plugin {
       return `export default ${JSON.stringify(map)};`;
     },
     handleHotUpdate({ file, server }) {
-      if (!file.endsWith(".docs.md") && !file.endsWith("docs-content.ts")) return;
+      if (!file.endsWith(".md") && !file.endsWith("docs-content.ts")) return;
       cache = null;
       const mod = server.moduleGraph.getModuleById(RESOLVED_ID);
       if (mod) server.moduleGraph.invalidateModule(mod);

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { assert, describe, layer } from "@effect/vitest";
+import { assert, describe, it, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { click, renderElement, testLayer, waitFor } from "trygg/testing";
 import * as Router from "trygg/router";
@@ -8,6 +8,8 @@ import * as Router from "trygg/router";
 import { DocsLayout } from "./docs-layout";
 import { DocsSidebar } from "./docs-sidebar";
 import { DocsHeadingsLive } from "../content/headings";
+import { docsContent } from "../content/docs-content";
+import { sidebarGroups } from "../content/sidebar";
 import { Footer } from "./footer";
 
 const docsGettingStartedLayer = Layer.merge(
@@ -27,6 +29,24 @@ const flushDom = Effect.gen(function* () {
 });
 
 describe("Docs chrome", () => {
+  describe("docs navigation content contract", () => {
+    it.effect("links only to published markdown-backed topic pages", () =>
+      Effect.sync(() => {
+        const topicLinks = sidebarGroups
+          .flatMap((group) => group.links)
+          .filter((link) => link.href !== "/docs" && link.href !== "/docs/getting-started");
+
+        const missing = topicLinks.filter((link) => docsContent[link.href] === undefined);
+
+        assert.deepStrictEqual(
+          missing.map((link) => link.href),
+          [],
+          "sidebar should not expose unpublished docs placeholders",
+        );
+      }),
+    );
+  });
+
   layer(docsGettingStartedLayer)("/docs/getting-started", (it) => {
     it.effect("renders grouped docs sidebar links", () =>
       Effect.gen(function* () {

@@ -71,7 +71,7 @@ export const gettingStarted: GettingStartedContent = {
     id: "create-project",
     eyebrow: "02",
     title: "Create a project",
-    body: "Scaffold a new trygg app with the canary create command.",
+    body: "Scaffold a new trygg app with the canary create command. It is interactive: choose the blank starter or the full-stack incident template, pick a platform and output mode, and optionally install dependencies.",
     commands: [
       { manager: "bun", label: packageManagers.bun, command: "bunx create-trygg@canary my-app" },
       { manager: "npm", label: packageManagers.npm, command: "npx create-trygg@canary my-app" },
@@ -90,7 +90,7 @@ export const gettingStarted: GettingStartedContent = {
   install: {
     id: "install",
     eyebrow: "03",
-    title: "Install",
+    title: "Install dependencies",
     body: "From inside the generated project, install dependencies.",
     commands: [
       { manager: "bun", label: packageManagers.bun, command: "bun install" },
@@ -102,18 +102,18 @@ export const gettingStarted: GettingStartedContent = {
   explore: {
     id: "explore-app",
     eyebrow: "04",
-    title: "Explore the app",
-    body: "This themed greeting is imported from a real TSX file and highlighted on this page.",
+    title: "Read a component",
+    body: "The blank starter generates a static home page in app/pages/home.tsx. A real component looks like this — Component.gen reads services and signals, then returns JSX.",
     notes: [
       "Component.gen lets JSX read Effect services and signals directly.",
-      "Signal.make creates fine-grained reactive state for the greeting.",
-      "Theme service is provided by a Layer at the component boundary.",
+      "Signal.make creates fine-grained reactive state — clicking patches just the greeting text, with no component re-run.",
+      "The Theme service is provided by a Layer with Component.provide, so the component's requirement is satisfied before mount.",
     ],
   },
   runDev: {
     id: "run-dev",
     eyebrow: "05",
-    title: "Run dev",
+    title: "Run the dev server",
     body: "Start the dev server and open localhost:5173 to see your app.",
     command: "bun run dev",
   },

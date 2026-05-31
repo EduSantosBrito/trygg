@@ -110,4 +110,68 @@ describe("DocsArticle", () => {
       assert.include(highlighted?.textContent, "Signal.make");
     }),
   );
+
+  it.effect("renders a GFM table instead of raw pipe text", () =>
+    Effect.gen(function* () {
+      const tableSource = `# Deployment
+
+| platform | output | Run with |
+| --- | --- | --- |
+| \`bun\` | \`server\` | \`bun dist/server.js\` |
+| \`cloudflare\` | \`static\` | Cloudflare Workers |
+`;
+      const result = yield* renderElement(<DocsArticle source={tableSource} />).pipe(
+        Effect.provide(testLayer),
+      );
+
+      const table = result.container.querySelector(".docs-table");
+      assert.isNotNull(table, "a markdown table should render as a <table>");
+
+      // Keyboard-scrollable wrapper must announce itself (WCAG 4.1.2 Name, Role, Value).
+      const wrap = result.container.querySelector(".docs-table-wrap");
+      assert.strictEqual(wrap?.getAttribute("role"), "region");
+      assert.strictEqual(wrap?.getAttribute("aria-label"), "Table");
+
+      const headers = Array.from(table?.querySelectorAll("thead th") ?? []).map(
+        (th) => th.textContent,
+      );
+      assert.deepStrictEqual(headers, ["platform", "output", "Run with"]);
+
+      const firstRow = Array.from(table?.querySelectorAll("tbody tr") ?? [])[0];
+      const cells = Array.from(firstRow?.querySelectorAll("td") ?? []).map((td) => td.textContent);
+      assert.deepStrictEqual(cells, ["bun", "server", "bun dist/server.js"]);
+
+      // Regression guard: the raw delimiter row must never reach the DOM as text.
+      assert.notInclude(result.container.textContent, "| --- |");
+    }),
+  );
+
+  it.effect("renders inline markdown links as anchors", () =>
+    Effect.gen(function* () {
+      const linkSource = `# Links
+
+See the [Config](/docs/config) page and the [Vite docs](https://vitejs.dev) site.
+`;
+      const result = yield* renderElement(<DocsArticle source={linkSource} />).pipe(
+        Effect.provide(testLayer),
+      );
+
+      const internal = result.container.querySelector('a[href="/docs/config"]');
+      assert.isNotNull(internal, "internal markdown link should render as an anchor");
+      assert.strictEqual(internal?.textContent, "Config");
+      assert.isNull(internal?.getAttribute("target"), "internal links should not open a new tab");
+
+      const external = result.container.querySelector('a[href="https://vitejs.dev"]');
+      assert.strictEqual(external?.getAttribute("target"), "_blank");
+      assert.strictEqual(external?.getAttribute("rel"), "noopener noreferrer");
+
+      // External links warn assistive tech that focus jumps to a new tab.
+      const newTabHint = external?.querySelector(".sr-only");
+      assert.isNotNull(newTabHint, "external links should carry a visually-hidden new-tab hint");
+      assert.include(newTabHint?.textContent, "opens in new tab");
+
+      // Regression guard: raw link syntax must never reach the DOM as text.
+      assert.notInclude(result.container.textContent, "[Config]");
+    }),
+  );
 });

@@ -24,7 +24,7 @@ expect(recorder.records().map((r) => r.name)).toEqual([
 ]);
 ```
 
-For human-facing console logging in an app, use the `debug` toolkit (see [debug.docs.md](../debug/debug.docs.md)) — `debug` is an Effect logger over the same trace stream, not a separate API. For aggregate counters and histograms, use [metrics](../debug/metrics.docs.md).
+For human-facing console logging in an app, use the `debug` toolkit (see [debug.docs.md](../debug/debug.docs.md)) — `debug` is an Effect logger over the same trace stream, not a separate API. In Vite dev, the generated entry also forwards browser trace records to the dev server so they appear in terminal/server logs. For aggregate counters and histograms, use [metrics](../debug/metrics.docs.md).
 
 ## Design
 

@@ -21,7 +21,13 @@ export interface ListBlock {
   readonly items: readonly string[];
 }
 
-export type Block = HeadingBlock | ParagraphBlock | CodeFenceBlock | ListBlock;
+export interface TableBlock {
+  readonly type: "table";
+  readonly headers: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+}
+
+export type Block = HeadingBlock | ParagraphBlock | CodeFenceBlock | ListBlock | TableBlock;
 
 function headingLevel(marker: string): 1 | 2 | 3 {
   if (marker.length === 1) return 1;
@@ -31,6 +37,22 @@ function headingLevel(marker: string): 1 | 2 | 3 {
 
 function lineAt(lines: ReadonlyArray<string>, index: number): string {
   return lines[index] ?? "";
+}
+
+// A GFM delimiter row: pipe-separated runs of dashes, with optional
+// alignment colons, e.g. `| --- | :--: | ---: |`.
+function isTableDelimiter(line: string): boolean {
+  return /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/.test(line.trim());
+}
+
+// Split one table row into trimmed cells, dropping the outer pipes.
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
 }
 
 function slugify(text: string): string {
@@ -91,13 +113,32 @@ export function parseMarkdown(source: string): readonly Block[] {
       continue;
     }
 
+    // GFM table: a header row immediately followed by a delimiter row.
+    if (line.includes("|") && isTableDelimiter(lineAt(lines, i + 1))) {
+      const headers = splitTableRow(line);
+      i += 2; // consume the header and delimiter rows
+      const rows: string[][] = [];
+      while (i < lines.length && lineAt(lines, i).trim() !== "" && lineAt(lines, i).includes("|")) {
+        rows.push(splitTableRow(lineAt(lines, i)));
+        i++;
+      }
+      blocks.push({ type: "table", headers, rows });
+      continue;
+    }
+
     const paraLines: string[] = [];
     while (
       i < lines.length &&
       lineAt(lines, i).trim() !== "" &&
       !lineAt(lines, i).match(/^#{1,3}\s/) &&
       !lineAt(lines, i).startsWith("```") &&
-      !lineAt(lines, i).startsWith("- ")
+      !lineAt(lines, i).startsWith("- ") &&
+      // A "|" line ends the paragraph ONLY when it actually starts a table
+      // (i.e. a delimiter row follows). A "|" line with no delimiter row is
+      // ordinary text and must be consumed here — otherwise it matches neither
+      // the table branch above nor this loop, `i` never advances, and the
+      // parser infinite-loops (e.g. `parseMarkdown("| not a table")`).
+      !(lineAt(lines, i).includes("|") && isTableDelimiter(lineAt(lines, i + 1)))
     ) {
       paraLines.push(lineAt(lines, i));
       i++;
@@ -111,13 +152,14 @@ export function parseMarkdown(source: string): readonly Block[] {
 }
 
 export interface InlineSegment {
-  readonly type: "text" | "code" | "bold";
+  readonly type: "text" | "code" | "bold" | "link";
   readonly content: string;
+  readonly href?: string;
 }
 
 export function parseInline(text: string): readonly InlineSegment[] {
   const result: InlineSegment[] = [];
-  const regex = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  const regex = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
   let lastIndex = 0;
   let match;
 
@@ -129,8 +171,15 @@ export function parseInline(text: string): readonly InlineSegment[] {
     if (token === undefined) continue;
     if (token.startsWith("`")) {
       result.push({ type: "code", content: token.slice(1, -1) });
-    } else {
+    } else if (token.startsWith("**")) {
       result.push({ type: "bold", content: token.slice(2, -2) });
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (link && link[1] !== undefined && link[2] !== undefined) {
+        result.push({ type: "link", content: link[1], href: link[2] });
+      } else {
+        result.push({ type: "text", content: token });
+      }
     }
     lastIndex = match.index + token.length;
   }

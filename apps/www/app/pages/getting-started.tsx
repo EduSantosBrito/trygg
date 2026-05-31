@@ -157,7 +157,7 @@ export default Component.gen(function* () {
               <ol>
                 <li>Create the project.</li>
                 <li>Install dependencies.</li>
-                <li>Read the generated component.</li>
+                <li>Read a component.</li>
                 <li>Start the dev server.</li>
                 <li>Choose the next docs path.</li>
               </ol>
@@ -196,7 +196,7 @@ export default Component.gen(function* () {
           <div className="docs-example-stack">
             <CodeBlock
               lines={exampleLines}
-              header="app/examples/getting-started.tsx"
+              header="greeting.tsx"
               fileType="tsx"
               copyText={gettingStartedSource}
             />
@@ -235,7 +235,7 @@ export default Component.gen(function* () {
           id="create-with-ai"
           eyebrow="07"
           title="Create with AI"
-          body="A small helper for users who want to keep exploring with an agent."
+          body="A ready-to-copy prompt that gives a coding agent what it needs to build this app."
         >
           <CopyForAgent />
         </SectionShell>

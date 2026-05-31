@@ -29,3 +29,4 @@ Task guides:
 - [VCS workflow](docs/agents/vcs.md)
 - [Planning](docs/agents/planning.md)
 - [Docs authoring](docs/docs-authoring.md)
+- [Docs content](docs/agents/docs-content.md)

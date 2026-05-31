@@ -1,8 +1,18 @@
 # Debug
 
+See framework lifecycle events — renders, signal writes, navigations — as readable console output scoped to one subtree, instead of reaching for a global debug flag.
+
+```tsx
+import { Component, Debug } from "trygg";
+import { App } from "./app.js";
+
+// Stream trace records for this subtree to the console, signal events only.
+const Debugged = App.pipe(Component.provide(Debug.layer({ minLevel: "Trace", filter: "signal" })));
+```
+
 ## When to use
 
-Use `Debug` when you want human-readable console output for Trygg's trace catalog. Framework internals emit through `Trace.emit`; `Debug` installs ordinary Effect loggers that format those catalog records for people.
+Use `Debug` when you want human-readable console output for Trygg's lifecycle events. Framework internals emit these records; `Debug` installs ordinary Effect loggers that format them for people.
 
 ## Behavior
 
@@ -16,11 +26,11 @@ Use `Debug` when you want human-readable console output for Trygg's trace catalo
 
 Console writes are best-effort: a failing or patched `console.log` must not break framework work.
 
-For tests and machine assertions, use `Trace.makeRecorder` with `Trace.record` or `trygg/testing.withRecording` instead of the console logger.
+For tests and machine assertions, use `trygg/testing.withRecording` instead of the console logger.
 
 ## Related exports
 
-- `Debug.consoleLogger`
-- `Debug.layer`
-- `Debug.DebugOptions`
-- `Debug.DebugFilter`
+- `Debug.consoleLogger` — pretty-prints trace records, passes other logs through
+- `Debug.layer` — installs the console logger for a subtree
+- `Debug.DebugOptions` — options for `layer`: minLevel, filter, batchWindow
+- `Debug.DebugFilter` — catalog-name prefixes kept by `options.filter`

@@ -76,6 +76,12 @@ const fixtureDocsContractWithMemberExports = [
 const fixtureSidecar = [
   "# Fixture",
   "",
+  "Use the fixture export to model one migrated owner module under test.",
+  "",
+  "```ts",
+  "const value = thing;",
+  "```",
+  "",
   "## When to use",
   "",
   "Use the fixture export in tests.",
@@ -169,15 +175,15 @@ describe("docs contract", () => {
   it("documents the platform and output contract", async () => {
     const docs = await readFile(join(packageRoot, "src/config.docs.md"), "utf8");
 
-    assert.include(docs, "public config remains `platform`, not `adapter`");
+    assert.include(docs, "`platform`, not `adapter`");
     assert.include(docs, '`output: "static"`');
     assert.include(docs, '`output: "server"`');
-    assert.include(docs, "requires `app/api.ts`");
-    assert.include(docs, "Cloudflare server MVP");
-    assert.include(docs, "full SSR route rendering");
+    assert.include(docs, "`app/api.ts` is optional");
+    assert.include(docs, "is rejected with a build error today");
+    assert.include(docs, "does not perform server-side route rendering");
     assert.include(docs, "`.trygg/worker-entry.js`");
     assert.include(docs, "fixed `ASSETS` binding");
-    assert.include(docs, "Public Cloudflare preview UX is deferred");
+    assert.include(docs, 'supported with `output: "static"` only');
   });
 
   it("documents layout-owned static SEO tags", async () => {

@@ -26,6 +26,19 @@ function renderInline(text: string) {
         </code>
       );
     if (seg.type === "bold") return <strong key={i}>{seg.content}</strong>;
+    if (seg.type === "link" && seg.href !== undefined) {
+      const external = /^https?:/.test(seg.href);
+      return (
+        <a
+          key={i}
+          href={seg.href}
+          {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        >
+          {seg.content}
+          {external ? <span className="sr-only"> (opens in new tab)</span> : null}
+        </a>
+      );
+    }
     return <span key={i}>{seg.content}</span>;
   });
 }
@@ -183,6 +196,31 @@ export const DocsArticle = Component.gen(function* (
                     <li key={j}>{renderInline(item)}</li>
                   ))}
                 </ul>
+              );
+            case "table":
+              return (
+                <div key={i} className="docs-table-wrap" role="region" aria-label="Table" tabIndex={0}>
+                  <table className="docs-table">
+                    <thead>
+                      <tr>
+                        {block.headers.map((header, j) => (
+                          <th key={j} scope="col">
+                            {renderInline(header)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {block.rows.map((row, r) => (
+                        <tr key={r}>
+                          {row.map((cell, c) => (
+                            <td key={c}>{renderInline(cell)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               );
           }
         })}

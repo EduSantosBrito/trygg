@@ -1,90 +1,66 @@
 # Signal
 
-## When to use
-
-Use `Signal` for local reactive state, derived values, conditional views, suspended views, and keyed list rendering. It is also the right primitive under scoped shared services that coordinate state across multiple components.
-
-## Behavior
-
-`Signal` defaults to fine-grained DOM updates when you pass a signal directly to JSX. Call `Signal.get` only when the component itself must re-run. Call `Signal.peek` when you need an imperative snapshot without subscribing the current render. `Signal.make` creates scoped state inside Effects, components, and provided service layers.
-
-Under the hood, each signal is backed by a `SubscriptionRef`. When you pass a signal to JSX, the renderer subscribes individual DOM nodes to that ref. When the signal changes, only the subscribed text nodes or attributes update — the component's `gen` function does not re-run. This is why structural branching requires `Signal.get`: it forces the component to re-execute so the conditional tree can be rebuilt, while leaf updates stay surgical and skip component re-execution entirely.
-
-Use `Signal.get` for structural branching, but keep leaf updates signal-driven:
+Hold reactive state and pass it straight into JSX so a value change updates only the bound DOM node, without re-running the Component.
 
 ```tsx
-const AuthStatus = Component.gen(function* () {
-  const signedIn = yield* Signal.make(false);
-  const label = yield* Signal.derive(signedIn, (value) => (value ? "Sign out" : "Sign in"));
+import { Component, Signal } from "trygg";
 
-  const showPrivateUi = yield* Signal.get(signedIn);
+const Counter = Component.gen(function* () {
+  const count = yield* Signal.make(0);
 
-  return (
-    <section>
-      <button onClick={() => Signal.update(signedIn, (value) => !value)}>{label}</button>
-      {showPrivateUi ? <Dashboard /> : <LoginPrompt />}
-    </section>
-  );
+  return <button onClick={() => Signal.update(count, (n) => n + 1)}>Count: {count}</button>;
 });
 ```
 
-For conditional rendering with a boolean signal, use `Signal.get` when the branch changes component structure, and keep leaf content signal-driven:
+Clicking the button updates the text node in place. The generator body runs once; only the bound `{count}` node re-renders.
+
+## When to use
+
+Reach for `Signal` for local or module-level reactive state: counters, form fields, toggles, derived values, suspended views, and keyed lists. Pass the Signal directly to JSX whenever only a DOM value changes — this is the default and the cheapest path.
+
+Step up to `Signal.get` only when the Component must *re-run* (for example, choosing a different subtree). For async, keyed, cacheable data, use `Resource` instead and read its state through the Signal it exposes.
+
+## Behavior
+
+`Signal.make(initial)` creates state owned by the surrounding scope — a Component instance, a Layer effect, or an explicit Effect scope — and disposes it when that scope closes. Inside a Component, signals are identified by creation position, so the same Signal is reused across re-runs.
+
+There are two read modes:
+
+- **Pass the Signal to JSX** (`{count}`): the renderer binds the individual text node or attribute to the Signal. On change, only that node updates and the Component does not re-run. This is fine-grained reactivity.
+- **`Signal.get(signal)`**: returns the value *and* subscribes the current render, so the Component re-runs on change. Use it only for structural branching where the Element tree itself differs:
 
 ```tsx
 const TogglePanel = Component.gen(function* () {
   const isOpen = yield* Signal.make(false);
-  const showPanel = yield* Signal.get(isOpen);
+  const label = yield* Signal.derive(isOpen, (v) => (v ? "Close" : "Open"));
+  const open = yield* Signal.get(isOpen);
 
   return (
     <section>
-      <button onClick={() => Signal.update(isOpen, (v) => !v)}>{isOpen ? "Close" : "Open"}</button>
-      {showPanel ? <PanelContent /> : null}
+      <button onClick={() => Signal.update(isOpen, (v) => !v)}>{label}</button>
+      {open ? <PanelContent /> : null}
     </section>
   );
 });
 ```
 
-Notice that `isOpen` is passed directly to JSX inside the button text for a surgical text update, while `Signal.get(isOpen)` is used for the structural `?` branch. Pass signals directly to JSX when only DOM content changes; call `Signal.get` only when the component must re-run for structural decisions.
+Note the derived `label` Signal passed directly into the button text (surgical text update) while `Signal.get(isOpen)` drives the `?` branch that swaps subtrees. Binding the raw `isOpen` Signal as `{isOpen ? …}` would not work — a Signal object is always truthy, so the ternary must run over the unwrapped value `open` that `Signal.get(isOpen)` returns.
 
-For lists, `Signal.each` keeps item scopes keyed by identity, so reordering or replacing neighbors does not tear down unchanged rows:
+Writes notify listeners. `Signal.set` and `Signal.update` are equality-checked first: writing an unchanged value is a no-op and notifies no one. `Signal.modify` reads, writes, and returns a derived result in one step and always notifies. `Signal.peek` reads the current value without subscribing, for snapshots in event handlers and service methods.
 
-```tsx
-const TodoList = Component.gen(function* () {
-  const items = yield* Signal.make<ReadonlyArray<{ readonly id: string; readonly text: string }>>(
-    [],
-  );
+`Signal.derive(source, f)` produces a derived Signal that recomputes when its source changes, keeping the work out of JSX; `Signal.deriveAll([a, b], f)` derives from several sources. `Signal.each(source, render, { key })` renders a keyed list where items keep their Effect scope and nested signals across reorders. `Signal.selector(source, project)` is the single-subscription alternative to one derived Signal per row: a source change from `previous -> next` recomputes only the outputs registered under those two keys.
 
-  return (
-    <ul>
-      {Signal.each(items, (item) => Effect.succeed(<TodoRow text={item.text} />), {
-        key: (item) => item.id,
-      })}
-    </ul>
-  );
-});
-```
+Sharp edges worth knowing before they bite:
 
-For single-selection lists, prefer `Signal.selector` over one `Signal.derive` per row on the shared selected-id signal. The selector owns one source subscription and creates per-key output signals; when the selected id changes, only the previous and next key buckets update:
+- **A derived array of Elements needs a Fragment wrap.** `Signal.derive(sig, () => [<A />, <B />])` renders as `[object Object]`; wrap it: `Signal.derive(sig, () => <>{a}{b}</>)`.
+- **Deriving a Component reads its props once.** `Signal.derive(sig, () => <Comp value={x} />)` captures props at derive time and will not track later changes. Pass the Signal *into* the Component, or resolve the value upfront, when it must stay reactive.
+- **Disposed-signal access is a lifecycle edge, not a user error.** If a stale event handler, async callback, or service method touches a Signal after its owning scope closed, reads return the last snapshot and writes are no-ops. Trygg records a `signal.disposed_access` diagnostic — the read and write signatures stay clean on purpose.
+
+For state shared across components, keep the raw Signal private inside a service and expose typed Effect methods that validate or transform before writing. This is a secondary pattern, not the headline — one minimal shape:
 
 ```tsx
-const selectedId = yield * Signal.make(0);
-const classFor = yield * Signal.selector(selectedId, (selected) => (selected ? "danger" : ""));
-
-const rows = Signal.each(
-  items,
-  (row) =>
-    Effect.gen(function* () {
-      const className = yield* classFor(row.id);
-      return <tr className={className}>{row.label}</tr>;
-    }),
-  { key: (row) => row.id },
-);
-```
-
-There is no separate "signal middleware" primitive. The predictable cross-component pattern is to keep the raw signal private inside a service and expose typed Effect methods that intercept, transform, validate, log, or batch updates before writing. This gives you middleware behavior with full type safety:
-
-```tsx
-import { Effect, Layer, Schedule } from "effect";
+import { Component, Signal } from "trygg";
+import { Effect, Layer } from "effect";
 import * as Context from "effect/Context";
 
 class SearchStore extends Context.Service<
@@ -93,121 +69,39 @@ class SearchStore extends Context.Service<
     readonly query: Signal.Signal<string>;
     readonly setQuery: (raw: string) => Effect.Effect<void>;
   }
->("example/SearchStore") {}
+>()("example/SearchStore") {}
 
 const SearchStoreLive = Layer.effect(
   SearchStore,
   Effect.gen(function* () {
-    const rawQuery = yield* Signal.make("");
-
+    const query = yield* Signal.make("");
     return {
-      query: rawQuery,
-      setQuery: (raw) =>
-        Effect.gen(function* () {
-          const next = raw.trim().replaceAll(/\s+/g, " ");
-          yield* Signal.set(rawQuery, next);
-          yield* Effect.log(`search.query:${next}`);
-        }),
-    };
-  }),
-);
-
-const SearchInput = Component.gen(function* () {
-  const store = yield* SearchStore;
-  return (
-    <input
-      value={store.query}
-      onInput={(event) =>
-        event.target instanceof HTMLInputElement ? store.setQuery(event.target.value) : Effect.void
-      }
-    />
-  );
-});
-
-const SearchBadge = Component.gen(function* () {
-  const store = yield* SearchStore;
-  return <p>Query: {store.query}</p>;
-});
-```
-
-That pattern keeps update rules in one place, preserves type safety at the boundary, and lets multiple components share one signal without directly mutating it.
-
-For cross-component interception, compose multiple middleware concerns in the service method:
-
-```tsx
-class CounterStore extends Context.Service<
-  CounterStore,
-  {
-    readonly count: Signal.Signal<number>;
-    readonly increment: () => Effect.Effect<void>;
-    readonly decrement: () => Effect.Effect<void>;
-  }
->("example/CounterStore") {}
-
-const CounterStoreLive = Layer.effect(
-  CounterStore,
-  Effect.gen(function* () {
-    const rawCount = yield* Signal.make(0);
-
-    return {
-      count: rawCount,
-      increment: () =>
-        Effect.gen(function* () {
-          const current = yield* Signal.peek(rawCount);
-          if (current >= 100) {
-            yield* Effect.log("max reached");
-            return;
-          }
-          yield* Signal.update(rawCount, (n) => n + 1);
-          yield* Effect.log(`incremented to ${current + 1}`);
-        }),
-      decrement: () =>
-        Effect.gen(function* () {
-          const current = yield* Signal.peek(rawCount);
-          if (current <= 0) {
-            yield* Effect.log("min reached");
-            return;
-          }
-          yield* Signal.update(rawCount, (n) => n - 1);
-        }),
+      query,
+      setQuery: (raw) => Signal.set(query, raw.trim()),
     };
   }),
 );
 ```
 
-For debouncing, use `Effect.sleep` inside the service method so callers fire immediately but only the last update wins:
-
-```tsx
-const DebouncedSearchStoreLive = Layer.effect(
-  SearchStore,
-  Effect.gen(function* () {
-    const rawQuery = yield* Signal.make("");
-
-    return {
-      query: rawQuery,
-      setQuery: (raw) =>
-        Effect.gen(function* () {
-          yield* Effect.sleep("200 millis");
-          const next = raw.trim();
-          yield* Signal.set(rawQuery, next);
-          yield* Effect.log(`debounced:${next}`);
-        }),
-    };
-  }),
-);
-```
-
-Because the raw signal is never exported, all mutations flow through the service boundary. Components read the signal directly for fine-grained updates, use `Signal.get` for structural rerenders, and use `Signal.peek` inside service methods or event handlers for imperative snapshots. This makes interception, transformation, and cross-component coordination predictable and testable.
-
-Disposed signal access is a lifecycle edge case, not an ordinary user-recoverable error. `Signal.get`, `Signal.peek`, `Signal.set`, `Signal.update`, and `Signal.modify` keep clean `Effect` signatures for application DX; if a stale reference touches a disposed signal, Trygg emits `signal.disposed_access` diagnostics, returns the last snapshot for reads, and ignores writes as no-ops.
+Components read `store.query` directly for fine-grained updates and call `store.setQuery` to write; the raw Signal is never written from outside.
 
 ## Related exports
 
-- `Signal.make`
-- `Signal.get`
-- `Signal.peek`
-- `Signal.modify`
-- `Signal.derive`
-- `Signal.selector`
+- `Signal.make` — create reactive state owned by the surrounding scope
+- `Signal.get` — read the value and subscribe the current render
+- `Signal.peek` — read the current value without subscribing
+- `Signal.set` — equality-checked write of a new value
+- `Signal.update` — equality-checked write from the previous value
+- `Signal.modify` — read, write, and return a result, always notifying
+- `Signal.derive` — derive a Signal that recomputes when its source changes
+- `Signal.deriveAll` — derive from several source Signals at once
+- `Signal.selector` — single-subscription alternative to one derived Signal per row
+- `Signal.each` — render a keyed list preserving per-item scope across reorders
 - `Signal.suspend`
-- `Signal.each`
+
+## Troubleshooting
+
+- **The text shows `[object Object]`.** A `Signal.derive` is returning an array of Elements. Wrap the children in a Fragment: `<>{...}</>`.
+- **A derived `<Comp />` never updates.** Deriving a Component reads its props once. Pass the Signal into the Component, or read the value with `Signal.peek` upfront.
+- **A click updates the value but the screen does not change.** The branch you expected to swap is structural. Read it with `Signal.get` so the Component re-runs; pass the Signal directly only for leaf text and attributes.
+- **An update silently does nothing.** Either the new value is equal to the current one (`Signal.set` and `Signal.update` are equality-checked) or the Signal's owner scope has closed — check for a `signal.disposed_access` diagnostic.
