@@ -55,13 +55,14 @@
     },
     "packages/cli": {
       "name": "create-trygg",
-      "version": "0.5.0-canary.1",
+      "version": "0.5.0-canary.2",
       "bin": {
         "create-trygg": "./index.ts",
       },
       "dependencies": {
         "@clack/prompts": "^0.9.0",
         "@effect/platform-bun": "4.0.0-beta.58",
+        "@effect/platform-node-shared": "4.0.0-beta.58",
         "effect": "4.0.0-beta.58",
       },
       "devDependencies": {
@@ -74,7 +75,7 @@
     },
     "packages/core": {
       "name": "trygg",
-      "version": "0.5.0-canary.1",
+      "version": "0.5.0-canary.2",
       "dependencies": {
         "consola": "^3.4.2",
       },
@@ -238,7 +239,7 @@
 
     "@effect/platform-node": ["@effect/platform-node@4.0.0-beta.58", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.58", "mime": "^4.1.0", "undici": "^8.0.2" }, "peerDependencies": { "effect": "^4.0.0-beta.58", "ioredis": "^5.7.0" } }, "sha512-lDgj/RXQTbZQAWg/Mkpy04sB6wlWyuC9SGxdqjgKj2tBZFihrSjf90CfRhlbsy2BMk2WNNgZsebEHSqSWgUifQ=="],
 
-    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.59", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.59" } }, "sha512-fGwFJuG0Te9U/ZeqeDZ2HcSKZBhX5wLjX2/Rxb5+yaOkvvFAN9MvIh05R0QQK5DCcERvnbhHSl1CjSIAN4aEwQ=="],
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.58", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.58" } }, "sha512-xqTspx4Aopi0po8eG/zzbcMaXbibtkt+Yt9Lo/jqPfXXduBK0E/dNr9y/Cbf85v5TNvGkL1rKCUYYQVX8PSKeg=="],
 
     "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-beta.58", "", { "peerDependencies": { "effect": "^4.0.0-beta.58" } }, "sha512-pgbBlyVx/bA2njgNTIpDuR6t45CVHZ4uLIP1BgcMkpDW2qfcTxF0GWy414Z8FkfCUf2jr8cimv0a6VxmArOo1w=="],
 
@@ -1426,7 +1427,7 @@
 
     "workerd": ["workerd@1.20260417.1", "", { "optionalDependencies": { "@cloudflare/workerd-darwin-64": "1.20260417.1", "@cloudflare/workerd-darwin-arm64": "1.20260417.1", "@cloudflare/workerd-linux-64": "1.20260417.1", "@cloudflare/workerd-linux-arm64": "1.20260417.1", "@cloudflare/workerd-windows-64": "1.20260417.1" }, "bin": { "workerd": "bin/workerd" } }, "sha512-X7YnHxHVGsp1wMN14FSHzNwe5VHJQdnrkwSu5pCcA+TFxLfiA3KOXyymdopMROH1AZVQ3ggX70ha/qE+7Uq5sw=="],
 
-    "ws": ["ws@8.19.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg=="],
+    "ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
 
     "wsl-utils": ["wsl-utils@0.3.1", "", { "dependencies": { "is-wsl": "^3.1.0", "powershell-utils": "^0.1.0" } }, "sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg=="],
 
@@ -1452,11 +1453,11 @@
 
     "@distilled.cloud/cloudflare-vite-plugin/vite": ["vite@7.3.1", "", { "dependencies": { "esbuild": "^0.27.0", "fdir": "^6.5.0", "picomatch": "^4.0.3", "postcss": "^8.5.6", "rollup": "^4.43.0", "tinyglobby": "^0.2.15" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "jiti": ">=1.21.0", "less": "^4.0.0", "lightningcss": "^1.21.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "jiti", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA=="],
 
-    "@effect/platform-node-shared/ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
+    "@effect/platform-bun/@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.59", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.59" } }, "sha512-fGwFJuG0Te9U/ZeqeDZ2HcSKZBhX5wLjX2/Rxb5+yaOkvvFAN9MvIh05R0QQK5DCcERvnbhHSl1CjSIAN4aEwQ=="],
+
+    "@effect/platform-node/@effect/platform-node-shared": ["@effect/platform-node-shared@4.0.0-beta.59", "", { "dependencies": { "@types/ws": "^8.18.1", "ws": "^8.20.0" }, "peerDependencies": { "effect": "^4.0.0-beta.59" } }, "sha512-fGwFJuG0Te9U/ZeqeDZ2HcSKZBhX5wLjX2/Rxb5+yaOkvvFAN9MvIh05R0QQK5DCcERvnbhHSl1CjSIAN4aEwQ=="],
 
     "@img/sharp-wasm32/@emnapi/runtime": ["@emnapi/runtime@1.8.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-mehfKSMWjjNol8659Z8KxEMrdSJDDot5SXMq00dM8BN4o+CLNXQ0xH2V7EchNHV4RmbZLmmPdEaXZc5H2FXmDg=="],
-
-    "@libsql/isomorphic-ws/ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
 
     "@tailwindcss/oxide-wasm32-wasi/@emnapi/core": ["@emnapi/core@1.8.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.1.0", "tslib": "^2.4.0" }, "bundled": true }, "sha512-AvT9QFpxK0Zd8J0jopedNm+w/2fIzvtPKPjqyw9jwvBaReTTqPBk9Hixaz7KbjimP+QNz605/XnjFcDAL2pqBg=="],
 
@@ -1487,6 +1488,8 @@
     "decamelize-keys/map-obj": ["map-obj@1.0.1", "", {}, "sha512-7N/q3lyZ+LVCp7PzuxrJr4KMbBE2hW7BT7YNia330OFxIf4d3r5zVpicP2650l7CPN6RM9zOJRl3NGpqSiw3Eg=="],
 
     "globby/ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
+
+    "happy-dom/ws": ["ws@8.19.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg=="],
 
     "libsql/detect-libc": ["detect-libc@2.0.2", "", {}, "sha512-UX6sGumvvqSaXgdKGUsgZWqcUyIXZ/vZTrlRT/iobiKhGL0zL4d3osHj3uqllWJK+i+sixDS/3COVEOFbupFyw=="],
 

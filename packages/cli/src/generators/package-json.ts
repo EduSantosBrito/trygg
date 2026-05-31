@@ -9,6 +9,7 @@ import {
   TRYGG_VERSION,
   EFFECT_VERSION,
   EFFECT_PLATFORM_BROWSER_VERSION,
+  EFFECT_PLATFORM_NODE_SHARED_VERSION,
   EFFECT_LANGUAGE_SERVICE_VERSION,
   TYPESCRIPT_VERSION,
   VITE_VERSION,
@@ -48,7 +49,7 @@ export const generatePackageJson: (
 
   const scripts: Record<string, string> = {
     dev: platform.devScript,
-    build: "vite build",
+    build: platform.buildScript,
     typecheck: "tsc --noEmit",
     lint: "oxlint .",
     "lint:fix": "oxlint . --fix",
@@ -63,12 +64,13 @@ export const generatePackageJson: (
     scripts.preview = `${runtime} dist/server.js`;
     scripts.start = `${runtime} dist/server.js`;
   } else {
-    scripts.preview = "vite preview";
+    scripts.preview = platform.previewScript;
   }
 
   const dependencies: Record<string, string> = {
     effect: EFFECT_VERSION,
     "@effect/platform-browser": EFFECT_PLATFORM_BROWSER_VERSION,
+    "@effect/platform-node-shared": EFFECT_PLATFORM_NODE_SHARED_VERSION,
     trygg: TRYGG_VERSION,
   };
 

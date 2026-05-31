@@ -4,11 +4,13 @@
  */
 import { layer, type PlatformConfigService } from "../platform-config.js";
 
-const NODE_VERSION = "^4.0.0-beta.58";
+const NODE_VERSION = "4.0.0-beta.58";
 
 const config: PlatformConfigService = {
   name: "node",
   devScript: "vite",
+  buildScript: "vite build",
+  previewScript: "vite preview",
   devDependencies: {
     "@effect/platform-node": NODE_VERSION,
   },

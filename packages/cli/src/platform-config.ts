@@ -13,6 +13,8 @@ import * as Context from "effect/Context";
 export interface PlatformConfigService {
   readonly name: "node" | "bun";
   readonly devScript: string;
+  readonly buildScript: string;
+  readonly previewScript: string;
   readonly devDependencies: Readonly<Record<string, string>>;
   readonly runtimeDependencyName: string;
   readonly runtimeVersion: string;
@@ -27,6 +29,8 @@ export class PlatformConfig extends Context.Service<
   {
     readonly name: "node" | "bun";
     readonly devScript: string;
+    readonly buildScript: string;
+    readonly previewScript: string;
     readonly devDependencies: Readonly<Record<string, string>>;
     readonly runtimeDependencyName: string;
     readonly runtimeVersion: string;
