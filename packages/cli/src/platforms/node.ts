@@ -4,7 +4,7 @@
  */
 import { layer, type PlatformConfigService } from "../platform-config.js";
 
-const NODE_VERSION = "^4.0.0-beta.51";
+const NODE_VERSION = "^4.0.0-beta.58";
 
 const config: PlatformConfigService = {
   name: "node",
