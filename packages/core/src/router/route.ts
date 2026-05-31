@@ -22,7 +22,7 @@
 import { Cause, Data, Effect, Option, Pipeable, Predicate, Schema } from "effect";
 import type * as LayerTypes from "effect/Layer";
 import * as Context from "effect/Context";
-import type { ComponentInput } from "./types.js";
+import type { ComponentInput, RouteComponentInput } from "./types.js";
 import { RenderStrategy } from "./render-strategy.js";
 import { ScrollStrategy } from "./scroll-strategy.js";
 import {
@@ -232,24 +232,24 @@ export interface RouteBuilder<
    */
   component: HasChildren extends true
     ? never
-    : (
-        c: ComponentInput,
+    : <C extends ComponentInput>(
+        c: RouteComponentInput<C>,
       ) => RouteBuilder<Path, R, true, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the layout component (renders Outlet for children).
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  layout: (
-    c: ComponentInput,
+  layout: <C extends ComponentInput>(
+    c: RouteComponentInput<C>,
   ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the loading fallback component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  loading: (
-    c: ComponentInput,
+  loading: <C extends ComponentInput>(
+    c: RouteComponentInput<C>,
   ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
@@ -257,22 +257,24 @@ export interface RouteBuilder<
    * Covers this route and all descendants — satisfies error coverage requirements.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  error: (c: ComponentInput) => RouteBuilder<Path, R, HasComponent, HasChildren, false, true>;
+  error: <C extends ComponentInput>(
+    c: RouteComponentInput<C>,
+  ) => RouteBuilder<Path, R, HasComponent, HasChildren, false, true>;
 
   /**
    * Set the not-found boundary component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  notFound: (
-    c: ComponentInput,
+  notFound: <C extends ComponentInput>(
+    c: RouteComponentInput<C>,
   ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
    * Set the forbidden boundary component.
    * Accepts a Component, Effect, or lazy loader `() => import("./page")`.
    */
-  forbidden: (
-    c: ComponentInput,
+  forbidden: <C extends ComponentInput>(
+    c: RouteComponentInput<C>,
   ) => RouteBuilder<Path, R, HasComponent, HasChildren, NeedsCoverage, HasErrorBoundary>;
 
   /**
@@ -580,7 +582,9 @@ export const make = <Path extends string>(path: Path): RouteBuilder<Path, never,
  * @public
  * @since 1.0.0
  */
-export const index = (component: ComponentInput): RouteBuilder<"__index__", never, true, false> =>
+export const index = <C extends ComponentInput>(
+  component: RouteComponentInput<C>,
+): RouteBuilder<"__index__", never, true, false> =>
   makeBuilder<"__index__", never, true, false>({
     ...emptyDefinition(IndexMarker),
     component,
@@ -847,7 +851,7 @@ export const routeRedirect = (
  * const requireAdmin = Effect.gen(function* () {
  *   const user = yield* getUser()
  *   if (!user.isAdmin) {
- *     return yield* routeForbidden()
+ *     return yield* routeForbidden
  *   }
  * })
  * ```

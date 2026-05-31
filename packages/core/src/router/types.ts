@@ -26,6 +26,7 @@ import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
 import type { NavigationPrefetchState } from "./navigation-outlet-coordination.js";
+import type { Router } from "./service.js";
 import {
   compileRoutePathPattern,
   interpolateCompiledRoutePathPattern,
@@ -141,6 +142,57 @@ export type RouteComponent<R = unknown> =
   | Component.Type<never, unknown, R>
   | Effect.Effect<Element, unknown, R>;
 
+type DirectRouteComponentRequirements<C> =
+  C extends Component.Type<never, unknown, infer R>
+    ? R
+    : C extends Effect.Effect<Element, unknown, infer R>
+      ? R
+      : never;
+
+type LoadedRouteComponentRequirements<Loaded> = Loaded extends {
+  readonly default: infer Default;
+}
+  ? RouteComponentInputRequirements<Default>
+  : RouteComponentInputRequirements<Loaded>;
+
+/**
+ * Extract service requirements from a direct route component or lazy loader.
+ * @internal
+ */
+export type RouteComponentInputRequirements<C> = C extends () => Promise<infer Loaded>
+  ? LoadedRouteComponentRequirements<Loaded>
+  : DirectRouteComponentRequirements<C>;
+
+type RouterProvidedRequirements = Scope.Scope | Router;
+
+type MissingRouteComponentRequirements<C> = Exclude<
+  RouteComponentInputRequirements<C>,
+  RouterProvidedRequirements
+>;
+
+type IsUnknown<T> = unknown extends T ? ([T] extends [unknown] ? true : false) : false;
+
+/**
+ * Branded route-definition error shown when a route component still requires services.
+ * @internal
+ */
+export interface UnprovidedRouteComponentRequirements<R> {
+  readonly "trygg/router: route component still requires services": R;
+  readonly "missing service requirements": R;
+  readonly "fix: pipe the component through Component.provide(ServiceLive) before passing it to the route definition": R;
+}
+
+/**
+ * Add a helpful branded error when a route component's requirements are not `never`.
+ * @internal
+ */
+export type RouteComponentInput<C extends ComponentInput> = C &
+  ([MissingRouteComponentRequirements<C>] extends [never]
+    ? unknown
+    : IsUnknown<MissingRouteComponentRequirements<C>> extends true
+      ? unknown
+      : UnprovidedRouteComponentRequirements<MissingRouteComponentRequirements<C>>);
+
 /**
  * Lazy loader function produced by the vite transform.
  * At build time, default imports become `.component(() => import("./page"))`,
@@ -162,7 +214,8 @@ export type RouteComponent<R = unknown> =
  * @public
  * @since 1.0.0
  */
-export type ComponentLoader = () => Promise<RouteComponent | { readonly default: unknown }>;
+export type ComponentLoader<Loaded = RouteComponent | { readonly default: unknown }> =
+  () => Promise<Loaded>;
 
 /**
  * Value stored in RouteDefinition component fields.
