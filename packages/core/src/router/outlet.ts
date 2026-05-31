@@ -281,12 +281,27 @@ export const buildTrieMatcher: (
  * - An Effect<Element>
  * @internal
  */
-const RouteComponentSchema = Schema.declare(
-  (u: unknown): u is RouteComponent => Component.isEffectComponent(u) || Effect.isEffect(u),
-  { identifier: "RouteComponent" },
-);
+const isRouteComponent = (u: unknown): u is RouteComponent =>
+  Component.isEffectComponent(u) || Effect.isEffect(u);
+
+const RouteComponentSchema = Schema.declare<RouteComponent>(isRouteComponent, {
+  identifier: "RouteComponent",
+});
+
+const LoadedRouteComponentSchema = Schema.Union([
+  RouteComponentSchema,
+  Schema.Struct({ default: RouteComponentSchema }),
+]);
 
 const decodeRouteComponent = Schema.decodeUnknownEffect(RouteComponentSchema);
+const decodeLoadedRouteComponentInput = Schema.decodeUnknownEffect(LoadedRouteComponentSchema);
+
+const decodeLoadedRouteComponent = (
+  loaded: unknown,
+): Effect.Effect<RouteComponent, unknown, never> =>
+  unsafeEraseR(decodeLoadedRouteComponentInput(loaded)).pipe(
+    Effect.map((decoded) => (isRouteComponent(decoded) ? decoded : decoded.default)),
+  );
 
 // =============================================================================
 // Lazy Component Loading
@@ -443,9 +458,9 @@ export const buildPrefetchResolver =
  * - Direct component (Component.gen or Effect): returns as-is
  * - Loader function (from vite transform): invokes loader via Effect.tryPromise
  *
- * At build time, the vite plugin transforms `.component(X)` to
- * `.component(() => import("./X"))` for Lazy routes. This function
- * detects the loader and invokes it, or passes through direct components.
+ * At build time, the vite plugin transforms default imports to module loaders
+ * and named imports to direct component loaders. This function detects the
+ * loader and invokes it, or passes through direct components.
  *
  * @internal
  */
@@ -453,13 +468,12 @@ const resolveComponent = (
   component: ComponentInput,
 ): Effect.Effect<RouteComponent, RenderLoadError, never> => {
   if (isComponentLoader(component)) {
-    // Loader function from vite transform: () => Promise<{ default: RouteComponent }>
     return Effect.tryPromise({
       try: () => component(),
       catch: (cause) => new RenderLoadError({ cause }),
     }).pipe(
-      Effect.flatMap((m) =>
-        unsafeEraseR(decodeRouteComponent(m.default)).pipe(
+      Effect.flatMap((loaded) =>
+        decodeLoadedRouteComponent(loaded).pipe(
           Effect.mapError((parseError) => new RenderLoadError({ cause: parseError })),
         ),
       ),
