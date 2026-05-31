@@ -114,7 +114,7 @@ async function render(target, fontPaths) {
       monospaceFamily: "IBM Plex Mono",
     },
     fitTo: { mode: "width", value: target.width },
-    background: "#050508",
+    background: "#f7f4ed",
   });
 
   const raster = resvg.render().asPng();
