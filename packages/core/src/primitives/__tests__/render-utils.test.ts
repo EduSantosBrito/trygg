@@ -1,7 +1,54 @@
 import { assert, describe, it } from "@effect/vitest";
-import { moveRange } from "../render-utils.js";
+import type { ElementProps } from "../element.js";
+import { moveRange, shallowPropsEqual } from "../render-utils.js";
+
+const props = (value: Record<string, unknown>): ElementProps => value as ElementProps;
 
 describe("render-utils", () => {
+  describe("shallowPropsEqual", () => {
+    it("treats the same object reference as equal", () => {
+      const p = props({ className: "row" });
+      assert.isTrue(shallowPropsEqual(p, p));
+    });
+
+    it("treats fresh objects with identical primitive values as equal", () => {
+      // The update-10th hot path: each render allocates a new props literal with
+      // the same interned className string. Structural Equal.equals paid a full
+      // hash for this; Object.is short-circuits it to "equal" so reconcile skips.
+      assert.isTrue(
+        shallowPropsEqual(props({ className: "col-md-1" }), props({ className: "col-md-1" })),
+      );
+    });
+
+    it("reports a changed primitive value", () => {
+      assert.isFalse(
+        shallowPropsEqual(props({ className: "row" }), props({ className: "row active" })),
+      );
+    });
+
+    it("reports a new function identity (handler re-bind)", () => {
+      const onClick = () => {};
+      assert.isTrue(shallowPropsEqual(props({ onClick }), props({ onClick })));
+      assert.isFalse(shallowPropsEqual(props({ onClick }), props({ onClick: () => {} })));
+    });
+
+    it("reports differing key sets", () => {
+      assert.isFalse(shallowPropsEqual(props({ className: "a" }), props({ className: "a", id: "x" })));
+      assert.isFalse(shallowPropsEqual(props({ className: "a", id: "x" }), props({ className: "a" })));
+      // Same count, different key — caught by the hasOwnProperty guard.
+      assert.isFalse(shallowPropsEqual(props({ id: "x" }), props({ className: "x" })));
+    });
+
+    it("reports a structurally-equal but freshly-allocated object prop as changed", () => {
+      // Intentional divergence from structural Equal.equals: inline object props
+      // (e.g. style literals) compare by reference, so an equal-but-fresh object
+      // re-applies. Harmless because prop application is idempotent.
+      assert.isFalse(
+        shallowPropsEqual(props({ style: { color: "red" } }), props({ style: { color: "red" } })),
+      );
+    });
+  });
+
   it("moves an inclusive DOM range before a reference node", () => {
     const parent = document.createElement("div");
     const start = document.createComment("start");

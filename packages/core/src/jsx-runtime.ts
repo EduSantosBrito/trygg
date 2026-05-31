@@ -68,8 +68,21 @@ const runJsx = (
   type: JSXElementType,
   props: Record<string, unknown> | null,
   key?: ElementKey,
-): Element =>
-  Effect.runSync(
+): Element => {
+  // Fast path: JSX construction is pure data-building, so the common
+  // intrinsic/component cases build synchronously without a fiber spin-up per
+  // node. `buildSync` returns null for the genuinely effectful cases (a Signal
+  // child, an invalid type) which fall through to the Effect path below.
+  try {
+    const built = JsxBuilder.buildSync(type, props, key);
+    if (built !== null) {
+      return built;
+    }
+  } catch {
+    // Exotic props (e.g. a throwing getter) — defer to the Effect path, which
+    // reads each prop defensively in isolation.
+  }
+  return Effect.runSync(
     JsxBuilder.build(type, props, key).pipe(
       // Preserve lazy invalid-component failures. Any other failure/defect at
       // this sync bridge is unexpected and should still surface immediately.
@@ -86,6 +99,7 @@ const runJsx = (
       ),
     ),
   );
+};
 
 /**
  * Create a JSX element

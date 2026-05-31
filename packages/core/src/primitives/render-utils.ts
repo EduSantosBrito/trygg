@@ -2,7 +2,9 @@ import { Effect, Equal, Option, Predicate } from "effect";
 import * as Context from "effect/Context";
 import * as SafeUrl from "../security/safe-url.js";
 import * as Trace from "../trace/index.js";
-import type { Element } from "./element.js";
+import type { Element, ElementProps } from "./element.js";
+
+const hasOwn = Object.prototype.hasOwnProperty;
 
 export interface BlockedSafeUrlAttribute {
   readonly key: string;
@@ -26,6 +28,43 @@ export const equalOrChanged = (left: unknown, right: unknown): boolean =>
     onNone: () => false,
     onSome: (equals) => equals,
   });
+
+/**
+ * Shallow per-key identity comparison for intrinsic prop objects.
+ *
+ * Props are fresh object literals produced by JSX on every render, so the
+ * structural {@link Equal.equals} used by {@link equalOrChanged} pays a full
+ * recursive `Hash`/structural walk over both objects only to almost always
+ * report "changed" — pure overhead on the reconcile hot path (profiled at
+ * ~8-11% of the keyed-list update window). Prop reconciliation only needs to
+ * know whether any prop *value* changed identity: a new signal/handler/string
+ * must re-bind, a same-identity value need not. `Object.is` per key answers
+ * exactly that, in linear time with no hashing.
+ *
+ * Object-valued props (e.g. an inline `style={{...}}` literal) compare by
+ * reference, so a structurally-equal but freshly-allocated object reports
+ * "changed" and is re-applied. That is harmless: prop application is idempotent.
+ *
+ * Returns `true` when every prop is identity-equal (reconcile may skip
+ * re-application), `false` when any prop differs.
+ */
+export const shallowPropsEqual = (left: ElementProps, right: ElementProps): boolean => {
+  if (left === right) return true;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  for (const key of leftKeys) {
+    if (
+      !hasOwn.call(right, key) ||
+      !Object.is(
+        (left as Record<string, unknown>)[key],
+        (right as Record<string, unknown>)[key],
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
 
 export const resolveReconcileTarget = (
   element: Element,

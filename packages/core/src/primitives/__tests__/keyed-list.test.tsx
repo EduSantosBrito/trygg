@@ -454,6 +454,59 @@ describe("KeyedList stable-order updates", () => {
     }),
   );
 
+  effect("rerenders a changed row in place, preserving the row's DOM node identity", () =>
+    Effect.gen(function* () {
+      // A same-key row whose value changed but whose rendered structure is still
+      // static->static must be reconciled in place (text/props patched on the
+      // existing nodes), NOT torn down and rebuilt. Preserving node identity is
+      // what keeps "update every Nth row" from replacing whole <tr> subtrees
+      // (super-linear paint/script); this is the contract the keyed-list reconcile
+      // fast-path guards.
+      const items = yield* Signal.make<
+        ReadonlyArray<{ readonly id: string; readonly label: string }>
+      >([
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Bravo" },
+      ]);
+
+      const { container } = yield* render(
+        <div>
+          {Signal.each(
+            items,
+            (item) => (
+              <div data-id={item.id} className="row">
+                <span>{item.label}</span>
+              </div>
+            ),
+            { key: (item) => item.id },
+          )}
+        </div>,
+      );
+
+      const rowB = container.querySelector('[data-id="b"]');
+      const spanB = rowB?.querySelector("span") ?? null;
+      assert.isNotNull(rowB);
+      assert.isNotNull(spanB);
+      assert.strictEqual(rowB?.textContent, "Bravo");
+
+      // Same key + same structure, only the label text changes (new object identity).
+      yield* Signal.set(items, [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Bravo 2" },
+      ]);
+      yield* Effect.yieldNow;
+
+      // The reconcile fast-path patches the text node in place: the <div data-id="b">
+      // AND its inner <span> are the SAME element instances, not a freshly built and
+      // swapped subtree.
+      assert.strictEqual(container.querySelector('[data-id="b"]'), rowB);
+      assert.strictEqual(rowB?.querySelector("span"), spanB);
+      assert.strictEqual(rowB?.textContent, "Bravo 2");
+      // The untouched row stays intact too.
+      assert.strictEqual(container.querySelector('[data-id="a"]')?.textContent, "Alpha");
+    }),
+  );
+
   effect("should converge to source order under rapid filter toggles", () =>
     Effect.gen(function* () {
       interface Item {

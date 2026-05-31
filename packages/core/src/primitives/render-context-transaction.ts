@@ -66,6 +66,19 @@ export const makeRenderContextTransaction = (): RenderContextTransactionShape =>
   };
 };
 
+/**
+ * Shared, stateless render-context transaction.
+ *
+ * @remarks
+ * Every method takes its state via parameters and closes over nothing, so a
+ * single module-level instance is safe to reuse across all renders. Reusing it
+ * avoids allocating a fresh transaction object (and its three closures) on every
+ * intrinsic's prop application — a per-element cost on the render hot path. The
+ * `makeRenderContextTransaction` factory is retained for the layer constructor.
+ */
+export const sharedRenderContextTransaction: RenderContextTransactionShape =
+  makeRenderContextTransaction();
+
 export class RenderContextTransaction extends Context.Service<
   RenderContextTransaction,
   {

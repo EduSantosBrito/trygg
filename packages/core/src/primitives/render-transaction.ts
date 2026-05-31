@@ -148,6 +148,18 @@ export const makeRenderTransaction = (): RenderTransactionShape => {
   };
 };
 
+/**
+ * Process-wide shared transaction helper.
+ *
+ * `makeRenderTransaction` captures no per-instance state — every returned
+ * closure references only its arguments and module-level constants — so one
+ * instance is safe to reuse across all renders. Hot render paths use this
+ * directly instead of allocating a fresh object (and three `Effect.fnUntraced`
+ * closures) per host element. `RenderTransaction.layer` already shared a single
+ * instance per layer; this extends that sharing to the non-service call sites.
+ */
+export const sharedRenderTransaction: RenderTransactionShape = makeRenderTransaction();
+
 export class RenderTransaction extends Context.Service<
   RenderTransaction,
   {

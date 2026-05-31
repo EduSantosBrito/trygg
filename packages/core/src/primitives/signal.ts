@@ -26,7 +26,6 @@ import {
   Ref,
   Schema,
   Scope,
-  SubscriptionRef,
 } from "effect";
 import * as Context from "effect/Context";
 import * as Metrics from "../debug/metrics.js";
@@ -193,7 +192,7 @@ export type SignalListener = () => Effect.Effect<void, unknown>;
  */
 export interface Signal<A> {
   readonly _tag: "Signal";
-  readonly _ref: SubscriptionRef.SubscriptionRef<A>;
+  readonly _cell: SignalCell<A>;
   /** Sync listeners for immediate change notifications */
   readonly _listeners: Set<SignalListener>;
   /** Debug ID for tracing */
@@ -205,12 +204,29 @@ export interface Signal<A> {
 }
 
 class SignalImpl<A> extends Data.TaggedClass("Signal")<{
-  readonly _ref: SubscriptionRef.SubscriptionRef<A>;
+  readonly _cell: SignalCell<A>;
   readonly _listeners: Set<SignalListener>;
   readonly _debugId: string;
   readonly _owner: SignalOwner;
   readonly _disposed: Ref.Ref<boolean>;
 }> {}
+
+/**
+ * Internal mutable value cell backing a {@link Signal}.
+ *
+ * @remarks
+ * A signal stores its current value in this one-field mutable box rather than an
+ * Effect `SubscriptionRef`. Change notification is driven directly by the
+ * signal's own `_listeners` set — the `SubscriptionRef.changes` stream was never
+ * consumed anywhere — so the PubSub/replay/semaphore/scope apparatus a
+ * `SubscriptionRef` allocates per signal was pure overhead on the create and
+ * dispose hot paths. The box reference is stable across value mutations, so the
+ * owning signal's `Data` identity hash stays constant.
+ * @internal
+ */
+interface SignalCell<A> {
+  value: A;
+}
 
 /**
  * Internal signal storage type.
@@ -244,10 +260,16 @@ declare global {
  * @internal
  */
 export interface RenderPhase {
-  /** Current signal index (for position-based identity like React hooks) */
-  readonly signalIndex: Ref.Ref<number>;
-  /** Array of signals created in this component */
-  readonly signals: Ref.Ref<Array<AnySignal>>;
+  /**
+   * Current signal index (for position-based identity like React hooks).
+   *
+   * A plain mutable field, not a `Ref` — a render phase is owned by a single
+   * render fiber and accessed synchronously, so the concurrency-safe semantics
+   * of `Ref` are never needed and only add per-render runtime overhead.
+   */
+  signalIndex: number;
+  /** Signals created in this component, in creation order (mutated in place). */
+  readonly signals: Array<AnySignal>;
   /** Set of signals accessed during this render (for subscriptions) */
   readonly accessed: Set<AnySignal>;
 }
@@ -342,6 +364,23 @@ export const CurrentSignalOwner: Context.Reference<SignalOwner> =
   ));
 
 /**
+ * Synchronous RenderPhase allocation for framework-internal fast paths.
+ *
+ * @remarks
+ * Allocates a fresh render phase directly, skipping the `Effect.sync` fiber
+ * dispatch that {@link makeRenderPhase} performs. For hot render paths (keyed-list
+ * per-row create) where the phase is consumed synchronously by the same render
+ * fiber. Outside those invariants use {@link makeRenderPhase}.
+ *
+ * @internal
+ */
+export const makeRenderPhaseUnsafe = (): RenderPhase => ({
+  signalIndex: 0,
+  signals: [],
+  accessed: new Set<AnySignal>(),
+});
+
+/**
  * Create a new RenderPhase for a component.
  *
  * @remarks
@@ -350,12 +389,7 @@ export const CurrentSignalOwner: Context.Reference<SignalOwner> =
  * @since 1.0.0
  * @internal
  */
-export const makeRenderPhase: Effect.Effect<RenderPhase> = Effect.gen(function* () {
-  const signalIndex = yield* Ref.make(0);
-  const signals = yield* Ref.make<Array<AnySignal>>([]);
-  const accessed = new Set<AnySignal>();
-  return { signalIndex, signals, accessed } satisfies RenderPhase;
-});
+export const makeRenderPhase: Effect.Effect<RenderPhase> = Effect.sync(makeRenderPhaseUnsafe);
 
 /**
  * Reset render phase for re-render (keeps signals, resets index).
@@ -366,10 +400,11 @@ export const makeRenderPhase: Effect.Effect<RenderPhase> = Effect.gen(function* 
  * @since 1.0.0
  * @internal
  */
-export const resetRenderPhase = Effect.fnUntraced(function* (phase: RenderPhase) {
-  yield* Ref.set(phase.signalIndex, 0);
-  phase.accessed.clear();
-});
+export const resetRenderPhase = (phase: RenderPhase): Effect.Effect<void> =>
+  Effect.sync(() => {
+    phase.signalIndex = 0;
+    phase.accessed.clear();
+  });
 
 const disposeSignal: <A>(signal: Signal<A>) => Effect.Effect<void> = Effect.fnUntraced(function* <
   A,
@@ -398,11 +433,11 @@ const makeOwnedSignal: <A>(
   ownerScope: Scope.Scope,
   component: string,
 ) {
-  const ref = yield* SubscriptionRef.make(initial);
+  const cell: SignalCell<A> = { value: initial };
   const disposed = yield* Ref.make(false);
   const debugId = Ids.nextSignalId();
   const signal: Signal<A> = new SignalImpl({
-    _ref: ref,
+    _cell: cell,
     _listeners: new Set(),
     _debugId: debugId,
     _owner: owner,
@@ -517,10 +552,10 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>, SignalScopeError>
     }
 
     // In component render - use position-based identity
-    const index = yield* Ref.get(phase.signalIndex);
-    yield* Ref.update(phase.signalIndex, (n) => n + 1);
+    const index = phase.signalIndex;
+    phase.signalIndex += 1;
 
-    const signals = yield* Ref.get(phase.signals);
+    const signals = phase.signals;
 
     let signal: Signal<A>;
     const existing = signals[index];
@@ -538,7 +573,7 @@ export const make: <A>(initial: A) => Effect.Effect<Signal<A>, SignalScopeError>
     } else {
       // First render - create new signal owned by the component scope.
       signal = yield* makeOwnedSignal(initial, ownerScope.owner, ownerScope.scope, "new");
-      yield* Ref.update(phase.signals, (arr) => [...arr, signal]);
+      phase.signals.push(signal);
     }
 
     // Note: We do NOT add to phase.accessed here.
@@ -592,7 +627,7 @@ export const get: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fnUntraced
       trigger: "component subscription",
     }));
   }
-  return yield* SubscriptionRef.get(signal._ref);
+  return signal._cell.value;
 });
 
 /**
@@ -625,7 +660,7 @@ export const peek: <A>(signal: Signal<A>) => Effect.Effect<A> = Effect.fnUntrace
   if (!disposed) {
     yield* Trace.emit("signal.peek", () => ({ signal_id: signal._debugId }));
   }
-  return yield* SubscriptionRef.get(signal._ref);
+  return signal._cell.value;
 });
 
 /**
@@ -649,7 +684,7 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
     const disposed = yield* recordDisposedAccess(signal, "set");
     if (disposed) return;
 
-    const prevValue = yield* SubscriptionRef.get(signal._ref);
+    const prevValue = signal._cell.value;
 
     // Skip update if value is unchanged (prevents unnecessary re-renders)
     if (yield* valuesEqual(prevValue, value)) {
@@ -661,7 +696,7 @@ export const set: <A>(signal: Signal<A>, value: A) => Effect.Effect<void> = Effe
       return;
     }
 
-    yield* SubscriptionRef.set(signal._ref, value);
+    signal._cell.value = value;
     yield* Trace.emit("signal.set", () => ({
       signal_id: signal._debugId,
       prev_value: prevValue,
@@ -694,7 +729,7 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
     const disposed = yield* recordDisposedAccess(signal, "update");
     if (disposed) return;
 
-    const prevValue = yield* SubscriptionRef.get(signal._ref);
+    const prevValue = signal._cell.value;
     const newValue = f(prevValue);
 
     // Skip update if value is unchanged (prevents unnecessary re-renders)
@@ -707,7 +742,7 @@ export const update: <A>(signal: Signal<A>, f: (a: A) => A) => Effect.Effect<voi
       return;
     }
 
-    yield* SubscriptionRef.set(signal._ref, newValue);
+    signal._cell.value = newValue;
     yield* Trace.emit("signal.update", () => ({
       signal_id: signal._debugId,
       prev_value: prevValue,
@@ -738,12 +773,13 @@ export const modify: <A, B>(signal: Signal<A>, f: (a: A) => readonly [B, A]) => 
   Effect.fn("Signal.modify")(function* <A, B>(signal: Signal<A>, f: (a: A) => readonly [B, A]) {
     const disposed = yield* recordDisposedAccess(signal, "modify");
     if (disposed) {
-      const current = yield* SubscriptionRef.get(signal._ref);
+      const current = signal._cell.value;
       const [result] = f(current);
       return result;
     }
 
-    const result = yield* SubscriptionRef.modify(signal._ref, f);
+    const [result, newValue] = f(signal._cell.value);
+    signal._cell.value = newValue;
     yield* notifyListeners(signal);
     return result;
   });
@@ -923,7 +959,7 @@ const selectorWithProject: <A, B>(
       yield* Scope.addFinalizer(scope, removeEntry(entry));
 
       return output;
-    }).pipe(Effect.withSpan("Signal.selector.select"));
+    });
   }
 
   return select;
@@ -1289,6 +1325,42 @@ export const subscribe: <A>(
     ),
   );
 });
+
+/**
+ * Synchronous value snapshot for framework-internal fast paths.
+ *
+ * @remarks
+ * Reads the backing cell directly, skipping the disposed-access recording that
+ * {@link peek} performs. Callers MUST hold a live signal: either building its
+ * owner's DOM (the owner scope is open), or running inside a change
+ * notification (disposal clears `_listeners`, so a subscribed callback can
+ * never observe a disposed signal). Outside those invariants use {@link peek}.
+ *
+ * @internal
+ */
+export const peekValueUnsafe = <A>(signal: Signal<A>): A => signal._cell.value;
+
+/**
+ * Synchronous subscription for framework-internal fast paths.
+ *
+ * @remarks
+ * Adds the listener directly and returns a synchronous unsubscribe. Equivalent
+ * to {@link subscribe} minus the `signal.subscribe`/`signal.unsubscribe` trace
+ * emissions — for hot render paths (synchronous intrinsic builds) that install
+ * attribute bindings without an Effect dispatch. The listener is still an
+ * Effect-returning callback invoked by `notifyListeners` on change.
+ *
+ * @internal
+ */
+export const subscribeUnsafe = <A>(
+  signal: Signal<A>,
+  listener: SignalListener,
+): (() => void) => {
+  signal._listeners.add(listener);
+  return () => {
+    signal._listeners.delete(listener);
+  };
+};
 
 // =============================================================================
 // Signal.suspend - Component suspension with async state tracking

@@ -656,6 +656,24 @@ export const enableDocumentMount: Effect.Effect<void> = setFiberRef(IsDocumentMo
  */
 export const DOCUMENT_TAGS: ReadonlySet<string> = new Set(["html", "head", "body"]);
 
+/**
+ * Synchronous guard: `true` only for tags that could ever produce a hoist
+ * action (head-hoistable tags, or document-shell tags during a document mount).
+ *
+ * @remarks
+ * For any tag outside `HOISTABLE_TAGS ∪ DOCUMENT_TAGS`, `makeHeadHoist().maybeHoist`
+ * provably returns `Option.none()` regardless of fiber-ref state — the
+ * `!HOISTABLE_TAGS.has(tag)` branch short-circuits before either ref is read.
+ * Renderers use this to skip allocating the hoist closure and running its
+ * `Effect.gen` (two fiber-ref reads + option allocation) on every plain element
+ * such as `<div>`/`<tr>`/`<td>`, which is the overwhelming common case.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export const isHoistCandidate = (tag: string): boolean =>
+  HOISTABLE_TAGS.has(tag) || DOCUMENT_TAGS.has(tag);
+
 // =============================================================================
 // Layers
 // =============================================================================

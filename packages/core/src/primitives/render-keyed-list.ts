@@ -5,7 +5,7 @@ import * as Signal from "./signal.js";
 import * as Trace from "../trace/index.js";
 import { moveRange } from "./render-utils.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
-import { makeRenderTransaction } from "./render-transaction.js";
+import { sharedRenderTransaction } from "./render-transaction.js";
 import { unsafeWidenContext } from "../internal/unsafe.js";
 
 interface RenderOptions {
@@ -25,6 +25,12 @@ interface RenderKeyedListDeps<E, R> {
     context: Context.Context<unknown> | null,
     options: RenderOptions,
   ) => Effect.Effect<RenderResult, E, R>;
+  readonly renderElementSync: (
+    element: Element,
+    parent: Node,
+    renderContext: RenderContext,
+    context: Context.Context<unknown> | null,
+  ) => RenderResult | null;
   readonly runForkInRenderContext: <E2, R2>(
     effect: Effect.Effect<void, E2, R2>,
     renderContext: RenderContext,
@@ -85,7 +91,7 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
   // Create anchor comment for the list
   const anchor = document.createComment("keyed-list");
   parent.appendChild(anchor);
-  const renderTransaction = makeRenderTransaction();
+  const renderTransaction = sharedRenderTransaction;
 
   // Track item states by key
   type ItemState = {
@@ -116,7 +122,71 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
   let isUpdating = false;
   let pendingUpdate = false;
 
-  // Helper to render a single item with a stable render phase
+  // Runs the user render function for `item` under `renderPhase` and returns the
+  // normalized element WITHOUT building DOM or providing a scope. Shared by the
+  // create/replace path (`renderItem`) and the in-place reconcile fast-path
+  // (`scheduleItemRerender`) so the render function executes exactly once per
+  // (re)render. The phase wraps only the user render — `renderElement`/reconcile
+  // observe the default (null) phase — so `renderPhase.accessed` (and thus the
+  // item's subscription set) is unchanged from rendering inline.
+  // `Effect.fnUntraced` (no span) — the idiomatic way to express a generator-based
+  // Effect helper; the create/re-render fibers `yield*` it like any other Effect.
+  const runRenderFn = Effect.fnUntraced(function* (
+    item: T,
+    index: number,
+    renderPhase: Signal.RenderPhase,
+  ) {
+    const renderEffect = deps.provideRenderContext(renderFn(item, index), runtime, context);
+    const element = yield* Effect.provideService(
+      renderEffect,
+      Signal.CurrentRenderPhase,
+      renderPhase,
+    );
+    // Fast path: a render function almost always returns an already-normalized
+    // `Element` (the common JSX case), which `fromUnknownSync` resolves without
+    // spinning a fiber; only a `Signal`-valued result (null) needs the effectful
+    // `fromUnknown`.
+    const syncNormalized = Element.fromUnknownSync(element);
+    return syncNormalized !== null ? syncNormalized : yield* Element.fromUnknown(element);
+  });
+
+  // Builds the DOM range [startMarker, content, endMarker] for an already-
+  // normalized element, appending it to the list parent. Does NOT provide the item
+  // scope — the caller wraps the whole render unit in one `Scope.provide(itemScope)`
+  // so the create path stays a single per-row fiber-context clone.
+  // `Effect.fnUntraced` (no span) — idiomatic generator Effect helper.
+  const buildItemDom = Effect.fnUntraced(function* (
+    normalizedElement: Element,
+    parentOverride?: Node,
+  ) {
+    const listParent = parentOverride ?? anchor.parentNode ?? parent;
+
+    // Insert start marker before rendering so content appears after it
+    const startMarker = document.createComment("item-start");
+    listParent.appendChild(startMarker);
+
+    // Synchronous fast path: a fully-static row subtree builds inline, skipping a
+    // per-row `renderElement` Effect dispatch (one `Effect.sync` primitive
+    // allocation + one run-loop step saved for every row of the create/replace/
+    // append cluster). `renderElementSync` returns `null` for rows that need the
+    // effectful renderer (signal/component/keyed children), which fall back to the
+    // original `yield* renderElement` path.
+    const syncResult = deps.renderElementSync(normalizedElement, listParent, runtime, context);
+    const result =
+      syncResult !== null
+        ? syncResult
+        : yield* deps.renderElement(normalizedElement, listParent, runtime, context, options);
+
+    // Insert end marker after content - ensures moveRange captures full Fragment range
+    const endMarker = document.createComment("item-end");
+    listParent.appendChild(endMarker);
+
+    return { result, startMarker, endMarker };
+  });
+
+  // Helper to render a single item with a stable render phase. `Effect.fnUntraced`
+  // (no span) — the Scope-provided inner `Effect.gen` is the only extra Effect
+  // boundary the run loop drives per row.
   const renderItem = Effect.fnUntraced(function* (
     item: T,
     index: number,
@@ -125,39 +195,35 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
     parentOverride?: Node,
   ) {
     // Use existing phase or create new one
-    const renderPhase = existingPhase ?? (yield* Signal.makeRenderPhase);
+    const renderPhase = existingPhase ?? Signal.makeRenderPhaseUnsafe();
 
     if (existingPhase !== null) {
       // Reset for re-render
       yield* Signal.resetRenderPhase(renderPhase);
     }
 
-    // Execute render function with render phase context and parent context
-    const renderEffect = deps.provideRenderContext(renderFn(item, index), runtime, context);
-
-    const element = yield* Effect.provideService(
-      renderEffect,
-      Signal.CurrentRenderPhase,
-      renderPhase,
-    ).pipe(Scope.provide(itemScope));
-
-    const listParent = parentOverride ?? anchor.parentNode ?? parent;
-
-    // Insert start marker before rendering so content appears after it
-    const startMarker = document.createComment("item-start");
-    listParent.appendChild(startMarker);
-
-    // Render into list parent (content appended after startMarker)
-    const normalizedElement = yield* Element.fromUnknown(element);
-    const result = yield* deps
-      .renderElement(normalizedElement, listParent, runtime, context, options)
-      .pipe(Scope.provide(itemScope));
-
-    // Insert end marker after content - ensures moveRange captures full Fragment range
-    const endMarker = document.createComment("item-end");
-    listParent.appendChild(endMarker);
-
-    return { renderPhase, result, startMarker, endMarker };
+    // One outer `Scope.provide(itemScope)` covers both the user render and the
+    // subsequent `renderElement`, eliminating the redundant second `Scope.provide`
+    // (one fewer per-row fiber-context Map clone). The phase stays render-only:
+    // `runRenderFn`'s inner `provideService(CurrentRenderPhase, renderPhase)` wraps
+    // only the user render and restores the prior context before `buildItemDom`
+    // runs, so `renderElement` observes the default (null) phase — keeping
+    // `renderPhase.accessed` (and thus the item's subscription set) unchanged.
+    return yield* Effect.gen(function* () {
+      const normalizedElement = yield* runRenderFn(item, index, renderPhase);
+      const { result, startMarker, endMarker } = yield* buildItemDom(
+        normalizedElement,
+        parentOverride,
+      );
+      return { renderPhase, result, startMarker, endMarker };
+    }).pipe(
+      Scope.provide(itemScope),
+      // Close the forked item scope if the render fails (the only failure-prone
+      // work — `runRenderFn` + `buildItemDom` — lives inside the gen above; the
+      // preceding phase setup is synchronous/infallible). Folded in here so the
+      // create call site can `yield*`-delegate `renderItem` directly.
+      Effect.onError(() => Scope.close(itemScope, Exit.void)),
+    );
   });
 
   const currentStatesInDomOrder = (): Array<ItemState> => {
@@ -181,28 +247,44 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
     return states;
   };
 
-  const detachContiguousItemRange = (states: ReadonlyArray<ItemState>): void => {
+  // Detach the whole contiguous marker..node range off-document in ONE pass and
+  // report whether it ran. Returns `true` when the range was extracted (so the
+  // caller can skip the now-redundant per-row .remove() calls), `false` when the
+  // range could not be formed (markers no longer share the list parent) and the
+  // caller must fall back to per-row removal.
+  const detachContiguousItemRange = (states: ReadonlyArray<ItemState>): boolean => {
     const listParent = anchor.parentNode;
-    if (listParent === null || states.length === 0) return;
+    if (listParent === null || states.length === 0) return false;
 
     for (const state of states) {
       if (
         state.startMarker.parentNode !== listParent ||
         state.endMarker.parentNode !== listParent
       ) {
-        return;
+        return false;
       }
     }
 
     const firstState = states[0];
     const lastState = states[states.length - 1];
-    if (firstState === undefined || lastState === undefined) return;
+    if (firstState === undefined || lastState === undefined) return false;
 
     const range = document.createRange();
     range.setStartBefore(firstState.startMarker);
     range.setEndAfter(lastState.endMarker);
+    // extractContents (not deleteContents): the goal is to pull the whole range
+    // off the live list parent in ONE pass WITHOUT a per-row live removal — per-row
+    // removal of <tr>s from a connected <tbody> is the super-linear-in-the-layout-
+    // engine path the "batches full clear before per-row cleanup touches a live
+    // table" perf contract guards against. extractContents reparents the range into
+    // a throwaway fragment without touching the live parent per child; the fragment
+    // is discarded. Crucially, callers then SKIP the per-row .remove()/marker.remove
+    // entirely (see the full-clear teardown) — those nodes are already off-document
+    // inside the discarded fragment — so the fragment never pays a second per-row
+    // detach. Per-row cleanup still runs via the retained StaticBuilt refs.
     range.extractContents();
     range.detach();
+    return true;
   };
 
   /**
@@ -262,7 +344,6 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
   // Note: updateList is sync because it's called from signal listener,
   // but it immediately forks an Effect for the actual work.
   function updateList(
-    preventSchedulerYield = false,
     forkContext: Context.Context<unknown> | null = null,
   ): void {
     if (isUnmounted) return;
@@ -272,7 +353,6 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
       return;
     }
 
-    const shouldPreventSchedulerYield = preventSchedulerYield || keyOrder.length === 0;
     isUpdating = true;
 
     const updateEffect = Effect.scoped(
@@ -332,11 +412,51 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
           }
         }
 
-        if (removedItems.length === keyOrder.length) {
+        // Full clear: pull the entire row range off-document in ONE range
+        // extraction. `detached` then lets the per-row teardown below skip the
+        // now-redundant root/marker `.remove()` calls — those nodes already live in
+        // the discarded fragment, so re-removing them is pure waste.
+        const detached =
+          removedItems.length === keyOrder.length &&
           detachContiguousItemRange(removedItems.map((item) => item.state));
-        }
 
-        for (const { key, state } of removedItems) {
+        // Synchronous batch teardown. A removed row whose render result exposes a
+        // sync cleanup core (the static fast-path) and holds no keyed-list-level
+        // subscriptions is torn down entirely in plain JS — cleanup, marker
+        // removal, scope close — inside ONE Effect.sync, instead of driving ~4
+        // primitives per row through the runLoop (the renderTransaction.cleanup
+        // wrapper alone is an fnUntraced suspend + a trace + a context-provide).
+        // This is the teardown analog of the static-build fast-path and the
+        // dominant cost on the keyed-list clear op. Rows with effectful cleanup or
+        // live subscriptions fall back to the per-row effectful path. Scope.close
+        // for a fast-path item scope runs a single reciprocal parent-unregister
+        // finalizer (Scope.closeUnsafe returns it as one cheap Sync); collect and
+        // run those after the sync pass. Exactly one keyedList.item.remove per
+        // removed row is preserved (perf-contract), in removedItems order.
+        const slowRemovals: Array<{ key: string | number; state: ItemState }> = [];
+        const reciprocalCloses: Array<Effect.Effect<void>> = [];
+        yield* Effect.sync(() => {
+          for (const removal of removedItems) {
+            const { key, state } = removal;
+            const cleanupSync = state.result.cleanupSync;
+            if (cleanupSync !== undefined && state.subscriptions.size === 0) {
+              cleanupSync(detached);
+              if (!detached) {
+                state.startMarker.remove();
+                state.endMarker.remove();
+              }
+              const close = Scope.closeUnsafe(state.scope, Exit.void);
+              if (close !== undefined) reciprocalCloses.push(close);
+              itemStates.delete(key);
+            } else {
+              slowRemovals.push(removal);
+            }
+          }
+        });
+        for (const close of reciprocalCloses) {
+          yield* close;
+        }
+        for (const { key, state } of slowRemovals) {
           // Clean up subscriptions
           for (const [, unsubscribe] of state.subscriptions) {
             yield* unsubscribe;
@@ -347,6 +467,8 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
           state.endMarker.remove();
           yield* Scope.close(state.scope, Exit.void);
           itemStates.delete(key);
+        }
+        for (const { key } of removedItems) {
           yield* Trace.emit("keyedList.item.remove", () => ({ key }));
         }
 
@@ -406,15 +528,19 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
               needsRerender,
             });
           } else {
-            // New item - create new state
-            const itemScope = yield* Scope.fork(listScope);
+            // New item - create new state. Fork the item scope synchronously
+            // (Scope.fork === sync(() => Scope.forkUnsafe(...)); forking unsafely
+            // here skips one run-loop Effect.sync step per row with identical
+            // parent/child finalizer wiring). The create-path error boundary below
+            // still closes + detaches it on failure.
+            const itemScope = Scope.forkUnsafe(listScope);
             const { renderPhase, result, startMarker, endMarker } = yield* renderItem(
               item,
               i,
               null,
               itemScope,
               stagedParent,
-            ).pipe(Effect.onError(() => Scope.close(itemScope, Exit.void)));
+            );
 
             // Set up subscriptions for this item's accessed signals.
             // scheduleItemRerender returns lightweight Effect.sync to avoid blocking
@@ -440,41 +566,64 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
                 deps.runForkInRenderContext(
                   Effect.scoped(
                     Effect.gen(function* () {
-                      // Re-render with same phase (preserves signals).
-                      // renderItem appends [startMarker, content, endMarker] to listParent.
-                      // We then move the new nodes before the old startMarker and
-                      // clean up the old range to preserve DOM order.
+                      // Re-render with the same phase (preserves signals). First
+                      // try an in-place reconcile: re-run the render fn for the new
+                      // value and ask the existing result to patch its own DOM
+                      // (changed text/props on the SAME nodes). On success we touch
+                      // only what changed — no new subtree, no teardown, node identity
+                      // preserved (the update-row hot path: 100 immutable-row updates
+                      // become 100 text-data writes instead of 100 subtree rebuilds).
+                      // On structural divergence the reconcile returns false and we
+                      // fall back to building a fresh subtree from the SAME already-
+                      // rendered element (the render fn runs exactly once) and swap.
                       const oldStartMarker = currentState.startMarker;
                       const oldEndMarker = currentState.endMarker;
 
-                      // Track new nodes for cleanup on error
+                      // Track new nodes for cleanup on error (set only on the replace
+                      // fallback; the reconcile path creates no new DOM).
                       let newResult: RenderResult | null = null;
                       let newStartMarker: Comment | null = null;
                       let newEndMarker: Comment | null = null;
 
                       yield* Effect.gen(function* () {
-                        const rendered = yield* renderItem(
-                          currentState.item,
-                          currentState.currentIndex,
-                          currentState.renderPhase,
-                          currentState.scope,
-                        );
-                        newResult = rendered.result;
-                        newStartMarker = rendered.startMarker;
-                        newEndMarker = rendered.endMarker;
+                        const reconcile = currentState.result.reconcile;
+                        // Run the render fn once under the item's own scope, then
+                        // either reconcile in place or build a replacement subtree.
+                        const outcome = yield* Effect.gen(function* () {
+                          yield* Signal.resetRenderPhase(currentState.renderPhase);
+                          const normalizedElement = yield* runRenderFn(
+                            currentState.item,
+                            currentState.currentIndex,
+                            currentState.renderPhase,
+                          );
+                          if (reconcile !== undefined) {
+                            const patched = yield* reconcile(normalizedElement, context);
+                            if (patched) return { reconciled: true as const };
+                          }
+                          const built = yield* buildItemDom(normalizedElement);
+                          return { reconciled: false as const, built };
+                        }).pipe(Scope.provide(currentState.scope));
 
-                        // Move new range [newStartMarker..newEndMarker] before old start
-                        moveRange(newStartMarker, newEndMarker, oldStartMarker);
+                        if (!outcome.reconciled) {
+                          newResult = outcome.built.result;
+                          newStartMarker = outcome.built.startMarker;
+                          newEndMarker = outcome.built.endMarker;
 
-                        // Clean up old render (removes old content)
-                        yield* renderTransaction.cleanup(currentState.result);
-                        oldStartMarker.remove();
-                        oldEndMarker.remove();
+                          // Move new range [newStartMarker..newEndMarker] before old start
+                          moveRange(newStartMarker, newEndMarker, oldStartMarker);
 
-                        // Update state
-                        currentState.result = newResult;
-                        currentState.startMarker = newStartMarker;
-                        currentState.endMarker = newEndMarker;
+                          // Clean up old render (removes old content)
+                          yield* renderTransaction.cleanup(currentState.result);
+                          oldStartMarker.remove();
+                          oldEndMarker.remove();
+
+                          // Update state
+                          currentState.result = newResult;
+                          currentState.startMarker = newStartMarker;
+                          currentState.endMarker = newEndMarker;
+                        }
+                        // Reconcile success leaves markers, scope and result in place —
+                        // only changed text/props/listeners on the existing nodes moved.
 
                         // Check if another re-render was requested during this render
                         const needsAnotherRender = currentState.pendingRerender;
@@ -541,8 +690,15 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
               scheduleRerender: scheduleItemRerender,
             };
 
-            // Initial subscription setup
-            yield* diffSubscriptions(key, state, renderPhase.accessed, scheduleItemRerender);
+            // Initial subscription setup. On the create path `state.subscriptions`
+            // is freshly empty (line above), so when the render read no signals
+            // (`accessed` empty) diffSubscriptions would only swap one empty Map for
+            // another — skip the fiber spin entirely. The re-render call site keeps
+            // calling unconditionally: there `subscriptions` may hold stale entries
+            // that must be unsubscribed even when the new render reads nothing.
+            if (renderPhase.accessed.size > 0) {
+              yield* diffSubscriptions(key, state, renderPhase.accessed, scheduleItemRerender);
+            }
 
             itemStates.set(key, state);
             newItemStates.push({
@@ -686,20 +842,27 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
         ? runtime
         : { ...runtime, services: Context.merge(runtime.services, forkContext) };
 
+    // Structural reconcile passes (create / replace / append / reorder / remove)
+    // are a single synchronous compute+DOM unit. Run the forked update fiber under
+    // Scheduler.PreventSchedulerYield so it completes in one macrotask instead of
+    // injecting cooperative setTimeout(0) yields — each Chrome-clamped to ~4.5ms of
+    // pure main-thread idle — once op-count crosses MaxOpsBeforeYield. Granular
+    // per-item re-renders fork separately (scheduleItemRerender) and keep cooperative
+    // scheduling, so interactive single-row updates are unaffected.
     deps.runForkInRenderContext(updateEffect, forkRuntime, context, {
-      preventSchedulerYield: shouldPreventSchedulerYield,
+      preventSchedulerYield: true,
     });
   }
 
-  // Initial render: bulk create must not yield through the browser scheduler.
-  yield* Effect.sync(() => updateList(true));
+  // Initial render.
+  yield* Effect.sync(() => updateList());
 
   // Subscribe to source signal changes. Capture the listener fiber context so
   // verifier annotations such as Trace.withAction follow the forked update.
   const unsubscribeSource = yield* Signal.subscribe(source, () =>
     Effect.gen(function* () {
       const forkContext = yield* Effect.context<never>();
-      updateList(false, unsafeWidenContext(forkContext));
+      updateList(unsafeWidenContext(forkContext));
     }),
   );
 

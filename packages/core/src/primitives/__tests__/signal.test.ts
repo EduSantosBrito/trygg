@@ -2,7 +2,8 @@
  * Signal Unit Tests
  *
  * Signal is the core reactive primitive of trygg.
- * Built on SubscriptionRef with sync callbacks for fine-grained reactivity.
+ * Built on a lightweight mutable value cell with sync listener callbacks for
+ * fine-grained reactivity.
  *
  * Test Categories:
  * - Creation: make, sync
@@ -118,7 +119,7 @@ describe("Signal.make", () => {
 
       const signal = yield* withRenderPhase(Signal.make(100), phase);
 
-      const signals = yield* Ref.get(phase.signals);
+      const signals = phase.signals;
       assert.strictEqual(signals.length, 1);
       assert.strictEqual(signals[0], signal);
     }),
@@ -978,8 +979,8 @@ describe("RenderPhase", () => {
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
-      const index = yield* Ref.get(phase.signalIndex);
-      const signals = yield* Ref.get(phase.signals);
+      const index = phase.signalIndex;
+      const signals = phase.signals;
 
       assert.strictEqual(index, 0);
       assert.deepStrictEqual(signals, []);
@@ -991,17 +992,17 @@ describe("RenderPhase", () => {
     Effect.gen(function* () {
       const phase = yield* Signal.makeRenderPhase;
 
-      yield* Ref.set(phase.signalIndex, 5);
+      phase.signalIndex = 5;
       const signal = yield* Signal.make(1);
       phase.accessed.add(signal);
 
       yield* Signal.resetRenderPhase(phase);
 
-      const index = yield* Ref.get(phase.signalIndex);
+      const index = phase.signalIndex;
       assert.strictEqual(index, 0);
       assert.strictEqual(phase.accessed.size, 0);
 
-      const signals = yield* Ref.get(phase.signals);
+      const signals = phase.signals;
       assert.strictEqual(signals.length, 0);
     }),
   );

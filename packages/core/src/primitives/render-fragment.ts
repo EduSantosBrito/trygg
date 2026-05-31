@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import type { Element } from "./element.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
 import { resolveReconcileTarget } from "./render-utils.js";
-import { makeRenderTransaction } from "./render-transaction.js";
+import { sharedRenderTransaction } from "./render-transaction.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -35,7 +35,7 @@ export const renderFragment: <E, R>(
   deps: RenderFragmentDeps<E, R>,
 ) {
   const childResults: Array<RenderResult> = [];
-  const renderTransaction = makeRenderTransaction();
+  const renderTransaction = sharedRenderTransaction;
 
   const cleanupRenderedChildren = Effect.gen(function* () {
     for (const child of childResults) {

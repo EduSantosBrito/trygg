@@ -35,6 +35,26 @@ const isElementKey = (value: unknown): value is ElementKey =>
 const isRecord = (value: unknown): value is RuntimeProps =>
   typeof value === "object" && value !== null;
 
+// Copy `props` minus the runtime-reserved `children` and `key` fields in a single
+// pass. The previous `Object.fromEntries(Object.entries(props).filter(...))` form
+// allocated, per JSX node, an entries array plus a `[k, v]` tuple for every key
+// plus a filtered array before the result object — three-plus short-lived objects
+// per node. On the create benchmark that is ~10k nodes per render, so the
+// intermediate tuples/arrays surface directly as GC pressure. `Object.keys` +
+// an indexed loop is the same own-enumerable, insertion-order semantics with one
+// array and the result object, and no per-prop tuple garbage.
+const stripReservedProps = (props: RuntimeProps): RuntimeProps => {
+  const result: RuntimeProps = {};
+  const keys = Object.keys(props);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index]!;
+    if (key !== "children" && key !== "key") {
+      result[key] = props[key];
+    }
+  }
+  return result;
+};
+
 const PropReadFailedTypeId: unique symbol = Symbol("trygg/PropReadFailed");
 
 interface PropReadFailed {
@@ -79,13 +99,7 @@ const normalizeInput: (props: unknown, key?: ElementKey) => Effect.Effect<Normal
     const propsKeyRaw = resolvedProps.key;
     const propsKey = isElementKey(propsKeyRaw) ? propsKeyRaw : undefined;
     const resolvedKey = key ?? propsKey ?? null;
-    const elementProps = unsafeAsElementProps(
-      Object.fromEntries(
-        Object.entries(resolvedProps).filter(
-          ([property]) => property !== "children" && property !== "key",
-        ),
-      ),
-    );
+    const elementProps = unsafeAsElementProps(stripReservedProps(resolvedProps));
 
     return {
       props: resolvedProps,
@@ -145,7 +159,51 @@ const build: (
   });
 });
 
+/**
+ * Synchronous fast path for {@link build}.
+ *
+ * @remarks
+ * JSX element construction is pure data-building; the Effect wrapper exists only
+ * for the defensive per-prop reads and the lazy invalid-component failure. For
+ * the overwhelmingly common cases — an intrinsic tag, or a valid Effect
+ * component, with no `Signal` children — this builds the identical `Element`
+ * synchronously so the runtime never spins a fiber per node. Returns `null` to
+ * defer to the Effect-based {@link build} when a child needs effectful
+ * resolution (a `Signal`, peeked by `fromChildren`) or `type` is not a plain
+ * intrinsic/component (the rare invalid-input branches, whose failure elements
+ * `build` already produces).
+ */
+const buildSync = (type: unknown, props: unknown, key?: ElementKey): ElementType | null => {
+  const resolvedProps: RuntimeProps = isRecord(props) ? props : {};
+  const childElements = Element.fromChildrenSync(resolvedProps.children);
+  if (childElements === null) {
+    return null;
+  }
+
+  const propsKeyRaw = resolvedProps.key;
+  const propsKey = isElementKey(propsKeyRaw) ? propsKeyRaw : undefined;
+  const resolvedKey = key ?? propsKey ?? null;
+
+  if (typeof type === "string") {
+    const elementProps = unsafeAsElementProps(stripReservedProps(resolvedProps));
+    return Element.Intrinsic({
+      tag: type,
+      props: elementProps,
+      children: childElements,
+      key: resolvedKey,
+    });
+  }
+
+  if (Component.isEffectComponent(type)) {
+    const element = type(resolvedProps);
+    return resolvedKey === null ? element : keyed(resolvedKey, element);
+  }
+
+  return null;
+};
+
 export const JsxBuilder = {
   build,
+  buildSync,
   normalizeInput,
 };

@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/element
  */
-import { Cause, Data, Effect, Layer, Predicate, Schema, Scope, SubscriptionRef } from "effect";
+import { Cause, Data, Effect, Layer, Predicate, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import { unsafeMakeKeyedListElement } from "../internal/unsafe.js";
 import type { Signal } from "./signal.js";
@@ -978,7 +978,7 @@ export const fromUnknown: (child: unknown) => Effect.Effect<Element> = Effect.fn
     return empty;
   }
   if (isSignal(child)) {
-    const currentValue = yield* SubscriptionRef.get(child._ref);
+    const currentValue = child._cell.value;
     return isElement(currentValue) ? signalElement(child) : signalText(child);
   }
   if (isElement(child)) {
@@ -1033,6 +1033,61 @@ export const fromChildren: (children: unknown) => Effect.Effect<ReadonlyArray<El
   });
 
 /**
+ * Synchronous fast path for {@link fromUnknown}.
+ *
+ * @remarks
+ * Returns the normalized element, or `null` for a `Signal` child — whose current
+ * value must be peeked through the reactive runtime, the one genuinely effectful
+ * branch. Every other child shape resolves synchronously and identically to
+ * `fromUnknown`, letting the JSX runtime build elements without spinning a fiber
+ * per node.
+ *
+ * @internal
+ */
+const fromUnknownSync = (child: unknown): Element | null => {
+  if (child == null || child === false) return empty;
+  if (typeof child === "string") return text(child);
+  if (typeof child === "number") return text(String(child));
+  if (child === true) return empty;
+  if (isSignal(child)) return null;
+  if (isElement(child)) return child;
+  if (isEffect(child)) return Element.fail(new InvalidJsxChildError({ reason: "effect" }));
+  return empty;
+};
+
+/**
+ * Synchronous fast path for {@link fromChildren}.
+ *
+ * @remarks
+ * Returns the normalized child array, or `null` when any (possibly nested) child
+ * is a `Signal` and therefore needs the effectful {@link fromChildren}. Mirrors
+ * `fromChildren`'s array flattening and empty-dropping exactly.
+ *
+ * @internal
+ */
+export const fromChildrenSync = (children: unknown): ReadonlyArray<Element> | null => {
+  if (children == null) return [];
+  if (Array.isArray(children)) {
+    const out: Array<Element> = [];
+    for (const child of children) {
+      if (Array.isArray(child)) {
+        const nested = fromChildrenSync(child);
+        if (nested === null) return null;
+        for (const element of nested) out.push(element);
+      } else {
+        const normalized = fromUnknownSync(child);
+        if (normalized === null) return null;
+        if (!isEmpty(normalized)) out.push(normalized);
+      }
+    }
+    return out;
+  }
+  const normalized = fromUnknownSync(children);
+  if (normalized === null) return null;
+  return isEmpty(normalized) ? [] : [normalized];
+};
+
+/**
  * Element constructors and utilities
  *
  * @remarks
@@ -1054,7 +1109,9 @@ export const Element: typeof ElementBase & {
   readonly fromEffect: typeof fromEffect;
   readonly fail: typeof fail;
   readonly fromUnknown: typeof fromUnknown;
+  readonly fromUnknownSync: typeof fromUnknownSync;
   readonly fromChildren: typeof fromChildren;
+  readonly fromChildrenSync: typeof fromChildrenSync;
 } = {
   Intrinsic: ElementBase.Intrinsic,
   Text: ElementBase.Text,
@@ -1071,7 +1128,9 @@ export const Element: typeof ElementBase & {
   fromEffect,
   fail,
   fromUnknown,
+  fromUnknownSync,
   fromChildren,
+  fromChildrenSync,
 };
 
 /**

@@ -23,7 +23,6 @@ import {
   Schema,
   Scope,
   Semaphore,
-  SubscriptionRef,
 } from "effect";
 import * as Trace from "../trace/index.js";
 import {
@@ -655,9 +654,10 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     );
 
     const router = yield* getRouter;
-    const currentRouteRenderKey = Effect.map(SubscriptionRef.get(router.current._ref), (current) =>
-      routeRenderKey(current.path, current.query),
-    );
+    const currentRouteRenderKey = Effect.sync(() => {
+      const current = router.current._cell.value;
+      return routeRenderKey(current.path, current.query);
+    });
 
     // Context fragment carrying CurrentRouter for this outlet's router service.
     // Threaded into every route/layout render (renderComponent/renderLayout) so
@@ -1081,8 +1081,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
           Effect.gen(function* () {
             const activeSlot = yield* Ref.get(asyncLoaderRef);
             if (Option.isNone(activeSlot) || activeSlot.value.loader !== loader) return;
-            const state = yield* SubscriptionRef.get(loader.state._ref);
-            const val = yield* SubscriptionRef.get(loader.view._ref);
+            const state = loader.state._cell.value;
+            const val = loader.view._cell.value;
             if (pendingScroll !== null && AsyncLoadState.$is("Ready")(state)) {
               const { activationId, routePath, strategyLayer } = pendingScroll;
               pendingScroll = null;
@@ -1134,8 +1134,8 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
         // returns; handle that window explicitly after track.
         pendingScroll = { activationId, routePath, strategyLayer };
         yield* loader.track(matchKey, renderEffect, { epoch });
-        const currentState = yield* SubscriptionRef.get(loader.state._ref);
-        const currentView = yield* SubscriptionRef.get(loader.view._ref);
+        const currentState = loader.state._cell.value;
+        const currentView = loader.view._cell.value;
         if (pendingScroll !== null && AsyncLoadState.$is("Ready")(currentState)) {
           pendingScroll = null;
           yield* routeActivation.commitAfterDomSwap(
@@ -1169,7 +1169,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
 
       const activationId = nextActivationId();
       const epoch = routeEpoch;
-      const route = yield* SubscriptionRef.get(router.current._ref);
+      const route = router.current._cell.value;
       const activationRequest: RouteActivationRequest = {
         activationId,
         path: route.path,
@@ -1354,7 +1354,7 @@ export const Outlet = Component.gen(function* (Props: ComponentProps<OutletProps
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
-          const currentRoute = yield* SubscriptionRef.get(router.current._ref);
+          const currentRoute = router.current._cell.value;
           yield* Trace.emit("effect.error.ignored", () => ({
             owner: "router.outlet",
             operation: "processRoute",

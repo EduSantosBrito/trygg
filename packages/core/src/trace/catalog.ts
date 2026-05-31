@@ -514,7 +514,14 @@ export const CATALOG = defineCatalog({
   "signal.create": { family: "signal", level: "cost", summary: "A signal was created." },
   "signal.dispose": {
     family: "signal",
-    level: "semantic",
+    // `cost`, symmetric with `signal.create` above: per-signal lifecycle is
+    // internal mechanics, not operational `semantic` info. As `semantic` (Info)
+    // it leaked to the default console logger on every disposal in production
+    // builds (default MinimumLogLevel is Info), taxing replace/clear/remove with
+    // one console.log per disposed signal. At `cost` (Debug) it is gated by
+    // default yet still captured by the recorder (forces Trace) and shown by the
+    // dev Debug layer — no observability lost, no DX change.
+    level: "cost",
     summary: "A scope-owned signal was disposed during reactivity cleanup.",
   },
   "signal.disposed_access": {

@@ -18,7 +18,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Deferred, Effect, Fiber, Layer, Ref, Schema, SubscriptionRef } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Components from "../../primitives/component.js";
@@ -310,8 +310,8 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
 
   scoped("Outlet component body should run only ONCE (not re-render on route change)", () =>
     Effect.gen(function* () {
-      // The real Outlet uses SubscriptionRef.get (not Signal.get) to read the
-      // route, so it does NOT register router.current as a component dependency.
+      // The real Outlet reads router.current's value cell directly (not
+      // Signal.get), so it does NOT register router.current as a component dependency.
       // Route transitions are handled reactively via subscription + AsyncLoader.
       //
       // This test verifies: the Outlet's signalElement anchor remains the SAME
@@ -648,7 +648,7 @@ describe("Outlet - Navigation integration", () => {
 
         const currentPathSnapshot = Effect.gen(function* () {
           const router = yield* Router.Router;
-          const route = yield* SubscriptionRef.get(router.current._ref);
+          const route = router.current._cell.value;
           return route.path;
         });
 
@@ -740,7 +740,7 @@ describe("Outlet - Navigation integration", () => {
 
       const currentPathSnapshot = Effect.gen(function* () {
         const router = yield* Router.Router;
-        const route = yield* SubscriptionRef.get(router.current._ref);
+        const route = router.current._cell.value;
         return route.path;
       });
 

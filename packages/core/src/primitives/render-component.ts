@@ -9,9 +9,9 @@ import { Element as ElementService } from "./element.js";
 import * as Signal from "./signal.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
 import {
-  makeRenderTransaction,
   RenderTransactionOutcome,
   type RenderTransactionOutcome as RenderTransactionOutcomeType,
+  sharedRenderTransaction,
 } from "./render-transaction.js";
 
 type RuntimeRequirements = unknown;
@@ -112,7 +112,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   let currentInputs = inputs;
   let currentContext = context;
   let providerContext: Context.Context<unknown> | null = null;
-  const renderTransaction = makeRenderTransaction();
+  const renderTransaction = sharedRenderTransaction;
 
   const componentScope = yield* Scope.fork(yield* Effect.scope);
   const providerScope = provider === null ? null : yield* Scope.fork(componentScope);

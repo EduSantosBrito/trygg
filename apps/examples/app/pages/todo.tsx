@@ -76,7 +76,7 @@ const TodoPage = Component.gen(function* () {
 
   const todoListElement = Signal.each(
     filteredTodos,
-    Effect.fn("TodoPage.todoListElement")(function* (todo) {
+    Effect.fnUntraced(function* (todo) {
       const editText = yield* Signal.make<Option.Option<string>>(Option.none());
       const editTextValue = yield* Signal.get(editText);
       const isEditing = Option.isSome(editTextValue);
@@ -84,7 +84,7 @@ const TodoPage = Component.gen(function* () {
       const startEditing = () => Signal.set(editText, Option.some(todo.text));
       const cancelEditing = () => Signal.set(editText, Option.none());
 
-      const saveEditing = Effect.fn("TodoPage.saveEditing")(function* () {
+      const saveEditing = Effect.fnUntraced(function* () {
         const text = yield* Signal.peek(editText);
         if (Option.isSome(text) && text.value.trim() !== "") {
           yield* updateTodoText(todo.id, text.value.trim());
@@ -101,7 +101,7 @@ const TodoPage = Component.gen(function* () {
           return "";
         }).pipe(Effect.flatMap((v) => Signal.set(editText, Option.some(v))));
 
-      const onEditKeyDown = Effect.fn("TodoPage.onEditKeyDown")(function* (e: Event) {
+      const onEditKeyDown = Effect.fnUntraced(function* (e: Event) {
         if (e instanceof KeyboardEvent) {
           if (e.key === "Enter") {
             yield* saveEditing();

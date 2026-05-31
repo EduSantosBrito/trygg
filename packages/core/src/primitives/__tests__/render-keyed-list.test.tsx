@@ -144,6 +144,7 @@ describe("renderKeyedList", () => {
                 }),
               } satisfies RenderResult;
             }),
+          renderElementSync: () => null,
           runForkInRenderContext: <E2, R2>(
             effect: Effect.Effect<void, E2, R2>,
             currentRenderContext: RenderContext,

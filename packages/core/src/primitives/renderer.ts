@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Effect, Layer, Match, Option, Schema, Scheduler, Scope } from "effect";
+import { Cause, Effect, Layer, Option, Schema, Scheduler, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
 import * as Signal from "./signal.js";
@@ -27,7 +27,12 @@ import {
   logBlockedSafeUrlAttribute,
   resolveReconcileTarget,
 } from "./render-utils.js";
-import { renderIntrinsic } from "./render-intrinsic.js";
+import {
+  buildStaticIntrinsic,
+  buildStaticIntrinsicSync,
+  isStaticIntrinsic,
+  renderIntrinsic,
+} from "./render-intrinsic.js";
 import { renderComponent } from "./render-component.js";
 import { renderKeyedList } from "./render-keyed-list.js";
 import { renderSignalElement } from "./render-signal-element.js";
@@ -49,6 +54,21 @@ const provideRenderContext = <A, E, R>(
   context: Context.Context<unknown> | null,
 ): Effect.Effect<A, E, RuntimeRequirements> =>
   context === null ? effect : Effect.provide(effect, context);
+
+// Synchronous fast path used by the keyed-list per-row create/replace driver: a
+// fully-static intrinsic row builds inline (direct DOM, no `Effect.sync` +
+// run-loop step), mirroring the `renderElement` Intrinsic branch exactly. Returns
+// `null` for any element that needs the effectful renderer (signal/component/
+// keyed children/head-hoist/etc.), so the caller falls back to `renderElement`.
+const renderElementSync = (
+  element: Element,
+  parent: Node,
+  renderContext: RenderContext,
+  context: Context.Context<unknown> | null,
+): RenderResult | null =>
+  element._tag === "Intrinsic" && isStaticIntrinsic(element)
+    ? buildStaticIntrinsicSync(element, parent, renderContext, context)
+    : null;
 
 export class InvalidEventHandlerError extends Schema.TaggedErrorClass<InvalidEventHandlerError>()(
   "InvalidEventHandlerError",
@@ -138,6 +158,20 @@ export const CurrentRenderContext = Context.Reference<RenderContext | null>(
 export interface RenderResult {
   readonly node: Node;
   readonly cleanup: Effect.Effect<void, unknown, RuntimeRequirements>;
+  /**
+   * Synchronous cleanup core, present only when teardown is pure synchronous DOM
+   * work (the static intrinsic fast-path). Equivalent in effect to running
+   * {@link cleanup}, but callable as plain JS so batch teardown paths (keyed-list
+   * clear) can dispose many rows in one `Effect.sync` instead of driving one
+   * cleanup effect per row through the runtime. Absent ⇒ use {@link cleanup}.
+   *
+   * Pass `detached: true` when the node was already pulled off-document by a
+   * batched range extraction (keyed-list full clear) so the redundant root
+   * `.remove()` is skipped; subscription/listener teardown still runs.
+   *
+   * @internal
+   */
+  readonly cleanupSync?: (detached?: boolean) => void;
   readonly reconcile?: (
     nextElement: Element,
     nextContext: Context.Context<unknown> | null,
@@ -351,10 +385,16 @@ const renderElement = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
-): Effect.Effect<RenderResult, unknown, RuntimeRequirements> =>
-  Match.value(element).pipe(
-    Match.tag("Text", ({ content }) =>
-      Effect.sync(() => {
+): Effect.Effect<RenderResult, unknown, RuntimeRequirements> => {
+  // Dispatch on the element tag with a plain `switch` rather than `Match.value`:
+  // `renderElement` is THE per-element hot path (called once per node — per row in
+  // a keyed list), and the pipe form allocates and runs a 10-stage matcher on
+  // every call. A switch is a jump table with the same lazy semantics (only the
+  // matched branch's Effect is constructed) and no per-call matcher allocation.
+  switch (element._tag) {
+    case "Text": {
+      const { content } = element;
+      return Effect.sync(() => {
         const node = document.createTextNode(content);
         parent.appendChild(node);
         let currentContent = content;
@@ -376,11 +416,12 @@ const renderElement = (
               return true;
             }),
         };
-      }),
-    ),
+      });
+    }
 
-    Match.tag("SignalText", ({ signal }) =>
-      Effect.gen(function* () {
+    case "SignalText": {
+      const { signal } = element;
+      return Effect.gen(function* () {
         // Get initial value and create text node
         const initialValue = yield* Signal.get(signal);
         const node = document.createTextNode(String(initialValue));
@@ -421,67 +462,117 @@ const renderElement = (
               return resolved.element.signal === currentSignal;
             }),
         };
-      }),
-    ),
+      });
+    }
 
-    Match.tag("SignalElement", ({ signal, onSwap }) =>
-      renderSignalElement(signal, onSwap, parent, renderContext, context, options, {
+    case "SignalElement":
+      return renderSignalElement(
+        element.signal,
+        element.onSwap,
+        parent,
+        renderContext,
+        context,
+        options,
+        {
+          renderElement,
+          runForkInRenderContext,
+        },
+      );
+
+    case "Provide":
+      return renderProvide(element.context, element.child, parent, renderContext, context, options, {
         renderElement,
-        runForkInRenderContext,
-      }),
-    ),
+      });
 
-    Match.tag("Provide", ({ context: providedContext, child }) =>
-      renderProvide(providedContext, child, parent, renderContext, context, options, {
-        renderElement,
-      }),
-    ),
+    case "Intrinsic":
+      // Fast path: a sync-buildable subtree (plain/event/signal-attribute props,
+      // no signal/effect children, components, keyed children, or head-hoist) is
+      // built by a single synchronous pass, skipping the per-element
+      // Effect.fnUntraced/makePrimitive/context-read machinery.
+      return isStaticIntrinsic(element)
+        ? buildStaticIntrinsic(element, parent, renderContext, context)
+        : renderIntrinsic(
+            element.tag,
+            element.props,
+            element.children,
+            element.key,
+            parent,
+            renderContext,
+            context,
+            options,
+            {
+              renderElement,
+              renderDocumentElement,
+              runForkInRenderContext,
+            },
+          );
 
-    Match.tag("Intrinsic", ({ tag, props, children, key }) =>
-      renderIntrinsic(tag, props, children, key, parent, renderContext, context, options, {
-        renderElement,
-        renderDocumentElement,
-        runForkInRenderContext,
-      }),
-    ),
-
-    Match.tag("Component", (component) =>
-      renderComponent(component, parent, renderContext, context, options, {
+    case "Component":
+      return renderComponent(element, parent, renderContext, context, options, {
         renderElement,
         provideRenderContext,
         runForkInRenderContext,
         resolveReconcileTarget,
         normalizeContext,
-      }),
-    ),
+      });
 
-    Match.tag("Fragment", ({ children }) =>
-      renderFragment(children, parent, renderContext, context, options, { renderElement }),
-    ),
-
-    Match.tag("Portal", ({ target, children }) =>
-      renderPortal(target, children, parent, renderContext, context, options, { renderElement }),
-    ),
-
-    Match.tag("KeyedList", ({ source, renderFn, keyFn }) =>
-      renderKeyedList(source, renderFn, keyFn, parent, renderContext, context, options, {
-        provideRenderContext,
+    case "Fragment":
+      return renderFragment(element.children, parent, renderContext, context, options, {
         renderElement,
-        runForkInRenderContext,
-      }),
-    ),
+      });
 
-    Match.tag("ErrorBoundaryElement", ({ child, fallback, onError }) =>
-      renderErrorBoundary(child, fallback, onError, parent, renderContext, context, {
-        defaultRenderOptions,
-        emptyContext,
-        renderElement,
-        runForkInRenderContext,
-      }),
-    ),
+    case "Portal":
+      return renderPortal(
+        element.target,
+        element.children,
+        parent,
+        renderContext,
+        context,
+        options,
+        { renderElement },
+      );
 
-    Match.exhaustive,
-  );
+    case "KeyedList":
+      return renderKeyedList(
+        element.source,
+        element.renderFn,
+        element.keyFn,
+        parent,
+        renderContext,
+        context,
+        options,
+        {
+          provideRenderContext,
+          renderElement,
+          renderElementSync,
+          runForkInRenderContext,
+        },
+      );
+
+    case "ErrorBoundaryElement":
+      return renderErrorBoundary(
+        element.child,
+        element.fallback,
+        element.onError,
+        parent,
+        renderContext,
+        context,
+        {
+          defaultRenderOptions,
+          emptyContext,
+          renderElement,
+          runForkInRenderContext,
+        },
+      );
+
+    default: {
+      // Exhaustiveness: every Element tag is handled above. If a new variant is
+      // added without a branch here, `element` is no longer `never` and this errors.
+      const _exhaustive: never = element;
+      return _exhaustive;
+    }
+  }
+};
 
 /**
  * Create the browser Renderer layer
