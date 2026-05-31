@@ -237,7 +237,7 @@ export const consoleLogger: Logger.Logger<unknown, void> = Logger.make((options)
  * Every field is optional: with no options, {@link layer} installs the console
  * logger and inherits the ambient minimum log level. `minLevel` tunes which
  * events are seen, `filter` restricts catalog output to named families, and
- * `batchWindow` coalesces writes over a time window.
+ * `batchWindow` coalesces console writes over a time window.
  *
  * @example
  * ```ts
@@ -271,10 +271,10 @@ export interface DebugOptions {
  * @remarks
  * The returned layer removes Effect's default console logger, preserves ambient
  * loggers such as trace recorders/tracers, and adds the colour console logger.
- * When `minLevel` is set it also lowers the subtree's
+ * When `minLevel` is set it lowers the subtree's
  * {@link References.MinimumLogLevel} so lower-severity events become visible;
- * when `batchWindow` is set, writes are coalesced with {@link Logger.batched}
- * and flushed once per window.
+ * when `batchWindow` is set, console writes are coalesced with
+ * {@link Logger.batched} and flushed once per window.
  *
  * @example
  * ```tsx

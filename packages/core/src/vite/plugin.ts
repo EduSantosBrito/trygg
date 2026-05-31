@@ -476,15 +476,10 @@ import { createConsola } from "consola";
 
 const logger = createConsola({ defaults: { tag: "trygg" } });
 
-/**
- * Plugin logger backed by consola.
- * Consola uses async reporters with buffered process.stdout.write,
- * so it won't block I/O like raw console.log calls.
- * @internal
- */
-const PluginLogger = Logger.make(({ message, logLevel }) => {
-  const text = String(message);
+const renderLogMessage = (message: unknown): string =>
+  Array.isArray(message) ? message.map((part) => String(part)).join(" ") : String(message);
 
+const logToConsola = (logLevel: Logger.Options<unknown>["logLevel"], text: string): void => {
   if (LogLevel.isGreaterThanOrEqualTo(logLevel, "Error")) {
     logger.error(text);
   } else if (LogLevel.isGreaterThanOrEqualTo(logLevel, "Warn")) {
@@ -494,6 +489,16 @@ const PluginLogger = Logger.make(({ message, logLevel }) => {
   } else {
     logger.info(text);
   }
+};
+
+/**
+ * Plugin logger backed by consola.
+ * Consola uses async reporters with buffered process.stdout.write,
+ * so it won't block I/O like raw console.log calls.
+ * @internal
+ */
+const PluginLogger = Logger.make((options) => {
+  logToConsola(options.logLevel, renderLogMessage(options.message));
 });
 
 /**
@@ -1507,12 +1512,13 @@ export const renderClientEntryModule = (owner: ClientEntryModuleOwner): string =
 import { mountDocument, Component, Debug } from "trygg"
 import { routes } from "${owner.routesImportPath}"
 import Layout from "${owner.layoutImportPath}"
-// Pretty-print the trace flight recorder to the console. Dev drops the minimum
-// level to "Debug" so cost events show; production stays at Effect's "Info"
-// default. Tune per-subtree from app/layout.tsx with Component.provide(Debug.layer({ ... })).
+// Pretty-print the trace flight recorder to the console.
+// Tune per-subtree from app/layout.tsx with Component.provide(Debug.layer({ ... })).
 const App = Component.gen(function* () {
   return <Layout />
-}).pipe(Component.provide(Debug.layer({ minLevel: import.meta.env.DEV ? "Debug" : "Info" })))
+}).pipe(Component.provide(Debug.layer({
+  minLevel: import.meta.env.DEV ? "Debug" : "Info",
+})))
 
 mountDocument(<App />, { manifest: routes.manifest })
 `;

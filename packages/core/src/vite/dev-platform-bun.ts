@@ -20,6 +20,7 @@ import {
   type DevPlatformService,
   ImportError,
 } from "./dev-platform.js";
+import * as Trace from "../trace/index.js";
 
 // =============================================================================
 // Dynamic Imports
@@ -242,6 +243,7 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
         const initHandler = Effect.fn("BunDevPlatform.initHandler")(function* () {
           yield* disposeHandler();
 
+          yield* Trace.emit("api.handler.loading", () => ({ module_path: "app/api.ts" }));
           const mod = yield* options.loadApiModule().pipe(
             Effect.tapError((error) =>
               Effect.gen(function* () {
@@ -252,6 +254,11 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
             Effect.option,
           );
           if (Option.isNone(mod)) return;
+
+          yield* Trace.emit("api.handler.loaded", () => ({
+            module_path: "app/api.ts",
+            exports: Object.keys(mod.value),
+          }));
 
           // Use SSR-loaded factory for layer detection and web handler creation
           const factory = options.handlerFactory;
@@ -300,6 +307,11 @@ export const BunDevPlatformLive: Layer.Layer<FileSystem.FileSystem | DevPlatform
           }
 
           const effect = Effect.gen(function* () {
+            yield* Trace.emit("api.request.received", () => ({
+              method: req.method ?? "GET",
+              url: req.url ?? "",
+            }));
+
             const state = yield* Ref.get(stateRef);
             if (Option.isNone(state.handler)) {
               const errorMessage = Option.match(state.lastError, {

@@ -140,6 +140,8 @@ const requestHttp = (options: {
   readonly port: number;
   readonly path: string;
   readonly headers?: Record<string, string>;
+  readonly method?: string;
+  readonly body?: string;
 }): Effect.Effect<HttpResult> =>
   Effect.promise(
     () =>
@@ -148,6 +150,7 @@ const requestHttp = (options: {
           {
             headers: options.headers,
             hostname: "127.0.0.1",
+            method: options.method,
             path: options.path,
             port: options.port,
           },
@@ -166,6 +169,7 @@ const requestHttp = (options: {
           },
         );
         req.on("error", reject);
+        if (options.body !== undefined) req.write(options.body);
         req.end();
       }),
   );
@@ -1692,12 +1696,13 @@ Route.make("/users/:id")
 import { mountDocument, Component, Debug } from "trygg"
 import { routes } from "../app/routes"
 import Layout from "../app/layout"
-// Pretty-print the trace flight recorder to the console. Dev drops the minimum
-// level to "Debug" so cost events show; production stays at Effect's "Info"
-// default. Tune per-subtree from app/layout.tsx with Component.provide(Debug.layer({ ... })).
+// Pretty-print the trace flight recorder to the console.
+// Tune per-subtree from app/layout.tsx with Component.provide(Debug.layer({ ... })).
 const App = Component.gen(function* () {
   return <Layout />
-}).pipe(Component.provide(Debug.layer({ minLevel: import.meta.env.DEV ? "Debug" : "Info" })))
+}).pipe(Component.provide(Debug.layer({
+  minLevel: import.meta.env.DEV ? "Debug" : "Info",
+})))
 
 mountDocument(<App />, { manifest: routes.manifest })
 `,
