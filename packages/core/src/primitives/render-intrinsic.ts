@@ -304,12 +304,12 @@ const isStaticProps = (props: ElementProps): boolean => {
  * @internal
  */
 export const isStaticIntrinsic = (element: Element): boolean => {
-  if (element._tag !== "Intrinsic") return false;
+  if (!Predicate.isTagged(element, "Intrinsic")) return false;
   if (Head.isHoistCandidate(element.tag)) return false;
   if (!isStaticProps(element.props)) return false;
   for (const child of element.children) {
-    if (child._tag === "Text") continue;
-    if (child._tag !== "Intrinsic") return false;
+    if (Predicate.isTagged(child, "Text")) continue;
+    if (!Predicate.isTagged(child, "Intrinsic")) return false;
     if (child.key !== null) return false;
     if (!isStaticIntrinsic(child)) return false;
   }
@@ -353,11 +353,11 @@ const applyStaticPropEntry = (
   eventSnapshot: RenderContext,
 ): void => {
   if (key.startsWith("on")) {
-    const handler = value as EventHandler;
+    if (!isEventHandler(value)) return;
     const eventName = key.slice(2).toLowerCase();
     const listener = (event: Event) => {
       const fiber = Effect.runForkWith(Context.empty())(
-        contextTransaction.runEventHandler(eventSnapshot, handler(event)),
+        contextTransaction.runEventHandler(eventSnapshot, value(event)),
       );
       Effect.runForkWith(Context.empty())(
         Scope.addFinalizer(eventSnapshot.scope, Fiber.interrupt(fiber)),
@@ -372,10 +372,10 @@ const applyStaticPropEntry = (
     // by `isStaticProps`, so `applyPropValue` never blocks (always `none`).
     const signal = value;
     applyPropValue(node, key, Signal.peekValueUnsafe(signal), renderContext.safeUrlConfig);
-    const update: Signal.SignalListener = () =>
-      Effect.sync(() => {
-        applyPropValue(node, key, Signal.peekValueUnsafe(signal), renderContext.safeUrlConfig);
-      });
+    const updateEffect = Effect.sync(() => {
+      applyPropValue(node, key, Signal.peekValueUnsafe(signal), renderContext.safeUrlConfig);
+    });
+    const update: Signal.SignalListener = () => updateEffect;
     unsubscribes.push(Signal.subscribeUnsafe(signal, update));
   } else {
     // Guaranteed non-(href|src) by `isStaticProps`, so the safe-url validator
@@ -440,13 +440,13 @@ const buildStaticElement = (
   let subtreeHasUnsubscribes = unsubscribes.length > 0;
   const children: Array<StaticChild> = [];
   for (const child of element.children) {
-    if (child._tag === "Text") {
+    if (Predicate.isTagged(child, "Text")) {
       const textNode = document.createTextNode(child.content);
       node.appendChild(textNode);
       children.push({ kind: "text", node: textNode });
-    } else {
+    } else if (Predicate.isTagged(child, "Intrinsic")) {
       // Verified static intrinsic by `isStaticIntrinsic`.
-      const childBuilt = buildStaticElement(child as IntrinsicElement, renderContext, context);
+      const childBuilt = buildStaticElement(child, renderContext, context);
       node.appendChild(childBuilt.node);
       children.push({ kind: "element", built: childBuilt });
       if (childBuilt.subtreeHasUnsubscribes) subtreeHasUnsubscribes = true;
@@ -511,7 +511,14 @@ const reconcileStaticBuilt = (
     for (const unsubscribe of built.unsubscribes) unsubscribe();
     built.unsubscribes = [];
     clearRemovedProps(built.node, built.props, nextProps);
-    applyStaticProps(built.node, nextProps, built.listeners, built.unsubscribes, renderContext, context);
+    applyStaticProps(
+      built.node,
+      nextProps,
+      built.listeners,
+      built.unsubscribes,
+      renderContext,
+      context,
+    );
     built.props = nextProps;
     flagDirty = true; // own unsubscribes may have been added/removed
   }
@@ -523,10 +530,10 @@ const reconcileStaticBuilt = (
     const childBuilt = built.children[index];
     if (nextChild === undefined || childBuilt === undefined) return false;
 
-    if (nextChild._tag === "Text") {
+    if (Predicate.isTagged(nextChild, "Text")) {
       if (childBuilt.kind !== "text") return false;
       if (childBuilt.node.data !== nextChild.content) childBuilt.node.data = nextChild.content;
-    } else if (nextChild._tag === "Intrinsic") {
+    } else if (Predicate.isTagged(nextChild, "Intrinsic")) {
       if (childBuilt.kind !== "element") return false;
       if (nextChild.key !== null) return false;
       const childFlagBefore = childBuilt.built.subtreeHasUnsubscribes;
@@ -586,12 +593,12 @@ const makeStaticRenderResult = (
   };
   return {
     node: root.node,
-    cleanup: Effect.sync(cleanupSync),
+    cleanup: Effect.sync(() => cleanupSync()),
     cleanupSync,
     reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
       Effect.sync(() => {
         const resolved = resolveReconcileTarget(nextElement, nextContext);
-        if (resolved.element._tag !== "Intrinsic") return false;
+        if (!Predicate.isTagged(resolved.element, "Intrinsic")) return false;
         // Only reconcile static→static; a next subtree that introduces a
         // signal/component/etc. must replace so the Effect renderer takes over.
         if (!isStaticIntrinsic(resolved.element)) return false;
@@ -619,7 +626,11 @@ export const buildStaticIntrinsicSync = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): RenderResult =>
-  makeStaticRenderResult(buildStaticElement(element, renderContext, context), parent, renderContext);
+  makeStaticRenderResult(
+    buildStaticElement(element, renderContext, context),
+    parent,
+    renderContext,
+  );
 
 /**
  * Fast path for fully-static intrinsic subtrees: one `Effect.sync` wrapping

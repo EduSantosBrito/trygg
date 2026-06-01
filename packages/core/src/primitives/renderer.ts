@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Effect, Layer, Option, Schema, Scheduler, Scope } from "effect";
+import { Cause, Effect, Layer, Option, Predicate, Schema, Scheduler, Scope } from "effect";
 import * as Context from "effect/Context";
 import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
 import * as Signal from "./signal.js";
@@ -66,7 +66,7 @@ const renderElementSync = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): RenderResult | null =>
-  element._tag === "Intrinsic" && isStaticIntrinsic(element)
+  Predicate.isTagged(element, "Intrinsic") && isStaticIntrinsic(element)
     ? buildStaticIntrinsicSync(element, parent, renderContext, context)
     : null;
 
@@ -480,9 +480,17 @@ const renderElement = (
       );
 
     case "Provide":
-      return renderProvide(element.context, element.child, parent, renderContext, context, options, {
-        renderElement,
-      });
+      return renderProvide(
+        element.context,
+        element.child,
+        parent,
+        renderContext,
+        context,
+        options,
+        {
+          renderElement,
+        },
+      );
 
     case "Intrinsic":
       // Fast path: a sync-buildable subtree (plain/event/signal-attribute props,

@@ -4,7 +4,10 @@ import * as SafeUrl from "../security/safe-url.js";
 import * as Trace from "../trace/index.js";
 import type { Element, ElementProps } from "./element.js";
 
-const hasOwn = Object.prototype.hasOwnProperty;
+const hasElementProp = (
+  props: ElementProps,
+  key: string,
+): props is ElementProps & Record<string, unknown> => Object.hasOwn(props, key);
 
 export interface BlockedSafeUrlAttribute {
   readonly key: string;
@@ -50,16 +53,10 @@ export const equalOrChanged = (left: unknown, right: unknown): boolean =>
  */
 export const shallowPropsEqual = (left: ElementProps, right: ElementProps): boolean => {
   if (left === right) return true;
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  for (const key of leftKeys) {
-    if (
-      !hasOwn.call(right, key) ||
-      !Object.is(
-        (left as Record<string, unknown>)[key],
-        (right as Record<string, unknown>)[key],
-      )
-    ) {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+  for (const [key, leftValue] of leftEntries) {
+    if (!hasElementProp(right, key) || !Object.is(leftValue, right[key])) {
       return false;
     }
   }

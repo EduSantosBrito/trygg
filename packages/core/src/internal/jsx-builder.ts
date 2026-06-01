@@ -47,8 +47,8 @@ const stripReservedProps = (props: RuntimeProps): RuntimeProps => {
   const result: RuntimeProps = {};
   const keys = Object.keys(props);
   for (let index = 0; index < keys.length; index++) {
-    const key = keys[index]!;
-    if (key !== "children" && key !== "key") {
+    const key = keys[index];
+    if (key !== undefined && key !== "children" && key !== "key") {
       result[key] = props[key];
     }
   }

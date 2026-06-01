@@ -115,6 +115,19 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
     /** Trigger item rerender while preserving scope */
     scheduleRerender: () => Effect.Effect<void>;
   };
+  type BuiltItemDom = {
+    readonly result: RenderResult;
+    readonly startMarker: Comment;
+    readonly endMarker: Comment;
+  };
+  type RerenderOutcome =
+    | { readonly kind: "reconciled" }
+    | { readonly kind: "replaced"; readonly built: BuiltItemDom };
+  const rerenderReconciled: RerenderOutcome = { kind: "reconciled" };
+  const rerenderReplaced = (built: BuiltItemDom): RerenderOutcome => ({
+    kind: "replaced",
+    built,
+  });
   const itemStates = new Map<string | number, ItemState>();
   const keyOrder: Array<string | number> = [];
   const listScope = yield* Scope.fork(yield* Effect.scope);
@@ -343,9 +356,7 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
   // Function to update the list
   // Note: updateList is sync because it's called from signal listener,
   // but it immediately forks an Effect for the actual work.
-  function updateList(
-    forkContext: Context.Context<unknown> | null = null,
-  ): void {
+  function updateList(forkContext: Context.Context<unknown> | null = null): void {
     if (isUnmounted) return;
 
     if (isUpdating) {
@@ -598,13 +609,13 @@ export const renderKeyedList = Effect.fn("renderKeyedList")(function* <T, E, R>(
                           );
                           if (reconcile !== undefined) {
                             const patched = yield* reconcile(normalizedElement, context);
-                            if (patched) return { reconciled: true as const };
+                            if (patched) return rerenderReconciled;
                           }
                           const built = yield* buildItemDom(normalizedElement);
-                          return { reconciled: false as const, built };
+                          return rerenderReplaced(built);
                         }).pipe(Scope.provide(currentState.scope));
 
-                        if (!outcome.reconciled) {
+                        if (outcome.kind === "replaced") {
                           newResult = outcome.built.result;
                           newStartMarker = outcome.built.startMarker;
                           newEndMarker = outcome.built.endMarker;

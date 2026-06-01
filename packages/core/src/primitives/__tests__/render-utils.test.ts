@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
+import { Effect } from "effect";
 import type { ElementProps } from "../element.js";
 import { moveRange, shallowPropsEqual } from "../render-utils.js";
 
-const props = (value: Record<string, unknown>): ElementProps => value as ElementProps;
+const props = (value: ElementProps): ElementProps => value;
+const eventEffect = Effect.void;
 
 describe("render-utils", () => {
   describe("shallowPropsEqual", () => {
@@ -27,15 +29,20 @@ describe("render-utils", () => {
     });
 
     it("reports a new function identity (handler re-bind)", () => {
-      const onClick = () => {};
+      const onClick = (_event: Event) => eventEffect;
+      const nextOnClick = (_event: Event) => eventEffect;
       assert.isTrue(shallowPropsEqual(props({ onClick }), props({ onClick })));
-      assert.isFalse(shallowPropsEqual(props({ onClick }), props({ onClick: () => {} })));
+      assert.isFalse(shallowPropsEqual(props({ onClick }), props({ onClick: nextOnClick })));
     });
 
     it("reports differing key sets", () => {
-      assert.isFalse(shallowPropsEqual(props({ className: "a" }), props({ className: "a", id: "x" })));
-      assert.isFalse(shallowPropsEqual(props({ className: "a", id: "x" }), props({ className: "a" })));
-      // Same count, different key — caught by the hasOwnProperty guard.
+      assert.isFalse(
+        shallowPropsEqual(props({ className: "a" }), props({ className: "a", id: "x" })),
+      );
+      assert.isFalse(
+        shallowPropsEqual(props({ className: "a", id: "x" }), props({ className: "a" })),
+      );
+      // Same count, different key — caught by the per-key lookup.
       assert.isFalse(shallowPropsEqual(props({ id: "x" }), props({ className: "x" })));
     });
 

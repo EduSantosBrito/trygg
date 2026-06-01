@@ -52,6 +52,19 @@ const rows3: readonly Row[] = [
   { id: 3, label: "c" },
 ];
 
+function signalDisposed<A>(
+  signals: ReadonlyMap<number, Signal.Signal<A>>,
+  id: number,
+): Effect.Effect<boolean> {
+  return Effect.gen(function* () {
+    const signal = signals.get(id);
+    if (signal === undefined) {
+      return assert.fail(`Missing signal for row ${id}`);
+    }
+    return yield* Ref.get(signal._disposed);
+  });
+}
+
 // =============================================================================
 // 1. Per-row owned signal (`Signal.make`) disposal
 // =============================================================================
@@ -77,7 +90,7 @@ describe("KeyedList per-row scope: owned signal disposal", () => {
       );
 
       assert.strictEqual(container.querySelectorAll("[data-id]").length, 3);
-      const isDisposed = (id: number) => Ref.get(owned.get(id)!._disposed);
+      const isDisposed = (id: number) => signalDisposed(owned, id);
 
       // Nothing disposed before any removal.
       assert.strictEqual(yield* isDisposed(1), false);
@@ -123,7 +136,7 @@ describe("KeyedList per-row scope: Signal.selector disposal (classFor pattern)",
       );
 
       const classOf = (id: number) =>
-        (container.querySelector(`[data-id="${id}"]`) as HTMLElement | null)?.className ?? null;
+        container.querySelector<HTMLElement>(`[data-id="${id}"]`)?.className ?? null;
 
       // selected === 2 → row 2 is "danger".
       assert.strictEqual(classOf(2), "danger");
@@ -136,8 +149,8 @@ describe("KeyedList per-row scope: Signal.selector disposal (classFor pattern)",
       yield* Effect.yieldNow;
 
       // Its selector output signal is disposed; the survivor's is not.
-      assert.strictEqual(yield* Ref.get(outputs.get(2)!._disposed), true);
-      assert.strictEqual(yield* Ref.get(outputs.get(1)!._disposed), false);
+      assert.strictEqual(yield* signalDisposed(outputs, 2), true);
+      assert.strictEqual(yield* signalDisposed(outputs, 1), false);
 
       // The shared selector still drives survivors: selecting row 3 makes it
       // "danger". This would break if the removed row's bucket entry leaked
@@ -189,7 +202,10 @@ describe("KeyedList per-row scope: item-scope finalizers", () => {
 
       // Unmount the whole list → the survivors' finalizers run.
       yield* Scope.close(mountScope, Exit.void);
-      assert.deepStrictEqual([...cleaned].sort((x, y) => x - y), [1, 2, 3]);
+      assert.deepStrictEqual(
+        [...cleaned].sort((x, y) => x - y),
+        [1, 2, 3],
+      );
     }),
   );
 });
@@ -238,7 +254,10 @@ describe("KeyedList per-row scope: in-flight event-handler ownership", () => {
       ).pipe(Effect.provideService(Scope.Scope, mountScope));
 
       // Click row 2's button → the handler forks and parks on `Effect.never`.
-      const btn = container.querySelector(`[data-id="2"]`) as HTMLButtonElement;
+      const btn = container.querySelector<HTMLButtonElement>(`button[data-id="2"]`);
+      if (btn === null) {
+        return assert.fail("Missing button for row 2");
+      }
       yield* click(btn);
       yield* Deferred.await(started);
       assert.strictEqual(interrupted, false);
