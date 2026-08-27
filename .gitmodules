@@ -1,6 +1,3 @@
-[submodule ".repos/effect"]
-	path = .repos/effect
-	url = https://github.com/Effect-TS/effect-smol
 [submodule ".repos/vue-language-tools"]
 	path = .repos/vue-language-tools
 	url = https://github.com/vuejs/language-tools
