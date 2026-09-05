@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("ValidationError", {
+export class ValidationError extends Schema.TaggedError<ValidationError>()("ValidationError", {
   field: Schema.String,
   description: Schema.String,
 }) {}

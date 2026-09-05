@@ -14,7 +14,7 @@ import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 import { cx } from "../cx.js";
 
-class ExpectedSignal extends Schema.TaggedErrorClass<ExpectedSignal>()("ExpectedSignal", {
+class ExpectedSignal extends Schema.TaggedError<ExpectedSignal>()("ExpectedSignal", {
   got: Schema.String,
 }) {}
 

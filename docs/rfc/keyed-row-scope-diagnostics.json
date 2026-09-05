@@ -1,0 +1,74 @@
+{
+  "taskDurationClones": {
+    "a": "/tmp/trygg-row-cpu-a-1azqu3mg",
+    "b": "/tmp/trygg-row-cpu-b-tq3735ob",
+    "c": "/tmp/trygg-row-cpu-c-ktpw472l"
+  },
+  "schedulerClones": {
+    "a": "/tmp/trygg-row-scheduler-a-xf_n8rqw",
+    "b": "/tmp/trygg-row-scheduler-b-x6nylo0r",
+    "c": "/tmp/trygg-row-scheduler-c-j7yxuw6e"
+  },
+  "taskDurationRuns": [
+    "a1",
+    "b1",
+    "c1",
+    "c2",
+    "b2",
+    "a2"
+  ],
+  "taskDurationWarmup": 20,
+  "taskDurationSamples": 31,
+  "schedulerWarmup": 0,
+  "schedulerSamples": 1,
+  "profileIntervalUs": 100,
+  "profileWarmup": 10,
+  "profileSamples": 1,
+  "profileIncludes": "validation and frame callbacks; not comparable with minified timing",
+  "research": "https://v8.dev/blog/optimizing-v8-memory",
+  "artifacts": {
+    "docs/rfc/keyed-row-scope-exploratory-c1.json": "cbf7ecc121e502beedf2619bc0108c8260a925771d816224c1ef3d55734c39f1",
+    "docs/rfc/keyed-row-scope-control.cpuprofile": "dfb920ee6cb279d331ad5b407ff0ec507579e840809666f4cde8584a21b50330",
+    "docs/rfc/keyed-row-scope-task-b1.json": "c4f4d0a5c29a647fccdea5e5d8fec5d2c691be6f5f6d3820bbb062f0470f48a1",
+    "docs/rfc/keyed-row-scope-task-a1.json": "5310d3787ed3190876fdbed90bba845350511b51eb0af01735427c758f5b3f9b",
+    "docs/rfc/keyed-row-scope-scheduler-c.json": "453d2379d38a98f6634ca00c73b25ab59ea42e77756006952cbd76004034efbd",
+    "docs/rfc/keyed-row-scope-exploratory-a2.json": "d210d6d92c7fb1f7b14ea813bbdbdd02273c54de584e34a271b6f740c0a8d323",
+    "docs/rfc/keyed-row-scope-scheduler-fixture.diff": "3c286e312d6df368d4ff29a8c9821e21751293fc68e554b0fae3d2da50d6727d",
+    "docs/rfc/keyed-row-scope-task-harness.diff": "fab81bd7694ffbde30ba1018540415d3b1bc7ad3a2cd7c35c0b419af7448200d",
+    "docs/rfc/keyed-row-scope-task-b2.json": "8e2af222dc8cbc97d2d5185bac1403e3ea0c796a2362bfbb00825df294e45f2e",
+    "docs/rfc/keyed-row-scope-task-a2.json": "f29439d796d21e51036df21d3aacc38a07daa3dc1a823e33be7025cc8261153d",
+    "docs/rfc/keyed-row-scope-task-c2.json": "556bf7958b4b05c38aaa26453884f9d962269ac02f5278bd801d6f9d80c1718c",
+    "docs/rfc/keyed-row-scope-scheduler-a.json": "3b0b9e36dd062d9518c7651ee6b747d4ab82d74d5a6858f52c967c9e709a5e14",
+    "docs/rfc/keyed-row-scope-scheduler-b.json": "6c6ec0a24f0394b696844c09ff1521335480fab1c945f0cfa9c63c9166381f9c",
+    "docs/rfc/keyed-row-scope-exploratory-c2.json": "c6af471f0e83c4f5732b73142cb21932fc7c30376a3effe3022d12a32f8a6e72",
+    "docs/rfc/keyed-row-scope-exploratory-a1.json": "fa80ddd4357082db1d64e42d65212cbde1768ba329b8282d16733915b45294ea",
+    "docs/rfc/keyed-row-scope-task-c1.json": "58055b1d7f58d73c9c3bdfb2c4d0daccca1f100423f3daf68f9b70bcdd65474b",
+    "docs/rfc/keyed-row-scope-candidate.cpuprofile": "1862167a050a5efa8964f74eeba516d1aa33cf969c06fe53f2f45d1275a7f05f"
+  },
+  "harness": {
+    "task-a": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "4ce40401d02849c1e822ff933b0cfd682d4002fa8e127d0a48e66c90594e7170"
+    },
+    "task-b": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "4ce40401d02849c1e822ff933b0cfd682d4002fa8e127d0a48e66c90594e7170"
+    },
+    "task-c": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "4ce40401d02849c1e822ff933b0cfd682d4002fa8e127d0a48e66c90594e7170"
+    },
+    "scheduler-a": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "e35709683c776cac8fcf3e4eaea95512522f5b6eb5abe112fdd625c95fa4d071"
+    },
+    "scheduler-b": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "e35709683c776cac8fcf3e4eaea95512522f5b6eb5abe112fdd625c95fa4d071"
+    },
+    "scheduler-c": {
+      "scripts/benchmark-browser.ts": "52470f33399b31cbb85932afc35cc4316d70276b05bb8592170567e5982f9f66",
+      "scripts/benchmarks/browser.ts": "e35709683c776cac8fcf3e4eaea95512522f5b6eb5abe112fdd625c95fa4d071"
+    }
+  }
+}

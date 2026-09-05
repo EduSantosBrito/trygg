@@ -1,7 +1,15 @@
 import { DateTime, Effect, Layer } from "effect";
 import * as Context from "effect/Context";
-import type { Severity } from "../errors/incidents";
-import { type Status, IncidentNotFound, InvalidTransition } from "../errors/incidents";
+import {
+  IncidentId,
+  type IncidentId as IncidentIdType,
+  IncidentTitle,
+  type IncidentTitle as IncidentTitleType,
+  type Severity,
+  type Status,
+  IncidentNotFound,
+  InvalidTransition,
+} from "../errors/incidents";
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -21,49 +29,40 @@ export interface TimelineEntry {
 }
 
 export interface Incident {
-  readonly id: number;
-  readonly title: string;
+  readonly id: IncidentIdType;
+  readonly title: IncidentTitleType;
   readonly severity: Severity;
   readonly status: Status;
   readonly timeline: ReadonlyArray<TimelineEntry>;
   readonly createdAt: Date;
 }
 
+export interface IncidentService {
+  readonly list: Effect.Effect<ReadonlyArray<Incident>>;
+  readonly get: (id: IncidentIdType) => Effect.Effect<Incident, IncidentNotFound>;
+  readonly create: (params: {
+    readonly title: IncidentTitleType;
+    readonly severity: Severity;
+  }) => Effect.Effect<Incident>;
+  readonly transition: (
+    id: IncidentIdType,
+    to: Status,
+  ) => Effect.Effect<Incident, InvalidTransition | IncidentNotFound>;
+  readonly addTimelineEntry: (
+    id: IncidentIdType,
+    message: string,
+  ) => Effect.Effect<void, IncidentNotFound>;
+}
+
 // ---------------------------------------------------------------------------
 // Service definition
 // ---------------------------------------------------------------------------
 
-export interface IncidentService {
-  readonly list: Effect.Effect<ReadonlyArray<Incident>>;
-  readonly get: (id: number) => Effect.Effect<Incident, IncidentNotFound>;
-  readonly create: (params: {
-    readonly title: string;
-    readonly severity: Severity;
-  }) => Effect.Effect<Incident>;
-  readonly transition: (
-    id: number,
-    to: Status,
-  ) => Effect.Effect<Incident, InvalidTransition | IncidentNotFound>;
-  readonly addTimelineEntry: (id: number, message: string) => Effect.Effect<void, IncidentNotFound>;
-}
-
 export class Incidents extends Context.Service<
   Incidents,
   {
-    readonly list: Effect.Effect<ReadonlyArray<Incident>>;
-    readonly get: (id: number) => Effect.Effect<Incident, IncidentNotFound>;
-    readonly create: (params: {
-      readonly title: string;
-      readonly severity: Severity;
-    }) => Effect.Effect<Incident>;
-    readonly transition: (
-      id: number,
-      to: Status,
-    ) => Effect.Effect<Incident, InvalidTransition | IncidentNotFound>;
-    readonly addTimelineEntry: (
-      id: number,
-      message: string,
-    ) => Effect.Effect<void, IncidentNotFound>;
+    /** Initializes the repository on first request and reuses it for this Layer acquisition. */
+    readonly acquire: Effect.Effect<IncidentService>;
   }
 >()("incident/Incidents") {}
 
@@ -75,8 +74,8 @@ const now: Effect.Effect<Date> = DateTime.nowAsDate;
 
 const seed: ReadonlyArray<Incident> = [
   {
-    id: 1,
-    title: "API latency spike",
+    id: IncidentId.make(1),
+    title: IncidentTitle.make("API latency spike"),
     severity: "SEV-2",
     status: "Investigating",
     timeline: [
@@ -86,16 +85,16 @@ const seed: ReadonlyArray<Incident> = [
     createdAt: new Date("2026-01-15T14:02:00Z"),
   },
   {
-    id: 2,
-    title: "DB connection pool exhaustion",
+    id: IncidentId.make(2),
+    title: IncidentTitle.make("DB connection pool exhaustion"),
     severity: "SEV-1",
     status: "Detected",
     timeline: [{ timestamp: new Date("2026-01-15T14:05:00Z"), message: "Incident created" }],
     createdAt: new Date("2026-01-15T14:05:00Z"),
   },
   {
-    id: 3,
-    title: "Auth service 503",
+    id: IncidentId.make(3),
+    title: IncidentTitle.make("Auth service 503"),
     severity: "SEV-3",
     status: "Resolved",
     timeline: [
@@ -109,16 +108,31 @@ const seed: ReadonlyArray<Incident> = [
   },
 ];
 
-const makeIncidentService = (): IncidentService => {
-  const store = new Map<number, Incident>(seed.map((i) => [i.id, i]));
+const cloneIncident = (incident: Incident): Incident => ({
+  ...incident,
+  timeline: incident.timeline.map(({ timestamp, message }) => ({
+    timestamp: new Date(timestamp.getTime()),
+    message,
+  })),
+  createdAt: new Date(incident.createdAt.getTime()),
+});
+
+const makeMemory = (): IncidentService => {
+  const store = new Map<IncidentIdType, Incident>(
+    seed.map((incident) => {
+      const copy = cloneIncident(incident);
+      return [copy.id, copy];
+    }),
+  );
   let nextId = 4;
 
-  const lookup = (id: number): Effect.Effect<Incident, IncidentNotFound> => {
-    const incident = store.get(id);
-    return incident !== undefined
-      ? Effect.succeed(incident)
-      : Effect.fail(new IncidentNotFound({ id }));
-  };
+  const lookup = (id: IncidentIdType): Effect.Effect<Incident, IncidentNotFound> =>
+    Effect.suspend(() => {
+      const incident = store.get(id);
+      return incident !== undefined
+        ? Effect.succeed(incident)
+        : Effect.fail(new IncidentNotFound({ id }));
+    });
 
   return {
     list: Effect.sync(() => [...store.values()]),
@@ -128,7 +142,7 @@ const makeIncidentService = (): IncidentService => {
     create: ({ title, severity }) =>
       Effect.gen(function* () {
         const ts = yield* now;
-        const id = nextId++;
+        const id = IncidentId.make(nextId++);
         const incident: Incident = {
           id,
           title,
@@ -143,36 +157,51 @@ const makeIncidentService = (): IncidentService => {
 
     transition: (id, to) =>
       Effect.gen(function* () {
-        const incident = yield* lookup(id);
-        const valid = TRANSITIONS[incident.status];
-        if (!valid.includes(to)) {
-          return yield* new InvalidTransition({
-            from: incident.status,
-            to,
-            validNext: valid,
-          });
-        }
         const ts = yield* now;
-        const updated: Incident = {
-          ...incident,
-          status: to,
-          timeline: [...incident.timeline, { timestamp: ts, message: to }],
-        };
-        store.set(id, updated);
-        return updated;
+        // Read, validate, and publish in one synchronous turn. Clock acquisition
+        // may suspend; no stale repository snapshot may cross that boundary.
+        return yield* Effect.suspend(
+          (): Effect.Effect<Incident, IncidentNotFound | InvalidTransition> => {
+            const incident = store.get(id);
+            if (incident === undefined) return Effect.fail(new IncidentNotFound({ id }));
+            const valid = TRANSITIONS[incident.status];
+            if (!valid.includes(to))
+              return Effect.fail(
+                new InvalidTransition({ from: incident.status, to, validNext: valid }),
+              );
+            const updated: Incident = {
+              ...incident,
+              status: to,
+              timeline: [...incident.timeline, { timestamp: ts, message: to }],
+            };
+            store.set(id, updated);
+            return Effect.succeed(updated);
+          },
+        );
       }),
 
     addTimelineEntry: (id, message) =>
       Effect.gen(function* () {
-        const incident = yield* lookup(id);
         const ts = yield* now;
-        const updated: Incident = {
-          ...incident,
-          timeline: [...incident.timeline, { timestamp: ts, message }],
-        };
-        store.set(id, updated);
+        return yield* Effect.suspend(() => {
+          const incident = store.get(id);
+          if (incident === undefined) return Effect.fail(new IncidentNotFound({ id }));
+          const updated: Incident = {
+            ...incident,
+            timeline: [...incident.timeline, { timestamp: ts, message }],
+          };
+          store.set(id, updated);
+          return Effect.void;
+        });
       }),
   };
 };
 
-export const IncidentsLive = Layer.succeed(Incidents, makeIncidentService());
+export namespace Incidents {
+  export const make = makeMemory;
+
+  export const layer = Layer.effect(
+    Incidents,
+    Effect.cached(Effect.sync(make)).pipe(Effect.map((acquire) => Incidents.of({ acquire }))),
+  );
+}

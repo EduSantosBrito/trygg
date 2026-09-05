@@ -1,0 +1,537 @@
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ b/packages/core/src/primitives/render-intrinsic.ts
+@@ -17,7 +17,7 @@
+ import { InvalidEventHandlerError } from "./renderer.js";
+ import * as RenderContextTransaction from "./render-context-transaction.js";
+ import * as RenderTransaction from "./render-transaction.js";
+-import { cleanupAll, reportUnhandledRenderCause, runOwnedRenderFiber } from "./render-cleanup.js";
++import { cleanupAll, runOwnedRenderFiber } from "./render-cleanup.js";
+ 
+ interface RenderOptions {
+   readonly errorHandler: ErrorBoundaryHandler | null;
+@@ -797,113 +797,99 @@
+     );
+   }
+ 
+-  const node = createElement(tag);
+-  yield* Trace.emit("intrinsic.render", () => ({ element_tag: tag }));
+-
+-  const domProps = props.mode !== undefined ? omitMode(props) : props;
+-  const appliedProps =
+-    Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)
+-      ? hoistAction.value.props
+-      : domProps;
+-
+-  let currentProps = appliedProps;
+-  let propCleanups = yield* applyProps(node, currentProps, renderContext, context, deps);
+-  const isHeadHoist = Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value);
+-  if (!isHeadHoist) parent.appendChild(node);
+-
+-  type ChildSlot = {
+-    readonly key: ReturnType<typeof getKey>;
+-    readonly startMarker: Comment;
+-    readonly endMarker: Comment;
+-    readonly result: RenderResult;
+-  };
+-
+-  const hasKeyedChildren = children.some((child) => getKey(child) !== null);
+-  const childrenAnchor = hasKeyedChildren ? document.createComment("children-end") : null;
+-  if (childrenAnchor !== null) node.appendChild(childrenAnchor);
+-
+-  const cleanupChildSlot = Effect.fnUntraced(function* (slot: ChildSlot) {
+-    yield* cleanupAll([
+-      RenderTransaction.cleanup(slot.result),
+-      Effect.sync(() => slot.startMarker.remove()),
+-      Effect.sync(() => slot.endMarker.remove()),
+-    ]);
+-  });
+-
+-  const renderChildSlot = Effect.fnUntraced(function* (
+-    child: Element,
+-    childContext: Context.Context<unknown> | null,
+-  ) {
+-    const fragment = document.createDocumentFragment();
+-    const startMarker = document.createComment("child-start");
+-    fragment.appendChild(startMarker);
+-    const result = yield* deps.renderElement(child, fragment, renderContext, childContext, options);
+-    const endMarker = document.createComment("child-end");
+-    fragment.appendChild(endMarker);
+-    if (childrenAnchor === null) {
+-      node.appendChild(fragment);
+-    } else {
+-      node.insertBefore(fragment, childrenAnchor);
+-    }
+-
+-    return { key: getKey(child), startMarker, endMarker, result } satisfies ChildSlot;
+-  });
+-
+-  const childResults: Array<RenderResult> = [];
+-  let childSlots: Array<ChildSlot> = [];
+-
+-  const cleanupProgressiveNode = Effect.suspend(() => {
+-    const cleanups: Array<Effect.Effect<void, unknown, R>> = [];
+-    if (hasKeyedChildren) {
+-      for (const childSlot of childSlots) cleanups.push(cleanupChildSlot(childSlot));
+-    } else {
+-      for (const child of childResults) cleanups.push(RenderTransaction.cleanup(child));
+-    }
+-    cleanups.push(
+-      ...propCleanups,
+-      Effect.sync(() => node.remove()),
+-    );
+-    return cleanupAll(cleanups);
+-  });
+-
+-  if (hasKeyedChildren) {
+-    for (const child of children) {
+-      childSlots.push(
+-        yield* renderChildSlot(child, context).pipe(
+-          Effect.onError(() =>
+-            cleanupProgressiveNode.pipe(
+-              Effect.catchCause((cause) => Effect.sync(() => reportUnhandledRenderCause(cause))),
+-            ),
+-          ),
+-        ),
+-      );
+-    }
+-  } else {
+-    for (const child of children) {
+-      childResults.push(
+-        yield* deps
+-          .renderElement(child, node, renderContext, context, options)
+-          .pipe(
+-            Effect.onError(() =>
+-              cleanupProgressiveNode.pipe(
+-                Effect.catchCause((cause) => Effect.sync(() => reportUnhandledRenderCause(cause))),
++  let rollback: Effect.Effect<void, unknown, R> = Effect.void;
++  // Native writes and result bookkeeping finish together; user rendering stays
++  // interruptible. Until handoff, every partial acquisition belongs to rollback.
++  return yield* Effect.uninterruptibleMask((restore) =>
++    Effect.gen(function* () {
++      const node = createElement(tag);
++      rollback = Effect.sync(() => node.remove());
++      yield* Trace.emit("intrinsic.render", () => ({ element_tag: tag }));
++
++      const domProps = props.mode !== undefined ? omitMode(props) : props;
++      const appliedProps =
++        Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)
++          ? hoistAction.value.props
++          : domProps;
++
++      let currentProps = appliedProps;
++      let propCleanups: Array<Effect.Effect<void>> = [];
++      const isHeadHoist = Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value);
++
++      type ChildSlot = {
++        readonly key: ReturnType<typeof getKey>;
++        readonly startMarker: Comment;
++        readonly endMarker: Comment;
++        readonly result: RenderResult;
++      };
++
++      const hasKeyedChildren = children.some((child) => getKey(child) !== null);
++      const childrenAnchor = hasKeyedChildren ? document.createComment("children-end") : null;
++      let headAnchor: Comment | undefined;
++
++      const cleanupChildSlot = Effect.fnUntraced(function* (slot: ChildSlot) {
++        yield* cleanupAll([
++          RenderTransaction.cleanup(slot.result),
++          Effect.sync(() => slot.startMarker.remove()),
++          Effect.sync(() => slot.endMarker.remove()),
++        ]);
++      });
++
++      const renderChildSlot = Effect.fnUntraced(function* (
++        child: Element,
++        childContext: Context.Context<unknown> | null,
++      ) {
++        let startMarker: Comment | undefined;
++        let endMarker: Comment | undefined;
++        let acquired: RenderResult | undefined;
++        return yield* Effect.uninterruptibleMask((restoreChild) =>
++          Effect.gen(function* () {
++            const fragment = document.createDocumentFragment();
++            const start = document.createComment("child-start");
++            startMarker = start;
++            fragment.appendChild(start);
++            const result = yield* restoreChild(
++              deps.renderElement(child, fragment, renderContext, childContext, options),
++            );
++            acquired = result;
++            const end = document.createComment("child-end");
++            endMarker = end;
++            fragment.appendChild(end);
++            if (childrenAnchor === null) node.appendChild(fragment);
++            else node.insertBefore(fragment, childrenAnchor);
++            return {
++              key: getKey(child),
++              startMarker: start,
++              endMarker: end,
++              result,
++            } satisfies ChildSlot;
++          }).pipe(
++            Effect.catchCause((cause) =>
++              Effect.exit(restoreChild(Effect.void)).pipe(
++                Effect.flatMap((exit) =>
++                  Effect.failCause(Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause),
++                ),
+               ),
+             ),
+           ),
+-      );
+-    }
+-  }
+-
+-  if (Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)) {
+-    if (node instanceof HTMLElement) {
+-      yield* hoistAction.value.mount(node);
+-    }
+-    const anchor = document.createComment(`head:${tag}`);
+-    parent.appendChild(anchor);
+-
+-    return {
+-      node: anchor,
+-      cleanup: Effect.suspend(() => {
++        ).pipe(
++          Effect.onExit((exit) => {
++            if (Exit.isSuccess(exit)) return Effect.void;
++            const cleanups: Array<Effect.Effect<void, unknown>> = [];
++            if (acquired !== undefined) cleanups.push(RenderTransaction.cleanup(acquired));
++            const start = startMarker;
++            const end = endMarker;
++            if (start !== undefined) cleanups.push(Effect.sync(() => start.remove()));
++            if (end !== undefined) cleanups.push(Effect.sync(() => end.remove()));
++            return cleanupAll(cleanups);
++          }),
++        );
++      });
++
++      const childResults: Array<RenderResult> = [];
++      let childSlots: Array<ChildSlot> = [];
++
++      const cleanupProgressiveNode = Effect.suspend(() => {
+         const cleanups: Array<Effect.Effect<void, unknown, R>> = [];
+         if (hasKeyedChildren) {
+           for (const childSlot of childSlots) cleanups.push(cleanupChildSlot(childSlot));
+@@ -912,138 +898,196 @@
+         }
+         cleanups.push(
+           ...propCleanups,
+-          Effect.sync(() => anchor.remove()),
++          Effect.sync(() => node.remove()),
+         );
++        const anchor = headAnchor;
++        if (anchor !== undefined) cleanups.push(Effect.sync(() => anchor.remove()));
+         return cleanupAll(cleanups);
+-      }),
+-    } satisfies RenderResult;
+-  }
+-
+-  return {
+-    node,
+-    cleanup: Effect.suspend(() => {
+-      // Detach this subtree's root from the document FIRST, as a single
+-      // synchronous DOM mutation, BEFORE recursing into child/prop cleanup.
+-      // Child cleanup is an Effect that `yield*`s once per child — every yield is
+-      // a scheduler boundary where the browser can paint, so cleaning up children
+-      // while still attached makes a large subtree disappear node-by-node (a
+-      // 60-line code block visibly tearing down line-by-line under load). Removing
+-      // `node` up front means every descendant removal happens off-document and is
+-      // never painted; the outermost intrinsic in any torn-down subtree thus
+-      // vanishes atomically and the inner `node.remove()`s become no-ops.
+-      const cleanups: Array<Effect.Effect<void, unknown, R>> = [Effect.sync(() => node.remove())];
++      });
++      rollback = cleanupProgressiveNode;
++      propCleanups = yield* restore(applyProps(node, currentProps, renderContext, context, deps));
++      if (!isHeadHoist) parent.appendChild(node);
++      if (childrenAnchor !== null) node.appendChild(childrenAnchor);
++
+       if (hasKeyedChildren) {
+-        for (const childSlot of childSlots) cleanups.push(cleanupChildSlot(childSlot));
++        for (const child of children)
++          childSlots.push(yield* restore(renderChildSlot(child, context)));
+       } else {
+-        for (const child of childResults) cleanups.push(RenderTransaction.cleanup(child));
++        for (const child of children)
++          childResults.push(
++            yield* restore(deps.renderElement(child, node, renderContext, context, options)),
++          );
+       }
+-      cleanups.push(...propCleanups);
+-      return cleanupAll(cleanups);
+-    }),
+-    reconcile: Effect.fnUntraced(function* (
+-      nextElement: Element,
+-      nextContext: Context.Context<unknown> | null,
+-    ) {
+-      const resolved = resolveReconcileTarget(nextElement, nextContext);
+-      const resolvedNextElement = resolved.element;
+-      const resolvedNextContext = resolved.context;
+-
+-      if (!Predicate.isTagged(resolvedNextElement, "Intrinsic")) return false;
+-      if (resolvedNextElement.tag !== tag || resolvedNextElement.key !== key) return false;
+-
+-      const nextProps =
+-        resolvedNextElement.props.mode !== undefined
+-          ? omitMode(resolvedNextElement.props)
+-          : resolvedNextElement.props;
+-
+-      if (!shallowPropsEqual(currentProps, nextProps)) {
+-        for (const cleanup of propCleanups) yield* cleanup;
+-        clearRemovedProps(node, currentProps, nextProps);
+-        propCleanups = yield* applyProps(node, nextProps, renderContext, resolvedNextContext, deps);
+-        currentProps = nextProps;
++
++      if (Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)) {
++        if (node instanceof HTMLElement) {
++          yield* restore(hoistAction.value.mount(node));
++        }
++        const anchor = document.createComment(`head:${tag}`);
++        headAnchor = anchor;
++        parent.appendChild(anchor);
++
++        return {
++          node: anchor,
++          cleanup: Effect.suspend(() => {
++            const cleanups: Array<Effect.Effect<void, unknown, R>> = [];
++            if (hasKeyedChildren) {
++              for (const childSlot of childSlots) cleanups.push(cleanupChildSlot(childSlot));
++            } else {
++              for (const child of childResults) cleanups.push(RenderTransaction.cleanup(child));
++            }
++            cleanups.push(
++              ...propCleanups,
++              Effect.sync(() => anchor.remove()),
++            );
++            return cleanupAll(cleanups);
++          }),
++        } satisfies RenderResult;
+       }
+ 
+-      if (!hasKeyedChildren) {
+-        if (resolvedNextElement.children.length !== childResults.length) return false;
+-
+-        for (let index = 0; index < childResults.length; index++) {
+-          const childResult = childResults[index];
+-          const nextChild = resolvedNextElement.children[index];
+-          if (
+-            childResult === undefined ||
+-            nextChild === undefined ||
+-            childResult.reconcile === undefined
++      return {
++        node,
++        cleanup: Effect.suspend(() => {
++          // Detach this subtree's root from the document FIRST, as a single
++          // synchronous DOM mutation, BEFORE recursing into child/prop cleanup.
++          // Child cleanup is an Effect that `yield*`s once per child — every yield is
++          // a scheduler boundary where the browser can paint, so cleaning up children
++          // while still attached makes a large subtree disappear node-by-node (a
++          // 60-line code block visibly tearing down line-by-line under load). Removing
++          // `node` up front means every descendant removal happens off-document and is
++          // never painted; the outermost intrinsic in any torn-down subtree thus
++          // vanishes atomically and the inner `node.remove()`s become no-ops.
++          const cleanups: Array<Effect.Effect<void, unknown, R>> = [
++            Effect.sync(() => node.remove()),
++          ];
++          if (hasKeyedChildren) {
++            for (const childSlot of childSlots) cleanups.push(cleanupChildSlot(childSlot));
++          } else {
++            for (const child of childResults) cleanups.push(RenderTransaction.cleanup(child));
++          }
++          cleanups.push(...propCleanups);
++          return cleanupAll(cleanups);
++        }),
++        reconcile: Effect.fnUntraced(function* (
++          nextElement: Element,
++          nextContext: Context.Context<unknown> | null,
++        ) {
++          const resolved = resolveReconcileTarget(nextElement, nextContext);
++          const resolvedNextElement = resolved.element;
++          const resolvedNextContext = resolved.context;
++
++          if (!Predicate.isTagged(resolvedNextElement, "Intrinsic")) return false;
++          if (resolvedNextElement.tag !== tag || resolvedNextElement.key !== key) return false;
++
++          const nextProps =
++            resolvedNextElement.props.mode !== undefined
++              ? omitMode(resolvedNextElement.props)
++              : resolvedNextElement.props;
++
++          if (!shallowPropsEqual(currentProps, nextProps)) {
++            for (const cleanup of propCleanups) yield* cleanup;
++            clearRemovedProps(node, currentProps, nextProps);
++            propCleanups = yield* applyProps(
++              node,
++              nextProps,
++              renderContext,
++              resolvedNextContext,
++              deps,
++            );
++            currentProps = nextProps;
++          }
++
++          if (!hasKeyedChildren) {
++            if (resolvedNextElement.children.length !== childResults.length) return false;
++
++            for (let index = 0; index < childResults.length; index++) {
++              const childResult = childResults[index];
++              const nextChild = resolvedNextElement.children[index];
++              if (
++                childResult === undefined ||
++                nextChild === undefined ||
++                childResult.reconcile === undefined
++              ) {
++                return false;
++              }
++              const outcome = yield* RenderTransaction.reconcile({
++                previous: childResult,
++                nextElement: nextChild,
++                nextContext: resolvedNextContext,
++                context: renderContext,
++              });
++              if (!Predicate.isTagged(outcome, "Reconciled")) return false;
++            }
++
++            return true;
++          }
++
++          if (childrenAnchor === null) return false;
++
++          const keyedIndices = new Map<string | number, number>();
++          childSlots.forEach((slot, index) => {
++            if (slot.key !== null && !keyedIndices.has(slot.key)) keyedIndices.set(slot.key, index);
++          });
++
++          const usedIndices = new Set<number>();
++          const nextSlots: Array<ChildSlot> = [];
++
++          const tryReuse = Effect.fnUntraced(function* (
++            nextChild: Element,
++            slotIndex: number | undefined,
+           ) {
+-            return false;
++            if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
++            const slot = childSlots[slotIndex];
++            if (slot === undefined || slot.result.reconcile === undefined) return false;
++            const outcome = yield* RenderTransaction.reconcile({
++              previous: slot.result,
++              nextElement: nextChild,
++              nextContext: resolvedNextContext,
++              context: renderContext,
++            });
++            if (!Predicate.isTagged(outcome, "Reconciled")) return false;
++            usedIndices.add(slotIndex);
++            nextSlots.push(slot);
++            return true;
++          });
++
++          for (let index = 0; index < resolvedNextElement.children.length; index++) {
++            const nextChild = resolvedNextElement.children[index];
++            if (nextChild === undefined) continue;
++
++            const nextKey = getKey(nextChild);
++            const reused =
++              nextKey !== null
++                ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
++                : yield* tryReuse(nextChild, index);
++            if (!reused) nextSlots.push(yield* renderChildSlot(nextChild, resolvedNextContext));
+           }
+-          const outcome = yield* RenderTransaction.reconcile({
+-            previous: childResult,
+-            nextElement: nextChild,
+-            nextContext: resolvedNextContext,
+-            context: renderContext,
+-          });
+-          if (!Predicate.isTagged(outcome, "Reconciled")) return false;
+-        }
+-
+-        return true;
+-      }
+-
+-      if (childrenAnchor === null) return false;
+-
+-      const keyedIndices = new Map<string | number, number>();
+-      childSlots.forEach((slot, index) => {
+-        if (slot.key !== null && !keyedIndices.has(slot.key)) keyedIndices.set(slot.key, index);
+-      });
+-
+-      const usedIndices = new Set<number>();
+-      const nextSlots: Array<ChildSlot> = [];
+-
+-      const tryReuse = Effect.fnUntraced(function* (
+-        nextChild: Element,
+-        slotIndex: number | undefined,
+-      ) {
+-        if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
+-        const slot = childSlots[slotIndex];
+-        if (slot === undefined || slot.result.reconcile === undefined) return false;
+-        const outcome = yield* RenderTransaction.reconcile({
+-          previous: slot.result,
+-          nextElement: nextChild,
+-          nextContext: resolvedNextContext,
+-          context: renderContext,
+-        });
+-        if (!Predicate.isTagged(outcome, "Reconciled")) return false;
+-        usedIndices.add(slotIndex);
+-        nextSlots.push(slot);
+-        return true;
+-      });
+-
+-      for (let index = 0; index < resolvedNextElement.children.length; index++) {
+-        const nextChild = resolvedNextElement.children[index];
+-        if (nextChild === undefined) continue;
+-
+-        const nextKey = getKey(nextChild);
+-        const reused =
+-          nextKey !== null
+-            ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
+-            : yield* tryReuse(nextChild, index);
+-        if (!reused) nextSlots.push(yield* renderChildSlot(nextChild, resolvedNextContext));
+-      }
+-
+-      let beforeRef: Node = childrenAnchor;
+-      for (let index = nextSlots.length - 1; index >= 0; index--) {
+-        const slot = nextSlots[index];
+-        if (slot === undefined) continue;
+-        moveRange(slot.startMarker, slot.endMarker, beforeRef);
+-        beforeRef = slot.startMarker;
+-      }
+-
+-      for (let index = 0; index < childSlots.length; index++) {
+-        const slot = childSlots[index];
+-        if (slot !== undefined && !usedIndices.has(index)) yield* cleanupChildSlot(slot);
+-      }
+-
+-      childSlots = nextSlots;
+-      return true;
+-    }),
+-  } satisfies RenderResult;
++
++          let beforeRef: Node = childrenAnchor;
++          for (let index = nextSlots.length - 1; index >= 0; index--) {
++            const slot = nextSlots[index];
++            if (slot === undefined) continue;
++            moveRange(slot.startMarker, slot.endMarker, beforeRef);
++            beforeRef = slot.startMarker;
++          }
++
++          for (let index = 0; index < childSlots.length; index++) {
++            const slot = childSlots[index];
++            if (slot !== undefined && !usedIndices.has(index)) yield* cleanupChildSlot(slot);
++          }
++
++          childSlots = nextSlots;
++          return true;
++        }),
++      } satisfies RenderResult;
++    }).pipe(
++      Effect.catchCause((cause) =>
++        Effect.exit(restore(Effect.void)).pipe(
++          Effect.flatMap((exit) =>
++            Effect.failCause(Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause),
++          ),
++        ),
++      ),
++    ),
++  ).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? rollback : Effect.void)));
+ });

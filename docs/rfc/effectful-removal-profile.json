@@ -1,0 +1,121 @@
+{
+  "date": "2026-09-05T07:00:58.823Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 740.2000000476837,
+          "frameMs": 753.3000000119209,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 718.5,
+          "frameMs": 725.3000000119209,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 727.8000000119209,
+          "frameMs": 735.3000000119209,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 723,
+          "frameMs": 732.8000000119209,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 712.6999999880791,
+          "frameMs": 720,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 722,
+          "frameMs": 728.5999999642372,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 729,
+          "frameMs": 741.8000000119209,
+          "rows": 999
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 44.30000001192093,
+    "firstContentfulPaintMs": 76
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 4664,
+      "gzipBytes": 1730
+    },
+    {
+      "file": "chunk-dtrpg03b.js",
+      "loadedAtStartup": true,
+      "bytes": 132882,
+      "gzipBytes": 28402
+    },
+    {
+      "file": "chunk-6hw957ww.js",
+      "loadedAtStartup": true,
+      "bytes": 449608,
+      "gzipBytes": 100320
+    },
+    {
+      "file": "chunk-4gbwy7ze.js",
+      "loadedAtStartup": true,
+      "bytes": 227727,
+      "gzipBytes": 58434
+    },
+    {
+      "file": "chunk-761gpvp7.js",
+      "loadedAtStartup": true,
+      "bytes": 1420,
+      "gzipBytes": 681
+    },
+    {
+      "file": "chunk-ggjs9hx6.js",
+      "loadedAtStartup": true,
+      "bytes": 108847,
+      "gzipBytes": 21837
+    },
+    {
+      "file": "chunk-v572xnay.js",
+      "loadedAtStartup": false,
+      "bytes": 2896,
+      "gzipBytes": 1148
+    }
+  ],
+  "work": [
+    {
+      "operation": "remove",
+      "rows": 999,
+      "elements": 6986,
+      "textNodes": 2994,
+      "comments": 1996,
+      "tags": {
+        "tr": 998,
+        "td": 3992,
+        "a": 1996
+      }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { Data, Effect, Exit, Layer, Result, Context, Schema, Scope } from "effect";
 
 // Tagged error for testing component failures
-class ComponentError extends Schema.TaggedErrorClass<ComponentError>()("ComponentError", {
+class ComponentError extends Schema.TaggedError<ComponentError>()("ComponentError", {
   message: Schema.String,
 }) {}
 import * as Component from "../component.js";

@@ -5,11 +5,71 @@
  * Success paths, failure paths, and boundary values.
  */
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
-import { SessionStorage, LocalStorage, sessionStorageTest, localStorageTest } from "../storage.js";
+import { Effect, Layer, Schema, Scope } from "effect";
+import {
+  SessionStorage,
+  LocalStorage,
+  sessionStorageBrowser,
+  localStorageBrowser,
+  sessionStorageTest,
+  localStorageTest,
+} from "../storage.js";
 
 const PointJson = Schema.fromJsonString(Schema.Struct({ x: Schema.Number, y: Schema.Number }));
 const encodePointJson = Schema.encodeEffect(PointJson);
+
+const makeNativeStorage = (): Storage => {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key) => {
+      values.delete(key);
+    },
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+  };
+};
+
+const installNativeStorageBackends: Effect.Effect<
+  { readonly session: Storage; readonly local: Storage },
+  never,
+  Scope.Scope
+> = Effect.acquireRelease(
+  Effect.sync(() => {
+    const sessionDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    const localDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const session = makeNativeStorage();
+    const local = makeNativeStorage();
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: session,
+    });
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: local,
+    });
+    return { session, local, sessionDescriptor, localDescriptor };
+  }),
+  ({ sessionDescriptor, localDescriptor }) =>
+    Effect.sync(() => {
+      if (sessionDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, "sessionStorage");
+      } else {
+        Object.defineProperty(globalThis, "sessionStorage", sessionDescriptor);
+      }
+      if (localDescriptor === undefined) {
+        Reflect.deleteProperty(globalThis, "localStorage");
+      } else {
+        Object.defineProperty(globalThis, "localStorage", localDescriptor);
+      }
+    }),
+).pipe(Effect.map(({ session, local }) => ({ session, local })));
 
 describe("SessionStorage", () => {
   it.effect("get returns null for missing key", () =>
@@ -118,3 +178,39 @@ describe("LocalStorage", () => {
     }).pipe(Effect.provide(Layer.merge(sessionStorageTest, localStorageTest))),
   );
 });
+
+const storageAdapters: ReadonlyArray<
+  readonly [string, Layer.Layer<SessionStorage | LocalStorage>]
+> = [
+  ["browser", Layer.merge(sessionStorageBrowser, localStorageBrowser)],
+  ["test", Layer.merge(sessionStorageTest, localStorageTest)],
+];
+
+for (const [name, layer] of storageAdapters) {
+  describe(`Storage ${name} adapter conformance`, () => {
+    it.effect("should preserve set get remove and backend isolation", () =>
+      Effect.gen(function* () {
+        // Test: should preserve set get remove and backend isolation through every Storage adapter.
+        // Scope: executes one public contract table against both controlled live globals and in-memory layers.
+        // Assertion: equal keys remain independent and successful mutations are observable in the selected backend only.
+        const native = yield* installNativeStorageBackends;
+        const session = yield* SessionStorage;
+        const local = yield* LocalStorage;
+
+        yield* session.set("shared", "session");
+        yield* local.set("shared", "local");
+        assert.strictEqual(yield* session.get("shared"), "session");
+        assert.strictEqual(yield* local.get("shared"), "local");
+
+        yield* session.remove("shared");
+        assert.isNull(yield* session.get("shared"));
+        assert.strictEqual(yield* local.get("shared"), "local");
+
+        if (name === "browser") {
+          assert.isNull(native.session.getItem("shared"));
+          assert.strictEqual(native.local.getItem("shared"), "local");
+        }
+      }).pipe(Effect.provide(layer)),
+    );
+  });
+}

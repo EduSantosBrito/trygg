@@ -1,0 +1,40 @@
+{
+  "experiment": "Static span combinator reuse",
+  "order": [
+    "per-call",
+    "reused",
+    "reused",
+    "per-call"
+  ],
+  "browser": "Chromium 141.0.7390.122",
+  "playwright": "1.62.1",
+  "effect": "4.0.0-rc.112",
+  "bun": "1.4.0",
+  "system": "Linux",
+  "kernel": "6.12.55",
+  "architecture": "x86_64",
+  "logicalCpuCount": 32,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900KF",
+  "variants": {
+    "per-call": {
+      "distJsSha256": "9263a60f087700a16cb522de2994809fde272fe36f0667a5359a05feca8b3d8b",
+      "fixtureSha256": "201d29b6f86ceaf9b64f2e1d4a260cbf44737325bfb4a8148d16a3eb391b56ca",
+      "runnerSha256": "1ccda7d160bb7a6ec38503cb04f745c0cd1e4e29b44ed492fe8e62c6b70b2feb"
+    },
+    "reused": {
+      "distJsSha256": "72fcbee8048cb0b2cab6f77dbda72e7401452d9b2bdf8153b1d19d53fc9aea44",
+      "fixtureSha256": "201d29b6f86ceaf9b64f2e1d4a260cbf44737325bfb4a8148d16a3eb391b56ca",
+      "runnerSha256": "1ccda7d160bb7a6ec38503cb04f745c0cd1e4e29b44ed492fe8e62c6b70b2feb"
+    }
+  },
+  "baselineReplacements": {
+    "withDeriveSpan": 1,
+    "withDeriveAllSpan": 1,
+    "withSelectorSpan": 2
+  },
+  "limitations": [
+    "Small test processes overlapped portions of measurements.",
+    "Two process replicates per variant; no significance claim.",
+    "The baseline reverses only span construction, not the earlier framework refactors."
+  ]
+}

@@ -6,21 +6,19 @@
     "apps/*"
   ],
   "type": "module",
-  "catalog": {
-    "@effect/language-service": "^0.85.1",
-    "@effect/platform-browser": "4.0.0-beta.58",
-    "@effect/platform-bun": "4.0.0-beta.58",
-    "@effect/platform-node": "4.0.0-beta.58",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.58",
-    "@effect/tsgo": "0.5.2",
-    "@effect/vitest": "4.0.0-beta.58",
-    "effect": "4.0.0-beta.58"
-  },
   "scripts": {
     "build": "bun run --cwd packages/core build",
-    "typecheck": "bun run --cwd packages/core typecheck && bun run --cwd packages/core test:types",
+    "typecheck": "bun run --cwd packages/core typecheck && bun run --cwd packages/core test:types && bun run --cwd packages/cli typecheck && bun run typecheck:templates && bun run --cwd apps/www typecheck && bun run typecheck:benchmarks",
+    "typecheck:benchmarks": "tsgo -p scripts/benchmarks/tsconfig.json",
+    "benchmark:runtime": "bun scripts/benchmark-runtime.ts",
+    "benchmark:navigation": "bun scripts/benchmark-navigation.ts",
+    "benchmark:incident-auth": "bun scripts/benchmark-incident-auth.ts",
+    "benchmark:router": "bun scripts/benchmark-router.ts",
+    "benchmark:activation-memory": "bun scripts/benchmark-activation-memory.ts",
+    "benchmark:dev-api": "bun scripts/benchmark-dev-api.ts",
+    "benchmark:browser": "bun run build && bun run typecheck:benchmarks && bun scripts/benchmark-browser.ts",
     "typecheck:templates": "tsgo -p packages/cli/tsconfig.templates.json",
-    "test": "bun run --cwd packages/core test && bun run --cwd apps/www test",
+    "test": "bun run --cwd packages/core test && bun run --cwd packages/cli test && bun run --cwd apps/www test",
     "test:watch": "bun run --cwd packages/core test:watch",
     "examples": "bun run build && bun run --cwd apps/examples dev",
     "www": "bun run --cwd apps/www dev",
@@ -28,24 +26,37 @@
     "www:preview": "bun run --cwd apps/www preview",
     "examples:preview": "bun run build && bun run --cwd apps/examples build && bun run --cwd apps/examples preview",
     "examples:install": "bun install --cwd apps/examples",
+    "trygg:check": "bun run packages/core/src/check/cli.ts",
     "lint": "oxlint -c oxlint.config.ts packages apps",
     "lint:fix": "oxlint -c oxlint.config.ts packages apps --fix",
-    "format": "oxfmt packages apps '!**/dist/**' --check",
-    "format:fix": "oxfmt packages apps '!**/dist/**' --write",
-    "effect:check": "bun run --cwd packages/core effect:check",
-    "check": "bun run lint:fix && bun run format:fix && bun run typecheck && bun run effect:check",
+    "format": "oxfmt packages apps '!**/dist/**' '!**/.trygg/**' --check",
+    "format:fix": "oxfmt packages apps '!**/dist/**' '!**/.trygg/**' --write",
+    "effect:check": "bun run --cwd packages/core effect:check && bun run --cwd packages/cli effect:check",
+    "check": "bun run lint && bun run format && bun run typecheck && bun run effect:check",
     "readme:header": "bun run --cwd apps/www scripts/build-readme-header.mjs",
-    "prepare": "effect-tsgo patch"
+    "prepare": "effect-tsgo patch --typescript-package @typescript/native"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/tsgo": "catalog:",
     "@oxlint/plugins": "^1.67.0",
-    "@typescript/native-preview": "latest",
+    "@typescript/native": "npm:typescript@7.0.2",
     "effect": "catalog:",
     "effect-rules": "^0.3.6",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.67.0",
-    "typescript": "^5.9.3"
+    "playwright": "1.62.1",
+    "typescript": "6.0.3"
+  },
+  "catalog": {
+    "@effect/language-service": "^0.87.2",
+    "@effect/platform-browser": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "@effect/tsgo": "0.38.0",
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "vitest": "4.1.5"
   }
 }

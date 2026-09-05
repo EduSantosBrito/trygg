@@ -1,6 +1,13 @@
+import { Context, Layer } from "effect";
 import { Component } from "trygg";
 
+export class Theme extends Context.Service<Theme, { readonly name: string }>()("app/Theme") {}
+
+export const ThemeLive = Layer.succeed(Theme, { name: "sky" });
+
 export default Component.gen(function* () {
+  const theme = yield* Theme;
+
   return (
     <main
       id="main-content"
@@ -15,6 +22,8 @@ export default Component.gen(function* () {
             app/pages/home.tsx
           </code>
         </p>
+
+        <p className="font-mono text-xs text-[var(--muted)]">Theme service: {theme.name}</p>
 
         <div className="flex flex-wrap justify-center gap-3">
           <a
@@ -40,4 +49,4 @@ bun run build        # production bundle`}</pre>
       </div>
     </main>
   );
-});
+}).pipe(Component.provide(ThemeLive));

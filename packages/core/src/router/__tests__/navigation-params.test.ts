@@ -14,6 +14,7 @@ import { scoped } from "../../testing/effect-vitest.js";
 import { Effect } from "effect";
 import * as Router from "../service.js";
 import { interpolateParams, buildPathWithParams } from "../types.js";
+import { buildPath } from "../utils.js";
 import * as Signal from "../../primitives/signal.js";
 
 // =============================================================================
@@ -145,8 +146,9 @@ describe("navigate with params", () => {
   scoped("should not modify path when params is empty object", () =>
     Effect.gen(function* () {
       const router = yield* Router.get;
+      const path: string = "/about";
 
-      yield* router.navigate("/about", { params: {} });
+      yield* router.navigate(path, { params: {} });
 
       const route = yield* Signal.get(router.current);
       assert.strictEqual(route.path, "/about");
@@ -219,6 +221,41 @@ describe("interpolateParams", () => {
     Effect.gen(function* () {
       const result = yield* interpolateParams("/offset/:n", { n: -1 });
       assert.strictEqual(result, "/offset/-1");
+    }),
+  );
+
+  it.effect("should reject decoded objects and unsupported collection values at runtime", () =>
+    Effect.gen(function* () {
+      // Scope: covers JavaScript callers that bypass generated Link/navigation input types.
+      // Assertion: Date, bigint, and array values all fail instead of being stringified implicitly.
+      const dateExit = yield* Effect.exit(
+        // @ts-expect-error Runtime must still defend callers without TypeScript.
+        interpolateParams("/events/:at", { at: new Date("2026-01-01T00:00:00Z") }),
+      );
+      const bigintExit = yield* Effect.exit(
+        // @ts-expect-error Runtime must still defend callers without TypeScript.
+        interpolateParams("/items/:id", { id: 1n }),
+      );
+      const arrayExit = yield* Effect.exit(
+        // @ts-expect-error Runtime must still defend callers without TypeScript.
+        interpolateParams("/tags/:tags", { tags: ["one", "two"] }),
+      );
+
+      assert.strictEqual(dateExit._tag, "Failure");
+      assert.strictEqual(bigintExit._tag, "Failure");
+      assert.strictEqual(arrayExit._tag, "Failure");
+    }),
+  );
+});
+
+describe("query URL construction", () => {
+  it.effect("should omit undefined optional encoded query fields", () =>
+    Effect.gen(function* () {
+      // Scope: covers optional Schema.Encoded query values at the URLSearchParams boundary.
+      // Assertion: omitted values do not serialize as the literal string "undefined".
+      const path = yield* buildPath("/events", { since: "2026-01-01", page: undefined });
+
+      assert.strictEqual(path, "/events?since=2026-01-01");
     }),
   );
 });

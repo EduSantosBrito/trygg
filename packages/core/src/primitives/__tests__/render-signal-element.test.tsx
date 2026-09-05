@@ -8,7 +8,7 @@ import type { ComponentProps } from "../component.js";
 import type { Element } from "../element.js";
 import * as Signal from "../signal.js";
 
-class SyntheticReconcileFailure extends Schema.TaggedErrorClass<SyntheticReconcileFailure>()(
+class SyntheticReconcileFailure extends Schema.TaggedError<SyntheticReconcileFailure>()(
   "SyntheticReconcileFailure",
   {
     detail: Schema.String,

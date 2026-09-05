@@ -1,0 +1,573 @@
+{
+  "date": "2026-09-05T05:11:23.145Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "create1k",
+      "samples": [
+        {
+          "operation": "create1k",
+          "handlerMs": 35.200000047683716,
+          "frameMs": 72.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 35.10000002384186,
+          "frameMs": 74.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 35.69999998807907,
+          "frameMs": 77.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 35,
+          "frameMs": 72,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 36.200000047683716,
+          "frameMs": 74.5,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 34.10000002384186,
+          "frameMs": 78.20000004768372,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 33.5,
+          "frameMs": 71.59999996423721,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "replace1k",
+      "samples": [
+        {
+          "operation": "replace1k",
+          "handlerMs": 47.80000001192093,
+          "frameMs": 90.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 47.10000002384186,
+          "frameMs": 85.39999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 44.5,
+          "frameMs": 85.5,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 44.10000002384186,
+          "frameMs": 85.5,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 46.700000047683716,
+          "frameMs": 86,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 46.5,
+          "frameMs": 87.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 42.69999998807907,
+          "frameMs": 81.5,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 3.800000011920929,
+          "frameMs": 23.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.100000023841858,
+          "frameMs": 25.80000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 3.5,
+          "frameMs": 29.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 3.400000035762787,
+          "frameMs": 30.600000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 3.5,
+          "frameMs": 17.80000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 5.800000011920929,
+          "frameMs": 33,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 3.600000023841858,
+          "frameMs": 20.400000035762787,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "select",
+      "samples": [
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 9,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 4.400000035762787,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 12.900000035762787,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 8.799999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 7.600000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.2999999523162842,
+          "frameMs": 9.299999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.3999999761581421,
+          "frameMs": 11.199999988079071,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "swap",
+      "samples": [
+        {
+          "operation": "swap",
+          "handlerMs": 1.300000011920929,
+          "frameMs": 12.300000011920929,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.199999988079071,
+          "frameMs": 9.300000011920929,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1,
+          "frameMs": 13.199999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.4000000357627869,
+          "frameMs": 8.5,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.199999988079071,
+          "frameMs": 9.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 2.100000023841858,
+          "frameMs": 8.800000011920929,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.2000000476837158,
+          "frameMs": 8.100000023841858,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 28,
+          "frameMs": 43.09999996423721,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 29,
+          "frameMs": 35.30000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 28.30000001192093,
+          "frameMs": 35,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71,
+          "frameMs": 77.90000003576279,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 28.400000035762787,
+          "frameMs": 46.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 24.900000035762787,
+          "frameMs": 32.80000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 24.899999976158142,
+          "frameMs": 44.69999998807907,
+          "rows": 999
+        }
+      ]
+    },
+    {
+      "operation": "append1k",
+      "samples": [
+        {
+          "operation": "append1k",
+          "handlerMs": 35.30000001192093,
+          "frameMs": 79.69999998807907,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 33.5,
+          "frameMs": 79.10000002384186,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 32.39999997615814,
+          "frameMs": 79.59999996423721,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 35.5,
+          "frameMs": 77.19999998807907,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 32.69999998807907,
+          "frameMs": 74.19999998807907,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 34.10000002384186,
+          "frameMs": 75.5,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 35.30000001192093,
+          "frameMs": 81.5,
+          "rows": 2000
+        }
+      ]
+    },
+    {
+      "operation": "clear",
+      "samples": [
+        {
+          "operation": "clear",
+          "handlerMs": 11.399999976158142,
+          "frameMs": 12.5,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.099999964237213,
+          "frameMs": 12.599999964237213,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.700000047683716,
+          "frameMs": 12.800000011920929,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 19.80000001192093,
+          "frameMs": 24.19999998807907,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.899999976158142,
+          "frameMs": 13.5,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.099999964237213,
+          "frameMs": 12.299999952316284,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 12,
+          "frameMs": 13.299999952316284,
+          "rows": 0
+        }
+      ]
+    },
+    {
+      "operation": "create10k",
+      "samples": [
+        {
+          "operation": "create10k",
+          "handlerMs": 327.80000001192093,
+          "frameMs": 723.6999999880791,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 313.10000002384186,
+          "frameMs": 772.6999999880791,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 326.60000002384186,
+          "frameMs": 725.3000000119209,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 314.60000002384186,
+          "frameMs": 738,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 324.80000001192093,
+          "frameMs": 708.9000000357628,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 312.5999999642372,
+          "frameMs": 736.5999999642372,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 398.39999997615814,
+          "frameMs": 806.0999999642372,
+          "rows": 10000
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 58.39999997615814,
+    "firstContentfulPaintMs": 88
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3118,
+      "gzipBytes": 1484
+    },
+    {
+      "file": "chunk-135dgjfw.js",
+      "loadedAtStartup": true,
+      "bytes": 74826,
+      "gzipBytes": 23276
+    },
+    {
+      "file": "chunk-7nph03a0.js",
+      "loadedAtStartup": true,
+      "bytes": 287167,
+      "gzipBytes": 81944
+    },
+    {
+      "file": "chunk-fkzrt2kw.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46539
+    },
+    {
+      "file": "chunk-wxat36j2.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 556
+    },
+    {
+      "file": "chunk-xzqa56ak.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18078
+    },
+    {
+      "file": "chunk-47e84wse.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 997
+    }
+  ],
+  "work": [
+    {
+      "operation": "create1k",
+      "rows": 1000,
+      "elements": 7000,
+      "textNodes": 3000,
+      "comments": 2000,
+      "tags": {
+        "tr": 1000,
+        "td": 4000,
+        "a": 2000
+      }
+    },
+    {
+      "operation": "replace1k",
+      "rows": 1000,
+      "elements": 7000,
+      "textNodes": 3000,
+      "comments": 2000,
+      "tags": {
+        "tr": 1000,
+        "td": 4000,
+        "a": 2000
+      }
+    },
+    {
+      "operation": "update",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "tags": {}
+    },
+    {
+      "operation": "select",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "tags": {}
+    },
+    {
+      "operation": "swap",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "tags": {}
+    },
+    {
+      "operation": "remove",
+      "rows": 999,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "tags": {}
+    },
+    {
+      "operation": "append1k",
+      "rows": 2000,
+      "elements": 7000,
+      "textNodes": 3000,
+      "comments": 2000,
+      "tags": {
+        "tr": 1000,
+        "td": 4000,
+        "a": 2000
+      }
+    },
+    {
+      "operation": "clear",
+      "rows": 0,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "tags": {}
+    },
+    {
+      "operation": "create10k",
+      "rows": 10000,
+      "elements": 70000,
+      "textNodes": 30000,
+      "comments": 20000,
+      "tags": {
+        "tr": 10000,
+        "td": 40000,
+        "a": 20000
+      }
+    }
+  ]
+}

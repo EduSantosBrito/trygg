@@ -42,7 +42,7 @@ import type { Effect, Types } from "effect";
  * @public
  * @since 1.0.0
  */
-export type Handler<E extends HttpApiEndpoint.Any, R = never> = (
+export type Handler<E extends HttpApiEndpoint.Constraint, R = never> = (
   request: Types.Simplify<HttpApiEndpoint.Request<E>>,
 ) => Effect.Effect<
   HttpApiEndpoint.Success<E>["Type"],
@@ -77,9 +77,9 @@ export type Handler<E extends HttpApiEndpoint.Any, R = never> = (
  * @public
  * @since 1.0.0
  */
-export type GroupHandlers<G extends HttpApiGroup.Any> = {
-  readonly [K in HttpApiEndpoint.Name<HttpApiGroup.Endpoints<G>>]: Handler<
-    HttpApiEndpoint.WithName<HttpApiGroup.Endpoints<G>, K>
+export type GroupHandlers<G extends HttpApiGroup.Constraint> = {
+  readonly [K in HttpApiEndpoint.Identifier<HttpApiGroup.Endpoints<G>>]: Handler<
+    Extract<HttpApiGroup.Endpoints<G>, { readonly identifier: K }>
   >;
 };
 
@@ -99,7 +99,9 @@ export type GroupHandlers<G extends HttpApiGroup.Any> = {
  * @public
  * @since 1.0.0
  */
-export type Request<E extends HttpApiEndpoint.Any> = Types.Simplify<HttpApiEndpoint.Request<E>>;
+export type Request<E extends HttpApiEndpoint.Constraint> = Types.Simplify<
+  HttpApiEndpoint.Request<E>
+>;
 
 /**
  * Extract success type from an endpoint.
@@ -117,7 +119,7 @@ export type Request<E extends HttpApiEndpoint.Any> = Types.Simplify<HttpApiEndpo
  * @public
  * @since 1.0.0
  */
-export type Success<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Success<E>["Type"];
+export type Success<E extends HttpApiEndpoint.Constraint> = HttpApiEndpoint.Success<E>["Type"];
 
 /**
  * Extract error type from an endpoint.
@@ -135,7 +137,7 @@ export type Success<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Success<E>[
  * @public
  * @since 1.0.0
  */
-export type Error<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Error<E>["Type"];
+export type Error<E extends HttpApiEndpoint.Constraint> = HttpApiEndpoint.Error<E>["Type"];
 
 /**
  * Extract the path type from an endpoint (the decoded path parameters).
@@ -153,7 +155,7 @@ export type Error<E extends HttpApiEndpoint.Any> = HttpApiEndpoint.Error<E>["Typ
  * @public
  * @since 1.0.0
  */
-export type Path<E extends HttpApiEndpoint.Any> =
+export type Path<E extends HttpApiEndpoint.Constraint> =
   HttpApiEndpoint.Params<E> extends {
     readonly Type: unknown;
   }
@@ -176,7 +178,7 @@ export type Path<E extends HttpApiEndpoint.Any> =
  * @public
  * @since 1.0.0
  */
-export type UrlParams<E extends HttpApiEndpoint.Any> =
+export type UrlParams<E extends HttpApiEndpoint.Constraint> =
   HttpApiEndpoint.Query<E> extends {
     readonly Type: unknown;
   }
@@ -198,7 +200,7 @@ export type UrlParams<E extends HttpApiEndpoint.Any> =
  * @public
  * @since 1.0.0
  */
-export type Payload<E extends HttpApiEndpoint.Any> =
+export type Payload<E extends HttpApiEndpoint.Constraint> =
   HttpApiEndpoint.Payload<E> extends {
     readonly Type: unknown;
   }
@@ -221,7 +223,7 @@ export type Payload<E extends HttpApiEndpoint.Any> =
  * @public
  * @since 1.0.0
  */
-export type Headers<E extends HttpApiEndpoint.Any> =
+export type Headers<E extends HttpApiEndpoint.Constraint> =
   HttpApiEndpoint.Headers<E> extends {
     readonly Type: unknown;
   }

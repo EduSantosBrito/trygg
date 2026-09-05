@@ -11,10 +11,10 @@ const DIVISIONS: ReadonlyArray<{ amount: number; unit: Intl.RelativeTimeFormatUn
 ];
 
 /**
- * Format an ISO date string as a relative time (e.g., "5 minutes ago", "2 hours ago")
+ * Format a decoded incident timestamp as relative time (e.g., "5 minutes ago").
  */
-export const formatRelative = (iso: string): string => {
-  let seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+export const formatRelative = (timestamp: Date): string => {
+  let seconds = (timestamp.getTime() - Date.now()) / 1000;
 
   for (const { amount, unit } of DIVISIONS) {
     if (Math.abs(seconds) < amount) {

@@ -1,0 +1,145 @@
+--- A/packages/core/src/primitives/render-keyed-list.ts
++++ B/packages/core/src/primitives/render-keyed-list.ts
+@@ -194,82 +194,82 @@
+   // normalized element, appending it to the list parent. Does NOT provide the item
+   // scope — the caller wraps the whole render unit in one `Scope.provide(itemScope)`
+   // so the create path stays a single per-row fiber-context clone.
+-  // `Effect.fnUntraced` (no span) — idiomatic generator Effect helper.
+-  const buildItemDom = Effect.fnUntraced(function* (
++  // Each execution owns fresh acquisition state; the common native path needs no generator.
++  const buildItemDom = (
+     normalizedElement: Element,
+     parentOverride?: Node,
+     renderContext: RenderContext = runtime,
+-  ) {
+-    let acquiredResult: RenderResult | undefined;
+-    let acquiredStart: Comment | undefined;
+-    let acquiredEnd: Comment | undefined;
+-    // Complete native acquisition/rollback before interruption, while effectful
+-    // component rendering retains its normal cancellation behavior.
+-    return yield* Effect.uninterruptibleMask((restore) =>
+-      Effect.gen(function* () {
++  ) =>
++    Effect.suspend(() => {
++      let acquiredResult: RenderResult | undefined;
++      let acquiredStart: Comment | undefined;
++      let acquiredEnd: Comment | undefined;
++      // Complete native acquisition/rollback before interruption, while effectful
++      // component rendering retains its normal cancellation behavior.
++      return Effect.uninterruptibleMask((restore) => {
+         const listParent = parentOverride ?? anchor.parentNode ?? parent;
+-
+-        // Insert start marker before rendering so content appears after it
+         const startMarker = document.createComment("item-start");
+         acquiredStart = startMarker;
+         listParent.appendChild(startMarker);
+ 
+-        // Synchronous fast path: a fully-static row subtree builds inline, skipping a
+-        // per-row `renderElement` Effect dispatch (one `Effect.sync` primitive
+-        // allocation + one run-loop step saved for every row of the create/replace/
+-        // append cluster). `renderElementSync` returns `null` for rows that need the
+-        // effectful renderer (signal/component/keyed children), which fall back to the
+-        // original `yield* renderElement` path.
++        const finish = (result: RenderResult) => {
++          acquiredResult = result;
++          const endMarker = document.createComment("item-end");
++          acquiredEnd = endMarker;
++          listParent.appendChild(endMarker);
++          return { result, startMarker, endMarker };
++        };
++        // Native static construction stays in this synchronous acquisition frame.
++        // Only effectful rendering and native recovery need an Effect continuation.
+         const syncResult = deps.renderElementSync(
+           normalizedElement,
+           listParent,
+           renderContext,
+           context,
+         );
+-        const result =
+-          syncResult === null
+-            ? yield* restore(
+-                deps.renderElement(normalizedElement, listParent, renderContext, context, options),
+-              )
+-            : Effect.isEffect(syncResult)
+-              ? yield* syncResult.pipe(
+-                  Effect.catchCause((cause) =>
+-                    Effect.exit(restore(Effect.void)).pipe(
+-                      Effect.flatMap((exit) =>
+-                        Effect.failCause(
+-                          Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause,
+-                        ),
+-                      ),
++        if (syncResult === null) {
++          return Effect.map(
++            restore(
++              deps.renderElement(normalizedElement, listParent, renderContext, context, options),
++            ),
++            finish,
++          );
++        }
++        if (Effect.isEffect(syncResult)) {
++          return Effect.map(
++            syncResult.pipe(
++              Effect.catchCause((cause) =>
++                Effect.exit(restore(Effect.void)).pipe(
++                  Effect.flatMap((exit) =>
++                    Effect.failCause(
++                      Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause,
+                     ),
+                   ),
+-                )
+-              : syncResult;
+-
+-        // Insert end marker after content - ensures moveRange captures full Fragment range
+-        acquiredResult = result;
+-        const endMarker = document.createComment("item-end");
+-        acquiredEnd = endMarker;
+-        listParent.appendChild(endMarker);
+-
+-        return { result, startMarker, endMarker };
+-      }),
+-    ).pipe(
+-      Effect.onExit((exit) => {
+-        if (Exit.isSuccess(exit)) return Effect.void;
+-        const cleanups: Array<Effect.Effect<void, unknown>> = [];
+-        if (acquiredResult !== undefined) cleanups.push(RenderTransaction.cleanup(acquiredResult));
+-        if (acquiredStart !== undefined) {
+-          const marker = acquiredStart;
+-          cleanups.push(Effect.sync(() => marker.remove()));
+-        }
+-        if (acquiredEnd !== undefined) {
+-          const marker = acquiredEnd;
+-          cleanups.push(Effect.sync(() => marker.remove()));
+-        }
+-        return cleanupAll(cleanups);
+-      }),
+-    );
+-  });
++                ),
++              ),
++            ),
++            finish,
++          );
++        }
++        return Effect.succeed(finish(syncResult));
++      }).pipe(
++        Effect.onExit((exit) => {
++          if (Exit.isSuccess(exit)) return Effect.void;
++          const cleanups: Array<Effect.Effect<void, unknown>> = [];
++          if (acquiredResult !== undefined)
++            cleanups.push(RenderTransaction.cleanup(acquiredResult));
++          if (acquiredStart !== undefined) {
++            const marker = acquiredStart;
++            cleanups.push(Effect.sync(() => marker.remove()));
++          }
++          if (acquiredEnd !== undefined) {
++            const marker = acquiredEnd;
++            cleanups.push(Effect.sync(() => marker.remove()));
++          }
++          return cleanupAll(cleanups);
++        }),
++      );
++    });
+ 
+   // Prepare a single item with a stable render phase. A compatible static result
+   // lends its DOM until reconciliation; other cases build a detached candidate.

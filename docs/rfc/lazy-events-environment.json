@@ -1,0 +1,83 @@
+{
+  "description": "A is the validated static acquisition and single preparation traversal implementation. B creates event snapshots only for nodes with event bindings, sharing one snapshot across handlers on the same node.",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2"
+  ],
+  "sourceA": {
+    "packages/core/src/primitives/render-intrinsic.ts": "0690e714a4e2b36a997b96cd9bca28b2d20016fc06a232d4b2b8e9ccca4bf4e1",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "d1ee373cb589296ee77c076cc4ae7d6d7775d2cf6284e340adfbc79f71e9011d",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "sourceB": {
+    "packages/core/src/primitives/render-intrinsic.ts": "0f459025273514a86ff02cf3649fb02b7e00480fb940cc0073c654e259e98335",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "d1ee373cb589296ee77c076cc4ae7d6d7775d2cf6284e340adfbc79f71e9011d",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "runtime": "Bun 1.4.0; Chromium 141.0.7390.122",
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "workProbe": "BENCHMARK_WORK=1; 10 warmups, 21 timing samples per operation, then separate native counters.",
+  "builtJavaScriptA": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "2695f6c9cb0090244cb380278b907ae93ab9983af1ea6678cc1662e6883eb68a",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-D6_oII5n.js": "e8aa7d655266ed76c9b83ca08441a0b5effecea5ad81b967d1ef5763e589836c",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "7b8396a053bfd78ee317a1d69cac9808916ec71727bef8a6dbd5dbcf6fa037c1",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "builtJavaScriptB": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "075ae66cf6f04727891a1fc6d1c0cb5eb2fe1e8c59a00f127283bf2e3217d7b7",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-dfMwa5IP.js": "772e22fd64f0a71c754f0578b172e8503240edda450f8cd11464cef6cd1a42f0",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "23bd3d59e4a01a3ba228097ec10c9edbc395c7753c7ed9b9ae2f6c4f75b944ff",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "artifacts": {
+    "docs/rfc/lazy-events-control-a1.json": "494883613228ec8b851616d42d709e42f58f28f90da1132924871031afd62196",
+    "docs/rfc/lazy-events-control-b1.json": "7075da20345171ba9ef72baf730a39fc050b7f5a53dace627bb6205fe22b717c",
+    "docs/rfc/lazy-events-control-b2.json": "0fe93c7292173f6f39e4a27b79926854e2cb05d3f99259e97f851862e6b4a161",
+    "docs/rfc/lazy-events-control-a2.json": "97d4ecdf1f7d24d9d1e0aad789561d48ad9dd69a0a92fb2d79e025f2cd2f13bb",
+    "docs/rfc/lazy-events-control.diff": "8b9191089a6214927146ffb637425494ed8bf3c22550812059a089404c074349"
+  },
+  "decision": "Retained: all lifecycle/context/acquisition tests pass; controlled longer runs show 11.1% lower mean run median for create10k and 10.4% lower for create1k. Removal and clear remain near the control; no heap-byte savings or global maximum performance claimed.",
+  "research": [
+    {
+      "title": "Memento Mori: Dynamic Allocation-site-based Optimizations",
+      "url": "https://research.google/pubs/memento-mori-dynamic-allocation-site-based-optimizations/",
+      "publication": "ISMM 2015",
+      "reviewed": "Primary publication abstract",
+      "inference": "Dynamic allocation behavior reinforces measuring actual execution rather than inferring exact heap savings from source constructions."
+    }
+  ]
+}

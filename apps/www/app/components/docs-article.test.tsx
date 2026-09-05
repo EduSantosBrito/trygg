@@ -161,7 +161,8 @@ See the [Config](/docs/config) page and the [Vite docs](https://vitejs.dev) site
       assert.strictEqual(internal?.textContent, "Config");
       assert.isNull(internal?.getAttribute("target"), "internal links should not open a new tab");
 
-      const external = result.container.querySelector('a[href="https://vitejs.dev"]');
+      const external = result.container.querySelector('a[href="https://vitejs.dev/"]');
+      assert.isNotNull(external, "external markdown link should use its canonical URL");
       assert.strictEqual(external?.getAttribute("target"), "_blank");
       assert.strictEqual(external?.getAttribute("rel"), "noopener noreferrer");
 

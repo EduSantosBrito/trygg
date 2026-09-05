@@ -24,7 +24,7 @@ interface ErrorViewProps {
   readonly error: unknown;
   readonly onRetry?: () => Effect.Effect<
     void,
-    Signal.SignalScopeError,
+    Signal.SignalScopeError | Resource.ResourceRegistrySaturatedError,
     ApiClient | Resource.ResourceRegistryTag
   >;
 }
@@ -32,14 +32,23 @@ interface ErrorViewProps {
 export const ErrorView = Component.gen(function* (Props: ComponentProps<ErrorViewProps>) {
   const { error, onRetry } = yield* Props;
   const { title, message } = yield* getErrorInfo(error);
+  const retry =
+    onRetry === undefined
+      ? undefined
+      : () =>
+          onRetry().pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Retry failed").pipe(Effect.annotateLogs("error", cause)),
+            ),
+          );
 
   return (
     <div className="error-view" role="alert">
       <h3 className="error-view__title">{title}</h3>
       <p className="error-view__message">{message}</p>
-      {onRetry && (
+      {retry && (
         <div className="error-view__actions">
-          <button type="button" className="btn btn--secondary btn--sm" onClick={onRetry}>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={retry}>
             Retry
           </button>
         </div>

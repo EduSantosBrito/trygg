@@ -1,0 +1,90 @@
+{
+  "date": "2026-09-04T21:37:52.088Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "select",
+      "samples": [
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 0.8999999761581421,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.3999999761581421,
+          "frameMs": 7.800000011920929,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 11.900000035762787,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.2999999523162842,
+          "frameMs": 9.5,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 9.699999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.20000004768371582,
+          "frameMs": 1.2000000476837158,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.20000004768371582,
+          "frameMs": 13.100000023841858,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 61.299999952316284,
+    "firstContentfulPaintMs": 88
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "bytes": 73630,
+      "gzipBytes": 23340
+    },
+    {
+      "file": "chunk-zn3j8yps.js",
+      "bytes": 286481,
+      "gzipBytes": 81721
+    },
+    {
+      "file": "chunk-m9pz9fd2.js",
+      "bytes": 134963,
+      "gzipBytes": 46533
+    },
+    {
+      "file": "chunk-e3ax07qd.js",
+      "bytes": 925,
+      "gzipBytes": 558
+    },
+    {
+      "file": "chunk-42jrdbvs.js",
+      "bytes": 61391,
+      "gzipBytes": 17744
+    }
+  ]
+}

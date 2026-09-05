@@ -93,12 +93,12 @@ dist
 
 ## Support matrix
 
-| platform | output | Emits | Run with |
-| --- | --- | --- | --- |
-| `bun` | `server` | `dist/server.js` + `dist/client/` | `bun dist/server.js` |
-| `node` | `server` | `dist/server.js` + `dist/client/` | `node dist/server.js` |
-| `bun` / `node` | `static` | `dist/` (assets only) | any static host |
-| `cloudflare` | `static` | `dist/` + `.trygg/worker-entry.js` | Cloudflare Workers |
-| `cloudflare` | `server` | — | rejected at build |
+| platform       | output   | Emits                              | Run with              |
+| -------------- | -------- | ---------------------------------- | --------------------- |
+| `bun`          | `server` | `dist/server.js` + `dist/client/`  | `bun dist/server.js`  |
+| `node`         | `server` | `dist/server.js` + `dist/client/`  | `node dist/server.js` |
+| `bun` / `node` | `static` | `dist/` (assets only)              | any static host       |
+| `cloudflare`   | `static` | `dist/` + `.trygg/worker-entry.js` | Cloudflare Workers    |
+| `cloudflare`   | `server` | —                                  | rejected at build     |
 
 See the [Config](/docs/config) page for the full `TryggConfig` reference, the [Vite plugin](/docs/vite-plugin) page for how the plugin consumes it, and [API types](/docs/api-types) for the generated same-origin client used by `output: "server"` apps.

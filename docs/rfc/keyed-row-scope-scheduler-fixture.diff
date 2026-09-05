@@ -1,0 +1,64 @@
+--- ordinary/scripts/benchmarks/browser.ts
++++ scheduler-counted/scripts/benchmarks/browser.ts
+@@ -1,5 +1,6 @@
+ import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
+ import { jsx } from "../../packages/core/dist/jsx-runtime.js";
++import * as Scheduler from "effect/Scheduler";
+ import * as References from "effect/References";
+ import { Component, Element, Signal, intrinsic, mount } from "../../packages/core/dist/index.js";
+ 
+@@ -11,6 +12,8 @@
+ export interface Measurement {
+   readonly operation: string;
+   readonly handlerMs: number;
++  readonly schedulerChecks: number;
++  readonly schedulerYields: number;
+   readonly frameMs: number;
+   readonly rows: number;
+ }
+@@ -24,6 +27,19 @@
+   }
+ }
+ 
++let checks = 0;
++let yields = 0;
++const scheduler = new Scheduler.MixedScheduler();
++const countedScheduler: Scheduler.Scheduler = {
++  executionMode: scheduler.executionMode,
++  shouldYield(fiber) {
++    checks++;
++    const result = scheduler.shouldYield(fiber);
++    if (result) yields++;
++    return result;
++  },
++  makeDispatcher: () => scheduler.makeDispatcher(),
++};
+ let nextId = 1;
+ const rows = (count: number): ReadonlyArray<Row> =>
+   Array.from({ length: count }, () => {
+@@ -134,6 +150,8 @@
+           complete = undefined;
+           reject(new Error(`${operation}: handler did not settle within 30 seconds`));
+         }, 30_000);
++        const checksBefore = checks;
++        const yieldsBefore = yields;
+         const start = performance.now();
+         complete = (handlerEnd) =>
+           requestAnimationFrame(() =>
+@@ -145,6 +163,8 @@
+                 resolve({
+                   operation,
+                   handlerMs: handlerEnd - start,
++                  schedulerChecks: checks - checksBefore,
++                  schedulerYields: yields - yieldsBefore,
+                   frameMs,
+                   rows: verify(operation, before),
+                 });
+@@ -203,6 +223,7 @@
+   ]);
+ }).pipe(Component.provide(Layer.mergeAll(
+   Layer.effect(Scope.Scope, Effect.scope),
++  Layer.succeed(Scheduler.Scheduler, countedScheduler),
+   Layer.succeed(References.MinimumLogLevel, "None"),
+ )));
+ 

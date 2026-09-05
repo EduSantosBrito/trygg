@@ -199,7 +199,13 @@ export const DocsArticle = Component.gen(function* (
               );
             case "table":
               return (
-                <div key={i} className="docs-table-wrap" role="region" aria-label="Table" tabIndex={0}>
+                <div
+                  key={i}
+                  className="docs-table-wrap"
+                  role="region"
+                  aria-label="Table"
+                  tabIndex={0}
+                >
                   <table className="docs-table">
                     <thead>
                       <tr>

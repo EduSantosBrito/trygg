@@ -1,0 +1,205 @@
+{
+  "date": "2026-09-05T06:42:22.700Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 10,
+  "samples": 21,
+  "results": [
+    {
+      "operation": "create1k",
+      "samples": [
+        {
+          "operation": "create1k",
+          "handlerMs": 42.89999997615814,
+          "frameMs": 80.80000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 44,
+          "frameMs": 81,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 44.39999997615814,
+          "frameMs": 83.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 46.30000001192093,
+          "frameMs": 85.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 42.69999998807907,
+          "frameMs": 80.89999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 45.200000047683716,
+          "frameMs": 84.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 47,
+          "frameMs": 85.39999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 45.40000003576279,
+          "frameMs": 84.20000004768372,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 41.10000002384186,
+          "frameMs": 78.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 43.90000003576279,
+          "frameMs": 81.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 43.69999998807907,
+          "frameMs": 82.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 44.39999997615814,
+          "frameMs": 82.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 41.700000047683716,
+          "frameMs": 78.70000004768372,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 43.5,
+          "frameMs": 80.70000004768372,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 43.30000001192093,
+          "frameMs": 81.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 44.30000001192093,
+          "frameMs": 82.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 41.39999997615814,
+          "frameMs": 78.59999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 44.69999998807907,
+          "frameMs": 82,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 55,
+          "frameMs": 95.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 45.19999998807907,
+          "frameMs": 82.89999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 41.39999997615814,
+          "frameMs": 78.89999997615814,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 54.299999952316284,
+    "firstContentfulPaintMs": 80
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3129,
+      "gzipBytes": 1487
+    },
+    {
+      "file": "chunk-6dwe0w7f.js",
+      "loadedAtStartup": true,
+      "bytes": 75553,
+      "gzipBytes": 23469
+    },
+    {
+      "file": "chunk-gcsybnjf.js",
+      "loadedAtStartup": true,
+      "bytes": 287167,
+      "gzipBytes": 81946
+    },
+    {
+      "file": "chunk-epdxbakc.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46539
+    },
+    {
+      "file": "chunk-mjzbk1f1.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 556
+    },
+    {
+      "file": "chunk-s6387grz.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18076
+    },
+    {
+      "file": "chunk-r7m54b7f.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 995
+    }
+  ],
+  "work": [
+    {
+      "operation": "create1k",
+      "rows": 1000,
+      "elements": 7000,
+      "textNodes": 3000,
+      "comments": 2000,
+      "tags": {
+        "tr": 1000,
+        "td": 4000,
+        "a": 2000
+      }
+    }
+  ]
+}

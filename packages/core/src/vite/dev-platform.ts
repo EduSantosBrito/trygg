@@ -10,6 +10,7 @@ import { Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
+import * as Trace from "../trace/index.js";
 
 // =============================================================================
 // Error Types
@@ -19,7 +20,7 @@ import type { Connect } from "vite";
  * Error when importing a platform module fails
  * @since 1.0.0
  */
-export class ImportError extends Schema.TaggedErrorClass<ImportError>()("ImportError", {
+export class ImportError extends Schema.TaggedError<ImportError>()("ImportError", {
   module: Schema.String,
   message: Schema.String,
   cause: Schema.optional(Schema.Unknown),
@@ -29,9 +30,17 @@ export class ImportError extends Schema.TaggedErrorClass<ImportError>()("ImportE
  * Error when API initialization fails
  * @since 1.0.0
  */
-export class ApiInitError extends Schema.TaggedErrorClass<ApiInitError>()("ApiInitError", {
+export class ApiInitError extends Schema.TaggedError<ApiInitError>()("ApiInitError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Unknown),
+}) {}
+
+/** Error raised while adapting a development HTTP request or response. */
+export class ApiRequestError extends Schema.TaggedError<ApiRequestError>()("ApiRequestError", {
+  reason: Schema.Literals(["Aborted", "BodyTooLarge", "ReadFailed", "WriteFailed"]),
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
+  limit: Schema.optional(Schema.Number),
 }) {}
 
 /**
@@ -39,6 +48,43 @@ export class ApiInitError extends Schema.TaggedErrorClass<ApiInitError>()("ApiIn
  * @since 1.0.0
  */
 export type DevApiErrors = ImportError | ApiInitError;
+
+/** Maximum buffered request body accepted by development HTTP bridges. */
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
+/** Strip query and fragment data before a request URL enters routine telemetry. */
+export const requestPathname = (url: string | undefined): string => {
+  if (url === undefined) return "";
+  const queryIndex = url.indexOf("?");
+  const fragmentIndex = url.indexOf("#");
+  const end =
+    queryIndex === -1
+      ? fragmentIndex
+      : fragmentIndex === -1
+        ? queryIndex
+        : Math.min(queryIndex, fragmentIndex);
+  const target = end === -1 ? url : url.slice(0, end);
+  if (target === "*") return target;
+
+  const schemeIndex = target.indexOf("://");
+  const authorityStart = target.startsWith("//") ? 2 : schemeIndex === -1 ? -1 : schemeIndex + 3;
+  if (authorityStart !== -1) {
+    const pathStart = target.indexOf("/", authorityStart);
+    return pathStart === -1 ? "/" : target.slice(pathStart);
+  }
+
+  return target.startsWith("/") ? target : "";
+};
+
+/** Emit the canonical request event without query or fragment data. */
+export const traceApiRequestReceived = (
+  method: string | undefined,
+  url: string | undefined,
+): Effect.Effect<void> =>
+  Trace.emit("api.request.received", () => ({
+    method: method ?? "GET",
+    pathname: requestPathname(url),
+  }));
 
 // =============================================================================
 // Types
@@ -52,7 +98,7 @@ export interface DevApiHandle {
   /** Connect middleware for Vite integration */
   readonly middleware: Connect.NextHandleFunction;
   /** Reload the API (call after api.ts changes) */
-  readonly reload: Effect.Effect<void, DevApiErrors, Scope.Scope>;
+  readonly reload: Effect.Effect<void, DevApiErrors>;
   /** Dispose of the API and cleanup resources */
   readonly dispose: Effect.Effect<void>;
 }
@@ -79,19 +125,15 @@ export interface HandlerFactory {
     unknown,
     Scope.Scope
   >;
-  /**
-   * Create a web-standard handler from a composed API layer.
-   *
-   * Decision (#120): this constructor remains synchronous. It only merges the
-   * API layer with platform services and asks HttpRouter for a web handler;
-   * acquisition/lifecycle work is deferred behind the returned handler and
-   * dispose callback, so wrapping the factory itself in Effect would not model
-   * an extra dependency or lifecycle boundary.
-   */
-  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => {
-    readonly handler: (request: Request) => Promise<Response>;
-    readonly dispose: () => void;
-  };
+  /** Acquire a web-standard handler and all of its Layer resources eagerly. */
+  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => Effect.Effect<
+    {
+      readonly handler: (request: Request) => Promise<Response>;
+      readonly dispose: Effect.Effect<void>;
+    },
+    unknown,
+    Scope.Scope
+  >;
 }
 
 /**
@@ -198,22 +240,26 @@ export const ServerPlatform = Context.Service<
 >("trygg/ServerPlatform");
 
 /** Node.js server platform — @effect/platform-node subpath imports */
-export const NodeServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {
-  imports: [
-    'import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"',
-    'import * as NodeRuntime from "@effect/platform-node/NodeRuntime"',
-    'import { createServer } from "node:http"',
-  ].join("\n"),
-  serverLayer: "NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST })",
-  runtime: "NodeRuntime",
-});
+export const NodeServerPlatform = {
+  layer: Layer.succeed(ServerPlatform, {
+    imports: [
+      'import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"',
+      'import * as NodeRuntime from "@effect/platform-node/NodeRuntime"',
+      'import { createServer } from "node:http"',
+    ].join("\n"),
+    serverLayer: "NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST })",
+    runtime: "NodeRuntime",
+  }),
+};
 
 /** Bun server platform — @effect/platform-bun subpath imports */
-export const BunServerPlatform: Layer.Layer<ServerPlatform> = Layer.succeed(ServerPlatform, {
-  imports: [
-    'import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"',
-    'import * as BunRuntime from "@effect/platform-bun/BunRuntime"',
-  ].join("\n"),
-  serverLayer: "BunHttpServer.layer({ port: PORT, hostname: HOST })",
-  runtime: "BunRuntime",
-});
+export const BunServerPlatform = {
+  layer: Layer.succeed(ServerPlatform, {
+    imports: [
+      'import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"',
+      'import * as BunRuntime from "@effect/platform-bun/BunRuntime"',
+    ].join("\n"),
+    serverLayer: "makeBunServerLayer({ port: PORT, hostname: HOST })",
+    runtime: "BunRuntime",
+  }),
+};

@@ -1,0 +1,107 @@
+{
+  "description": "A retains all static acquisition/handoff/release fixes. B removes two generators and a redundant Effect.suspend from keyed DOM acquisition; uninterruptibleMask already invokes its callback inside the lazy Effect runtime. Masks and onExit cleanup are preserved.",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2"
+  ],
+  "sourceA": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "sourceB": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "2a347f27b943eb023ffdd5381d0eb1d5176965395fcea0203a9dcb1b310961d2",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "runtime": "Bun 1.4.0; Chromium 141.0.7390.122",
+  "exploratory": "BENCHMARK_CASE=create10k; counters disabled; five warmups and seven samples.",
+  "fullComparison": "BENCHMARK_WORK=1; all nine cases; separate native counters after timings.",
+  "exploratorySourceB": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "fad18cee31df69a96e267a80634e2339c08f23bc2edf0c650c1041857af5754f",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "builtJavaScriptA": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "448e0dd23056601be4a8806acf79f8722b2cc56b7627df81b0f0c882f3759f0e",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-D9A-HvCw.js": "fc7637e655369a0c71ce58c0454a531205f470d08d312417772207b4e5b9b930",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "3272d71a1393041541129767a8b959f95d1a9cf97cedcf1406512097efd20058",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "builtJavaScriptB": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "59a69a0227b64354a9453b2be374ecf236c547e10c598c6f57e4156d30668cf2",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-C-KBUWzy.js": "1189acc19f92d139a2a083dab0245a0e9c34a1d63f599217dc83e222de970e31",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "34d74cdf7e4d6dbaec3829b738c4189cfd965b51149f17bed6a268ade870cf84",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "effectRuntime": {
+    "version": "4.0.0-rc.112",
+    "source": "node_modules/effect/src/internal/effect.ts",
+    "sha256": "0e32b42fbc8901ae75419fbd2999bf5c96b40e4bb54cc42c4fc2ec778cc641f0",
+    "observation": "uninterruptibleMask runs its callback through withFiber at execution time; OnExit masks finalizer invocation."
+  },
+  "profile": {
+    "variant": "A (all acquisition fixes, before this turn optimization)",
+    "operation": "create10k",
+    "sampleIntervalMicroseconds": 100,
+    "window": "fifth warmup completed; first measured operation plus validation and following frame",
+    "identifiers": "preserved; profile mode differs from ordinary timing mode",
+    "artifacts": [
+      "docs/rfc/static-acquisition-create10k.cpuprofile",
+      "docs/rfc/static-acquisition-create10k-profile.json"
+    ]
+  },
+  "artifacts": {
+    "docs/rfc/acquisition-cost-control-a1.json": "45a293d9775a8dceac2a8a57ed9eff838586a1ffbd621b37459ced9029967400",
+    "docs/rfc/acquisition-cost-control-b1.json": "8211db6d52ad5a08d14e78458eb3c03077276f3b705f5ef45f2a2d1a71635a2b",
+    "docs/rfc/acquisition-cost-control-b2.json": "c3993812fa7ce52f32a3b6450c8f645a36e089e6efc940cf47e2a535a477e1c4",
+    "docs/rfc/acquisition-cost-control-a2.json": "c205e9cee66107a6857607dca8d597ce37084fb7009c8c88019f9205ff7ef4c8",
+    "docs/rfc/acquisition-cost-control.diff": "3fd19d3ca77b279fb24dbe499df6432db99b6f3cac921d381f8a34c1a419580e",
+    "docs/rfc/static-acquisition-create10k.cpuprofile": "a5d7c845ba83bbc868ef9a3502f837f7377a2f5e85d1562283824b682757a534",
+    "docs/rfc/static-acquisition-create10k-profile.json": "c1363747d5415b06a2c4de6d34f3daa4d6ea176db4a32293b08df68cdbdce3e5",
+    "docs/rfc/acquisition-generators-exploratory.diff": "70309433363d3c0fe809be2004e312ae4b9c1b88d7ae7563b4a314a7b8b24e0f",
+    "docs/rfc/acquisition-failure-continuation-rejected.diff": "6e1543826b9792f1195a1ef1f3c2cd92c5cbc2ce71a3ea6fa9b100ae38830067",
+    "docs/rfc/acquisition-cost-exploratory-a1.json": "9e93c400108e15f4ceb76dac85ed964950654765c91d9fc681f79bf53967a883",
+    "docs/rfc/acquisition-cost-exploratory-b1.json": "6986d6c38fc003f75e0ceb6dda9dfb00abd94110de5e6afa966a55a4ec46d024",
+    "docs/rfc/acquisition-cost-exploratory-b2.json": "150ea110ff978f707b6bf3a6815988bb5a674496a09bf6e7c9cbade0da6c1769",
+    "docs/rfc/acquisition-cost-exploratory-a2.json": "e998a32ce8b45845846e2ee84a4447753ac99dab1e46b74f70c86825f936456d"
+  },
+  "decision": "Not accepted: full comparison improved create10k mean run median by 3.6% but worsened removal by 10.6%."
+}

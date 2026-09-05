@@ -25,7 +25,7 @@ Use Vite `transformIndexHtml` only for document-shell concerns that exist outsid
 
 ## Behavior
 
-The renderer hoists the tags in `Head.HOISTABLE_TAGS` (`title`, `meta`, `link`, `style`, `script`, `base`) into the active head service rather than mounting them where they appear. Components never provide the service: `mount` (browser) or SSR rendering supplies it implicitly, and when no head service is active the tags render inline as ordinary elements.
+The renderer hoists the tags in `Head.HOISTABLE_TAGS` (`title`, `meta`, `link`, `style`, `script`, `base`) through its active head manager rather than mounting them where they appear. Components never provide this manager: browser rendering creates it for the render scope, and when no manager is active the tags render inline as ordinary elements.
 
 Dedup is keyed by `Head.deriveKey(tag, props)`:
 
@@ -34,8 +34,6 @@ Dedup is keyed by `Head.deriveKey(tag, props)`:
 - `link`, `style`, and `script` have no key, so duplicates are allowed.
 
 Keyed tags use a stack, so the nearest (last-mounted) writer is the visible one. When a deeper component mounts a `<title>`, the previous title is hidden; when that component unmounts, its Scope finalizer removes the node and restores the previous title. This makes a layout's default title yield to a page's title.
-
-`Head.HeadStrategy` decides where head work happens. It follows the render strategy by default — SSR computes the head server-side (`Head.HeadStrategy.Server`) so crawlers see it in the initial HTML, while client-side renders compute it after JS (`Head.HeadStrategy.Client`) — and can be overridden per route.
 
 ## Static SEO from layouts
 
@@ -74,16 +72,14 @@ Do not duplicate static SEO injection through Vite `transformIndexHtml`. Tags in
 
 ## Related exports
 
-- `Head.HeadStrategy` — decides where head work happens, following render strategy
 - `Head.deriveKey` — computes the dedup key for a tag
 - `Head.isHoistable`
 - `Head.HOISTABLE_TAGS` — the tags the renderer hoists into the head
-- `Head.makeBrowserHead`
-- `Head.browserHeadLayer`
-- `Head.makeTestHead`
+- `Head.makeBrowser`
+- `Head.makeTest`
 
 ## Troubleshooting
 
 - A page `<meta name="description">` does not override the layout's: both resolve to the same key `meta:name:description`, so the deeper one wins only while it is mounted — confirm the page component is actually nested under the layout in the route tree.
 - Two `<link>` or `<script>` tags both appear: `link`, `style`, and `script` have no dedup key by design. Move shared, single-instance metadata to a keyed `title`/`meta` tag, or render the duplicate-prone tag once in a shared ancestor.
-- A tag renders in place instead of in the head: no head service is active on that fiber. The browser service is set up at the Mount boundary; check that the element is mounted through `mount`/SSR and not a `mode: "static"` element, which opts out of hoisting.
+- A tag renders in place instead of in the head: no head manager is active on that fiber. The browser renderer creates the manager at the Mount boundary; check that the element is mounted through `mount` and not a `mode: "static"` element, which opts out of hoisting.

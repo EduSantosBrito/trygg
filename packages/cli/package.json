@@ -29,17 +29,25 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "effect:check": "effect-language-service diagnostics --project tsconfig.json",
+    "test": "bun run --cwd ../core build && vitest run",
+    "test:scaffold-smoke": "bun run --cwd ../core build && vitest run src/__tests__/scaffold.test.ts -t 'blank scaffold should typecheck and build successfully|incident scaffold should provide its global API client and build'"
+  },
   "dependencies": {
     "@clack/prompts": "^0.9.0",
-    "@effect/platform-bun": "4.0.0-beta.58",
-    "@effect/platform-node-shared": "4.0.0-beta.58",
-    "effect": "4.0.0-beta.58"
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.58",
-    "@effect/vitest": "4.0.0-beta.58",
+    "@effect/language-service": "catalog:",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/vitest": "catalog:",
     "@types/node": "^20.0.0",
     "trygg": "workspace:*",
-    "vitest": "^3.2.0"
+    "typescript": "^5.7.0",
+    "vitest": "catalog:"
   }
 }

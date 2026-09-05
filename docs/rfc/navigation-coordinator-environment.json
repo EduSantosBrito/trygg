@@ -1,0 +1,10 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "effect": "4.0.0-rc.112",
+  "sha256": {
+    "scripts/benchmark-navigation.ts": "84f9a6b0570c1a1909afe230d3e1efd51d5b559d2f4655757631a6282491d938",
+    "packages/core/src/router/navigation-core.ts": "1a8d935e6b4363fa77947e115d87b6af8509840a714f3e536c77001e6278065f",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  },
+  "limits": "Two sequential fresh Bun processes; in-memory replace transitions, no Router Signal publication, DOM, or browser history. Checks run outside timed batches. No controlled before/after comparison."
+}

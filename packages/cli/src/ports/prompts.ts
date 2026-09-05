@@ -9,7 +9,7 @@ import * as Context from "effect/Context";
 
 // === Error Types ===
 
-export class PromptCancelledError extends Schema.TaggedErrorClass<PromptCancelledError>()(
+export class PromptCancelledError extends Schema.TaggedError<PromptCancelledError>()(
   "PromptCancelledError",
   {
     message: Schema.String,
@@ -18,21 +18,45 @@ export class PromptCancelledError extends Schema.TaggedErrorClass<PromptCancelle
   static readonly default = new PromptCancelledError({ message: "Prompt cancelled" });
 }
 
-export class InvalidProjectNameError extends Schema.TaggedErrorClass<InvalidProjectNameError>()(
+const PromptOperation = Schema.Union([
+  Schema.Literal("text"),
+  Schema.Literal("select"),
+  Schema.Literal("confirm"),
+]);
+
+export class PromptFailedError extends Schema.TaggedError<PromptFailedError>()(
+  "PromptFailedError",
+  {
+    operation: PromptOperation,
+    cause: Schema.Defect(),
+  },
+) {}
+
+export class InvalidPromptResponseError extends Schema.TaggedError<InvalidPromptResponseError>()(
+  "InvalidPromptResponseError",
+  {
+    operation: PromptOperation,
+    value: Schema.Unknown,
+  },
+) {}
+
+export type PromptError = PromptCancelledError | PromptFailedError | InvalidPromptResponseError;
+
+export class InvalidProjectNameError extends Schema.TaggedError<InvalidProjectNameError>()(
   "InvalidProjectNameError",
   {
     name: Schema.String,
   },
 ) {}
 
-export class InvalidTemplateError extends Schema.TaggedErrorClass<InvalidTemplateError>()(
+export class InvalidTemplateError extends Schema.TaggedError<InvalidTemplateError>()(
   "InvalidTemplateError",
   {
     template: Schema.String,
   },
 ) {}
 
-export class TemplateNotFoundError extends Schema.TaggedErrorClass<TemplateNotFoundError>()(
+export class TemplateNotFoundError extends Schema.TaggedError<TemplateNotFoundError>()(
   "TemplateNotFoundError",
   {
     template: Schema.String,
@@ -40,16 +64,11 @@ export class TemplateNotFoundError extends Schema.TaggedErrorClass<TemplateNotFo
   },
 ) {}
 
-export class DirectoryExistsError extends Schema.TaggedErrorClass<DirectoryExistsError>()(
+export class DirectoryExistsError extends Schema.TaggedError<DirectoryExistsError>()(
   "DirectoryExistsError",
   {
     path: Schema.String,
   },
-) {}
-
-export class InstallFailedError extends Schema.TaggedErrorClass<InstallFailedError>()(
-  "InstallFailedError",
-  {},
 ) {}
 
 // === Prompt Option Types ===
@@ -80,21 +99,13 @@ export interface ConfirmOptions {
 
 // === Service Interface ===
 
-export interface PromptsService {
-  readonly text: (options: TextOptions) => Effect.Effect<string, PromptCancelledError>;
-  readonly select: <T extends string>(
-    options: SelectOptions<T>,
-  ) => Effect.Effect<T, PromptCancelledError>;
-  readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
-}
-
 export class Prompts extends Context.Service<
   Prompts,
   {
-    readonly text: (options: TextOptions) => Effect.Effect<string, PromptCancelledError>;
-    readonly select: <T extends string>(
-      options: SelectOptions<T>,
-    ) => Effect.Effect<T, PromptCancelledError>;
-    readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptCancelledError>;
+    readonly text: (options: TextOptions) => Effect.Effect<string, PromptError>;
+    readonly select: <T extends string>(options: SelectOptions<T>) => Effect.Effect<T, PromptError>;
+    readonly confirm: (options: ConfirmOptions) => Effect.Effect<boolean, PromptError>;
   }
 >()("trygg/Prompts") {}
+
+export type PromptsService = Prompts["Service"];

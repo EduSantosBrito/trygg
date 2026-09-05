@@ -17,9 +17,8 @@
  *   3. A finalizer registered in a row body (i.e. on the ambient item scope)
  *      runs on single-row removal, and again for any survivors on full list
  *      unmount.
- *   4. An in-flight event-handler fiber is owned by the *mount* scope, not the
- *      per-row scope: removing the row does NOT interrupt it, but unmounting the
- *      list does.
+ *   4. An in-flight event-handler fiber is owned by the per-row scope: removing
+ *      the row interrupts it before the rest of that row is finalized.
  *
  * Source basis (effect 4.0.0-beta.68):
  *   - render-keyed-list.ts: `itemScope = Scope.forkUnsafe(listScope)`, provided
@@ -31,10 +30,8 @@
  *     `setContext`/`getRef`), so the reference resolves to its `null` default
  *     and the owner falls through to the ambient item scope. `Signal.make` is
  *     owned the same way via `currentOwnerScope()`.
- *   - render-intrinsic.ts:334-352: the event listener forks the handler fiber
- *     and registers `Scope.addFinalizer(eventSnapshot.scope, Fiber.interrupt)`,
- *     and `eventSnapshot.scope === renderContext.scope` (the mount scope), NOT
- *     the per-row item scope.
+ *   - render-intrinsic.ts snapshots the row-local RenderContext and registers
+ *     each handler fiber in that context's scope.
  */
 import { assert, describe, effect } from "@effect/vitest";
 import { Deferred, Effect, Exit, Ref, Scope } from "effect";
@@ -195,10 +192,10 @@ describe("KeyedList per-row scope: item-scope finalizers", () => {
       assert.deepStrictEqual(cleaned, []);
 
       // Remove one row → only its finalizer runs.
-      yield* Signal.update(data, (d) => d.filter((r) => r.id !== 2));
+      yield* Signal.update(data, (d) => d.filter((r) => r.id !== 3));
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
-      assert.deepStrictEqual(cleaned, [2]);
+      assert.deepStrictEqual(cleaned, [3]);
 
       // Unmount the whole list → the survivors' finalizers run.
       yield* Scope.close(mountScope, Exit.void);
@@ -211,12 +208,14 @@ describe("KeyedList per-row scope: item-scope finalizers", () => {
 });
 
 // =============================================================================
-// 4. In-flight event-handler fiber ownership (mount scope, not item scope)
+// 4. In-flight event-handler fiber ownership (item scope)
 // =============================================================================
 
 describe("KeyedList per-row scope: in-flight event-handler ownership", () => {
-  effect("does not interrupt an in-flight handler on row removal, but does on unmount", () =>
+  effect("should interrupt an in-flight handler before finalizing its removed row", () =>
     Effect.gen(function* () {
+      // Scope: covers handler ownership at the keyed-row lifetime boundary.
+      // Assertion: row removal interrupts and awaits the handler before row finalization.
       const mountScope = yield* Scope.make();
       const data = yield* Signal.make<readonly Row[]>([
         { id: 1, label: "a" },
@@ -224,30 +223,38 @@ describe("KeyedList per-row scope: in-flight event-handler ownership", () => {
       ]);
       const started = yield* Deferred.make<void>();
       let interrupted = false;
+      let finalizedAfterInterrupt = false;
 
       const { container } = yield* render(
         <div>
           {Signal.each(
             data,
-            (row: Row) => (
-              <button
-                data-id={row.id}
-                onClick={() =>
-                  Effect.gen(function* () {
-                    yield* Deferred.succeed(started, undefined);
-                    return yield* Effect.never;
-                  }).pipe(
-                    Effect.onInterrupt(() =>
-                      Effect.sync(() => {
-                        interrupted = true;
-                      }),
-                    ),
-                  )
-                }
-              >
-                {row.label}
-              </button>
-            ),
+            Effect.fnUntraced(function* (row: Row) {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  if (row.id === 2) finalizedAfterInterrupt = interrupted;
+                }),
+              );
+              return (
+                <button
+                  data-id={row.id}
+                  onClick={() =>
+                    Effect.gen(function* () {
+                      yield* Deferred.succeed(started, undefined);
+                      return yield* Effect.never;
+                    }).pipe(
+                      Effect.onInterrupt(() =>
+                        Effect.sync(() => {
+                          interrupted = true;
+                        }),
+                      ),
+                    )
+                  }
+                >
+                  {row.label}
+                </button>
+              );
+            }),
             { key: (row) => row.id },
           )}
         </div>,
@@ -262,15 +269,15 @@ describe("KeyedList per-row scope: in-flight event-handler ownership", () => {
       yield* Deferred.await(started);
       assert.strictEqual(interrupted, false);
 
-      // Remove row 2: its DOM is gone, but the in-flight handler fiber is owned
-      // by the mount scope, so removing the row does NOT interrupt it.
+      // Remove row 2: its handler must stop before the row body finalizes.
       yield* Signal.update(data, (d) => d.filter((r) => r.id !== 2));
       yield* Effect.yieldNow;
       yield* Effect.yieldNow;
       assert.isNull(container.querySelector(`[data-id="2"]`));
-      assert.strictEqual(interrupted, false);
+      assert.strictEqual(interrupted, true);
+      assert.strictEqual(finalizedAfterInterrupt, true);
 
-      // Unmount the whole list → the mount-scope finalizer interrupts the fiber.
+      // A later root unmount must not run the completed interruption twice.
       yield* Scope.close(mountScope, Exit.void);
       yield* Effect.yieldNow;
       assert.strictEqual(interrupted, true);

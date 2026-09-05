@@ -10,15 +10,16 @@
  * @since 1.0.0
  * @module trygg/primitives/renderer
  */
-import { Cause, Effect, Layer, Option, Predicate, Schema, Scheduler, Scope } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Predicate, Schema, Scheduler, Scope } from "effect";
 import * as Context from "effect/Context";
+import * as References from "effect/References";
 import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
 import * as Signal from "./signal.js";
 import * as Trace from "../trace/index.js";
 import { setFiberRef } from "../internal/fiber-ref.js";
-import { unsafeEraseR, unsafeWidenContext } from "../internal/unsafe.js";
+import { unsafeWidenContext } from "../internal/unsafe.js";
 import * as SafeUrl from "../security/safe-url.js";
-import { ResourceRegistryLive } from "./resource.js";
+import { ResourceRegistry } from "./resource.js";
 import * as Head from "./head.js";
 import { browser as platformBrowser } from "../platform/browser.js";
 import type { RoutesManifest } from "../router/index.js";
@@ -40,6 +41,7 @@ import { renderProvide } from "./render-provide.js";
 import { renderFragment } from "./render-fragment.js";
 import { renderPortal } from "./render-portal.js";
 import { renderErrorBoundary } from "./render-error-boundary.js";
+import { asFinalizer, cleanupAll, runOwnedRenderFiber } from "./render-cleanup.js";
 
 export { ComponentAnchorError } from "./render-component.js";
 export { PortalTargetNotFoundError } from "./render-portal.js";
@@ -52,8 +54,25 @@ const provideRenderContext = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   _renderContext: RenderContext,
   context: Context.Context<unknown> | null,
-): Effect.Effect<A, E, RuntimeRequirements> =>
-  context === null ? effect : Effect.provide(effect, context);
+): Effect.Effect<A, E, RuntimeRequirements> => {
+  const services =
+    context === null ? _renderContext.services : Context.merge(_renderContext.services, context);
+
+  // Captured services must not replace the structural scope supplied by the
+  // component or keyed-row render path that is currently running this Effect.
+  return Effect.provide(effect, Context.omit(Scope.Scope)(services));
+};
+
+// Row services are stable for the list owner. Scope and operation annotations
+// belong to the executing worker, rather than this captured service snapshot.
+const captureRowServices = (
+  renderContext: RenderContext,
+  context: Context.Context<unknown> | null,
+): Context.Context<unknown> =>
+  Context.omit(
+    Scope.Scope,
+    References.CurrentLogAnnotations,
+  )(context === null ? renderContext.services : Context.merge(renderContext.services, context));
 
 // Synchronous fast path used by the keyed-list per-row create/replace driver: a
 // fully-static intrinsic row builds inline (direct DOM, no `Effect.sync` +
@@ -65,12 +84,14 @@ const renderElementSync = (
   parent: Node,
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
-): RenderResult | null =>
-  Predicate.isTagged(element, "Intrinsic") && isStaticIntrinsic(element)
-    ? buildStaticIntrinsicSync(element, parent, renderContext, context)
+): RenderResult | Effect.Effect<RenderResult> | null => {
+  const activeRenderContext = withRenderServices(renderContext, context);
+  return Predicate.isTagged(element, "Intrinsic") && isStaticIntrinsic(element)
+    ? buildStaticIntrinsicSync(element, parent, activeRenderContext, context)
     : null;
+};
 
-export class InvalidEventHandlerError extends Schema.TaggedErrorClass<InvalidEventHandlerError>()(
+export class InvalidEventHandlerError extends Schema.TaggedError<InvalidEventHandlerError>()(
   "InvalidEventHandlerError",
   { prop: Schema.String },
 ) {
@@ -105,7 +126,24 @@ const mergeRenderServices = (
   renderContext: RenderContext,
   context: Context.Context<unknown> | null,
 ): Context.Context<unknown> =>
-  context === null ? renderContext.services : Context.merge(context, renderContext.services);
+  context === null ? renderContext.services : Context.merge(renderContext.services, context);
+
+const withRenderServices = (
+  renderContext: RenderContext,
+  context: Context.Context<unknown> | null,
+): RenderContext => {
+  if (context === null) return renderContext;
+  const services = mergeRenderServices(renderContext, context);
+  return {
+    ...renderContext,
+    services,
+    safeUrlConfig: Context.getOrElse(
+      services,
+      SafeUrl.SafeUrlConfig,
+      () => renderContext.safeUrlConfig,
+    ),
+  };
+};
 
 const runForkInRenderContext = <A, E>(
   effect: Effect.Effect<A, E, RuntimeRequirements>,
@@ -119,7 +157,7 @@ const runForkInRenderContext = <A, E>(
       ? Context.add(services, Scheduler.PreventSchedulerYield, true)
       : services;
 
-  Effect.runForkWith(forkServices)(effect.pipe(Scope.provide(renderContext.scope)));
+  runOwnedRenderFiber(effect, forkServices, renderContext.scope);
 };
 
 /**
@@ -138,6 +176,14 @@ export const CurrentRenderContext = Context.Reference<RenderContext | null>(
     defaultValue: () => null,
   },
 );
+
+/** @internal Values acquired by a prepared render, retained under its owning scope. */
+export interface RenderPreparation {
+  /** Partial acquisition must continue through the DOM renderer before later Effects run. */
+  readonly needsDom?: true;
+  readonly propertyValues: ReadonlyMap<string, unknown> | undefined;
+  readonly children: ReadonlyArray<RenderPreparation | undefined>;
+}
 
 /**
  * Result of rendering an element - contains the DOM node and cleanup effect.
@@ -172,11 +218,35 @@ export interface RenderResult {
    * @internal
    */
   readonly cleanupSync?: (detached?: boolean) => void;
+  /**
+   * Non-mutating structural check permitting a caller to defer replacement DOM
+   * construction. Reconciliation can still fail; callers must retain rollback
+   * state and build a replacement if reconciliation returns false.
+   *
+   * @internal
+   */
+  readonly canReconcile?: (
+    nextElement: Element,
+    nextContext: Context.Context<unknown> | null,
+  ) => boolean;
+  /** @internal Plan compatible property acquisition without DOM; undefined declines before running Effects. */
+  readonly prepareReconcile?: (
+    nextElement: Element,
+    nextContext: Context.Context<unknown> | null,
+  ) => Effect.Effect<RenderPreparation, unknown, RuntimeRequirements> | undefined;
+  /** @internal Snapshot acquired values before commit so rollback does not rerun user Effects. */
+  readonly preparation?: RenderPreparation | undefined;
   readonly reconcile?: (
     nextElement: Element,
     nextContext: Context.Context<unknown> | null,
+    preparation?: RenderPreparation,
   ) => Effect.Effect<boolean, unknown, RuntimeRequirements>;
 }
+
+const canReconcileText = (
+  nextElement: Element,
+  nextContext: Context.Context<unknown> | null,
+): boolean => Predicate.isTagged(resolveReconcileTarget(nextElement, nextContext).element, "Text");
 
 const normalizeContext = (context: Context.Context<unknown> | null): Context.Context<unknown> =>
   context ?? emptyContext;
@@ -193,6 +263,7 @@ export type ErrorBoundaryHandler = (cause: Cause.Cause<unknown>) => void;
  * @internal
  */
 interface RenderOptions {
+  readonly preparation?: RenderPreparation | undefined;
   readonly errorHandler: ErrorBoundaryHandler | null;
 }
 
@@ -293,86 +364,113 @@ const renderDocumentElement = Effect.fn("renderDocumentElement")(function* (
 
   // Strip framework-specific 'mode' prop before applying
   const { mode: _mode, ...domProps } = props;
-
-  // Apply attributes to the existing node (skip for <head> — no meaningful attrs)
   const appliedAttrs: Array<{ key: string; prev: string | null }> = [];
-  const signalCleanups: Array<Effect.Effect<void>> = [];
-  if (tag !== "head") {
-    for (const [key, value] of Object.entries(domProps)) {
-      if (key === "children" || key === "key") continue;
-      const attrName = key === "className" ? "class" : key === "htmlFor" ? "for" : key;
-      if (Signal.isSignal(value)) {
-        // Signal-valued attribute: fine-grained reactivity on document elements
-        const prev = targetNode.getAttribute(attrName);
-        const initialValue = yield* Signal.get(value);
-        const blocked = applyPropValue(targetNode, key, initialValue, renderContext.safeUrlConfig);
-        if (Option.isSome(blocked)) {
-          yield* logBlockedSafeUrlAttribute(blocked.value);
-        }
-        appliedAttrs.push({ key: attrName, prev });
+  const signalCleanups: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
+  const childResults: Array<RenderResult> = [];
+  let anchor: Comment | null = null;
 
-        yield* Trace.emit("document.signal.initial", () => ({
-          signal_id: value._debugId,
-          value: initialValue,
-          element_tag: tag,
-          trigger: `prop:${key}`,
-        }));
-
-        const unsubscribe = yield* Signal.subscribe(value, () =>
-          Effect.gen(function* () {
-            const newValue = yield* Signal.get(value);
-            yield* Trace.emit("document.signal.update", () => ({
-              signal_id: value._debugId,
-              value: newValue,
-              element_tag: tag,
-              trigger: `prop:${key}`,
-            }));
-            const blocked = applyPropValue(targetNode, key, newValue, renderContext.safeUrlConfig);
-            if (Option.isSome(blocked)) {
-              yield* logBlockedSafeUrlAttribute(blocked.value);
+  const cleanupDocumentRender: Effect.Effect<void, unknown, RuntimeRequirements> = Effect.suspend(
+    () => {
+      const cleanups: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
+      for (let index = childResults.length - 1; index >= 0; index--) {
+        const child = childResults[index];
+        if (child !== undefined) cleanups.push(child.cleanup);
+      }
+      for (let index = signalCleanups.length - 1; index >= 0; index--) {
+        const cleanup = signalCleanups[index];
+        if (cleanup !== undefined) cleanups.push(cleanup);
+      }
+      for (let index = appliedAttrs.length - 1; index >= 0; index--) {
+        const attribute = appliedAttrs[index];
+        if (attribute === undefined) continue;
+        cleanups.push(
+          Effect.sync(() => {
+            if (attribute.prev !== null) {
+              targetNode.setAttribute(attribute.key, attribute.prev);
+            } else {
+              targetNode.removeAttribute(attribute.key);
             }
           }),
         );
-        signalCleanups.push(unsubscribe);
-      } else if (typeof value === "string") {
-        const prev = targetNode.getAttribute(attrName);
-        targetNode.setAttribute(attrName, value);
-        appliedAttrs.push({ key: attrName, prev });
       }
-    }
-  }
+      cleanups.push(Effect.sync(() => anchor?.remove()));
+      return cleanupAll(cleanups);
+    },
+  );
 
-  // Render children into the target node
-  const childResults: Array<RenderResult> = [];
-  for (const child of children) {
-    const result = yield* renderElement(child, renderTarget, renderContext, context, options);
-    childResults.push(result);
-  }
+  return yield* Effect.gen(function* () {
+    // Apply attributes to the existing node (skip for <head> — no meaningful attrs).
+    if (tag !== "head") {
+      for (const [key, value] of Object.entries(domProps)) {
+        if (key === "children" || key === "key") continue;
+        const attrName =
+          key === "className" ? "class" : key === "htmlFor" ? "for" : key.toLowerCase();
+        if (Signal.isSignal(value)) {
+          const prev = targetNode.getAttribute(attrName);
+          appliedAttrs.push({ key: attrName, prev });
+          const initialValue = yield* Signal.get(value);
+          const blocked = applyPropValue(
+            targetNode,
+            key,
+            initialValue,
+            renderContext.safeUrlConfig,
+          );
+          if (Option.isSome(blocked)) {
+            yield* logBlockedSafeUrlAttribute(blocked.value);
+          }
 
-  // Anchor comment for positioning (appended to the target)
-  const anchor = document.createComment(`doc:${tag}`);
-  renderTarget.appendChild(anchor);
+          yield* Trace.emit("document.signal.initial", () => ({
+            signal_id: value._debugId,
+            value_type: Trace.valueType(initialValue),
+            element_tag: tag,
+            trigger: `prop:${key}`,
+          }));
 
-  return {
-    node: anchor,
-    cleanup: Effect.gen(function* () {
-      for (const cleanup of signalCleanups) {
-        yield* cleanup;
-      }
-      for (const child of childResults) {
-        yield* child.cleanup;
-      }
-      // Revert applied attributes
-      for (const { key, prev } of appliedAttrs) {
-        if (prev !== null) {
-          targetNode.setAttribute(key, prev);
-        } else {
-          targetNode.removeAttribute(key);
+          const unsubscribe = yield* Signal.subscribe(value, () =>
+            Effect.gen(function* () {
+              const newValue = yield* Signal.get(value);
+              yield* Trace.emit("document.signal.update", () => ({
+                signal_id: value._debugId,
+                value_type: Trace.valueType(newValue),
+                element_tag: tag,
+                trigger: `prop:${key}`,
+              }));
+              const updateBlocked = applyPropValue(
+                targetNode,
+                key,
+                newValue,
+                renderContext.safeUrlConfig,
+              );
+              if (Option.isSome(updateBlocked)) {
+                yield* logBlockedSafeUrlAttribute(updateBlocked.value);
+              }
+            }),
+          );
+          signalCleanups.push(unsubscribe);
+        } else if (typeof value === "string") {
+          const prev = targetNode.getAttribute(attrName);
+          appliedAttrs.push({ key: attrName, prev });
+          const blocked = applyPropValue(targetNode, key, value, renderContext.safeUrlConfig);
+          if (Option.isSome(blocked)) {
+            yield* logBlockedSafeUrlAttribute(blocked.value);
+          }
         }
       }
-      anchor.remove();
-    }),
-  };
+    }
+
+    for (const child of children) {
+      const result = yield* renderElement(child, renderTarget, renderContext, context, options);
+      childResults.push(result);
+    }
+
+    anchor = document.createComment(`doc:${tag}`);
+    renderTarget.appendChild(anchor);
+
+    return {
+      node: anchor,
+      cleanup: cleanupDocumentRender,
+    } satisfies RenderResult;
+  }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? cleanupDocumentRender : Effect.void)));
 });
 
 /**
@@ -386,6 +484,7 @@ const renderElement = (
   context: Context.Context<unknown> | null,
   options: RenderOptions = defaultRenderOptions,
 ): Effect.Effect<RenderResult, unknown, RuntimeRequirements> => {
+  renderContext = withRenderServices(renderContext, context);
   // Dispatch on the element tag with a plain `switch` rather than `Match.value`:
   // `renderElement` is THE per-element hot path (called once per node — per row in
   // a keyed list), and the pipe form allocates and runs a 10-stage matcher on
@@ -401,6 +500,7 @@ const renderElement = (
         return {
           node,
           cleanup: Effect.sync(() => node.remove()),
+          canReconcile: canReconcileText,
           reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
             Effect.sync(() => {
               const resolved = resolveReconcileTarget(nextElement, nextContext);
@@ -430,7 +530,7 @@ const renderElement = (
 
         yield* Trace.emit("signalText.initial", () => ({
           signal_id: signal._debugId,
-          value: initialValue,
+          value_type: Trace.valueType(initialValue),
         }));
 
         // Subscribe to signal changes for fine-grained updates
@@ -440,7 +540,7 @@ const renderElement = (
             const value = yield* Signal.get(signal);
             yield* Trace.emit("signalText.update", () => ({
               signal_id: signal._debugId,
-              value: value,
+              value_type: Trace.valueType(value),
             }));
             node.textContent = String(value);
           }),
@@ -550,7 +650,7 @@ const renderElement = (
         context,
         options,
         {
-          provideRenderContext,
+          captureRowServices,
           renderElement,
           renderElementSync,
           runForkInRenderContext,
@@ -612,10 +712,10 @@ const makeBrowserRenderer = Effect.fn("Renderer.browserLayer")(function* () {
     element: Element,
   ) {
     const scope = yield* Effect.scope;
-    const headService = yield* Head.makeBrowserHead();
+    const headManager = yield* Head.makeBrowser();
 
-    // Set Head service for head element hoisting
-    yield* setFiberRef(Head.CurrentHead, headService);
+    // Set the renderer-owned head manager for intrinsic hoisting.
+    yield* setFiberRef(Head.CurrentHead, headManager);
 
     const methodServices = unsafeWidenContext(yield* Effect.context<never>());
     const renderServices = Context.merge(services, methodServices);
@@ -630,34 +730,36 @@ const makeBrowserRenderer = Effect.fn("Renderer.browserLayer")(function* () {
     // Set up render context after renderer-local FiberRefs are installed
     yield* setFiberRef(CurrentRenderContext, renderContext);
 
-    // Create an anchor comment to mark the mount point
-    // This replaces innerHTML="" clearing - we only manage our own nodes
     const mountAnchor = document.createComment("trygg-mount");
-    container.appendChild(mountAnchor);
+    let result: RenderResult | null = null;
 
-    // Render the element tree - content is inserted before the anchor
-    // by the renderElement function (for Component, Fragment, etc.)
-    // For elements that append directly, they go after existing content
-    const result = yield* Effect.provide(
-      renderElement(element, container, renderContext, null),
-      renderServices,
-    );
+    yield* Effect.gen(function* () {
+      // This replaces innerHTML="" clearing - we only manage our own nodes.
+      container.appendChild(mountAnchor);
+      const mountedResult = yield* Effect.provide(
+        renderElement(element, container, renderContext, null),
+        renderServices,
+      );
+      result = mountedResult;
 
-    // Move rendered content before the anchor for consistent ordering
-    container.insertBefore(result.node, mountAnchor);
+      container.insertBefore(mountedResult.node, mountAnchor);
 
-    // Register cleanup on scope finalization using acquireRelease pattern
-    yield* Effect.addFinalizer(() =>
-      Effect.catchCause(
+      yield* Effect.addFinalizer(() =>
         Effect.provide(
-          Effect.gen(function* () {
-            yield* result.cleanup;
-            mountAnchor.remove();
-          }),
+          cleanupAll([mountedResult.cleanup, Effect.sync(() => mountAnchor.remove())]).pipe(
+            asFinalizer,
+          ),
           renderServices,
         ),
-        () => Effect.void,
-      ),
+      );
+    }).pipe(
+      Effect.onExit((exit) => {
+        if (Exit.isSuccess(exit)) return Effect.void;
+        const rollback: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
+        if (result !== null) rollback.push(result.cleanup);
+        rollback.push(Effect.sync(() => mountAnchor.remove()));
+        return Effect.provide(cleanupAll(rollback), renderServices);
+      }),
     );
   });
 
@@ -803,11 +905,9 @@ export const mount = <E>(
     import("../router/index.js"),
   ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistryLive);
+    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistry.layer());
     const appLayer = browserLayer.pipe(Layer.provideMerge(appServicesLayer));
-    runMain(
-      unsafeEraseR(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer))),
-    );
+    runMain(render(container, appEffect).pipe(Effect.scoped, Effect.provide(appLayer)));
   });
 };
 
@@ -918,12 +1018,8 @@ export const mountDocument = <E>(
     import("../router/index.js"),
   ]).then(([{ runMain }, Router]) => {
     const routerLayer = Router.browserLayer.pipe(Layer.provide(platformBrowser));
-    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistryLive);
+    const appServicesLayer = Layer.mergeAll(routerLayer, ResourceRegistry.layer());
     const appLayer = browserLayer.pipe(Layer.provideMerge(appServicesLayer));
-    runMain(
-      unsafeEraseR(
-        renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer)),
-      ),
-    );
+    runMain(renderDocument(appEffect, options).pipe(Effect.scoped, Effect.provide(appLayer)));
   });
 };

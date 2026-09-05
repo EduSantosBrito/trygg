@@ -49,7 +49,9 @@ Prefer recovering inside the Component itself (`Effect.catchTag`, returning a fa
 - `ErrorBoundary.catchAll(View)` accepts a matcher with any remaining errors and produces a Component whose error channel is `never`. The catch-all `View` receives `{ cause }` for the unmatched failures.
 - `ErrorBoundary.exhaustive(matcher)` only type-checks when every tag in `E` has been handled by `ErrorBoundary.on`. It produces a Component whose error channel is `never`; if a tagged failure still reaches it at render time, the rendered Element fails with `UnhandledErrorsError`.
 
-Both finalizers return an `Effect`, so build the safe Component with `yield*` inside `Component.gen` or `Effect.gen`. The handler matched by `ErrorBoundary.on` receives `{ error }` typed to that exact tag; the catch-all receives `{ cause }` (the full `Cause.Cause<unknown>`). Matching reads `_tag` from the squashed cause, so any tagged error works — `Data.TaggedError` and `Schema.TaggedErrorClass` both qualify.
+Both finalizers return an `Effect`, so build the safe Component with `yield*` inside `Component.gen` or `Effect.gen`. The handler matched by `ErrorBoundary.on` receives `{ error }` typed to that exact tag; the catch-all receives `{ cause }` (the full `Cause.Cause<unknown>`). Matching reads `_tag` from the squashed cause, so any tagged error works — `Data.TaggedError` and `Schema.TaggedError` both qualify.
+
+Recovery applies to Causes containing only typed failures. Defects and interruption, including mixed Causes, remain terminal and do not construct fallback UI. Failed child scopes close with their failure Exit. If rollback also fails, both the render and cleanup reasons remain observable.
 
 Sharp edges:
 

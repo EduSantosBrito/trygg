@@ -22,11 +22,13 @@ export { PlatformEventTarget, EventTargetError, type EventTargetService } from "
 export {
   Observer,
   ObserverError,
+  TestObserver,
   type ObserverService,
+  type TestObserverService,
   type IntersectionOptions,
   type IntersectionHandle,
 } from "./observer.js";
-export { Idle, IdleError, type IdleService } from "./idle.js";
+export { Idle, IdleError, TestIdle, type IdleService, type TestIdleService } from "./idle.js";
 
 export { browser } from "./browser.js";
 export { test } from "./test.js";

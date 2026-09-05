@@ -1,0 +1,340 @@
+--- A/packages/core/src/primitives/render-intrinsic.ts
++++ B/packages/core/src/primitives/render-intrinsic.ts
+@@ -1,4 +1,4 @@
+-import { Effect, Option, Predicate } from "effect";
++import { Cause, Effect, Exit, Option, Predicate } from "effect";
+ import * as Context from "effect/Context";
+ import { Element, getKey, type ElementProps, type EventHandler } from "./element.js";
+ import * as Signal from "./signal.js";
+@@ -227,6 +227,10 @@
+ });
+ 
+ type IntrinsicElement = Extract<Element, { readonly _tag: "Intrinsic" }>;
++
++interface StaticRenderResult extends RenderResult {
++  readonly cleanup: Effect.Effect<void>;
++}
+ 
+ interface StaticEventBinding {
+   readonly eventName: string;
+@@ -416,46 +420,47 @@
+  * subtree can later reconcile in place. Children are appended directly — no
+  * Effect dispatch, no per-child markers.
+  */
++const createStaticBuilt = (element: IntrinsicElement): StaticBuilt => ({
++  node: createElement(element.tag),
++  element,
++  props: element.props.mode !== undefined ? omitMode(element.props) : element.props,
++  incompleteProps: undefined,
++  listeners: [],
++  unsubscribes: [],
++  children: [],
++  // Incomplete nodes must remain traversable if acquisition aborts.
++  subtreeHasUnsubscribes: true,
++});
++
+ const buildStaticElement = (
+-  element: IntrinsicElement,
++  built: StaticBuilt,
+   renderContext: RenderContext,
+   context: Context.Context<unknown> | null,
+-): StaticBuilt => {
+-  const node = createElement(element.tag);
+-  const props = element.props.mode !== undefined ? omitMode(element.props) : element.props;
+-  const listeners: Array<StaticEventBinding> = [];
+-  const unsubscribes: Array<() => void> = [];
+-  applyStaticProps(node, props, listeners, unsubscribes, renderContext, context);
+-
+-  // Track whether this subtree carries any signal-attribute unsubscribes so
+-  // teardown can early-out; the per-child check is a single boolean OR (no
+-  // allocation, no native call) and never touches the create hot path measurably.
+-  let subtreeHasUnsubscribes = unsubscribes.length > 0;
+-  const children: Array<StaticChild> = [];
+-  for (const child of element.children) {
++): void => {
++  applyStaticProps(
++    built.node,
++    built.props,
++    built.listeners,
++    built.unsubscribes,
++    renderContext,
++    context,
++  );
++  let subtreeHasUnsubscribes = built.unsubscribes.length > 0;
++  for (const child of built.element.children) {
+     if (Predicate.isTagged(child, "Text")) {
+       const textNode = document.createTextNode(child.content);
+-      node.appendChild(textNode);
+-      children.push({ kind: "text", node: textNode });
++      built.node.appendChild(textNode);
++      built.children.push({ kind: "text", node: textNode });
+     } else if (Predicate.isTagged(child, "Intrinsic")) {
+-      // Verified static intrinsic by `isStaticIntrinsic`.
+-      const childBuilt = buildStaticElement(child, renderContext, context);
+-      node.appendChild(childBuilt.node);
+-      children.push({ kind: "element", built: childBuilt });
++      const childBuilt = createStaticBuilt(child);
++      // Retain ownership before either property acquisition or insertion can fail.
++      built.children.push({ kind: "element", built: childBuilt });
++      buildStaticElement(childBuilt, renderContext, context);
++      built.node.appendChild(childBuilt.node);
+       if (childBuilt.subtreeHasUnsubscribes) subtreeHasUnsubscribes = true;
+     }
+   }
+-
+-  return {
+-    node,
+-    element,
+-    props,
+-    incompleteProps: undefined,
+-    listeners,
+-    unsubscribes,
+-    children,
+-    subtreeHasUnsubscribes,
+-  };
++  built.subtreeHasUnsubscribes = subtreeHasUnsubscribes;
+ };
+ 
+ /**
+@@ -610,16 +615,14 @@
+ 
+ /**
+  * Wrap a built {@link StaticBuilt} root in the {@link RenderResult} the static
+- * fast-path returns: append the root to its parent and expose the synchronous
++ * fast-path returns: expose the synchronous
+  * cleanup/reconcile pair, producing an in-place-reconcilable result for the
+- * from-scratch build ({@link buildStaticIntrinsicSync}).
++ * from-scratch build ({@link buildStaticIntrinsicSync}), which owns insertion.
+  */
+ const makeStaticRenderResult = (
+   root: StaticBuilt,
+-  parent: Node,
+   renderContext: RenderContext,
+-): RenderResult => {
+-  parent.appendChild(root.node);
++): StaticRenderResult => {
+   // Detach the root first (single DOM mutation), then drop listeners — same
+   // ordering rationale as the Effect path's cleanup. Shared by both the Effect
+   // `cleanup` and the synchronous `cleanupSync` fast-path core.
+@@ -630,8 +633,12 @@
+   // fragment, so skip it. Listener/subscription teardown via cleanupStaticBuilt
+   // still runs (and itself early-outs for fully-static subtrees).
+   const cleanupSync = (detached?: boolean): void => {
+-    if (detached !== true) root.node.remove();
+-    cleanupStaticBuilt(root);
++    // oxlint-disable-next-line effect/no-try-catch -- Native detachment must not prevent synchronous subscription release; the enclosing Effect retains its defect.
++    try {
++      if (detached !== true) root.node.remove();
++    } finally {
++      cleanupStaticBuilt(root);
++    }
+   };
+   return {
+     node: root.node,
+@@ -667,6 +674,10 @@
+  * cleanup detaches the root then drops every descendant listener; reconcile
+  * updates text/props in place when the next element is still fully static, else
+  * returns `false` to fall back to a replace.
++ * Native acquisition failures return an Effect that rolls back the retained
++ * partial tree and preserves acquisition and cleanup Causes. Callers must yield
++ * this Effect inside their native acquisition mask before continuing or handing
++ * off ownership, and release a result if interruption prevents that handoff.
+  *
+  * @internal
+  */
+@@ -675,15 +686,28 @@
+   parent: Node,
+   renderContext: RenderContext,
+   context: Context.Context<unknown> | null,
+-): RenderResult =>
+-  makeStaticRenderResult(
+-    buildStaticElement(element, renderContext, context),
+-    parent,
+-    renderContext,
+-  );
+-
+-/**
+- * Fast path for fully-static intrinsic subtrees: one `Effect.sync` wrapping
++): StaticRenderResult | Effect.Effect<StaticRenderResult> => {
++  const root = createStaticBuilt(element);
++  // oxlint-disable-next-line effect/no-try-catch -- Native adapter: successful construction stays synchronous; failures enter Effect with rollback and the original defect.
++  try {
++    buildStaticElement(root, renderContext, context);
++    const result = makeStaticRenderResult(root, renderContext);
++    parent.appendChild(root.node);
++    return result;
++  } catch (defect) {
++    return Effect.failCause(Cause.die(defect)).pipe(
++      Effect.onError(() =>
++        cleanupAll([
++          Effect.sync(() => root.node.remove()),
++          Effect.sync(() => cleanupStaticBuilt(root)),
++        ]),
++      ),
++    );
++  }
++};
++
++/**
++ * Fast path for fully-static intrinsic subtrees: one `Effect.suspend` wrapping
+  * {@link buildStaticIntrinsicSync}, bypassing the per-element
+  * `Effect.fnUntraced`/`makePrimitive`/context-read machinery the Effect renderer
+  * pays for each node. Used by the effectful `renderElement` dispatch; the
+@@ -697,7 +721,31 @@
+   renderContext: RenderContext,
+   context: Context.Context<unknown> | null,
+ ): Effect.Effect<RenderResult> =>
+-  Effect.sync(() => buildStaticIntrinsicSync(element, parent, renderContext, context));
++  Effect.suspend(() => {
++    let acquired: StaticRenderResult | undefined;
++    // Bounded native acquisition and rollback must finish before deferred interruption.
++    return Effect.uninterruptibleMask((restore) =>
++      Effect.suspend(() => {
++        const result = buildStaticIntrinsicSync(element, parent, renderContext, context);
++        if (!Effect.isEffect(result)) acquired = result;
++        return Effect.isEffect(result) ? result : Effect.succeed(result);
++      }).pipe(
++        Effect.catchCause((cause) =>
++          // Restore cancellation after rollback and retain the native Cause
++          // alongside a deferred interrupt instead of replacing either one.
++          Effect.exit(restore(Effect.void)).pipe(
++            Effect.flatMap((exit) =>
++              Effect.failCause(Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause),
++            ),
++          ),
++        ),
++      ),
++    ).pipe(
++      Effect.onExit((exit) =>
++        Exit.isFailure(exit) && acquired !== undefined ? acquired.cleanup : Effect.void,
++      ),
++    );
++  });
+ 
+ export const renderIntrinsic = Effect.fnUntraced(function* <E, R>(
+   tag: string,
+--- A/packages/core/src/primitives/render-keyed-list.ts
++++ B/packages/core/src/primitives/render-keyed-list.ts
+@@ -31,7 +31,7 @@
+     parent: Node,
+     renderContext: RenderContext,
+     context: Context.Context<unknown> | null,
+-  ) => RenderResult | null;
++  ) => RenderResult | Effect.Effect<RenderResult> | null;
+   readonly runForkInRenderContext: <E2, R2>(
+     effect: Effect.Effect<void, E2, R2>,
+     renderContext: RenderContext,
+@@ -200,34 +200,75 @@
+     parentOverride?: Node,
+     renderContext: RenderContext = runtime,
+   ) {
+-    const listParent = parentOverride ?? anchor.parentNode ?? parent;
+-
+-    // Insert start marker before rendering so content appears after it
+-    const startMarker = document.createComment("item-start");
+-    listParent.appendChild(startMarker);
+-
+-    // Synchronous fast path: a fully-static row subtree builds inline, skipping a
+-    // per-row `renderElement` Effect dispatch (one `Effect.sync` primitive
+-    // allocation + one run-loop step saved for every row of the create/replace/
+-    // append cluster). `renderElementSync` returns `null` for rows that need the
+-    // effectful renderer (signal/component/keyed children), which fall back to the
+-    // original `yield* renderElement` path.
+-    const syncResult = deps.renderElementSync(
+-      normalizedElement,
+-      listParent,
+-      renderContext,
+-      context,
++    let acquiredResult: RenderResult | undefined;
++    let acquiredStart: Comment | undefined;
++    let acquiredEnd: Comment | undefined;
++    // Complete native acquisition/rollback before interruption, while effectful
++    // component rendering retains its normal cancellation behavior.
++    return yield* Effect.uninterruptibleMask((restore) =>
++      Effect.gen(function* () {
++        const listParent = parentOverride ?? anchor.parentNode ?? parent;
++
++        // Insert start marker before rendering so content appears after it
++        const startMarker = document.createComment("item-start");
++        acquiredStart = startMarker;
++        listParent.appendChild(startMarker);
++
++        // Synchronous fast path: a fully-static row subtree builds inline, skipping a
++        // per-row `renderElement` Effect dispatch (one `Effect.sync` primitive
++        // allocation + one run-loop step saved for every row of the create/replace/
++        // append cluster). `renderElementSync` returns `null` for rows that need the
++        // effectful renderer (signal/component/keyed children), which fall back to the
++        // original `yield* renderElement` path.
++        const syncResult = deps.renderElementSync(
++          normalizedElement,
++          listParent,
++          renderContext,
++          context,
++        );
++        const result =
++          syncResult === null
++            ? yield* restore(
++                deps.renderElement(normalizedElement, listParent, renderContext, context, options),
++              )
++            : Effect.isEffect(syncResult)
++              ? yield* syncResult.pipe(
++                  Effect.catchCause((cause) =>
++                    Effect.exit(restore(Effect.void)).pipe(
++                      Effect.flatMap((exit) =>
++                        Effect.failCause(
++                          Exit.isFailure(exit) ? Cause.combine(exit.cause, cause) : cause,
++                        ),
++                      ),
++                    ),
++                  ),
++                )
++              : syncResult;
++
++        // Insert end marker after content - ensures moveRange captures full Fragment range
++        acquiredResult = result;
++        const endMarker = document.createComment("item-end");
++        acquiredEnd = endMarker;
++        listParent.appendChild(endMarker);
++
++        return { result, startMarker, endMarker };
++      }),
++    ).pipe(
++      Effect.onExit((exit) => {
++        if (Exit.isSuccess(exit)) return Effect.void;
++        const cleanups: Array<Effect.Effect<void, unknown>> = [];
++        if (acquiredResult !== undefined) cleanups.push(RenderTransaction.cleanup(acquiredResult));
++        if (acquiredStart !== undefined) {
++          const marker = acquiredStart;
++          cleanups.push(Effect.sync(() => marker.remove()));
++        }
++        if (acquiredEnd !== undefined) {
++          const marker = acquiredEnd;
++          cleanups.push(Effect.sync(() => marker.remove()));
++        }
++        return cleanupAll(cleanups);
++      }),
+     );
+-    const result =
+-      syncResult !== null
+-        ? syncResult
+-        : yield* deps.renderElement(normalizedElement, listParent, renderContext, context, options);
+-
+-    // Insert end marker after content - ensures moveRange captures full Fragment range
+-    const endMarker = document.createComment("item-end");
+-    listParent.appendChild(endMarker);
+-
+-    return { result, startMarker, endMarker };
+   });
+ 
+   // Prepare a single item with a stable render phase. A compatible static result
+--- A/packages/core/src/primitives/renderer.ts
++++ B/packages/core/src/primitives/renderer.ts
+@@ -72,7 +72,7 @@
+   parent: Node,
+   renderContext: RenderContext,
+   context: Context.Context<unknown> | null,
+-): RenderResult | null => {
++): RenderResult | Effect.Effect<RenderResult> | null => {
+   const activeRenderContext = withRenderServices(renderContext, context);
+   return Predicate.isTagged(element, "Intrinsic") && isStaticIntrinsic(element)
+     ? buildStaticIntrinsicSync(element, parent, activeRenderContext, context)

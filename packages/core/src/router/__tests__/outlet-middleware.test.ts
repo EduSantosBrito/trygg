@@ -15,16 +15,13 @@ import { Effect, Option, Predicate, Ref, Schema } from "effect";
 import * as Route from "../route.js";
 import { routeRedirect, routeForbidden } from "../route.js";
 import * as Routes from "../routes.js";
-import { createMatcher, collectRouteMiddleware, runRouteMiddleware } from "../matching.js";
+import { RouteMatcher, collectRouteMiddleware, runRouteMiddleware } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 
-class TestMiddlewareError extends Schema.TaggedErrorClass<TestMiddlewareError>()(
-  "TestMiddlewareError",
-  {
-    message: Schema.String,
-  },
-) {}
+class TestMiddlewareError extends Schema.TaggedError<TestMiddlewareError>()("TestMiddlewareError", {
+  message: Schema.String,
+}) {}
 
 // Dummy components
 const Comp: RouteComponent = Effect.succeed(empty);
@@ -45,8 +42,8 @@ describe("collectRouteMiddleware", () => {
         Route.make("/test").middleware(m1).middleware(m2).middleware(m3).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/test");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/test");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -71,8 +68,8 @@ describe("collectRouteMiddleware", () => {
           .children(Route.make("/users").middleware(childMiddleware).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -102,8 +99,8 @@ describe("collectRouteMiddleware", () => {
           ),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/a/b/c");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/a/b/c");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -120,8 +117,8 @@ describe("collectRouteMiddleware", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/simple").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/simple");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/simple");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -145,8 +142,8 @@ describe("collectRouteMiddleware", () => {
           .children(Route.make("/dashboard").middleware(childM1).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/dashboard");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/dashboard");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -171,8 +168,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/test").middleware(Effect.void).middleware(Effect.void).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/test");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/test");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -186,8 +183,8 @@ describe("runRouteMiddleware", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/test").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/test");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/test");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -209,8 +206,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/test").middleware(m1).middleware(m2).middleware(m3).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/test");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/test");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -237,8 +234,8 @@ describe("runRouteMiddleware", () => {
           .children(Route.make("/dashboard").middleware(childMiddleware).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/dashboard");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/dashboard");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -259,8 +256,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/protected").middleware(redirectMiddleware).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/protected");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/protected");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -282,8 +279,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/protected").middleware(redirectMiddleware).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/protected");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/protected");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -304,8 +301,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/admin").middleware(forbiddenMiddleware).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -323,8 +320,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/broken").middleware(failingMiddleware).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/broken");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/broken");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -351,8 +348,8 @@ describe("runRouteMiddleware", () => {
           .component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/protected");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/protected");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -379,8 +376,8 @@ describe("runRouteMiddleware", () => {
         Route.make("/admin").middleware(forbidMiddleware).middleware(logMiddleware).component(Comp),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -410,8 +407,8 @@ describe("runRouteMiddleware", () => {
           .children(Route.make("/users").middleware(childMiddleware).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -444,8 +441,8 @@ describe("runRouteMiddleware", () => {
           ),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/a/b/c");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/a/b/c");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {

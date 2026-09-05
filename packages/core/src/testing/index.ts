@@ -10,7 +10,18 @@
  * @since 1.0.0
  * @module trygg/testing
  */
-import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Scope } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Scope,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import { Element, isElement } from "../primitives/element.js";
@@ -122,7 +133,7 @@ export interface TestRenderResult {
  * @public
  * @since 1.0.0
  */
-export class ElementNotFoundError extends Schema.TaggedErrorClass<ElementNotFoundError>()(
+export class ElementNotFoundError extends Schema.TaggedError<ElementNotFoundError>()(
   "ElementNotFoundError",
   {
     queryType: Schema.String,
@@ -309,26 +320,28 @@ const createQueryHelpers = (container: HTMLElement): Omit<TestRenderResult, "con
  */
 const renderElementImpl = Effect.fn("renderElement")(function* (element: Element) {
   const renderer = yield* Renderer;
-
-  // Create a container for the rendered element
-  const container = document.createElement("div");
-  container.setAttribute("data-testid", "test-container");
-  document.body.appendChild(container);
-
-  // Render the element
-  yield* renderer.mount(container, element);
-
-  // Clean up container when scope closes
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      container.remove();
+  const owner = yield* Effect.scope;
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.fork(owner);
+      if (Predicate.isTagged(scope.state, "Closed")) return yield* Effect.interrupt;
+      return yield* restore(
+        Effect.gen(function* () {
+          const container = yield* Effect.acquireRelease(
+            Effect.sync(() => document.createElement("div")),
+            (container) => Effect.sync(() => container.remove()),
+          );
+          if (Predicate.isTagged(scope.state, "Closed")) return yield* Effect.interrupt;
+          container.setAttribute("data-testid", "test-container");
+          document.body.appendChild(container);
+          yield* renderer.mount(container, element);
+          return { container, ...createQueryHelpers(container) } satisfies TestRenderResult;
+        }).pipe(Scope.provide(scope)),
+      ).pipe(
+        Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void)),
+      );
     }),
   );
-
-  return {
-    container,
-    ...createQueryHelpers(container),
-  } satisfies TestRenderResult;
 });
 
 /**
@@ -451,7 +464,8 @@ export const withRecording = <A, E, R>(
  * @remarks
  * `type` updates the element value and dispatches the matching `input` and
  * `change` events so controlled components observe the same sequence as in the
- * browser.
+ * browser. It then drains the interaction scheduler so Effect handlers settle
+ * before the next assertion.
  *
  * @example
  * ```tsx
@@ -471,7 +485,7 @@ export const type = (
     element.value = value;
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  }).pipe(Effect.andThen(flushInteractionEffects));
 
 /**
  * Error raised when `waitFor` exhausts its retry budget.
@@ -491,7 +505,7 @@ export const type = (
  * @public
  * @since 1.0.0
  */
-export class WaitForTimeoutError extends Schema.TaggedErrorClass<WaitForTimeoutError>()(
+export class WaitForTimeoutError extends Schema.TaggedError<WaitForTimeoutError>()(
   "WaitForTimeoutError",
   {
     timeout: Schema.Number,
@@ -503,12 +517,9 @@ export class WaitForTimeoutError extends Schema.TaggedErrorClass<WaitForTimeoutE
   }
 }
 
-class WaitForAttemptError extends Schema.TaggedErrorClass<WaitForAttemptError>()(
-  "WaitForAttemptError",
-  {
-    cause: Schema.Unknown,
-  },
-) {}
+class WaitForAttemptError extends Schema.TaggedError<WaitForAttemptError>()("WaitForAttemptError", {
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * Wait for a condition to become true.
@@ -562,10 +573,10 @@ export const waitFor: <T>(
   );
 
   // Schedule: retry at interval, max retries based on timeout
-  const schedule = Schedule.both(
+  const schedule = Schedule.max([
     Schedule.spaced(Duration.millis(interval)),
     Schedule.recurs(maxRetries),
-  );
+  ]);
 
   // Run with retries until success or schedule exhausted
   yield* attempt.pipe(

@@ -15,10 +15,10 @@ Build composable, type-safe UIs using [Effect](https://effect.website) with fine
 
 ## Quick Start
 
-Create a new project with the CLI:
+There is no stable release yet. Create a project by requesting the canary CLI explicitly:
 
 ```bash
-bunx create-trygg my-app
+bunx create-trygg@canary my-app
 cd my-app
 bun install
 bun run dev

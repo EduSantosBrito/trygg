@@ -1,0 +1,107 @@
+{
+  "date": "2026-09-05T03:41:43.792Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 43.69999998807907,
+          "frameMs": 50.80000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 80.80000001192093,
+          "frameMs": 87.30000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 36.59999996423721,
+          "frameMs": 50.59999996423721,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 36.30000001192093,
+          "frameMs": 56.10000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 35.60000002384186,
+          "frameMs": 43.30000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 72.19999998807907,
+          "frameMs": 78.69999998807907,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 34.5,
+          "frameMs": 44.09999996423721,
+          "rows": 999
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 48.89999997615814,
+    "firstContentfulPaintMs": 80
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 4640,
+      "gzipBytes": 1721
+    },
+    {
+      "file": "chunk-zqmr4emm.js",
+      "loadedAtStartup": true,
+      "bytes": 127627,
+      "gzipBytes": 27479
+    },
+    {
+      "file": "chunk-rgp62snh.js",
+      "loadedAtStartup": true,
+      "bytes": 449608,
+      "gzipBytes": 100318
+    },
+    {
+      "file": "chunk-sfmvkqbg.js",
+      "loadedAtStartup": true,
+      "bytes": 227727,
+      "gzipBytes": 58431
+    },
+    {
+      "file": "chunk-bf1xkaga.js",
+      "loadedAtStartup": true,
+      "bytes": 1420,
+      "gzipBytes": 679
+    },
+    {
+      "file": "chunk-3xwfs21m.js",
+      "loadedAtStartup": true,
+      "bytes": 108847,
+      "gzipBytes": 21833
+    },
+    {
+      "file": "chunk-dmtv9z74.js",
+      "loadedAtStartup": false,
+      "bytes": 2896,
+      "gzipBytes": 1147
+    }
+  ]
+}

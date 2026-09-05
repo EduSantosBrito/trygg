@@ -23,6 +23,7 @@ import { TestClock } from "effect/testing";
 import * as Trace from "../../trace/index.js";
 import { Element, Fragment } from "../../index.js";
 import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
+import { jsx } from "../../jsx-runtime.js";
 import * as Router from "../../router/index.js";
 import * as SafeUrl from "../../security/safe-url.js";
 import { scoped } from "../../testing/effect-vitest.js";
@@ -34,7 +35,7 @@ import { Renderer, browserLayer } from "../renderer.js";
 import * as Signal from "../signal.js";
 
 // Tagged errors for testing component failures
-class ComponentError extends Schema.TaggedErrorClass<ComponentError>()("ComponentError", {
+class ComponentError extends Schema.TaggedError<ComponentError>()("ComponentError", {
   message: Schema.String,
 }) {}
 
@@ -178,6 +179,166 @@ describe("SafeUrl attribute handling", () => {
 
       const link = yield* getByTestId("custom-link");
       assert.strictEqual(link.getAttribute("href"), "myapp://settings");
+    }),
+  );
+
+  scoped("applies URL policy per element and attribute sink", () =>
+    Effect.gen(function* () {
+      // Test: should apply URL policy per element and attribute sink.
+      // Scope: covers href, src, action, formAction, and every srcSet candidate at the renderer boundary.
+      // Assertion: passive image data is retained while active navigation, form, script, and srcSet values are omitted.
+      const { getByTestId } = yield* render(
+        <div>
+          <a data-testid="data-link" href="data:text/html,unsafe">
+            unsafe
+          </a>
+          <img data-testid="data-image" src="data:image/png;base64,iVBORw0KGgo=" />
+          <form data-testid="data-form" action="data:text/html,unsafe" />
+          <button data-testid="unsafe-button" formAction="javascript:alert(1)" />
+          <img data-testid="unsafe-srcset" srcSet="/safe.png 1x, JAVASCRIPT:alert(1) 2x" />
+          <iframe
+            data-testid="blob-resource"
+            src="blob:https://example.com/550e8400-e29b-41d4-a716-446655440000"
+          />
+        </div>,
+      );
+
+      assert.isNull((yield* getByTestId("data-link")).getAttribute("href"));
+      assert.strictEqual(
+        (yield* getByTestId("data-image")).getAttribute("src"),
+        "data:image/png;base64,iVBORw0KGgo=",
+      );
+      assert.isNull((yield* getByTestId("data-form")).getAttribute("action"));
+      assert.isNull((yield* getByTestId("unsafe-button")).getAttribute("formaction"));
+      assert.isNull((yield* getByTestId("unsafe-srcset")).getAttribute("srcset"));
+      assert.isNull((yield* getByTestId("blob-resource")).getAttribute("src"));
+    }),
+  );
+
+  scoped("rejects hostile values across every exposed URL attribute grammar", () =>
+    Effect.gen(function* () {
+      // Test: should reject hostile schemes across the element x attribute policy matrix.
+      // Scope: covers single URLs, srcset candidates, ping lists, and generic fallback interception.
+      // Assertion: no active/resource value reaches a DOM attribute through the generic prop path.
+      const recorder = Trace.makeRecorder();
+      const { getByTestId } = yield* Trace.record(
+        render(
+          <div>
+            <object data-testid="object-data" data="data:text/html,<script>alert(1)</script>" />
+            <object
+              data-testid="object-blob"
+              data="blob:https://example.test/550e8400-e29b-41d4-a716-446655440000"
+            />
+            <video data-testid="video-poster" poster="javascript:alert(1)" />
+            <blockquote data-testid="blockquote-cite" cite="data:text/html,unsafe" />
+            <q
+              data-testid="q-cite"
+              cite="blob:https://example.test/550e8400-e29b-41d4-a716-446655440000"
+            />
+            <ins data-testid="ins-cite" cite="JAVASCRIPT:alert(1)" />
+            <del data-testid="del-cite" cite="data:text/html,unsafe" />
+            <a data-testid="anchor-ping" ping="/audit data:text/html,unsafe" />
+            <area data-testid="area-ping" ping="/audit javascript:alert(1)" />
+            <source data-testid="source-srcset" srcSet="/safe.png 1x, javascript:alert(1) 2x" />
+            <div data-testid="generic-href" href="data:text/html,unsafe" />
+          </div>,
+        ),
+        recorder,
+      );
+
+      const blocked: ReadonlyArray<readonly [string, string]> = [
+        ["object-data", "data"],
+        ["object-blob", "data"],
+        ["video-poster", "poster"],
+        ["blockquote-cite", "cite"],
+        ["q-cite", "cite"],
+        ["ins-cite", "cite"],
+        ["del-cite", "cite"],
+        ["anchor-ping", "ping"],
+        ["area-ping", "ping"],
+        ["source-srcset", "srcset"],
+        ["generic-href", "href"],
+      ];
+
+      for (const [testId, attribute] of blocked) {
+        assert.isNull((yield* getByTestId(testId)).getAttribute(attribute));
+      }
+      assert.strictEqual(
+        recorder.records().filter((record) => record.name === "safeUrl.blocked").length,
+        blocked.length,
+      );
+    }),
+  );
+
+  scoped("allows passive image URLs without widening resource or list sinks", () =>
+    Effect.gen(function* () {
+      // Test: should allow passive image data while retaining strict resource and list policies.
+      // Scope: verifies explicit safe grants for poster alongside ordinary HTTPS cite/data/ping values.
+      // Assertion: approved values are present and multi-URL attributes survive only when every URL is safe.
+      const { getByTestId } = yield* render(
+        <div>
+          <video data-testid="safe-poster" poster="data:image/png;base64,iVBORw0KGgo=" />
+          <object data-testid="safe-object" data="https://example.test/document.pdf" />
+          <blockquote data-testid="safe-cite" cite="https://example.test/source" />
+          <a data-testid="safe-ping" ping="/audit https://example.test/ping" />
+        </div>,
+      );
+
+      assert.strictEqual(
+        (yield* getByTestId("safe-poster")).getAttribute("poster"),
+        "data:image/png;base64,iVBORw0KGgo=",
+      );
+      assert.strictEqual(
+        (yield* getByTestId("safe-object")).getAttribute("data"),
+        "https://example.test/document.pdf",
+      );
+      assert.strictEqual(
+        (yield* getByTestId("safe-cite")).getAttribute("cite"),
+        "https://example.test/source",
+      );
+      assert.strictEqual(
+        (yield* getByTestId("safe-ping")).getAttribute("ping"),
+        "/audit https://example.test/ping",
+      );
+    }),
+  );
+
+  scoped("validates every srcset candidate across HTML tokenizer edge cases", () =>
+    Effect.gen(function* () {
+      // Test: should reject every hostile srcset candidate across malformed descriptor and delimiter states.
+      // Scope: reproduces the first-`)` bypass and covers controls, repeated commas, and data-URL commas.
+      // Assertion: every hostile list is omitted, a safe data URL list survives, and an unknown tag cannot use generic assignment to bypass validation.
+      const hostile: ReadonlyArray<readonly [string, string]> = [
+        ["first-close", "/safe.png foo((bar), javascript:alert(1) 2x"],
+        ["malformed-descriptor", "/safe.png 1x garbage, JAVASCRIPT:alert(1) 2x"],
+        ["control", "/safe.png 1x, \u0000javascript:alert(1) 2x"],
+        ["repeated-commas", ",, /safe.png 1x,,, javascript:alert(1) 2x"],
+        ["data-comma", "data:image/png;base64,iVBORw0KGgo= 1x, javascript:alert(1) 2x"],
+        ["data-trailing-comma", "data:image/png;base64,iVBORw0KGgo=, javascript:alert(1) 2x"],
+      ];
+
+      for (const [testId, srcSet] of hostile) {
+        const { getByTestId } = yield* render(
+          jsx("img", { "data-testid": `srcset-${testId}`, srcSet }),
+        );
+        assert.isNull((yield* getByTestId(`srcset-${testId}`)).getAttribute("srcset"));
+      }
+
+      const safeDataSrcSet =
+        "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E 1x, /safe.png 2x";
+      const { getByTestId: getSafeByTestId } = yield* render(
+        jsx("img", { "data-testid": "safe-data-srcset", srcSet: safeDataSrcSet }),
+      );
+      assert.strictEqual(
+        (yield* getSafeByTestId("safe-data-srcset")).getAttribute("srcset"),
+        safeDataSrcSet,
+      );
+
+      const bypass = "/safe.png foo((bar), javascript:alert(1) 2x";
+      const { getByTestId: getGenericByTestId } = yield* render(
+        jsx("url-prop-probe", { "data-testid": "generic-srcset", srcSet: bypass }),
+      );
+      assert.isNull((yield* getGenericByTestId("generic-srcset")).getAttribute("srcset"));
     }),
   );
 });
@@ -1525,15 +1686,74 @@ describe("Re-render behavior", () => {
     }),
   );
 
-  scoped("should treat stable child update failures without a boundary as defects", () =>
+  scoped("should retain the committed owner when prior render-scope cleanup defects", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        class StableChildError extends Schema.TaggedErrorClass<StableChildError>()(
-          "StableChildError",
-          {
-            reason: Schema.Literal("update-failed"),
-          },
-        ) {}
+        // oxlint-disable-next-line effect/no-built-in-error-constructor -- The old render-scope finalizer deliberately dies with this identity.
+        const cleanupDefect = new Error("prior render cleanup defect");
+        const originalConsoleError = console.error;
+        let cleanupReports = 0;
+        let committedScopeFinalized = 0;
+        console.error = (...values: ReadonlyArray<unknown>) => {
+          if (values.some((value) => String(value).includes(cleanupDefect.message))) {
+            cleanupReports++;
+          }
+        };
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            console.error = originalConsoleError;
+          }),
+        );
+
+        const Child = Component.gen(function* (Props: Component.ComponentProps<{ value: string }>) {
+          const { value } = yield* Props;
+          const renderScope = yield* Signal.CurrentRenderScope;
+          if (renderScope === null) assert.fail("Expected component render scope");
+
+          if (value === "before") {
+            // oxlint-disable-next-line effect/no-effect-escape-hatch -- Deliberately verifies post-commit scope cleanup defects.
+            yield* Scope.addFinalizer(renderScope, Effect.die(cleanupDefect));
+          } else {
+            yield* Scope.addFinalizer(
+              renderScope,
+              Effect.sync(() => {
+                committedScopeFinalized++;
+              }),
+            );
+          }
+          return <div data-testid="scope-owner">{value}</div>;
+        });
+
+        const renderer = yield* Renderer;
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+
+        const result = yield* unsafeEraseR(renderer.render(<Child value="before" />, container));
+        const reconcile = result.reconcile;
+        if (reconcile === undefined) assert.fail("Expected component result to reconcile");
+
+        const reused = yield* unsafeEraseR(reconcile(<Child value="after" />, null));
+
+        assert.isTrue(reused);
+        assert.strictEqual(
+          container.querySelector('[data-testid="scope-owner"]')?.textContent,
+          "after",
+        );
+        assert.strictEqual(cleanupReports, 1);
+
+        yield* unsafeEraseR(result.cleanup);
+        assert.strictEqual(committedScopeFinalized, 1);
+      }).pipe(Effect.provide(browserLayer)),
+    ),
+  );
+
+  scoped("should preserve typed stable child update failures without a boundary", () =>
+    unsafeEraseR(
+      Effect.gen(function* () {
+        class StableChildError extends Schema.TaggedError<StableChildError>()("StableChildError", {
+          reason: Schema.Literal("update-failed"),
+        }) {}
 
         const Child = Component.gen(function* (Props: Component.ComponentProps<{ value: string }>) {
           const { value } = yield* Props;
@@ -1574,28 +1794,30 @@ describe("Re-render behavior", () => {
 
         Exit.match(exit, {
           onFailure: (cause) => {
-            assert.isTrue(Cause.hasDies(cause));
+            assert.isTrue(Cause.hasFails(cause));
+            assert.isFalse(Cause.hasDies(cause));
+            assert.isFalse(Cause.hasInterrupts(cause));
             assert.instanceOf(Cause.squash(cause), StableChildError);
           },
           onSuccess: () => {
-            assert.fail("Expected stable child update to defect");
+            assert.fail("Expected stable child update to fail");
           },
         });
 
-        assert.isNull(container.querySelector('[data-testid="stable-child-failure"]'));
+        assert.strictEqual(
+          container.querySelector('[data-testid="stable-child-failure"]')?.textContent,
+          "before",
+        );
       }).pipe(Effect.provide(browserLayer)),
     ),
   );
 
-  scoped("should swap to ErrorBoundary fallback when a stable child update defects", () =>
+  scoped("should swap to ErrorBoundary fallback when a stable child update fails", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        class StableChildError extends Schema.TaggedErrorClass<StableChildError>()(
-          "StableChildError",
-          {
-            reason: Schema.Literal("update-failed"),
-          },
-        ) {}
+        class StableChildError extends Schema.TaggedError<StableChildError>()("StableChildError", {
+          reason: Schema.Literal("update-failed"),
+        }) {}
 
         const RiskyChild = Component.gen(function* (
           Props: Component.ComponentProps<{ value: string }>,

@@ -1,0 +1,375 @@
+{
+  "date": "2026-09-05T14:13:36.434511+00:00",
+  "validation": [
+    {
+      "command": "bun run build",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-build4.log",
+      "logSha256": "88f7790d9fc19f713724de774d22808af9f14a7c5bd7fd5633bf7913d4b54ed2",
+      "tail": "<DIR>/api.js                            chunk \u2502 size:   0.21 kB\n<DIR>/jsx-runtime.js                    chunk \u2502 size:   0.23 kB\n<DIR>/chunk-pbuEa-1d.js                 chunk \u2502 size:   0.36 kB\n<DIR>/render-profiling-BeDTqPf8.js      chunk \u2502 size:   1.16 kB\n<DIR>/jsx-dev-runtime.js                chunk \u2502 size:   1.20 kB\n<DIR>/config.js                         chunk \u2502 size:   1.61 kB\n<DIR>/cx-DcD59i4D.js                    chunk \u2502 size:   3.64 kB\n<DIR>/unsafe-DQ74TVkG.js                chunk \u2502 size:   3.90 kB\n<DIR>/callback-runtime-CjbTpqSx.js      chunk \u2502 size:   4.00 kB\n<DIR>/jsx-runtime-CGeQGggT.js           chunk \u2502 size:   6.45 kB\n<DIR>/profiling.js                      chunk \u2502 size:   7.09 kB\n<DIR>/testing.js                        chunk \u2502 size:  13.66 kB\n<DIR>/dev-platform-bun-DNJ0NM8p.js      chunk \u2502 size:  16.00 kB\n<DIR>/component-GNvM4kAL.js             chunk \u2502 size:  17.37 kB\n<DIR>/index.js                          chunk \u2502 size:  20.23 kB\n<DIR>/trace-BTUDXjuJ.js                 chunk \u2502 size:  70.55 kB\n<DIR>/observer-Diz3Tqwm.js              chunk \u2502 size:  84.86 kB\n<DIR>/vite-plugin.js                    chunk \u2502 size: 149.24 kB\n<DIR>/router.js                         chunk \u2502 size: 162.79 kB\n<DIR>/renderer-CGFgkd2q.js              chunk \u2502 size: 197.87 kB\n\n\u2714 rolldown v1.0.0-rc.17 Finished in 54.08 ms"
+    },
+    {
+      "command": "bun run typecheck",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-full-types.log",
+      "logSha256": "53b20be6792ff8885a46c51c3973f09c4dd98a584d84ae01601a50a7222655f5",
+      "tail": "\u2714 rolldown v1.0.0-rc.17 Finished in 47.18 ms\n$ tsgo --noEmit\n../../scripts/release/cli.ts(336,33): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(808,12): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(853,5): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(921,11): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(964,11): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(977,28): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(993,28): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1017,26): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1033,26): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1070,28): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1085,26): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1108,9): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1219,11): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1265,17): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1277,13): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1301,28): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n../../scripts/release/cli.ts(1316,26): suggestion TS377026: This code uses `JSON.parse` or `JSON.stringify`. Effect Schema provides Effect-aware APIs for JSON parsing and stringifying. effect(preferSchemaOverJson)\n$ tsgo -p packages/cli/tsconfig.templates.json\n$ tsgo --noEmit\n$ tsgo -p scripts/benchmarks/tsconfig.json"
+    },
+    {
+      "command": "bun run test",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-full-tests.log",
+      "logSha256": "359e0e575d97bc1e04605df41773918471b8f0cf32f7e748f96dbbae3f167621",
+      "tail": "      Tests  87 passed (87)\n   Start at  16:01:07\n   Duration  8.11s (transform 908ms, setup 0ms, import 3.63s, tests 9.29s, environment 193ms)\n\n$ vitest run\n\n RUN  v4.1.5 /home/host/dev/trygg/apps/www\n\n \u2713 app/lib/markdown.test.ts (6 tests) 5ms\n \u2713 app/lib/changelog.test.ts (27 tests) 7ms\n \u2713 app/components/header.test.tsx (5 tests) 60ms\n \u2713 app/components/docs-article.test.tsx (3 tests) 55ms\n \u2713 app/components/docs-layout.test.tsx (11 tests) 314ms\n \u2713 app/pages/home.test.tsx (4 tests) 426ms\n \u2713 app/pages/getting-started.test.tsx (10 tests) 603ms\n \u2713 app/routes.test.tsx (38 tests) 2684ms\n\n Test Files  8 passed (8)\n      Tests  104 passed (104)\n   Start at  16:01:15\n   Duration  3.90s (transform 4.21s, setup 0ms, import 5.98s, tests 4.15s, environment 680ms)\n"
+    },
+    {
+      "command": "bun run effect:check",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-effect.log",
+      "logSha256": "824a47a5ecdcdc2430080cb9f00f65fa66fcd97b38ab556cbee46aff68b02c24",
+      "tail": "$ bun run --cwd packages/core effect:check && bun run --cwd packages/cli effect:check\n$ effect-language-service diagnostics --project tsconfig.json\nChecked 203 files out of 203 files. \n0 errors, 0 warnings and 0 messages.\n$ effect-language-service diagnostics --project tsconfig.json\nChecked 30 files out of 30 files. \n0 errors, 0 warnings and 0 messages."
+    },
+    {
+      "command": "bun run check",
+      "observedExitCode": 1,
+      "log": "/tmp/opencode/trygg-profiling-final-check.log",
+      "logSha256": "70f2f1453c8123be559a228e1be2c1de4a29e203dec01f76a1dde2bf7b5dd3b2",
+      "tail": "    :                                            ^^^^^^^^\n 82 |               });\n    `----\n  help: Assigning a variable to this instead of properly using arrow lambdas may be a symptom of pre-ES2015 practices or not managing scope well.\n\nFound 2 warnings and 0 errors.\nFinished in 614ms on 406 files with 168 rules using 32 threads.\n$ oxfmt packages apps '!**/dist/**' '!**/.trygg/**' --check\nChecking formatting...\n\npackages/core/trygg-test-Qmdoqz/app/layout.tsx (0ms)\npackages/core/trygg-test-Qmdoqz/app/routes.ts (0ms)\npackages/core/trygg-test-UEnGw2/app/layout.tsx (0ms)\npackages/core/trygg-test-UEnGw2/app/routes.ts (0ms)\npackages/core/trygg-test-yZUgiU/app/api.ts (0ms)\npackages/core/trygg-test-yZUgiU/app/layout.tsx (0ms)\npackages/core/trygg-test-yZUgiU/app/routes.ts (0ms)\n\nFormat issues found in above 7 files. Run without `--check` to fix.\nFinished in 492ms on 476 files using 32 threads.\nerror: script \"format\" exited with code 1\nerror: script \"check\" exited with code 1"
+    },
+    {
+      "command": "bun run --cwd packages/core docs:check",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-final-docs.log",
+      "logSha256": "45157d40c16440cd0d49109dd73a79749959b6e00cb01c931955a35300519504",
+      "tail": "$ bun ./src/internal/docs-check.ts\ndocs: ok (345 reachable exports)"
+    },
+    {
+      "command": "bun run --cwd apps/examples build",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-examples.log",
+      "logSha256": "3a53b8806c1de862ed066fd486c939250a35e6ea5e943ed9b1edf79d5d32f2b8",
+      "tail": "dist/client/assets/login-7IdbHPjO.js             2.69 kB \u2502 gzip:   1.11 kB\ndist/client/assets/layout-DNV_ptTE.js            3.14 kB \u2502 gzip:   1.09 kB\ndist/client/assets/home-BkQEvHkF.js              3.56 kB \u2502 gzip:   1.53 kB\ndist/client/assets/form-DaHutJga.js              3.74 kB \u2502 gzip:   1.54 kB\ndist/client/assets/error-boundary-MaQUzEBY.js    3.77 kB \u2502 gzip:   1.32 kB\ndist/client/assets/prefetch-D7J_JCYR.js          4.05 kB \u2502 gzip:   1.45 kB\ndist/client/assets/nested-provide-Cb3LJNVx.js    4.08 kB \u2502 gzip:   1.60 kB\ndist/client/assets/todo-BfQBABY0.js              4.17 kB \u2502 gzip:   1.70 kB\ndist/client/assets/dashboard-SG57TRQq.js         4.41 kB \u2502 gzip:   1.75 kB\ndist/client/assets/portal-8JxFpsN4.js            5.38 kB \u2502 gzip:   1.49 kB\ndist/client/assets/suspend-B2q6agBn.js           6.19 kB \u2502 gzip:   1.54 kB\ndist/client/assets/resource-fXQl-Dop.js          6.81 kB \u2502 gzip:   1.82 kB\ndist/client/assets/index-CPNmNZme.js           405.66 kB \u2502 gzip: 126.59 kB\n\u2713 built in 2.43s\n[trygg] \u2139 Building production server...\nvite v6.4.1 building SSR bundle for production...\ntransforming...\n\u2713 2 modules transformed.\nrendering chunks...\ndist/server.js  10.71 kB\n\u2713 built in 15ms\n[trygg] \u2139 Server build complete"
+    },
+    {
+      "command": "bun run www:build",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-site-build.log",
+      "logSha256": "a61e6e3d4f2bcf77113a5925beef18b86fab0f2669ad02e74d2afd4c7198e925",
+      "tail": "dist/assets/engine-oniguruma-CyoZypuG.js    6.84 kB \u2502 gzip:   2.64 kB\ndist/assets/code-block-BNRcCihE.js          9.32 kB \u2502 gzip:   3.62 kB\ndist/assets/github-light-DAi9KRSo.js       11.18 kB \u2502 gzip:   2.52 kB\ndist/assets/github-dark-DHJKELXO.js        11.41 kB \u2502 gzip:   2.56 kB\ndist/assets/home-Byndt1OM.js               11.97 kB \u2502 gzip:   3.82 kB\ndist/assets/getting-started-Dn6abW_o.js    14.24 kB \u2502 gzip:   5.59 kB\ndist/assets/changelog-D_Hbqr3M.js          31.87 kB \u2502 gzip:  11.05 kB\ndist/assets/bash-Yzrsuije.js               41.48 kB \u2502 gzip:   6.10 kB\ndist/assets/core-l71XxsPa.js              113.22 kB \u2502 gzip:  35.72 kB\ndist/assets/js-wDzz0qaB.js                174.83 kB \u2502 gzip:  16.60 kB\ndist/assets/tsx-COt5Ahok.js               175.54 kB \u2502 gzip:  16.59 kB\ndist/assets/ts-BPQ3VLAy.js                181.08 kB \u2502 gzip:  16.11 kB\ndist/assets/docs-content-CzclHlug.js      184.45 kB \u2502 gzip:  57.48 kB\ndist/assets/index-CRRiW1-Y.js             332.55 kB \u2502 gzip: 103.29 kB\ndist/assets/wasm-CG6Dc4jp.js              622.34 kB \u2502 gzip: 231.16 kB\ndist/assets/topic-d7cEtItF.js             700.18 kB \u2502 gzip:  33.29 kB\n\n(!) Some chunks are larger than 700 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n\u2713 built in 2.74s"
+    },
+    {
+      "command": "source-mode Chromium smoke",
+      "observedExitCode": 0,
+      "log": "/tmp/opencode/trygg-profiling-source-smoke.log",
+      "logSha256": "fa0444ca7e3b5c2d6a9cbff07f4a432d54b8b60abf89531a46bf043f2e157c14",
+      "tail": "create1k: handler median 38.00 ms\nreplace1k: handler median 47.20 ms\nupdate: handler median 4.00 ms\nselect: handler median 0.20 ms\nswap: handler median 1.40 ms\nremove: handler median 25.70 ms\nappend1k: handler median 29.20 ms\nclear: handler median 12.20 ms\ncreate10k: handler median 300.20 ms"
+    }
+  ],
+  "testTotal": 1924,
+  "testBreakdown": {
+    "core": 1733,
+    "cli": 87,
+    "site": 104
+  },
+  "newTests": 19,
+  "docsExports": 345,
+  "redTests": [
+    {
+      "log": "/tmp/opencode/trygg-profiling-phases-red.log",
+      "sha256": "62bc8b24a4c9945776ad461d9185c78c94ce8c2134c6b6f3f466a2d81c20e6c4",
+      "observedExitCode": 1
+    },
+    {
+      "log": "/tmp/opencode/trygg-profiling-parent-red.log",
+      "sha256": "0cc33e6aef4e65ef3996a3a7445906b9e71cc19e297183ef150403b589acc8a2",
+      "observedExitCode": 1
+    }
+  ],
+  "measuredSourceDistHarnessStillMatch": true,
+  "queryBoundary": {
+    "date": "2026-09-05T16:06:01+02:00",
+    "url": "https://traces.brito.top/api/v1/traces/d80856f62a9d64e19fc7fcda82d8146f",
+    "observedHttpStatus": 401,
+    "error": "unauthenticated",
+    "apiKeyAvailable": false,
+    "indexingVerified": false
+  },
+  "pane": {
+    "owner": "wM:p4",
+    "lastForegroundProcess": "fish",
+    "closed": true,
+    "applicationServiceStarted": false
+  },
+  "sourceSmoke": {
+    "date": "2026-09-05T14:10:27.394Z",
+    "browser": "141.0.7390.122",
+    "transport": "inline",
+    "fixture": "source",
+    "profiling": "off",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "warmup": 1,
+    "samples": 3,
+    "results": [
+      {
+        "operation": "create1k",
+        "samples": [
+          {
+            "operation": "create1k",
+            "handlerMs": 38.39999997615814,
+            "frameMs": 87.19999998807907,
+            "rows": 1000
+          },
+          {
+            "operation": "create1k",
+            "handlerMs": 34.89999997615814,
+            "frameMs": 77.09999996423721,
+            "rows": 1000
+          },
+          {
+            "operation": "create1k",
+            "handlerMs": 38,
+            "frameMs": 78.60000002384186,
+            "rows": 1000
+          }
+        ]
+      },
+      {
+        "operation": "replace1k",
+        "samples": [
+          {
+            "operation": "replace1k",
+            "handlerMs": 47.10000002384186,
+            "frameMs": 88.80000001192093,
+            "rows": 1000
+          },
+          {
+            "operation": "replace1k",
+            "handlerMs": 47.19999998807907,
+            "frameMs": 90,
+            "rows": 1000
+          },
+          {
+            "operation": "replace1k",
+            "handlerMs": 48.69999998807907,
+            "frameMs": 87.39999997615814,
+            "rows": 1000
+          }
+        ]
+      },
+      {
+        "operation": "update",
+        "samples": [
+          {
+            "operation": "update",
+            "handlerMs": 5.5,
+            "frameMs": 28.19999998807907,
+            "rows": 1000
+          },
+          {
+            "operation": "update",
+            "handlerMs": 3.600000023841858,
+            "frameMs": 24.899999976158142,
+            "rows": 1000
+          },
+          {
+            "operation": "update",
+            "handlerMs": 4,
+            "frameMs": 18.100000023841858,
+            "rows": 1000
+          }
+        ]
+      },
+      {
+        "operation": "select",
+        "samples": [
+          {
+            "operation": "select",
+            "handlerMs": 0.30000001192092896,
+            "frameMs": 14.399999976158142,
+            "rows": 1000
+          },
+          {
+            "operation": "select",
+            "handlerMs": 0.19999998807907104,
+            "frameMs": 15.199999988079071,
+            "rows": 1000
+          },
+          {
+            "operation": "select",
+            "handlerMs": 0.19999998807907104,
+            "frameMs": 16,
+            "rows": 1000
+          }
+        ]
+      },
+      {
+        "operation": "swap",
+        "samples": [
+          {
+            "operation": "swap",
+            "handlerMs": 1.2999999523162842,
+            "frameMs": 16.899999976158142,
+            "rows": 1000
+          },
+          {
+            "operation": "swap",
+            "handlerMs": 1.4000000357627869,
+            "frameMs": 16.600000023841858,
+            "rows": 1000
+          },
+          {
+            "operation": "swap",
+            "handlerMs": 1.399999976158142,
+            "frameMs": 14.299999952316284,
+            "rows": 1000
+          }
+        ]
+      },
+      {
+        "operation": "remove",
+        "samples": [
+          {
+            "operation": "remove",
+            "handlerMs": 25.700000047683716,
+            "frameMs": 32.30000001192093,
+            "rows": 999
+          },
+          {
+            "operation": "remove",
+            "handlerMs": 25.5,
+            "frameMs": 39.80000001192093,
+            "rows": 999
+          },
+          {
+            "operation": "remove",
+            "handlerMs": 26.5,
+            "frameMs": 43.19999998807907,
+            "rows": 999
+          }
+        ]
+      },
+      {
+        "operation": "append1k",
+        "samples": [
+          {
+            "operation": "append1k",
+            "handlerMs": 29,
+            "frameMs": 73.29999995231628,
+            "rows": 2000
+          },
+          {
+            "operation": "append1k",
+            "handlerMs": 31.600000023841858,
+            "frameMs": 75.10000002384186,
+            "rows": 2000
+          },
+          {
+            "operation": "append1k",
+            "handlerMs": 29.19999998807907,
+            "frameMs": 70.30000001192093,
+            "rows": 2000
+          }
+        ]
+      },
+      {
+        "operation": "clear",
+        "samples": [
+          {
+            "operation": "clear",
+            "handlerMs": 12.899999976158142,
+            "frameMs": 14,
+            "rows": 0
+          },
+          {
+            "operation": "clear",
+            "handlerMs": 11.399999976158142,
+            "frameMs": 12.599999964237213,
+            "rows": 0
+          },
+          {
+            "operation": "clear",
+            "handlerMs": 12.199999988079071,
+            "frameMs": 13.299999952316284,
+            "rows": 0
+          }
+        ]
+      },
+      {
+        "operation": "create10k",
+        "samples": [
+          {
+            "operation": "create10k",
+            "handlerMs": 314,
+            "frameMs": 743.6000000238419,
+            "rows": 10000
+          },
+          {
+            "operation": "create10k",
+            "handlerMs": 300.19999998807907,
+            "frameMs": 760.6999999880791,
+            "rows": 10000
+          },
+          {
+            "operation": "create10k",
+            "handlerMs": 295.0999999642372,
+            "frameMs": 689.2999999523163,
+            "rows": 10000
+          }
+        ]
+      }
+    ],
+    "operationConsoleMessages": [
+      {
+        "operation": "create1k",
+        "messages": 0
+      },
+      {
+        "operation": "replace1k",
+        "messages": 0
+      },
+      {
+        "operation": "update",
+        "messages": 0
+      },
+      {
+        "operation": "select",
+        "messages": 0
+      },
+      {
+        "operation": "swap",
+        "messages": 0
+      },
+      {
+        "operation": "remove",
+        "messages": 0
+      },
+      {
+        "operation": "append1k",
+        "messages": 0
+      },
+      {
+        "operation": "clear",
+        "messages": 0
+      },
+      {
+        "operation": "create10k",
+        "messages": 0
+      }
+    ],
+    "startup": null,
+    "bundleSizes": [
+      {
+        "file": "browser.js",
+        "loadedAtStartup": null,
+        "bytes": 639499,
+        "gzipBytes": 198436
+      }
+    ]
+  },
+  "gitDiffCheck": 0,
+  "committed": false,
+  "pushed": false
+}

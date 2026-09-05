@@ -73,15 +73,9 @@ const runJsx = (
   // intrinsic/component cases build synchronously without a fiber spin-up per
   // node. `buildSync` returns null for the genuinely effectful cases (a Signal
   // child, an invalid type) which fall through to the Effect path below.
-  // oxlint-disable-next-line effect/no-try-catch -- This public sync JSX boundary must preserve the hot-path buildSync call while degrading hostile proxy/getter props into the defensive Effect path below.
-  try {
-    const built = JsxBuilder.buildSync(type, props, key);
-    if (built !== null) {
-      return built;
-    }
-  } catch {
-    // Exotic props (e.g. a throwing getter) — defer to the Effect path, which
-    // reads each prop defensively in isolation.
+  const built = JsxBuilder.buildSync(type, props, key);
+  if (built !== null) {
+    return built;
   }
   return Effect.runSync(
     JsxBuilder.build(type, props, key).pipe(

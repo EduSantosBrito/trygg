@@ -1,0 +1,90 @@
+{
+  "date": "2026-09-04T21:37:53.874Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "select",
+      "samples": [
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 11.300000011920929,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 10.199999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.2999999523162842,
+          "frameMs": 13,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 10.5,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 10.199999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 1,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 0.7999999523162842,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 52.90000003576279,
+    "firstContentfulPaintMs": 80
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "bytes": 73630,
+      "gzipBytes": 23340
+    },
+    {
+      "file": "chunk-zn3j8yps.js",
+      "bytes": 286481,
+      "gzipBytes": 81721
+    },
+    {
+      "file": "chunk-m9pz9fd2.js",
+      "bytes": 134963,
+      "gzipBytes": 46533
+    },
+    {
+      "file": "chunk-e3ax07qd.js",
+      "bytes": 925,
+      "gzipBytes": 558
+    },
+    {
+      "file": "chunk-42jrdbvs.js",
+      "bytes": 61391,
+      "gzipBytes": 17744
+    }
+  ]
+}

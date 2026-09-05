@@ -1,0 +1,21 @@
+{
+  "languages": {
+    "TypeScript": {
+      "language_servers": ["mini-check", "..."]
+    },
+    "TSX": {
+      "language_servers": ["mini-check", "..."]
+    }
+  },
+  "lsp": {
+    "mini-check": {
+      "settings": {
+        "server_path": "dist/lsp.mjs"
+      },
+      "initialization_options": {
+        "projectDir": "demo",
+        "tsconfigPath": "tsconfig.json"
+      }
+    }
+  }
+}

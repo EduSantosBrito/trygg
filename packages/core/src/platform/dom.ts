@@ -11,7 +11,7 @@ import * as Context from "effect/Context";
 // Error type
 // =============================================================================
 
-export class DomError extends Schema.TaggedErrorClass<DomError>()("DomError", {
+export class DomError extends Schema.TaggedError<DomError>()("DomError", {
   operation: Schema.String,
   cause: Schema.Unknown,
 }) {}
@@ -52,11 +52,11 @@ export interface DomService {
   readonly assignStyle: (el: HTMLElement, styles: object) => Effect.Effect<void, DomError>;
   readonly querySelector: (
     selector: string,
-    root?: Node,
+    root?: ParentNode,
   ) => Effect.Effect<Element | null, DomError>;
   readonly querySelectorAll: (
     selector: string,
-    root?: Node,
+    root?: ParentNode,
   ) => Effect.Effect<NodeListOf<Element>, DomError>;
   readonly getElementById: (id: string) => Effect.Effect<Element | null, DomError>;
   readonly head: Effect.Effect<HTMLHeadElement, DomError>;
@@ -108,11 +108,11 @@ export interface Dom extends Context.Service<
     readonly assignStyle: (el: HTMLElement, styles: object) => Effect.Effect<void, DomError>;
     readonly querySelector: (
       selector: string,
-      root?: Node,
+      root?: ParentNode,
     ) => Effect.Effect<Element | null, DomError>;
     readonly querySelectorAll: (
       selector: string,
-      root?: Node,
+      root?: ParentNode,
     ) => Effect.Effect<NodeListOf<Element>, DomError>;
     readonly getElementById: (id: string) => Effect.Effect<Element | null, DomError>;
     readonly head: Effect.Effect<HTMLHeadElement, DomError>;
@@ -161,11 +161,11 @@ export const Dom = Context.Service<
     readonly assignStyle: (el: HTMLElement, styles: object) => Effect.Effect<void, DomError>;
     readonly querySelector: (
       selector: string,
-      root?: Node,
+      root?: ParentNode,
     ) => Effect.Effect<Element | null, DomError>;
     readonly querySelectorAll: (
       selector: string,
-      root?: Node,
+      root?: ParentNode,
     ) => Effect.Effect<NodeListOf<Element>, DomError>;
     readonly getElementById: (id: string) => Effect.Effect<Element | null, DomError>;
     readonly head: Effect.Effect<HTMLHeadElement, DomError>;
@@ -179,6 +179,10 @@ export const Dom = Context.Service<
 // =============================================================================
 // Browser layer
 // =============================================================================
+
+const readDocumentHead = (): HTMLHeadElement | null => document.head;
+const readDocumentBody = (): HTMLElement | null => document.body;
+const readDocumentElement = (): HTMLElement | null => document.documentElement;
 
 export const browser: Layer.Layer<Dom> = Layer.succeed(
   Dom,
@@ -271,11 +275,20 @@ export const browser: Layer.Layer<Dom> = Layer.succeed(
 
     setProperty: (node, key, value) =>
       Effect.try({
-        try: () => {
-          Reflect.set(node, key, value);
-        },
+        try: () => Reflect.set(node, key, value),
         catch: (cause) => new DomError({ operation: "setProperty", cause }),
-      }),
+      }).pipe(
+        Effect.flatMap((written) =>
+          written
+            ? Effect.void
+            : Effect.fail(
+                new DomError({
+                  operation: "setProperty",
+                  cause: `Reflect.set returned false for property "${key}"`,
+                }),
+              ),
+        ),
+      ),
 
     assignStyle: (el, styles) =>
       Effect.try({
@@ -287,25 +300,13 @@ export const browser: Layer.Layer<Dom> = Layer.succeed(
 
     querySelector: (selector, root) =>
       Effect.try({
-        try: () => {
-          if (root === undefined) return document.querySelector(selector);
-          if (root instanceof Element) return root.querySelector(selector);
-          if (root instanceof Document) return root.querySelector(selector);
-          if (root instanceof DocumentFragment) return root.querySelector(selector);
-          return null;
-        },
+        try: () => (root ?? document).querySelector(selector),
         catch: (cause) => new DomError({ operation: "querySelector", cause }),
       }),
 
     querySelectorAll: (selector, root) =>
       Effect.try({
-        try: () => {
-          if (root === undefined) return document.querySelectorAll(selector);
-          if (root instanceof Element) return root.querySelectorAll(selector);
-          if (root instanceof Document) return root.querySelectorAll(selector);
-          if (root instanceof DocumentFragment) return root.querySelectorAll(selector);
-          return document.querySelectorAll(selector);
-        },
+        try: () => (root ?? document).querySelectorAll(selector),
         catch: (cause) => new DomError({ operation: "querySelectorAll", cause }),
       }),
 
@@ -316,19 +317,42 @@ export const browser: Layer.Layer<Dom> = Layer.succeed(
       }),
 
     head: Effect.try({
-      try: () => document.head,
+      try: readDocumentHead,
       catch: (cause) => new DomError({ operation: "head", cause }),
-    }),
+    }).pipe(
+      Effect.flatMap((head) =>
+        head === null
+          ? Effect.fail(new DomError({ operation: "head", cause: "document.head is not ready" }))
+          : Effect.succeed(head),
+      ),
+    ),
 
     body: Effect.try({
-      try: () => document.body,
+      try: readDocumentBody,
       catch: (cause) => new DomError({ operation: "body", cause }),
-    }),
+    }).pipe(
+      Effect.flatMap((body) =>
+        body === null
+          ? Effect.fail(new DomError({ operation: "body", cause: "document.body is not ready" }))
+          : Effect.succeed(body),
+      ),
+    ),
 
     documentElement: Effect.try({
-      try: () => document.documentElement,
+      try: readDocumentElement,
       catch: (cause) => new DomError({ operation: "documentElement", cause }),
-    }),
+    }).pipe(
+      Effect.flatMap((documentElement) =>
+        documentElement === null
+          ? Effect.fail(
+              new DomError({
+                operation: "documentElement",
+                cause: "document.documentElement is not ready",
+              }),
+            )
+          : Effect.succeed(documentElement),
+      ),
+    ),
 
     activeElement: Effect.try({
       try: () => document.activeElement,
@@ -347,38 +371,4 @@ export const browser: Layer.Layer<Dom> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<Dom> = Layer.succeed(
-  Dom,
-  Dom.of({
-    createElement: (tag) => Effect.sync(() => document.createElement(tag)),
-    createComment: (text) => Effect.sync(() => document.createComment(text)),
-    createTextNode: (text) => Effect.sync(() => document.createTextNode(text)),
-    createFragment: () => Effect.sync(() => document.createDocumentFragment()),
-    createTreeWalker: (root, whatToShow) =>
-      Effect.sync(() => document.createTreeWalker(root, whatToShow)),
-    appendChild: (_parent, _child) => Effect.void,
-    insertBefore: (_parent, _node, _ref) => Effect.void,
-    replaceChild: (_parent, _newChild, _oldChild) => Effect.void,
-    remove: (_node) => Effect.void,
-    setAttribute: (_el, _key, _value) => Effect.void,
-    removeAttribute: (_el, _key) => Effect.void,
-    getAttribute: (_el, _key) => Effect.succeed(null),
-    setProperty: (_node, _key, _value) => Effect.void,
-    assignStyle: (_el, _styles) => Effect.void,
-    querySelector: (_selector, _root) => Effect.succeed(null),
-    querySelectorAll: (selector, root) =>
-      Effect.sync(() => {
-        if (root === undefined) return document.querySelectorAll(selector);
-        if (root instanceof Element) return root.querySelectorAll(selector);
-        if (root instanceof Document) return root.querySelectorAll(selector);
-        if (root instanceof DocumentFragment) return root.querySelectorAll(selector);
-        return document.querySelectorAll(selector);
-      }),
-    getElementById: (_id) => Effect.succeed(null),
-    head: Effect.sync(() => document.createElement("head")),
-    body: Effect.sync(() => document.createElement("body")),
-    documentElement: Effect.sync(() => document.createElement("html")),
-    activeElement: Effect.succeed(null),
-    matches: (_el, _selector) => Effect.succeed(false),
-  }),
-);
+export const test: Layer.Layer<Dom> = browser;

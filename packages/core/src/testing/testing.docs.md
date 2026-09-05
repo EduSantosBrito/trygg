@@ -36,10 +36,10 @@ Reach for `trygg/testing` whenever a test needs to mount trygg UI, dispatch DOM 
 
 ## Behavior
 
-`render` and `renderElement` mount into a fresh container appended to `document.body` and return `TestRenderResult` query helpers. The container is removed by a finalizer when the test scope closes, so `it.scoped` is required — `render` reuses that scope rather than opening its own.
+`render` and `renderElement` mount into a fresh container appended to `document.body` and return `TestRenderResult` query helpers. A child Scope owns each mount and its container. Successful mounts remain owned by the test scope, so use `it.scoped` or an explicitly scoped Effect. A failed or interrupted mount closes its child Scope immediately, removes the container, and preserves the failure Cause.
 
 - Queries split by failure mode: `getBy*` (by `text`, `testId` — the `data-testid` attribute — or `role`) fail with a typed `ElementNotFoundError`, while the matching `queryBy*` return `Option`. For CSS selectors use `querySelector` (fails with `ElementNotFoundError`) or `queryBySelector` (returns `Option`); `querySelectorAll` returns a `ReadonlyArray`.
-- `click` dispatches through the real DOM, then drains the scheduler, so handlers and the Signal updates they trigger settle before the next assertion. `type` sets `value` and fires `input` then `change`.
+- `click` dispatches through the real DOM. `type` sets `value` and fires `input` then `change`. Both drain the scheduler so handlers and the Signal updates they trigger settle before the next assertion.
 - `waitFor` retries on an Effect `Schedule` instead of wall-clock timers, so it composes with `TestClock`. Fork it, then advance `TestClock` to resolve a pending condition; it fails with `WaitForTimeoutError` when the budget runs out.
 - `withRecording` installs a fresh in-memory `Trace.Recorder` for its scope only and resolves with the ordered `ReadonlyArray<Trace.TraceRecord>` the wrapped effect produced. Assert on `records.map((r) => r.name)` to lock the sequence of framework steps. The recorder is scope-local, so concurrent tests stay isolated.
 
@@ -49,7 +49,7 @@ Reach for `trygg/testing` whenever a test needs to mount trygg UI, dispatch DOM 
 - `renderElement` — mount when a test controls `Renderer` layer placement
 - `testLayer` — the `Renderer` layer for manual provision
 - `click` — dispatch a DOM click, then drain the scheduler
-- `type` — set `value` and fire `input` then `change`
+- `type` — set `value`, fire `input` then `change`, and drain the scheduler
 - `waitFor` — retry a condition on an Effect `Schedule`
 - `withRecording` — record the ordered framework events an effect produces
 - `Trace` — test-only event recorder re-export for manual recording

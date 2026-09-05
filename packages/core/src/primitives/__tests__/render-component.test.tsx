@@ -1,15 +1,107 @@
 import { assert, describe } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer, Scope } from "effect";
 import * as Context from "effect/Context";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import * as Trace from "../../trace/index.js";
 import { click, render, type as typeInput } from "../../testing/index.js";
 import * as Component from "../component.js";
+import { Element as TryggElement } from "../element.js";
 import * as ErrorBoundary from "../error-boundary.js";
 import * as Signal from "../signal.js";
 
 describe("render-component", () => {
+  scoped("does not inspect a component thunk Proxy in any Trace mode", () =>
+    Effect.gen(function* () {
+      // Scope: component execution with a caller-controlled run thunk Proxy at the render telemetry seam.
+      // Assertion: every Trace mode invokes business work once without reading Proxy properties or mutating state.
+      type TraceMode = "enabled" | "filtered" | "absent";
+      const run = <A, E, R>(
+        mode: TraceMode,
+        effect: Effect.Effect<A, E, R>,
+        recorder: Trace.Recorder,
+      ): Effect.Effect<A, E, R> =>
+        mode === "enabled"
+          ? Trace.record(effect, recorder)
+          : mode === "filtered"
+            ? effect.pipe(Effect.provideService(References.MinimumLogLevel, "Fatal"))
+            : effect.pipe(
+                Effect.provide(Logger.layer([])),
+                Effect.provideService(References.MinimumLogLevel, "Trace"),
+              );
+
+      const runCase = Effect.fnUntraced(function* (mode: TraceMode) {
+        const recorder = Trace.makeRecorder();
+        let applyCalls = 0;
+        let propertyTraps = 0;
+        let state = "stable";
+        // oxlint-disable-next-line effect/prefer-static-effect -- The callable target is the business thunk under test.
+        const target = () => Effect.succeed(TryggElement.Text({ content: "rendered" }));
+        const componentRun = new Proxy(target, {
+          apply: (fn, thisArg, args) => {
+            applyCalls++;
+            return Reflect.apply(fn, thisArg, args);
+          },
+          get: (fn, key, receiver) => {
+            propertyTraps++;
+            state = "mutated";
+            // oxlint-disable-next-line effect/no-unknown-shape-probing -- The hostile Proxy must otherwise preserve target behavior.
+            return Reflect.get(fn, key, receiver);
+          },
+          getOwnPropertyDescriptor: (fn, key) => {
+            propertyTraps++;
+            state = "mutated";
+            return Reflect.getOwnPropertyDescriptor(fn, key);
+          },
+          ownKeys: (fn) => {
+            propertyTraps++;
+            state = "mutated";
+            return Reflect.ownKeys(fn);
+          },
+        });
+        const element = TryggElement.Component({
+          run: componentRun,
+          key: null,
+          identity: componentRun,
+          inputs: undefined,
+        });
+        const exit = yield* run(mode, render(element), recorder).pipe(Effect.exit);
+
+        return {
+          success: Exit.isSuccess(exit),
+          text: Exit.isSuccess(exit) ? exit.value.container.textContent : "failed",
+          applyCalls,
+          propertyTraps,
+          state,
+          componentType: recorder.records().find((record) => record.name === "component.render")
+            ?.payload?.["component_type"],
+        };
+      });
+
+      const expected = {
+        success: true,
+        text: "rendered",
+        applyCalls: 1,
+        propertyTraps: 0,
+        state: "stable",
+      };
+      assert.deepStrictEqual(yield* runCase("enabled"), {
+        ...expected,
+        componentType: "function",
+      });
+      assert.deepStrictEqual(yield* runCase("filtered"), {
+        ...expected,
+        componentType: undefined,
+      });
+      assert.deepStrictEqual(yield* runCase("absent"), {
+        ...expected,
+        componentType: undefined,
+      });
+    }),
+  );
+
   scoped("mounts with provided services", () => {
     class Label extends Context.Service<Label, { readonly value: string }>()("test/Label") {}
 

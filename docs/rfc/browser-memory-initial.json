@@ -1,0 +1,170 @@
+{
+  "date": "2026-09-04T21:28:27.353Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "create10k",
+      "samples": [
+        {
+          "operation": "create10k",
+          "handlerMs": 304.80000001192093,
+          "frameMs": 751.8999999761581,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 320.5999999642372,
+          "frameMs": 708,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 308.39999997615814,
+          "frameMs": 768.3999999761581,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 314.10000002384186,
+          "frameMs": 714.4000000357628,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 307.80000001192093,
+          "frameMs": 731.6999999880791,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 322.4000000357628,
+          "frameMs": 730.5,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 304.7999999523163,
+          "frameMs": 720.0999999642372,
+          "rows": 10000
+        }
+      ]
+    }
+  ],
+  "memory": {
+    "cycles": 10,
+    "rowsPerCycle": 10000,
+    "forcedGc": true,
+    "samples": [
+      {
+        "label": "baseline",
+        "usedSize": 8337792,
+        "totalSize": 13406208,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "mounted10k",
+        "usedSize": 76984716,
+        "totalSize": 80166912,
+        "documents": 1,
+        "nodes": 120038,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-1",
+        "usedSize": 8322588,
+        "totalSize": 10784768,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-2",
+        "usedSize": 8359148,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-3",
+        "usedSize": 8361632,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-4",
+        "usedSize": 8364224,
+        "totalSize": 9736192,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-5",
+        "usedSize": 8364332,
+        "totalSize": 8949760,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-6",
+        "usedSize": 8367136,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-7",
+        "usedSize": 8365088,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-8",
+        "usedSize": 8368428,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-9",
+        "usedSize": 8368356,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-10",
+        "usedSize": 8368356,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "pagehide",
+        "usedSize": 8258840,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 29,
+        "jsEventListeners": 36
+      }
+    ]
+  }
+}

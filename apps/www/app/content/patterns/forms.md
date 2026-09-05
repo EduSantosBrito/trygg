@@ -40,13 +40,15 @@ Two ways to read a Signal, for two different jobs:
 - `Signal.get(signal)` reads **reactively** — it subscribes the surrounding component so a derived display updates when the value changes.
 
 ```tsx
-const error = yield* Signal.make<Option.Option<string>>(Option.none());
+const error = yield * Signal.make<Option.Option<string>>(Option.none());
 
 // Reactive read for rendering the message:
-{Option.match(yield* Signal.get(error), {
-  onNone: () => null,
-  onSome: (message) => <p className="field-error">{message}</p>,
-})}
+{
+  Option.match(yield * Signal.get(error), {
+    onNone: () => null,
+    onSome: (message) => <p className="field-error">{message}</p>,
+  });
+}
 ```
 
 ## Validate on submit with typed errors
@@ -57,8 +59,8 @@ Validation is ordinary Effect code. Model each failure as a tagged error, write 
 import { Effect, Match, Option, Result, Schema } from "effect";
 import { Component, Signal } from "trygg";
 
-class EmailRequired extends Schema.TaggedErrorClass<EmailRequired>()("EmailRequired", {}) {}
-class EmailInvalid extends Schema.TaggedErrorClass<EmailInvalid>()("EmailInvalid", {
+class EmailRequired extends Schema.TaggedError<EmailRequired>()("EmailRequired", {}) {}
+class EmailInvalid extends Schema.TaggedError<EmailInvalid>()("EmailInvalid", {
   email: Schema.String,
 }) {}
 

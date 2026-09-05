@@ -72,7 +72,7 @@ export type ElementKey = string | number;
  */
 export type EventHandler<A = void, E = never, R = never> = (event: Event) => Effect.Effect<A, E, R>;
 
-export class InvalidJsxChildError extends Schema.TaggedErrorClass<InvalidJsxChildError>()(
+export class InvalidJsxChildError extends Schema.TaggedError<InvalidJsxChildError>()(
   "InvalidJsxChildError",
   { reason: Schema.Literal("effect") },
 ) {
@@ -387,6 +387,7 @@ export interface ElementProps extends HtmlProps, SvgProps {}
 
 export interface AnchorHtmlProps extends HtmlProps {
   readonly href?: MaybeSignal<string>;
+  readonly ping?: string;
   readonly target?: "_blank" | "_self" | "_parent" | "_top";
   readonly rel?: string;
   readonly download?: string | boolean;
@@ -447,6 +448,7 @@ export interface InputHtmlProps extends HtmlProps {
   readonly accept?: string;
   readonly multiple?: boolean;
   readonly capture?: boolean | "user" | "environment";
+  readonly formAction?: string;
 }
 
 export interface LabelHtmlProps extends HtmlProps {
@@ -481,6 +483,24 @@ export interface ImgHtmlProps extends HtmlProps {
   readonly loading?: "eager" | "lazy";
   readonly decoding?: "async" | "auto" | "sync";
   readonly crossOrigin?: "anonymous" | "use-credentials";
+}
+
+interface CitingHtmlProps extends HtmlProps {
+  readonly cite?: MaybeSignal<string>;
+}
+
+interface ObjectHtmlProps extends HtmlProps {
+  readonly data?: MaybeSignal<string>;
+}
+
+interface SourceHtmlProps extends HtmlProps {
+  readonly src?: MaybeSignal<string>;
+  readonly srcSet?: string;
+}
+
+interface VideoHtmlProps extends HtmlProps {
+  readonly src?: MaybeSignal<string>;
+  readonly poster?: MaybeSignal<string>;
 }
 
 export interface TableHtmlProps extends HtmlProps {
@@ -521,7 +541,7 @@ export interface HtmlIntrinsicElements {
   readonly div: HtmlProps;
   readonly p: HtmlProps;
   readonly pre: HtmlProps;
-  readonly blockquote: HtmlProps;
+  readonly blockquote: CitingHtmlProps;
   readonly ol: HtmlProps;
   readonly ul: HtmlProps;
   readonly li: HtmlProps;
@@ -538,7 +558,9 @@ export interface HtmlIntrinsicElements {
   readonly small: HtmlProps;
   readonly s: HtmlProps;
   readonly cite: HtmlProps;
-  readonly q: HtmlProps;
+  readonly q: CitingHtmlProps;
+  readonly ins: CitingHtmlProps;
+  readonly del: CitingHtmlProps;
   readonly code: HtmlProps;
   readonly kbd: HtmlProps;
   readonly sub: HtmlProps;
@@ -580,17 +602,17 @@ export interface HtmlIntrinsicElements {
   readonly col: HtmlProps;
   readonly img: ImgHtmlProps;
   readonly audio: HtmlProps;
-  readonly video: HtmlProps;
-  readonly source: HtmlProps;
+  readonly video: VideoHtmlProps;
+  readonly source: SourceHtmlProps;
   readonly track: HtmlProps;
   readonly picture: HtmlProps;
   readonly iframe: HtmlProps;
   readonly embed: HtmlProps;
-  readonly object: HtmlProps;
+  readonly object: ObjectHtmlProps;
   readonly param: HtmlProps;
   readonly canvas: HtmlProps;
   readonly map: HtmlProps;
-  readonly area: HtmlProps;
+  readonly area: AnchorHtmlProps;
   readonly details: HtmlProps;
   readonly summary: HtmlProps;
   readonly dialog: HtmlProps;
@@ -685,12 +707,13 @@ export type Element = Data.TaggedEnum<{
   readonly SignalElement: {
     readonly signal: AnySignal;
     /**
-     * Optional Effect invoked synchronously after the renderer's `insertBefore`
-     * during a DOM swap. Used by the router outlet to synchronize scroll
-     * restoration with the actual DOM update.
+     * Optional callback invoked synchronously after the renderer's
+     * `insertBefore` during a DOM swap. The callback receives the exact signal
+     * value that committed so owners cannot acknowledge a newer request from a
+     * late older swap.
      * @internal
      */
-    readonly onSwap: Effect.Effect<void> | undefined;
+    readonly onSwap: ((value: unknown) => Effect.Effect<void>) | undefined;
   };
   /**
    * Context boundary - provides a captured context to child components.
@@ -1279,7 +1302,7 @@ export const signalText = (signal: Signal<unknown>): Element => Element.SignalTe
  */
 export const signalElement = <A>(
   signal: Signal<A>,
-  options?: { readonly onSwap?: Effect.Effect<void> },
+  options?: { readonly onSwap?: (value: unknown) => Effect.Effect<void> },
 ): Element => Element.SignalElement({ signal, onSwap: options?.onSwap });
 
 /**

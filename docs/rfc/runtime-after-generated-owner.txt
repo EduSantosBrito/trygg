@@ -1,0 +1,11 @@
+resolve 100 routes: 0.025 ms/op
+match last of 100 routes: 0.021 ms/op
+miss 100 routes: 0.019 ms/op
+resolve 1000 routes: 0.014 ms/op
+match last of 1000 routes: 0.044 ms/op
+miss 1000 routes: 0.026 ms/op
+resolve 4000 routes: 0.067 ms/op
+match last of 4000 routes: 0.183 ms/op
+miss 4000 routes: 0.144 ms/op
+cleanup 1000 releases: 0.046 ms/op
+cleanup 10000 releases: 0.335 ms/op

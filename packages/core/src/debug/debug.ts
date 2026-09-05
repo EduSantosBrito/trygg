@@ -181,14 +181,16 @@ const matchesFilter = (name: string, filter: DebugFilter): boolean => {
 const formatLine = (
   options: Logger.Options<unknown>,
   filter: DebugFilter | undefined,
+  reader: Trace.TraceRecordReader,
 ): ConsoleLine | undefined => {
-  const record = Trace.recordOf(options);
+  const record = reader.read(options);
+  if (record === null) return undefined;
   if (record === undefined) return formatPlain(options);
   if (filter !== undefined && !matchesFilter(record.name, filter)) return undefined;
   return formatTrace(record);
 };
 
-class ConsoleWriteError extends Schema.TaggedErrorClass<ConsoleWriteError>()("ConsoleWriteError", {
+class ConsoleWriteError extends Schema.TaggedError<ConsoleWriteError>()("ConsoleWriteError", {
   cause: Schema.Unknown,
 }) {}
 
@@ -203,6 +205,20 @@ const writeLine = (line: ConsoleLine | undefined): void => {
 };
 
 // ── Loggers & layer ───────────────────────────────────────────────────────────
+
+const debugLoggers = new WeakSet<object>();
+
+const markDebugLogger = <Message, Output>(
+  logger: Logger.Logger<Message, Output>,
+): Logger.Logger<Message, Output> => {
+  debugLoggers.add(logger);
+  return logger;
+};
+
+const isDebugLogger = (logger: Logger.Logger<unknown, unknown>): boolean =>
+  debugLoggers.has(logger);
+
+const consoleRecordReader = Trace.makeRecordReader();
 
 /**
  * A {@link Logger} that pretty-prints catalog events to the browser console with
@@ -226,8 +242,10 @@ const writeLine = (line: ConsoleLine | undefined): void => {
  * @public
  * @since 1.0.0
  */
-export const consoleLogger: Logger.Logger<unknown, void> = Logger.make((options) =>
-  writeLine(formatLine(options, undefined)),
+export const consoleLogger: Logger.Logger<unknown, void> = markDebugLogger(
+  consoleRecordReader.register(
+    Logger.make((options) => writeLine(formatLine(options, undefined, consoleRecordReader))),
+  ),
 );
 
 /**
@@ -269,8 +287,8 @@ export interface DebugOptions {
  * output. Provide it to a component subtree with `Component.provide`.
  *
  * @remarks
- * The returned layer removes Effect's default console logger, preserves ambient
- * loggers such as trace recorders/tracers, and adds the colour console logger.
+ * The returned layer replaces the nearest ambient Debug logger while preserving
+ * independent loggers such as trace recorders and tracers.
  * When `minLevel` is set it lowers the subtree's
  * {@link References.MinimumLogLevel} so lower-severity events become visible;
  * when `batchWindow` is set, console writes are coalesced with
@@ -289,11 +307,18 @@ export interface DebugOptions {
  */
 export const layer = (options?: DebugOptions): Layer.Layer<never> => {
   const filter = options?.filter;
+  const recordReader = Trace.makeRecordReader();
   const debugLogger =
     options?.batchWindow === undefined
-      ? Effect.succeed(Logger.make((opts) => writeLine(formatLine(opts, filter))))
+      ? Effect.succeed(
+          markDebugLogger(
+            recordReader.register(
+              Logger.make((opts) => writeLine(formatLine(opts, filter, recordReader))),
+            ),
+          ),
+        )
       : Logger.batched(
-          Logger.make((opts: Logger.Options<unknown>) => formatLine(opts, filter)),
+          Logger.make((opts: Logger.Options<unknown>) => formatLine(opts, filter, recordReader)),
           {
             window: options.batchWindow,
             flush: (lines) =>
@@ -301,7 +326,7 @@ export const layer = (options?: DebugOptions): Layer.Layer<never> => {
                 for (const line of lines) writeLine(line);
               }),
           },
-        );
+        ).pipe(Effect.map((logger) => markDebugLogger(recordReader.register(logger))));
 
   const loggerLayer = Layer.effect(
     Logger.CurrentLoggers,
@@ -310,7 +335,7 @@ export const layer = (options?: DebugOptions): Layer.Layer<never> => {
         const current = fiber.getRef(Logger.CurrentLoggers);
         const next = new Set<Logger.Logger<unknown, unknown>>();
         for (const logger of current) {
-          if (logger !== Logger.defaultLogger) next.add(logger);
+          if (logger !== Logger.defaultLogger && !isDebugLogger(logger)) next.add(logger);
         }
         next.add(activeDebugLogger);
         return Effect.succeed(next);

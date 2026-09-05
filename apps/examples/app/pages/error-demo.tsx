@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { Signal, Component } from "trygg";
 import * as Router from "trygg/router";
 
-class DemoError extends Schema.TaggedErrorClass<DemoError>()("DemoError", {
+class DemoError extends Schema.TaggedError<DemoError>()("DemoError", {
   message: Schema.String,
 }) {}
 

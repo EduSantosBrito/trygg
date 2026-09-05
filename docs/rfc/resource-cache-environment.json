@@ -1,0 +1,10 @@
+{
+  "scope": "Two fresh Bun processes before optimization, then two final fresh Bun processes after the cache and ownership changes. Identical timed hit operations; 100 warmups and seven samples of 1000 operations each. No timed I/O, cache churn, expiration sweeps, or browser workload.",
+  "effect": "4.0.0-rc.112",
+  "bun": "1.4.0",
+  "sourceSha256": {
+    "beforeResource": "a3e24ad03ed4381859a9630e8ebdbe1c17286789989a0aa296bdb11f398025ba",
+    "afterResource": "a7a72309c842c3311fbe938a555e7f1a9cf9295f29f59750235ca30e69ffbb3a",
+    "benchmark": "c03028e735a151382486314d783a0c19f6c4e2032c0be7b3c78686e4926c54a7"
+  }
+}

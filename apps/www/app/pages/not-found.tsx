@@ -23,8 +23,8 @@ export default Component.gen(function* () {
               This page slipped through the rule.
             </h1>
             <p className="not-found__lede">
-              The link is missing or has moved. The docs are the fastest way back; pick a
-              direction below.
+              The link is missing or has moved. The docs are the fastest way back; pick a direction
+              below.
             </p>
 
             <ul className="not-found__directions" role="list">

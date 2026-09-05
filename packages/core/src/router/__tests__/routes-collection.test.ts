@@ -60,7 +60,7 @@ describe(".add()", () => {
 
   it.effect("should reject route with unsatisfied R (type-level)", () =>
     Effect.sync(() => {
-      const requireAuth = AuthService.asEffect().pipe(Effect.flatMap(() => Effect.void));
+      const requireAuth = Effect.service(AuthService).pipe(Effect.flatMap(() => Effect.void));
       const routeWithR = Route.make("/admin").middleware(requireAuth).component(comp);
 
       // @ts-expect-error - Route has R = AuthService, not never

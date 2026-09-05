@@ -2,5 +2,5 @@
  * Platform layers exports
  * @since 1.0.0
  */
-export { NodePlatformConfig } from "./node.js";
-export { BunPlatformConfig } from "./bun.js";
+export * as NodePlatform from "./node.js";
+export * as BunPlatform from "./bun.js";

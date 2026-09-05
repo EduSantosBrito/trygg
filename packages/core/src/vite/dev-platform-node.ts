@@ -5,7 +5,18 @@
  * Uses SSR-loaded handler factory for @effect/platform layer composition,
  * ensuring Router.Live identity matches between plugin and user code.
  */
-import { Effect, FileSystem, Layer, Match, Option, Ref, Schema, Scope } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schema,
+  Scope,
+} from "effect";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import {
@@ -16,8 +27,10 @@ import {
   DevPlatform,
   type DevPlatformService,
   ImportError,
+  traceApiRequestReceived,
 } from "./dev-platform.js";
 import * as Trace from "../trace/index.js";
+import * as CallbackRuntime from "./callback-runtime.js";
 
 // =============================================================================
 // Dynamic Imports
@@ -45,16 +58,27 @@ const encodeApiUnavailableBody = Schema.encodeEffect(ApiUnavailableBody);
 // Internal State
 // =============================================================================
 
+interface HandlerInstance {
+  readonly handler: (req: IncomingMessage, res: ServerResponse) => void;
+  readonly runRequest: (effect: Effect.Effect<void>) => void;
+  readonly scope: Scope.Closeable;
+}
+
 interface HandlerState {
-  readonly handler: Option.Option<(req: IncomingMessage, res: ServerResponse) => void>;
-  readonly dispose: Option.Option<Effect.Effect<void>>;
-  readonly lastError: Option.Option<ApiInitError>;
+  readonly instance: Option.Option<HandlerInstance>;
 }
 
 const emptyState: HandlerState = {
-  handler: Option.none(),
-  dispose: Option.none(),
-  lastError: Option.none(),
+  instance: Option.none(),
+};
+
+const reportApiInitFailures = (
+  cause: Cause.Cause<ApiInitError>,
+  report: DevApiOptions["onError"],
+): Effect.Effect<void> => {
+  const failures = cause.reasons.filter(Cause.isFailReason);
+  if (failures.length === 0 || failures.length !== cause.reasons.length) return Effect.void;
+  return Effect.forEach(failures, ({ error }) => report(error), { discard: true });
 };
 
 // =============================================================================
@@ -67,77 +91,70 @@ const emptyState: HandlerState = {
  * which was SSR-loaded from the same module graph as the user's api.ts.
  * @internal
  */
-const initHandler: (
-  state: Ref.Ref<HandlerState>,
+const acquireHandler: (
+  ownerScope: Scope.Scope,
   options: DevApiOptions,
-) => Effect.Effect<void, ApiInitError, Scope.Scope> = Effect.fn("NodeDevPlatform.initHandler")(
-  function* (state, options) {
-    // Dispose previous handler
-    const current = yield* Ref.get(state);
-    yield* Option.match(current.dispose, {
-      onNone: () => Effect.void,
-      onSome: (dispose) => dispose,
-    });
+) => Effect.Effect<HandlerInstance, ApiInitError> = Effect.fn("NodeDevPlatform.acquireHandler")(
+  function* (ownerScope, options) {
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        if (Predicate.isTagged(ownerScope.state, "Closed")) return yield* Effect.interrupt;
+        const candidateScope = yield* Scope.fork(ownerScope);
+        const candidate = Effect.gen(function* () {
+          yield* Trace.emit("api.handler.loading", () => ({ module_path: "app/api.ts" }));
+          if (Predicate.isTagged(candidateScope.state, "Closed")) return yield* Effect.interrupt;
+          const mod = yield* options.loadApiModule();
 
-    // Load API module
-    yield* Trace.emit("api.handler.loading", () => ({ module_path: "app/api.ts" }));
-    const mod = yield* options.loadApiModule().pipe(
-      Effect.tapError((error) =>
-        Effect.gen(function* () {
-          yield* Ref.set(state, { ...emptyState, lastError: Option.some(error) });
-          yield* options.onError(error);
-        }),
-      ),
-      Effect.option,
+          yield* Trace.emit("api.handler.loaded", () => ({
+            module_path: "app/api.ts",
+            module_type: Trace.valueType(mod),
+          }));
+
+          if (Predicate.isTagged(candidateScope.state, "Closed")) return yield* Effect.interrupt;
+          const factory = options.handlerFactory;
+          const apiLive = yield* factory
+            .makeApiLayer(mod)
+            .pipe(
+              Effect.mapError(
+                (cause) => new ApiInitError({ message: "Failed to detect API layer", cause }),
+              ),
+            );
+          if (Predicate.isTagged(candidateScope.state, "Closed")) return yield* Effect.interrupt;
+          if (factory.makeNodeHandler === undefined) {
+            return yield* new ApiInitError({
+              message: "makeNodeHandler not available in handler factory",
+            });
+          }
+
+          const result = yield* Effect.acquireRelease(
+            factory
+              .makeNodeHandler(apiLive)
+              .pipe(
+                Effect.mapError(
+                  (cause) => new ApiInitError({ message: "Failed to create API handler", cause }),
+                ),
+              ),
+            (result) => result.dispose,
+          );
+          if (Predicate.isTagged(candidateScope.state, "Closed")) return yield* Effect.interrupt;
+          const runFork = yield* CallbackRuntime.make();
+          return {
+            handler: result.handler,
+            runRequest: (effect) => {
+              runFork(effect);
+            },
+            scope: candidateScope,
+          } satisfies HandlerInstance;
+        }).pipe(Effect.tapCause((cause) => reportApiInitFailures(cause, options.onError)));
+
+        const exit = yield* restore(Scope.provide(candidate, candidateScope)).pipe(Effect.exit);
+        if (Exit.isSuccess(exit)) return exit.value;
+
+        return yield* Effect.failCause(exit.cause).pipe(
+          Effect.ensuring(Scope.close(candidateScope, exit)),
+        );
+      }),
     );
-    if (Option.isNone(mod)) return;
-
-    yield* Trace.emit("api.handler.loaded", () => ({
-      module_path: "app/api.ts",
-      exports: Object.keys(mod.value),
-    }));
-
-    // Detect and compose API layer using SSR-loaded factory
-    const factory = options.handlerFactory;
-    const apiLive = yield* factory.makeApiLayer(mod.value).pipe(
-      Effect.mapError(
-        (cause) => new ApiInitError({ message: "Failed to detect API layer", cause }),
-      ),
-      Effect.tapError((error) =>
-        Effect.gen(function* () {
-          yield* Ref.set(state, { ...emptyState, lastError: Option.some(error) });
-          yield* options.onError(error);
-        }),
-      ),
-      Effect.option,
-    );
-    if (Option.isNone(apiLive)) return;
-
-    // Create Node handler using SSR-loaded factory
-    if (factory.makeNodeHandler === undefined) {
-      return yield* new ApiInitError({
-        message: "makeNodeHandler not available in handler factory",
-      });
-    }
-    const result = yield* factory.makeNodeHandler(apiLive.value).pipe(
-      Effect.mapError(
-        (cause) => new ApiInitError({ message: "Failed to create API handler", cause }),
-      ),
-      Effect.tapError((cause) =>
-        Effect.gen(function* () {
-          yield* Ref.set(state, { ...emptyState, lastError: Option.some(cause) });
-          yield* options.onError(cause);
-        }),
-      ),
-      Effect.option,
-    );
-    if (Option.isNone(result)) return;
-
-    yield* Ref.set(state, {
-      handler: Option.some(result.value.handler),
-      dispose: Option.some(result.value.dispose),
-      lastError: Option.none(),
-    });
   },
 );
 
@@ -145,100 +162,130 @@ const initHandler: (
 // Node DevPlatform Implementation
 // =============================================================================
 
-export const NodeDevPlatformLive: Layer.Layer<DevPlatform | FileSystem.FileSystem, ImportError> =
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const nodeFs = yield* importNodeFileSystem;
-      const fileSystemLayer = nodeFs.layer;
+export const layer: Layer.Layer<DevPlatform | FileSystem.FileSystem, ImportError> = Layer.unwrap(
+  Effect.gen(function* () {
+    const nodeFs = yield* importNodeFileSystem;
+    const fileSystemLayer = nodeFs.layer;
 
-      const makeApi: (
-        options: DevApiOptions,
-      ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> = Effect.fn(
-        "NodeDevPlatform.makeApi",
-      )(function* (options) {
-        const context = yield* Effect.context<never>();
-        const state = yield* Ref.make<HandlerState>(emptyState);
+    const makeApi: (
+      options: DevApiOptions,
+    ) => Effect.Effect<DevApiHandle, DevApiErrors, Scope.Scope> = Effect.fn(
+      "NodeDevPlatform.makeApi",
+    )(function* (options) {
+      const ownerScope = yield* Scope.Scope;
+      const state = yield* Ref.make<HandlerState>(emptyState);
+      const runAdmission = yield* CallbackRuntime.make();
 
-        yield* initHandler(state, options);
-        yield* Effect.addFinalizer(() =>
+      const disposeCurrent = Effect.fn("NodeDevPlatform.disposeCurrent")(function* () {
+        return yield* Effect.uninterruptible(
           Effect.gen(function* () {
-            const current = yield* Ref.get(state);
-            yield* Option.match(current.dispose, {
+            const current = yield* Ref.getAndSet(state, emptyState);
+            yield* Option.match(current.instance, {
               onNone: () => Effect.void,
-              onSome: (dispose) => dispose,
+              onSome: (instance) => Scope.close(instance.scope, Exit.void),
             });
-            yield* Ref.set(state, emptyState);
           }),
         );
-
-        const middleware: Connect.NextHandleFunction = (req, res, next) => {
-          if (!req.url?.startsWith("/api/")) {
-            return next();
-          }
-
-          const effect = Effect.gen(function* () {
-            yield* Trace.emit("api.request.received", () => ({
-              method: req.method ?? "GET",
-              url: req.url ?? "",
-            }));
-
-            const currentState = yield* Ref.get(state);
-
-            if (Option.isNone(currentState.handler)) {
-              const errorMessage = Option.match(currentState.lastError, {
-                onNone: () => "Check console for errors",
-                onSome: (error) =>
-                  Match.value(error).pipe(
-                    Match.tag("ApiInitError", ({ message }) => message),
-                    Match.exhaustive,
-                  ),
-              });
-              yield* options.onError(new ApiInitError({ message: "Handler not available" }));
-              const body = yield* encodeApiUnavailableBody({
-                error: "API handler not available",
-                message: errorMessage,
-              }).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ApiInitError({ message: "Failed to encode error response", cause }),
-                ),
-              );
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(body);
-              return;
-            }
-
-            currentState.handler.value(req, res);
-          });
-
-          Effect.runPromiseWith(context)(effect).catch((_error: unknown) => {
-            if (!res.headersSent) {
-              res.statusCode = 500;
-              res.end("Internal Server Error");
-            }
-          });
-        };
-
-        return {
-          middleware,
-          reload: initHandler(state, options),
-          dispose: Effect.gen(function* () {
-            const current = yield* Ref.get(state);
-            yield* Option.match(current.dispose, {
-              onNone: () => Effect.void,
-              onSome: (dispose) => dispose,
-            });
-            yield* Ref.set(state, emptyState);
-          }),
-        };
       });
 
-      const service: DevPlatformService = {
-        fileSystemLayer,
-        makeApi,
+      const installCandidate = Effect.fn("NodeDevPlatform.installCandidate")(function* () {
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const candidate = yield* restore(acquireHandler(ownerScope, options));
+            // Acquisition can suspend across shutdown. Decide owner liveness
+            // and publication in the same synchronous state transition.
+            const previous = yield* Ref.modify(
+              state,
+              (current): readonly [Option.Option<HandlerState>, HandlerState] => {
+                if (Predicate.isTagged(ownerScope.state, "Closed")) return [Option.none(), current];
+                return [Option.some(current), { instance: Option.some(candidate) }];
+              },
+            );
+            if (Option.isNone(previous)) return yield* Effect.interrupt;
+            yield* Option.match(previous.value.instance, {
+              onNone: () => Effect.void,
+              onSome: (instance) => Scope.close(instance.scope, Exit.void),
+            });
+          }),
+        );
+      });
+
+      yield* Effect.addFinalizer(() => disposeCurrent());
+      yield* installCandidate();
+
+      const middleware: Connect.NextHandleFunction = (req, res, next) => {
+        if (!req.url?.startsWith("/api/")) {
+          return next();
+        }
+
+        const effect = Effect.gen(function* () {
+          yield* traceApiRequestReceived(req.method, req.url);
+
+          const currentState = yield* Ref.get(state);
+
+          if (Option.isNone(currentState.instance)) {
+            yield* options.onError(new ApiInitError({ message: "Handler not available" }));
+            const body = yield* encodeApiUnavailableBody({
+              error: "API handler not available",
+              message: "The development API is shutting down",
+            }).pipe(
+              Effect.mapError(
+                (cause) => new ApiInitError({ message: "Failed to encode error response", cause }),
+              ),
+            );
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(body);
+            return;
+          }
+
+          const instance = currentState.instance.value;
+          instance.runRequest(
+            Effect.sync(() => instance.handler(req, res)).pipe(
+              Effect.catchCause((cause) =>
+                options.onError(cause).pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      if (!res.headersSent) {
+                        res.statusCode = 500;
+                        res.end("Internal Server Error");
+                      }
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).pipe(
+          Effect.catchCause((cause) =>
+            options.onError(cause).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  if (!res.headersSent) {
+                    res.statusCode = 500;
+                    res.end("Internal Server Error");
+                  }
+                }),
+              ),
+            ),
+          ),
+        );
+
+        runAdmission(effect);
       };
 
-      return Layer.mergeAll(Layer.succeed(DevPlatform, service), fileSystemLayer);
-    }),
-  );
+      return {
+        middleware,
+        reload: installCandidate(),
+        dispose: disposeCurrent(),
+      };
+    });
+
+    const service: DevPlatformService = {
+      fileSystemLayer,
+      makeApi,
+    };
+
+    return Layer.mergeAll(Layer.succeed(DevPlatform, service), fileSystemLayer);
+  }),
+);

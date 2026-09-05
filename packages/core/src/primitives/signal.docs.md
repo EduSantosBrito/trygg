@@ -18,7 +18,7 @@ Clicking the button updates the text node in place. The generator body runs once
 
 Reach for `Signal` for local or module-level reactive state: counters, form fields, toggles, derived values, suspended views, and keyed lists. Pass the Signal directly to JSX whenever only a DOM value changes — this is the default and the cheapest path.
 
-Step up to `Signal.get` only when the Component must *re-run* (for example, choosing a different subtree). For async, keyed, cacheable data, use `Resource` instead and read its state through the Signal it exposes.
+Step up to `Signal.get` only when the Component must _re-run_ (for example, choosing a different subtree). For async, keyed, cacheable data, use `Resource` instead and read its state through the Signal it exposes.
 
 ## Behavior
 
@@ -27,7 +27,7 @@ Step up to `Signal.get` only when the Component must *re-run* (for example, choo
 There are two read modes:
 
 - **Pass the Signal to JSX** (`{count}`): the renderer binds the individual text node or attribute to the Signal. On change, only that node updates and the Component does not re-run. This is fine-grained reactivity.
-- **`Signal.get(signal)`**: returns the value *and* subscribes the current render, so the Component re-runs on change. Use it only for structural branching where the Element tree itself differs:
+- **`Signal.get(signal)`**: returns the value _and_ subscribes the current render, so the Component re-runs on change. Use it only for structural branching where the Element tree itself differs:
 
 ```tsx
 const TogglePanel = Component.gen(function* () {
@@ -50,10 +50,21 @@ Writes notify listeners. `Signal.set` and `Signal.update` are equality-checked f
 
 `Signal.derive(source, f)` produces a derived Signal that recomputes when its source changes, keeping the work out of JSX; `Signal.deriveAll([a, b], f)` derives from several sources. `Signal.each(source, render, { key })` renders a keyed list where items keep their Effect scope and nested signals across reorders. `Signal.selector(source, project)` is the single-subscription alternative to one derived Signal per row: a source change from `previous -> next` recomputes only the outputs registered under those two keys.
 
+When a keyed item's value or index changes, its render Effect executes once for
+that update. Compatible static rows reuse their DOM after preparation; structural
+changes build detached replacements. Preparation failure preserves the committed
+list. A failure while patching live nodes triggers rollback, and rollback failures
+remain observable in the Cause. If native writes prevent rollback from completing,
+the DOM can remain partially changed. A later rendered update retries incomplete
+properties, and removing the row releases subscriptions acquired by failed patches.
+Static DOM construction also releases partial bindings if a native write fails or
+interruption prevents the completed result from reaching its owner. A failed DOM
+removal remains observable while subscription cleanup still runs.
+
 Sharp edges worth knowing before they bite:
 
 - **A derived array of Elements needs a Fragment wrap.** `Signal.derive(sig, () => [<A />, <B />])` renders as `[object Object]`; wrap it: `Signal.derive(sig, () => <>{a}{b}</>)`.
-- **Deriving a Component reads its props once.** `Signal.derive(sig, () => <Comp value={x} />)` captures props at derive time and will not track later changes. Pass the Signal *into* the Component, or resolve the value upfront, when it must stay reactive.
+- **Deriving a Component reads its props once.** `Signal.derive(sig, () => <Comp value={x} />)` captures props at derive time and will not track later changes. Pass the Signal _into_ the Component, or resolve the value upfront, when it must stay reactive.
 - **Disposed-signal access is a lifecycle edge, not a user error.** If a stale event handler, async callback, or service method touches a Signal after its owning scope closed, reads return the last snapshot and writes are no-ops. Trygg records a `signal.disposed_access` diagnostic — the read and write signatures stay clean on purpose.
 
 For state shared across components, keep the raw Signal private inside a service and expose typed Effect methods that validate or transform before writing. This is a secondary pattern, not the headline — one minimal shape:
@@ -84,6 +95,25 @@ const SearchStoreLive = Layer.effect(
 ```
 
 Components read `store.query` directly for fine-grained updates and call `store.setQuery` to write; the raw Signal is never written from outside.
+
+## Suspended views and cancellation
+
+`Signal.suspend` owns its worker, subscriptions, and view Signal in the component
+scope, or the ambient Effect scope when used outside a component. Closing that
+scope interrupts active work, awaits its finalizers, removes dependency
+subscriptions, and disposes the view. Dependency updates during shutdown do not
+invoke `Pending` again. Starting a retained suspended component through an
+already-closed owner exits interrupted before running its source or callbacks.
+
+Typed source failures render the configured `Failure` branch. An explicit
+interruption raised by the source also renders a terminal `Failure` view, while
+the worker still exits interrupted and reports its original Cause. Cancellation
+by the owner invokes no failure callback. Defects and mixed terminal Causes
+remain terminal rather than becoming a recovered view.
+
+Signal listeners isolate and report all-Fail Causes. Defects, interruption, and
+mixed Causes remain visible in the mutation's Exit. Listener callbacks run after
+the mutation gate is released, so a callback can update the same Signal.
 
 ## Related exports
 

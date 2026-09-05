@@ -3,7 +3,7 @@ import * as Router from "trygg/router";
 
 import { DocsArticle, extractDocsHeadings } from "../../components/docs-article";
 import { docsContent } from "../../content/docs-content";
-import { setDocsHeadings } from "../../content/headings";
+import { DocsHeadingsLive, setDocsHeadings } from "../../content/headings";
 import { sidebarGroups } from "../../content/sidebar";
 import { currentRouteSnapshot } from "../../lib/router-snapshot";
 
@@ -51,4 +51,4 @@ export default Component.gen(function* () {
       </article>
     </>
   );
-});
+}).pipe(Component.provide(DocsHeadingsLive));

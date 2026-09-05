@@ -1,0 +1,10 @@
+{
+  "scope": "All nine production browser interaction cases after MIDDLEWARE-001 and TESTING-001; memory probe disabled. This table fixture does not exercise Router.Outlet redirect latency or the testing entrypoint.",
+  "bun": "1.4.0",
+  "effect": "4.0.0-rc.112",
+  "sourceSha256": {
+    "packages/core/src/router/outlet.ts": "5e96771bd53b703ef7ab2d9ace9d2e22a760165e4d7a840f1b95147aa2d57bf5",
+    "packages/core/src/testing/index.ts": "4e3ee7fd59e493437c79a10751c005523ababac19c0327b92dfed6b09765c7de",
+    "scripts/benchmark-browser.ts": "b1a7f1ff49fc8d0e82d08db65773b9b2ffef668b578af0484e3289d1ed972521"
+  }
+}

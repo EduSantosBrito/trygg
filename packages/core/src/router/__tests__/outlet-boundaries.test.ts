@@ -13,7 +13,7 @@ import { Effect, Option, Result, Schema } from "effect";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import {
-  createMatcher,
+  RouteMatcher,
   resolveErrorBoundary,
   resolveNotFoundBoundary,
   resolveForbiddenBoundary,
@@ -57,8 +57,8 @@ describe("resolveErrorBoundary", () => {
           .children(Route.make("/users").error(ChildError).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -80,8 +80,8 @@ describe("resolveErrorBoundary", () => {
           .children(Route.make("/users").component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -98,8 +98,8 @@ describe("resolveErrorBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -116,8 +116,8 @@ describe("resolveErrorBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -141,8 +141,8 @@ describe("resolveErrorBoundary", () => {
           ),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/a/b/c");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/a/b/c");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -170,8 +170,8 @@ describe("resolveNotFoundBoundary", () => {
           .children(Route.make("/users").notFound(RootNotFound).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -193,8 +193,8 @@ describe("resolveNotFoundBoundary", () => {
           .children(Route.make("/users").component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -211,8 +211,8 @@ describe("resolveNotFoundBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -229,8 +229,8 @@ describe("resolveNotFoundBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -255,8 +255,8 @@ describe("resolveForbiddenBoundary", () => {
           .children(Route.make("/billing").forbidden(ChildForbidden).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/billing");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/billing");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -278,8 +278,8 @@ describe("resolveForbiddenBoundary", () => {
           .children(Route.make("/users").component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -296,8 +296,8 @@ describe("resolveForbiddenBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/admin").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -325,8 +325,8 @@ describe("resolveLoadingBoundary", () => {
           .children(Route.make("/users").loading(ChildLoading).component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -348,8 +348,8 @@ describe("resolveLoadingBoundary", () => {
           .children(Route.make("/users").component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/admin/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/admin/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -366,8 +366,8 @@ describe("resolveLoadingBoundary", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -383,17 +383,17 @@ describe("resolveLoadingBoundary", () => {
 // =============================================================================
 
 describe("decodeRouteParams", () => {
-  it.effect("should decode params via Schema", () =>
+  it.effect("should decode params via callable Schema", () =>
     Effect.gen(function* () {
+      const schema = Schema.Struct({ id: Schema.NumberFromString });
+      assert.strictEqual(typeof schema, "function");
+
       const manifest = Routes.make().add(
-        Route.make("/users/:id")
-          .params(Schema.Struct({ id: Schema.NumberFromString }))
-          .component(Comp)
-          .error(ErrorBoundary),
+        Route.make("/users/:id").params(schema).component(Comp).error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users/123");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users/123");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -407,8 +407,8 @@ describe("decodeRouteParams", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users/:id").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users/abc");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users/abc");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -427,8 +427,8 @@ describe("decodeRouteParams", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/users/abc");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/users/abc");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -459,8 +459,8 @@ describe("decodeRouteParams", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/blog/2024/hello");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/blog/2024/hello");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -480,8 +480,8 @@ describe("decodeRouteParams", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/items/0");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/items/0");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -497,22 +497,20 @@ describe("decodeRouteParams", () => {
 // =============================================================================
 
 describe("decodeRouteQuery", () => {
-  it.effect("should decode query params via Schema", () =>
+  it.effect("should decode query params via callable Schema", () =>
     Effect.gen(function* () {
+      const schema = Schema.Struct({
+        q: Schema.String,
+        page: Schema.optional(Schema.NumberFromString),
+      });
+      assert.strictEqual(typeof schema, "function");
+
       const manifest = Routes.make().add(
-        Route.make("/search")
-          .query(
-            Schema.Struct({
-              q: Schema.String,
-              page: Schema.optional(Schema.NumberFromString),
-            }),
-          )
-          .component(Comp)
-          .error(ErrorBoundary),
+        Route.make("/search").query(schema).component(Comp).error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/search");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/search");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -528,8 +526,8 @@ describe("decodeRouteQuery", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/about").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/about");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/about");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -554,8 +552,8 @@ describe("decodeRouteQuery", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/search");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/search");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -576,8 +574,8 @@ describe("decodeRouteQuery", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/search");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/search");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -601,8 +599,8 @@ describe("decodeRouteQuery", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/items");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/items");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {
@@ -630,8 +628,8 @@ describe("decodeRouteQuery", () => {
           .error(ErrorBoundary),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const match = matcher.match("/items");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const match = yield* matcher.match("/items");
       assert.isTrue(Option.isSome(match));
 
       if (Option.isSome(match)) {

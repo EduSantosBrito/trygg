@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, Option, Schema, Scope } from "effect";
+import { Effect, Exit, Option, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import * as Trace from "../trace/index.js";
 import type { RenderContext } from "./renderer.js";
@@ -19,7 +19,7 @@ const ScopeOwner = Schema.Union([
   Schema.Literal("boundary"),
 ]);
 
-export class RenderContextOwnershipError extends Schema.TaggedErrorClass<RenderContextOwnershipError>()(
+export class RenderContextOwnershipError extends Schema.TaggedError<RenderContextOwnershipError>()(
   "RenderContextOwnershipError",
   {
     owner: ScopeOwner,
@@ -27,71 +27,36 @@ export class RenderContextOwnershipError extends Schema.TaggedErrorClass<RenderC
   },
 ) {}
 
-export interface RenderContextTransactionShape {
-  readonly forkContext: (
-    request: RenderContextForkRequest,
-  ) => Effect.Effect<RenderContextSnapshot, RenderContextOwnershipError>;
-  readonly runEventHandler: <A, E, R>(
-    snapshot: RenderContextSnapshot,
-    handler: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E>;
-  readonly finalizeOwnedScope: (snapshot: RenderContextSnapshot) => Effect.Effect<void, never>;
-}
+export const forkContext: (
+  request: RenderContextForkRequest,
+) => Effect.Effect<RenderContextSnapshot, RenderContextOwnershipError> = Effect.fnUntraced(
+  function* (request: RenderContextForkRequest) {
+    yield* Trace.emit("effect.fork.scoped", () => ({ owner: request.scopeOwner }));
+    const scope = yield* Scope.fork(request.parent.scope).pipe(
+      Effect.mapError(
+        (cause) => new RenderContextOwnershipError({ owner: request.scopeOwner, cause }),
+      ),
+    );
+    const services = Option.isSome(request.additionalServices)
+      ? Context.merge(request.parent.services, request.additionalServices.value)
+      : request.parent.services;
 
-export const makeRenderContextTransaction = (): RenderContextTransactionShape => {
-  return {
-    forkContext: Effect.fnUntraced(function* (request) {
-      yield* Trace.emit("effect.fork.scoped", () => ({ owner: request.scopeOwner }));
-      const scope = yield* Scope.fork(request.parent.scope).pipe(
-        Effect.mapError(
-          (cause) => new RenderContextOwnershipError({ owner: request.scopeOwner, cause }),
-        ),
-      );
-      const services = Option.isSome(request.additionalServices)
-        ? Context.merge(request.parent.services, request.additionalServices.value)
-        : request.parent.services;
+    return {
+      services,
+      scope,
+      safeUrlConfig: request.parent.safeUrlConfig,
+    };
+  },
+);
 
-      return {
-        services,
-        scope,
-        safeUrlConfig: request.parent.safeUrlConfig,
-      };
-    }),
-    runEventHandler: (snapshot, handler) =>
-      handler.pipe(Scope.provide(snapshot.scope), Effect.provide(snapshot.services)),
-    finalizeOwnedScope: Effect.fnUntraced(function* (snapshot) {
-      yield* Scope.close(snapshot.scope, Exit.void);
-      yield* Trace.emit("effect.scope.close", () => ({ owner: "render-context" }));
-    }),
-  };
-};
+export const runEventHandler = <A, E, R>(
+  snapshot: RenderContextSnapshot,
+  handler: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E> =>
+  handler.pipe(Scope.provide(snapshot.scope), Effect.provide(snapshot.services));
 
-/**
- * Shared, stateless render-context transaction.
- *
- * @remarks
- * Every method takes its state via parameters and closes over nothing, so a
- * single module-level instance is safe to reuse across all renders. Reusing it
- * avoids allocating a fresh transaction object (and its three closures) on every
- * intrinsic's prop application — a per-element cost on the render hot path. The
- * `makeRenderContextTransaction` factory is retained for the layer constructor.
- */
-export const sharedRenderContextTransaction: RenderContextTransactionShape =
-  makeRenderContextTransaction();
-
-export class RenderContextTransaction extends Context.Service<
-  RenderContextTransaction,
-  {
-    readonly forkContext: (
-      request: RenderContextForkRequest,
-    ) => Effect.Effect<RenderContextSnapshot, RenderContextOwnershipError>;
-    readonly runEventHandler: <A, E, R>(
-      snapshot: RenderContextSnapshot,
-      handler: Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A, E>;
-    readonly finalizeOwnedScope: (snapshot: RenderContextSnapshot) => Effect.Effect<void, never>;
-  }
->()("trygg/RenderContextTransaction") {
-  static readonly layer = (): Layer.Layer<RenderContextTransaction> =>
-    Layer.succeed(RenderContextTransaction, makeRenderContextTransaction());
-}
+export const finalizeOwnedScope: (snapshot: RenderContextSnapshot) => Effect.Effect<void, never> =
+  Effect.fnUntraced(function* (snapshot: RenderContextSnapshot) {
+    yield* Scope.close(snapshot.scope, Exit.void);
+    yield* Trace.emit("effect.scope.close", () => ({ owner: "render-context" }));
+  });

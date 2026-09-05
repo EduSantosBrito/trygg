@@ -7,7 +7,7 @@ import { click, renderElement, testLayer, waitFor } from "trygg/testing";
 
 import HomePage from "./home";
 
-class MissingInstallCopyButton extends Schema.TaggedErrorClass<MissingInstallCopyButton>()(
+class MissingInstallCopyButton extends Schema.TaggedError<MissingInstallCopyButton>()(
   "MissingInstallCopyButton",
   {},
 ) {}

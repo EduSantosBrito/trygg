@@ -1,14 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Ref } from "effect";
+import { Deferred, Effect, Exit, Fiber, Ref } from "effect";
 import * as Trace from "../../trace/index.js";
 import * as Signal from "../../primitives/signal.js";
 import {
+  NavigationAdapter,
+  NavigationCore,
   NavigationCoreError,
-  makeInMemoryNavigationAdapter,
-  makeNavigationCore,
   navigationTarget,
   sameQuery,
-  type NavigationAdapter,
   type NavigationCoreShape,
 } from "../navigation-core.js";
 import { parsePath } from "../utils.js";
@@ -16,8 +15,8 @@ import * as Router from "../service.js";
 
 const makeCore: (initialPath: string) => Effect.Effect<NavigationCoreShape, NavigationCoreError> =
   Effect.fn("NavigationCoreTest.makeCore")(function* (initialPath: string) {
-    const adapter = yield* makeInMemoryNavigationAdapter(initialPath);
-    return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
+    const adapter = yield* NavigationAdapter.makeInMemory(initialPath);
+    return yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
   });
 
 const makeBrowserLikeCore: (
@@ -56,7 +55,7 @@ const makeBrowserLikeCore: (
       if (index < historyStack.length - 1) index++;
     }).pipe(Effect.mapError((cause) => new NavigationCoreError({ operation: "forward", cause }))),
   };
-  return yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
+  return yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
 });
 
 const traceEventsFor: <E, R>(
@@ -190,13 +189,164 @@ describe("NavigationCore trace boundary", () => {
         back: Effect.void,
         forward: Effect.void,
       };
-      const core = yield* makeNavigationCore({ notifyUnchangedQuery: false }, adapter);
+      const core = yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
       const records = yield* traceEventsFor(
         core.navigate(navigationTarget("/broken")).pipe(Effect.result, Effect.asVoid),
       );
 
       assert.deepStrictEqual(eventNames(records), []);
     }),
+  );
+});
+
+describe("NavigationCore concurrent transitions", () => {
+  it.effect("should cancel queued navigation before it acquires the history permit", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Scope: a pending adapter mutation owns the permit while another caller cancels.
+        // Assertion: queued cancellation completes before the active mutation releases its permit.
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const memory = yield* NavigationAdapter.makeInMemory("/");
+        const applied: Array<string> = [];
+        const adapter: NavigationAdapter = {
+          ...memory,
+          push: (url, state) =>
+            Effect.gen(function* () {
+              if (url === "/active") {
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(release);
+              }
+              yield* memory.push(url, state);
+              applied.push(url);
+            }),
+        };
+        const core = yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined));
+        const active = yield* Effect.forkScoped(core.navigate(navigationTarget("/active")));
+        yield* Deferred.await(started);
+        const queued = yield* Effect.forkScoped(core.navigate(navigationTarget("/canceled")));
+        yield* Effect.yieldNow;
+        yield* Fiber.interrupt(queued);
+        assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(queued)));
+        assert.deepStrictEqual(applied, []);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(active);
+        assert.deepStrictEqual(applied, ["/active"]);
+        assert.strictEqual((yield* core.current).navigationId, 1);
+      }),
+    ),
+  );
+
+  it.effect(
+    "should retain an applied history mutation when interrupted during snapshot refresh",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // Scope: history has changed, but reading its resulting snapshot is still suspended.
+          // Assertion: interruption remains observable and cannot leave the coordinator on the previous entry.
+          const readStarted = yield* Deferred.make<void>();
+          const releaseRead = yield* Deferred.make<void>();
+          const memory = yield* NavigationAdapter.makeInMemory("/");
+          let applied = false;
+          const adapter: NavigationAdapter = {
+            ...memory,
+            push: (url, state) =>
+              memory.push(url, state).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    applied = true;
+                  }),
+                ),
+              ),
+            read: Effect.gen(function* () {
+              if (applied) {
+                yield* Deferred.succeed(readStarted, undefined);
+                yield* Deferred.await(releaseRead);
+              }
+              return yield* memory.read;
+            }),
+          };
+          const core = yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
+          yield* Effect.addFinalizer(() => Deferred.succeed(releaseRead, undefined));
+          const navigation = yield* Effect.forkScoped(
+            core.navigate(navigationTarget("/applied?owner=winner")),
+          );
+          yield* Deferred.await(readStarted);
+          const interrupt = yield* Effect.forkScoped(Fiber.interrupt(navigation));
+          yield* Effect.yieldNow;
+          yield* Deferred.succeed(releaseRead, undefined);
+          yield* Fiber.join(interrupt);
+          const exit = yield* Fiber.await(navigation);
+          assert.isTrue(Exit.hasInterrupts(exit));
+          const history = yield* memory.read;
+          const snapshot = yield* core.current;
+          assert.strictEqual(history.path, "/applied");
+          assert.strictEqual(snapshot.path, history.path);
+          assert.strictEqual(snapshot.query.toString(), history.query.toString());
+          assert.strictEqual(snapshot.scrollKey, history.scrollKey);
+          assert.strictEqual(snapshot.navigationId, 1);
+        }),
+      ),
+  );
+
+  it.effect("serializes a slow adapter mutation and commits only the latest snapshot", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>();
+        const releaseFirst = yield* Deferred.make<void>();
+        const history: Array<string> = [];
+        let currentUrl = "/";
+        const adapter: NavigationAdapter = {
+          read: Effect.gen(function* () {
+            const { path, query } = yield* parsePath(currentUrl).pipe(
+              Effect.mapError(
+                (cause) => new NavigationCoreError({ operation: "parsePath", cause }),
+              ),
+            );
+            return {
+              path,
+              query,
+              isPopstate: false,
+              hash: "",
+              scrollKey: `controlled-${history.length}`,
+            };
+          }),
+          push: (url) =>
+            Effect.gen(function* () {
+              if (url.startsWith("/slow")) {
+                yield* Deferred.succeed(firstStarted, undefined);
+                yield* Deferred.await(releaseFirst);
+              }
+              history.push(url);
+              currentUrl = url;
+            }),
+          replace: () => Effect.void,
+          back: Effect.void,
+          forward: Effect.void,
+        };
+        const core = yield* NavigationCore.make({ notifyUnchangedQuery: false }, adapter);
+        const slowFiber = yield* Effect.forkScoped(
+          Effect.exit(core.navigate(navigationTarget("/slow", { query: { owner: "stale" } }))),
+        );
+        yield* Deferred.await(firstStarted);
+        const winnerFiber = yield* Effect.forkScoped(
+          Effect.exit(core.navigate(navigationTarget("/winner", { query: { owner: "latest" } }))),
+        );
+
+        yield* Deferred.succeed(releaseFirst, undefined);
+        const slowExit = yield* Fiber.join(slowFiber);
+        const winnerExit = yield* Fiber.join(winnerFiber);
+        const snapshot = yield* core.current;
+
+        assert.isTrue(Exit.isSuccess(slowExit));
+        assert.isTrue(Exit.isSuccess(winnerExit));
+        assert.deepStrictEqual(history, ["/slow?owner=stale", "/winner?owner=latest"]);
+        assert.strictEqual(snapshot.navigationId, 2);
+        assert.strictEqual(snapshot.path, "/winner");
+        assert.strictEqual(snapshot.query.get("owner"), "latest");
+      }),
+    ),
   );
 });
 
@@ -222,9 +372,9 @@ describe("Router.testLayer NavigationCore delegation", () => {
 
       assert.deepStrictEqual(semanticNames, [
         "router.navigate.request",
-        "history.push",
         "router.current.set",
         "router.query.set",
+        "history.push",
         "router.navigate.commit",
         "router.navigate.stateApplied",
       ]);
@@ -266,5 +416,45 @@ describe("Router.testLayer NavigationCore delegation", () => {
         yield* router.back();
         assert.strictEqual((yield* Signal.get(router.current)).path, "/users/1/details");
       }).pipe(Effect.provide(Router.testLayer("/"))),
+  );
+
+  it.effect("prevents a slow listener from letting an older route overwrite the winner", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const router = yield* Router.Router;
+        const firstListenerStarted = yield* Deferred.make<void>();
+        const releaseFirstListener = yield* Deferred.make<void>();
+        let notification = 0;
+        const unsubscribe = yield* Signal.subscribe(router.current, () =>
+          Effect.gen(function* () {
+            notification++;
+            if (notification !== 1) return;
+            yield* Deferred.succeed(firstListenerStarted, undefined);
+            yield* Deferred.await(releaseFirstListener);
+          }),
+        );
+        const slowFiber = yield* Effect.forkScoped(
+          Effect.exit(router.navigate("/slow", { query: { owner: "stale" } })),
+        );
+        yield* Deferred.await(firstListenerStarted);
+        const winnerFiber = yield* Effect.forkScoped(
+          Effect.exit(router.navigate("/winner", { query: { owner: "latest" } })),
+        );
+
+        const winnerExit = yield* Fiber.join(winnerFiber);
+        const routeWhileStaleListenerIsBlocked = yield* Signal.peek(router.current);
+        const queryWhileStaleListenerIsBlocked = yield* Signal.peek(router.query);
+        yield* Deferred.succeed(releaseFirstListener, undefined);
+        const slowExit = yield* Fiber.join(slowFiber);
+        yield* unsubscribe;
+
+        assert.isTrue(Exit.isSuccess(winnerExit));
+        assert.isTrue(Exit.isSuccess(slowExit));
+        assert.strictEqual(routeWhileStaleListenerIsBlocked.navigation.navigationId, 2);
+        assert.strictEqual(routeWhileStaleListenerIsBlocked.path, "/winner");
+        assert.strictEqual(routeWhileStaleListenerIsBlocked.query.get("owner"), "latest");
+        assert.strictEqual(queryWhileStaleListenerIsBlocked.get("owner"), "latest");
+      }).pipe(Effect.provide(Router.testLayer("/"))),
+    ),
   );
 });

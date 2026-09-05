@@ -1,0 +1,64 @@
+{
+  "date": "2026-09-05T12:43:00.693Z",
+  "browser": "141.0.7390.122",
+  "transport": "inline",
+  "fixture": "granular",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 1,
+  "samples": 3,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 11.299999952316284,
+          "frameMs": 28.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 27.19999998807907,
+          "frameMs": 29.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 10.799999952316284,
+          "frameMs": 31.299999952316284,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": null,
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": null,
+      "bytes": 579634,
+      "gzipBytes": 177135
+    }
+  ],
+  "work": [
+    {
+      "operation": "update",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "maps": 1303,
+      "sets": 600,
+      "tags": {}
+    }
+  ]
+}

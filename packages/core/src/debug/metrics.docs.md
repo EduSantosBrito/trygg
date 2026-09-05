@@ -34,7 +34,7 @@ Framework internals advance these through the recording helpers (`recordNavigati
 
 `Metrics.snapshot` is an `Effect<MetricsSnapshot>` that reads every instrument via `Metric.value` and flattens it: counters become plain numbers (`componentRenderCount`, `navigationCount`, and the rest) and histograms become `{ count, min, max, sum, buckets }`, where `buckets` is a `ReadonlyArray<readonly [number, number]>` of boundary/cumulative-count pairs. There is no average field; compute it as `sum / count` and guard against `count === 0`.
 
-Counters are cumulative and never reset within a process, so snapshots reflect totals since module load, not a window. For an exported view, implement `MetricsSink` (or use `Metrics.createSink` / `Metrics.createCollectorSink`), register it, and call `Metrics.exportToSinks`; sink failures are caught and logged so one failing sink does not block the others, and `exportToSinks` is a no-op when no sink is registered. The sink registry is module-global, so register and unregister around tests with `Metrics.unregisterSink` to avoid cross-test leakage.
+Counters are cumulative and never reset within a process, so snapshots reflect totals since module load, not a window. For an exported view, implement `MetricsSink` (or use `Metrics.MetricsSink.make` / `Metrics.MetricsSink.makeCollector`), register it, and call `Metrics.exportToSinks`; sink failures are caught and logged so one failing sink does not block the others, and `exportToSinks` is a no-op when no sink is registered. The sink registry is module-global, so register and unregister around tests with `Metrics.unregisterSink` to avoid cross-test leakage.
 
 ## Related exports
 
@@ -42,8 +42,8 @@ Counters are cumulative and never reset within a process, so snapshots reflect t
 - `Metrics.MetricsSnapshot` — the flattened counters-and-histograms shape `snapshot` resolves to
 - `Metrics.exportToSinks` — push a snapshot to every registered sink
 - `Metrics.registerSink` — add a sink to the module-global registry
-- `Metrics.createSink` — build a `MetricsSink` for exporting snapshots
-- `Metrics.createCollectorSink` — sink collecting snapshots into a fresh array
+- `Metrics.MetricsSink.make` — build a `MetricsSink` for exporting snapshots
+- `Metrics.MetricsSink.makeCollector` — sink collecting snapshots into a supplied array
 - `Metrics.consoleSink` — sink that writes snapshots to the console
 - `Metrics.componentRenderCounter` — Effect `Metric` counting component renders
 - `Metrics.renderDurationHistogram` — Effect `Metric` histogram of render durations
@@ -53,4 +53,4 @@ Counters are cumulative and never reset within a process, so snapshots reflect t
 - Snapshot counts look too high: counters are cumulative for the process lifetime, not per-render or per-window. Take two snapshots and subtract to measure a span.
 - Histogram has no `avg`: `MetricsSnapshot` exposes `count`, `min`, `max`, `sum`, and `buckets` only. Derive the average from `sum / count`, returning 0 when `count` is 0.
 - A registered sink throws and nothing surfaces: `exportToSinks` catches each sink's cause and logs it under the sink's `name`, then continues to the next sink; check the logged error rather than expecting `exportToSinks` to fail.
-- Tests see metrics from other tests: the sink registry and counters are module-global. Use `Metrics.createCollectorSink` with a fresh array, register it for the test, and `Metrics.unregisterSink` after.
+- Tests see metrics from other tests: the sink registry and counters are module-global. Use `Metrics.MetricsSink.makeCollector` with a fresh array, register it for the test, and `Metrics.unregisterSink` after.

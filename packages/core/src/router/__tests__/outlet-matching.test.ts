@@ -11,11 +11,11 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Effect, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 import * as Route from "../route.js";
 import { IndexMarker } from "../route.js";
 import * as Routes from "../routes.js";
-import { resolveRoutes, createMatcher } from "../matching.js";
+import { resolveRoutes, RouteMatcher } from "../matching.js";
 import * as Router from "../service.js";
 import * as Signal from "../../primitives/signal.js";
 import { empty } from "../../primitives/element.js";
@@ -172,15 +172,55 @@ describe("resolveRoutes", () => {
 });
 
 // =============================================================================
-// createMatcher - Trie-based matching
+// RouteMatcher.make - Canonical matching
 // =============================================================================
 
-describe("createMatcher", () => {
+describe("RouteMatcher.make", () => {
+  it.effect("should preserve malformed URI failures exactly like the production matcher", () =>
+    Effect.gen(function* () {
+      const manifest = Routes.make().add(Route.make("/users/:id").component(Comp)).manifest;
+      const resolved = yield* resolveRoutes(manifest);
+      const direct = yield* RouteMatcher.make(manifest);
+      const production = yield* RouteMatcher.fromResolved(resolved);
+
+      const directValid = yield* direct.match("/users/a%2Fb");
+      const productionValid = yield* production.match("/users/a%2Fb");
+      assert.deepStrictEqual(directValid, productionValid);
+
+      const directMalformed = yield* direct.match("/users/%E0%A4%A").pipe(Effect.result);
+      const productionMalformed = yield* production.match("/users/%E0%A4%A").pipe(Effect.result);
+      assert.isTrue(Result.isFailure(directMalformed));
+      assert.isTrue(Result.isFailure(productionMalformed));
+      if (Result.isFailure(directMalformed) && Result.isFailure(productionMalformed)) {
+        assert.strictEqual(directMalformed.failure._tag, "InvalidRoutePathEncoding");
+        assert.deepStrictEqual(directMalformed.failure, productionMalformed.failure);
+      }
+    }),
+  );
+
+  it.effect("keeps each route's param names when dynamic prefixes overlap", () =>
+    Effect.gen(function* () {
+      const manifest = Routes.make()
+        .add(Route.make("/users/:id/edit").component(CompA))
+        .add(Route.make("/users/:slug/view").component(CompB)).manifest;
+      const resolved = yield* resolveRoutes(manifest);
+      const matcher = yield* RouteMatcher.fromResolved(resolved);
+
+      const result = yield* matcher.match("/users/guide/view");
+
+      assert.isTrue(Option.isSome(result));
+      if (Option.isSome(result)) {
+        assert.strictEqual(result.value.route.path, "/users/:slug/view");
+        assert.deepStrictEqual(result.value.params, { slug: "guide" });
+      }
+    }),
+  );
+
   it.effect("should match static route", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/about").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/about");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/about");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -193,8 +233,8 @@ describe("createMatcher", () => {
   it.effect("should match root path", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -206,8 +246,8 @@ describe("createMatcher", () => {
   it.effect("should match dynamic param route", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users/:id").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/123");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/123");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -223,8 +263,8 @@ describe("createMatcher", () => {
         Route.make("/settings").layout(Layout).children(Route.make("/profile").component(Comp)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/settings/profile");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/settings/profile");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -241,16 +281,16 @@ describe("createMatcher", () => {
           .children(Route.index(CompA), Route.make("/profile").component(CompB)),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
 
-      const indexResult = matcher.match("/settings");
+      const indexResult = yield* matcher.match("/settings");
       assert.isTrue(Option.isSome(indexResult));
       if (Option.isSome(indexResult)) {
         assert.strictEqual(indexResult.value.route.path, "/settings");
         assert.strictEqual(indexResult.value.route.definition.path, IndexMarker);
       }
 
-      const profileResult = matcher.match("/settings/profile");
+      const profileResult = yield* matcher.match("/settings/profile");
       assert.isTrue(Option.isSome(profileResult));
       if (Option.isSome(profileResult)) {
         assert.strictEqual(profileResult.value.route.path, "/settings/profile");
@@ -264,16 +304,16 @@ describe("createMatcher", () => {
         .add(Route.make("/users/admin").component(CompA))
         .add(Route.make("/users/:id").component(CompB)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
 
-      const result = matcher.match("/users/admin");
+      const result = yield* matcher.match("/users/admin");
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
         assert.strictEqual(result.value.route.path, "/users/admin");
         assert.deepStrictEqual(result.value.params, {});
       }
 
-      const dynamicResult = matcher.match("/users/123");
+      const dynamicResult = yield* matcher.match("/users/123");
       assert.isTrue(Option.isSome(dynamicResult));
       if (Option.isSome(dynamicResult)) {
         assert.strictEqual(dynamicResult.value.route.path, "/users/:id");
@@ -289,22 +329,22 @@ describe("createMatcher", () => {
         .add(Route.make("/docs/:page").component(CompB))
         .add(Route.make("/docs/:path*").component(CompC)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
 
-      const staticResult = matcher.match("/docs/intro");
+      const staticResult = yield* matcher.match("/docs/intro");
       assert.isTrue(Option.isSome(staticResult));
       if (Option.isSome(staticResult)) {
         assert.strictEqual(staticResult.value.route.path, "/docs/intro");
       }
 
-      const paramResult = matcher.match("/docs/tutorial");
+      const paramResult = yield* matcher.match("/docs/tutorial");
       assert.isTrue(Option.isSome(paramResult));
       if (Option.isSome(paramResult)) {
         assert.strictEqual(paramResult.value.route.path, "/docs/:page");
         assert.strictEqual(paramResult.value.params.page, "tutorial");
       }
 
-      const wildcardResult = matcher.match("/docs/api/users/list");
+      const wildcardResult = yield* matcher.match("/docs/api/users/list");
       assert.isTrue(Option.isSome(wildcardResult));
       if (Option.isSome(wildcardResult)) {
         assert.strictEqual(wildcardResult.value.route.path, "/docs/:path*");
@@ -316,8 +356,8 @@ describe("createMatcher", () => {
   it.effect("should return Option.none for unknown path", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/unknown");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/unknown");
 
       assert.isTrue(Option.isNone(result));
     }),
@@ -326,8 +366,8 @@ describe("createMatcher", () => {
   it.effect("should return Option.none for partial match", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/123/extra");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/123/extra");
 
       assert.isTrue(Option.isNone(result));
     }),
@@ -336,8 +376,8 @@ describe("createMatcher", () => {
   it.effect("should match catch-all with zero segments", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/docs/:path*").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/docs");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/docs");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -349,8 +389,8 @@ describe("createMatcher", () => {
   it.effect("should not match required catch-all with zero segments", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/files/:filepath+").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files");
 
       assert.isTrue(Option.isNone(result));
     }),
@@ -359,8 +399,8 @@ describe("createMatcher", () => {
   it.effect("should match required catch-all with one segment", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/files/:filepath+").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files/readme.txt");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files/readme.txt");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -372,8 +412,8 @@ describe("createMatcher", () => {
   it.effect("should strip query string before matching", () =>
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/search").component(Comp)).manifest;
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/search?q=hello&page=2");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/search?q=hello&page=2");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -392,9 +432,9 @@ describe("createMatcher", () => {
             .children(Route.index(CompB), Route.make("/profile").component(CompC)),
         ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
 
-      assert.strictEqual(matcher.routes.length, 3);
+      assert.strictEqual((yield* matcher.routes).length, 3);
     }),
   );
 
@@ -408,8 +448,8 @@ describe("createMatcher", () => {
           ),
       ).manifest;
 
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/admin/users/456");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/admin/users/456");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -433,12 +473,12 @@ describe("re-match on path change", () => {
         .add(Route.make("/users").component(CompB))
         .add(Route.make("/settings").component(CompC)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
       const router = yield* Router.get;
 
       // Initially at /
       const route1 = yield* Signal.get(router.current);
-      const match1 = matcher.match(route1.path);
+      const match1 = yield* matcher.match(route1.path);
       assert.isTrue(Option.isSome(match1));
       if (Option.isSome(match1)) {
         assert.strictEqual(match1.value.route.path, "/");
@@ -447,7 +487,7 @@ describe("re-match on path change", () => {
       // Navigate to /users
       yield* router.navigate("/users");
       const route2 = yield* Signal.get(router.current);
-      const match2 = matcher.match(route2.path);
+      const match2 = yield* matcher.match(route2.path);
       assert.isTrue(Option.isSome(match2));
       if (Option.isSome(match2)) {
         assert.strictEqual(match2.value.route.path, "/users");
@@ -456,7 +496,7 @@ describe("re-match on path change", () => {
       // Navigate to /settings
       yield* router.navigate("/settings");
       const route3 = yield* Signal.get(router.current);
-      const match3 = matcher.match(route3.path);
+      const match3 = yield* matcher.match(route3.path);
       assert.isTrue(Option.isSome(match3));
       if (Option.isSome(match3)) {
         assert.strictEqual(match3.value.route.path, "/settings");
@@ -468,12 +508,12 @@ describe("re-match on path change", () => {
     Effect.gen(function* () {
       const manifest = Routes.make().add(Route.make("/users").component(Comp)).manifest;
 
-      const matcher = yield* createMatcher(manifest);
+      const matcher = yield* RouteMatcher.make(manifest);
       const router = yield* Router.get;
 
       yield* router.navigate("/nonexistent");
       const route = yield* Signal.get(router.current);
-      const result = matcher.match(route.path);
+      const result = yield* matcher.match(route.path);
 
       assert.isTrue(Option.isNone(result));
     }).pipe(Effect.provide(Router.testLayer("/"))),

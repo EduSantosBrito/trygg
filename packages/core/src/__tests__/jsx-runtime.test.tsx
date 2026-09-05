@@ -1,3 +1,4 @@
+/* oxlint-disable effect/no-raw-throw, effect/no-built-in-error-constructor -- Hostile Proxy/getter regression tests require direct JavaScript throws. */
 /**
  * JSX Runtime Component Validation Tests
  *
@@ -11,7 +12,7 @@ import { Cause, Effect, Exit, Predicate } from "effect";
 import * as Context from "effect/Context";
 import * as Component from "../primitives/component.js";
 import { getKey } from "../primitives/element.js";
-import { jsxDEV } from "../jsx-dev-runtime.js";
+import { jsxDEV, jsxsDEV } from "../jsx-dev-runtime.js";
 import { Fragment, jsx, jsxs } from "../jsx-runtime.js";
 import { render } from "../testing/index.js";
 
@@ -262,11 +263,12 @@ describe("JSX component validation", () => {
     }),
   );
 
-  it.effect("should align jsxDEV with jsx while Fragment children props are hostile", () =>
+  it.effect("should align jsxDEV with jsx while hostile props abort construction", () =>
     Effect.gen(function* () {
-      // Test: should align jsxDEV with jsx while Fragment children props are hostile.
-      // Scope: verifies the development JSX entrypoint cannot drift from production JSX for the same Fragment inputs.
-      // Assertion: jsxDEV(Fragment, props) degrades the hostile children getter into the same empty fragment result as jsx(Fragment, props).
+      // Test: should align jsxDEV with jsx while hostile props abort construction.
+      // Scope: verifies development and production JSX share the same hostile-props boundary.
+      // Assertion: both entrypoints preserve the getter throw and neither returns a partial Fragment.
+      const failure = new Error("boom-children");
       const malformedProps = new Proxy(
         {},
         {
@@ -285,7 +287,7 @@ describe("JSX component validation", () => {
           },
           get(_target, property) {
             if (property === "children") {
-              return assert.fail("boom-children");
+              throw failure;
             }
 
             return undefined;
@@ -299,65 +301,101 @@ describe("JSX component validation", () => {
         columnNumber: 1,
       };
 
-      const jsxExit = yield* Effect.exit(render(jsx(Fragment, malformedProps)));
-
-      if (Exit.isFailure(jsxExit)) {
-        return assert.fail(
-          `Expected jsx(Fragment, props) to degrade hostile children but got ${Cause.pretty(jsxExit.cause)}`,
-        );
+      const jsxExit = yield* Effect.exit(Effect.sync(() => jsx(Fragment, malformedProps)));
+      if (Exit.isSuccess(jsxExit)) {
+        return assert.fail("Expected jsx to reject hostile props");
       }
 
       const jsxDevExit = yield* Effect.exit(
-        render(jsxDEV(Fragment, malformedProps, undefined, false, source)),
+        Effect.sync(() => jsxDEV(Fragment, malformedProps, undefined, false, source)),
       );
-
-      if (Exit.isFailure(jsxDevExit)) {
-        return assert.fail(
-          `Expected jsxDEV(Fragment, props) to match jsx(Fragment, props) but got ${Cause.pretty(jsxDevExit.cause)}`,
-        );
+      if (Exit.isSuccess(jsxDevExit)) {
+        return assert.fail("Expected jsxDEV to reject hostile props");
       }
 
-      assert.strictEqual(
-        jsxDevExit.value.container.textContent,
-        jsxExit.value.container.textContent,
-      );
+      assert.strictEqual(Cause.squash(jsxExit.cause), failure);
+      assert.strictEqual(Cause.squash(jsxDevExit.cause), failure);
     }),
   );
 
-  it.effect(
-    "should not throw while malformed props trigger proxy traps during jsx construction",
-    () =>
-      Effect.gen(function* () {
-        // Test: should not throw while malformed props trigger proxy traps during jsx construction.
-        // Scope: regression coverage for hostile JavaScript callers at the public sync JSX boundary.
-        // Assertion: jsx construction succeeds, preserves the explicit key, and degrades malformed props into the intrinsic default shape.
-        const malformedProps = new Proxy(
-          {},
-          {
-            ownKeys() {
-              return assert.fail("boom-own-keys");
-            },
+  it.effect("should not return a partial element while prop enumeration throws", () =>
+    Effect.gen(function* () {
+      // Test: should not return a partial element while prop enumeration throws.
+      // Scope: regression coverage for hostile Proxy traps at the public sync JSX boundary.
+      // Assertion: construction preserves the original throw instead of returning empty props.
+      const failure = new Error("boom-own-keys");
+      const malformedProps = new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw failure;
           },
-        );
+        },
+      );
 
-        const construction = yield* Effect.exit(Effect.sync(() => jsx("div", malformedProps, 13)));
+      const construction = yield* Effect.exit(Effect.sync(() => jsx("div", malformedProps, 13)));
 
-        if (Exit.isFailure(construction)) {
-          return assert.fail(
-            `Expected malformed props to degrade during jsx construction but got ${Cause.pretty(construction.cause)}`,
-          );
-        }
+      if (Exit.isSuccess(construction)) {
+        return assert.fail("Expected malformed prop enumeration to fail construction");
+      }
 
-        const element = construction.value;
-        assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
-        if (!Predicate.isTagged(element, "Intrinsic")) {
-          return assert.fail("Expected Intrinsic element");
-        }
+      assert.strictEqual(Cause.squash(construction.cause), failure);
+    }),
+  );
 
-        assert.deepStrictEqual(element.props, {});
-        assert.strictEqual(element.key, 13);
-        assert.deepStrictEqual(element.children, []);
-      }),
+  it.effect("should preserve hostile enumeration defects through jsxs aliases", () =>
+    Effect.gen(function* () {
+      // Test: should preserve hostile enumeration defects through jsxs and jsxsDEV.
+      // Scope: covers both static-children aliases at the public production/development boundaries.
+      // Assertion: both aliases preserve the same defect and neither returns a partial Element.
+      const failure = new Error("boom-jsxs-own-keys");
+      const malformedProps = new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw failure;
+          },
+        },
+      );
+
+      const jsxsExit = yield* Effect.exit(Effect.sync(() => jsxs("div", malformedProps)));
+      const jsxsDevExit = yield* Effect.exit(
+        Effect.sync(() => jsxsDEV("div", malformedProps, undefined, true)),
+      );
+
+      if (Exit.isSuccess(jsxsExit) || Exit.isSuccess(jsxsDevExit)) {
+        return assert.fail("Expected both jsxs aliases to reject hostile enumeration");
+      }
+      assert.strictEqual(Cause.squash(jsxsExit.cause), failure);
+      assert.strictEqual(Cause.squash(jsxsDevExit.cause), failure);
+    }),
+  );
+
+  it.effect("should preserve hostile getter defects through jsxs aliases", () =>
+    Effect.gen(function* () {
+      // Test: should preserve hostile getter defects through jsxs and jsxsDEV.
+      // Scope: covers a getter failure after an earlier prop has already been copied.
+      // Assertion: both aliases abort construction instead of returning the readable prop subset.
+      const failure = new Error("boom-jsxs-getter");
+      const malformedProps = {
+        id: "must-not-survive",
+        get title() {
+          throw failure;
+        },
+        children: ["child"],
+      };
+
+      const jsxsExit = yield* Effect.exit(Effect.sync(() => jsxs("div", malformedProps)));
+      const jsxsDevExit = yield* Effect.exit(
+        Effect.sync(() => jsxsDEV("div", malformedProps, undefined, true)),
+      );
+
+      if (Exit.isSuccess(jsxsExit) || Exit.isSuccess(jsxsDevExit)) {
+        return assert.fail("Expected both jsxs aliases to reject hostile getters");
+      }
+      assert.strictEqual(Cause.squash(jsxsExit.cause), failure);
+      assert.strictEqual(Cause.squash(jsxsDevExit.cause), failure);
+    }),
   );
 
   it("should not require services while constructing valid effect components with jsx", () => {

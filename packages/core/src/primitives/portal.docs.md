@@ -51,7 +51,17 @@ The portalled subtree only changes DOM placement. It reads the same services and
 
 Selector targets resolve at creation time, not at render time. If the selector matches nothing or matches a non-`HTMLElement`, `Portal.make` fails with `PortalTargetNotFoundError` carrying the offending `target` string — handle it like any other typed error before the Mount boundary.
 
-`Portal.make` is client-only: it reads `document` directly to create or resolve its target, so it has no server-side rendering path and throws where `document` is undefined. Create portals from client-rendered Components only.
+Malformed selectors and native DOM acquisition failures return `PortalDomError`,
+which records the operation and original cause. Dynamic containers acquire their
+cleanup owner before insertion. Failed or interrupted acquisition rolls back
+immediately; acquisition into a closed owner is interrupted before allocating DOM.
+A failed removal during Scope finalization remains observable as a defect carrying
+`PortalDomError`; other finalizers still run. If acquisition and rollback both
+fail, the resulting Cause retains both failures.
+
+`Portal.make` is client-only: it reads `document` directly to create or resolve its
+target and has no server-side rendering path. Missing DOM access returns
+`PortalDomError`. Create portals from client-rendered Components only.
 
 ## Related exports
 
@@ -59,6 +69,7 @@ Selector targets resolve at creation time, not at render time. If the selector m
 - `PortalProps` — the optional `visible` prop on the returned Component
 - `PortalOptions` — `target` for the portal's DOM destination
 - `PortalTargetNotFoundError` — failure when the selector resolves no `HTMLElement`
+- `PortalDomError` — failed native acquisition or container removal
 
 ## Troubleshooting
 

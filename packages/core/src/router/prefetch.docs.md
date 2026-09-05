@@ -15,11 +15,17 @@ const UsersList = Component.gen(function* () {
 });
 
 export const routes = Routes.make().add(
-  Route.make("/users").prefetch(() => loadUsers()).component(UsersList),
+  Route.make("/users")
+    .prefetch(() => loadUsers())
+    .component(UsersList),
 );
 
 // The Link warms that route before the click; "intent" is the default.
-const ToUsers = <Router.Link to="/users" prefetch="intent">View users</Router.Link>;
+const ToUsers = (
+  <Router.Link to="/users" prefetch="intent">
+    View users
+  </Router.Link>
+);
 ```
 
 ## When to use

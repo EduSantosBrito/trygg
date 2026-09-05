@@ -129,7 +129,7 @@ export * as Metrics from "./debug/metrics.js";
 // Head management — head element hoisting and dedup
 export * as Head from "./primitives/head.js";
 
-// SafeUrl validation for secure href/src attributes
-// Validates URLs against a configurable scheme allowlist
+// SafeUrl validation for URL-bearing DOM attributes
+// Validates URLs against configurable, sink-specific scheme policies
 export * as SafeUrl from "./security/safe-url.js";
 export { UnsafeUrlError } from "./security/safe-url.js";

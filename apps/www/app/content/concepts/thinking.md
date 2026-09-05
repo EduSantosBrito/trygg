@@ -22,8 +22,8 @@ Treat the body not as code that re-executes per frame, but as the place you wire
 `Signal.make(initial)` holds state. For computed values, `Signal.derive` (or `Signal.deriveAll` for multiple sources) recomputes when its source changes. There is no dependency array to keep in sync — the subscription is the source you passed.
 
 ```ts
-const count = yield* Signal.make(0);
-const doubled = yield* Signal.derive(count, (n) => n * 2);
+const count = yield * Signal.make(0);
+const doubled = yield * Signal.derive(count, (n) => n * 2);
 ```
 
 Instead of `useMemo` with a manual dependency list, name the source signal and let the derivation track it. The derived signal is cleaned up with its owning scope.
@@ -43,14 +43,21 @@ Instead of re-rendering a subtree to reflect new state, bind the Signal at the e
 For async reads, reach for `Resource` rather than firing a fetch inside an effect and tracking pending/error flags by hand. `Resource.fetch` returns a `Signal` of the state — `Pending`, `Success`, or `Failure` — and `Resource.match` renders each branch. The registry caches and deduplicates by key.
 
 ```tsx
-const state = yield* Resource.fetch(usersResource);
-return yield* Resource.match(state).pipe(
-  Resource.on("Pending", () => <p>Loading…</p>),
-  Resource.on("Success", ({ value }: { value: ReadonlyArray<string>; stale: boolean }) => (
-    <ul>{value.map((name) => <li>{name}</li>)}</ul>
-  )),
-  Resource.on("Failure", ({ error }) => <p>{String(error)}</p>),
-  Resource.exhaustive,
+const state = yield * Resource.fetch(usersResource);
+return (
+  yield *
+  Resource.match(state).pipe(
+    Resource.on("Pending", () => <p>Loading…</p>),
+    Resource.on("Success", ({ value }: { value: ReadonlyArray<string>; stale: boolean }) => (
+      <ul>
+        {value.map((name) => (
+          <li>{name}</li>
+        ))}
+      </ul>
+    )),
+    Resource.on("Failure", ({ error }) => <p>{String(error)}</p>),
+    Resource.exhaustive,
+  )
 );
 ```
 
@@ -67,10 +74,11 @@ The component body runs inside an Effect scope, so cleanup is a finalizer, not a
 ```ts
 import { Effect } from "effect";
 
-yield* Effect.acquireRelease(
-  Effect.sync(() => window.addEventListener("resize", onResize)),
-  () => Effect.sync(() => window.removeEventListener("resize", onResize)),
-);
+yield *
+  Effect.acquireRelease(
+    Effect.sync(() => window.addEventListener("resize", onResize)),
+    () => Effect.sync(() => window.removeEventListener("resize", onResize)),
+  );
 ```
 
 Instead of returning a cleanup callback, acquire the resource in setup and let its finalizer run on unmount.

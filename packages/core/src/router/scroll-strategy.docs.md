@@ -28,6 +28,16 @@ A strategy is route-scoped: it applies to the Route it is provided on and the de
 - `Auto` — saves and restores scroll position per history entry via `sessionStorage`. A new forward navigation scrolls to the top, back/forward restores the position saved for that entry, and a hash navigation scrolls to the matching element.
 - `None` — no scroll management; the document stays exactly where it was across the navigation.
 
+For a mounted Outlet, the owning activation applies this decision only after the renderer acknowledges its exact DOM replacement. The resulting `ScrollApplyPayload` carries the resolved strategy plus the activation's `hash`, `isPopstate`, and `scrollKey`, with these `kind` variants:
+
+- `none`: `ScrollStrategy.None` performed no scroll work.
+- `hash`: `Auto` found the hash target and scrolled it into view. A missing target falls through to restoration or top scrolling.
+- `restore`: a back/forward activation checked its history-entry key. `restored: true` means a saved position was decoded and applied; `restored: false` means no saved position existed. `restored` is absent from other payload kinds.
+- `top`: a non-popstate `Auto` activation with no matching hash scrolled to `(0, 0)`.
+- `ignoredError`: post-swap scroll work ended in a typed-failure-only `Cause`, so the activation treated scrolling as best-effort and continued.
+
+Recovery is Cause-aware: a non-empty `Cause` becomes `ignoredError` only when every reason is `Fail`. A `Die` or `Interrupt` reason, alone or mixed with `Fail`, is re-failed with the full Cause and produces no payload. The DOM replacement has already committed at this point; defects and interruption are not rewritten as successful scroll decisions.
+
 `Route.provide` recognizes the specific exported layer instances (`ScrollStrategy.Auto`, `ScrollStrategy.None`) to store the value on the Route's scroll-strategy slot rather than its render-strategy slot. Because the same `provide` accepts both `RenderStrategy` and `ScrollStrategy` layers, you can pipe both onto one Route:
 
 ```tsx
@@ -42,6 +52,7 @@ Sharp edge: `Route.provide` is for route-local strategy layers only. Service dat
 
 - `ScrollStrategy` — the Context.Service key carrying `.Auto` and `.None` Layers
 - `ScrollStrategyType` — pure-data union backing the resolved strategy value
+- `ScrollApplyPayload`: post-swap scroll decision and restoration result
 - `ScrollAuto`
 - `ScrollNone`
 

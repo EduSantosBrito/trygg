@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "typeRoots": ["../../packages/core/node_modules/@types", "../../node_modules/@types"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true
+  },
+  "include": [
+    "./browser.ts",
+    "../benchmark-browser.ts",
+    "../benchmark-runtime.ts",
+    "../benchmark-resource.ts",
+    "../benchmark-dev-api.ts",
+    "../benchmark-navigation.ts",
+    "../benchmark-activation-memory.ts",
+    "../benchmark-router.ts",
+    "../benchmark-incident-auth.ts"
+  ]
+}

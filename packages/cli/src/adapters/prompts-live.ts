@@ -7,24 +7,35 @@ import * as clack from "@clack/prompts";
 import {
   Prompts,
   PromptCancelledError,
+  PromptFailedError,
+  InvalidPromptResponseError,
   type PromptsService,
   type TextOptions,
   type SelectOptions,
   type ConfirmOptions,
 } from "../ports/prompts";
 
+export interface ClackPromptAdapter {
+  readonly isCancel: (value: unknown) => value is symbol;
+  readonly text: (options: clack.TextOptions) => Promise<string | symbol>;
+  readonly select: (options: clack.SelectOptions<string>) => Promise<string | symbol>;
+  readonly confirm: (options: clack.ConfirmOptions) => Promise<boolean | symbol>;
+}
+
 /**
  * Helper to run a clack prompt and handle cancellation
  */
-const isPromptValue = <T>(value: T | symbol): value is T => !clack.isCancel(value);
-
-const runPrompt = <T>(prompt: () => Promise<T | symbol>): Effect.Effect<T, PromptCancelledError> =>
+const runPrompt = <T>(
+  adapter: ClackPromptAdapter,
+  operation: "text" | "select" | "confirm",
+  prompt: () => Promise<T | symbol>,
+) =>
   Effect.tryPromise({
     try: prompt,
-    catch: () => PromptCancelledError.default,
+    catch: (cause) => new PromptFailedError({ operation, cause }),
   }).pipe(
     Effect.flatMap((result) =>
-      isPromptValue<T>(result) ? Effect.succeed(result) : Effect.fail(PromptCancelledError.default),
+      adapter.isCancel(result) ? Effect.fail(PromptCancelledError.default) : Effect.succeed(result),
     ),
   );
 
@@ -48,11 +59,12 @@ const buildConfirmOptions = (options: ConfirmOptions): clack.ConfirmOptions => {
   return result;
 };
 
-const promptsImpl: PromptsService = {
-  text: (options: TextOptions) => runPrompt(() => clack.text(buildTextOptions(options))),
+export const make = (adapter: ClackPromptAdapter): PromptsService => ({
+  text: (options: TextOptions) =>
+    runPrompt(adapter, "text", () => adapter.text(buildTextOptions(options))),
 
   select: <T extends string>(options: SelectOptions<T>) =>
-    runPrompt<string>(() => {
+    runPrompt(adapter, "select", () => {
       const clackOpts = options.options.map((opt) => {
         if (opt.hint !== undefined) {
           return { value: opt.value, label: opt.label, hint: opt.hint };
@@ -68,18 +80,18 @@ const promptsImpl: PromptsService = {
         selectOpts.initialValue = options.initialValue;
       }
 
-      return clack.select(selectOpts);
+      return adapter.select(selectOpts);
     }).pipe(
       Effect.flatMap((selected) => {
         const matched = options.options.find((option) => option.value === selected);
         return matched === undefined
-          ? Effect.fail(PromptCancelledError.default)
+          ? Effect.fail(new InvalidPromptResponseError({ operation: "select", value: selected }))
           : Effect.succeed(matched.value);
       }),
     ),
 
   confirm: (options: ConfirmOptions) =>
-    runPrompt(() => clack.confirm(buildConfirmOptions(options))),
-};
+    runPrompt(adapter, "confirm", () => adapter.confirm(buildConfirmOptions(options))),
+});
 
-export const PromptsLive = Layer.succeed(Prompts, promptsImpl);
+export const layer = Layer.succeed(Prompts, make(clack));

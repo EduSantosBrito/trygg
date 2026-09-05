@@ -12,8 +12,8 @@ const manifest = Router.Routes.make()
   .add(Router.Route.make("/users/:id").component(UserPage)).manifest;
 
 const program = Effect.gen(function* () {
-  const matcher = yield* Router.createMatcher(manifest);
-  const match = matcher.match("/users/42");
+  const matcher = yield* Router.RouteMatcher.make(manifest);
+  const match = yield* matcher.match("/users/42");
   if (Option.isSome(match)) {
     // match.value.route is the ResolvedRoute, match.value.params is { id: "42" }
     return match.value.params;
@@ -33,18 +33,18 @@ Redirects, middleware, and Boundary surfaces are not declared here. They live on
 
 ## Behavior
 
-- `resolveRoutes` flattens the nested route tree into absolute `ResolvedRoute` patterns, carrying each route's ancestors (root first, parent last). A route enters the flat list only if it has a component or is an index route.
-- Matching prefers more specific patterns. Patterns with more segments sort first; among patterns of equal segment count, a per-segment score breaks the tie — static segments outrank params, params outrank required catch-alls, and those outrank wildcards. The matcher sorts compiled patterns once, then linear-scans for the first hit, returning `Option<RouteMatch>` with raw string params.
+- `resolveRoutes` flattens the nested route tree in depth-first declaration order into absolute `ResolvedRoute` patterns, carrying each route's ancestors (root first, parent last). A route enters the flat list only if it has a component or is an index route. Each execution owns its result; resolving a manifest does not fork background work.
+- Matching prefers more specific patterns. Patterns with more segments sort first; among patterns of equal segment count, a per-segment score breaks the tie — static segments outrank params, params outrank required catch-alls, and those outrank wildcards. Equal scores preserve declaration order. The matcher sorts compiled patterns once, decodes each pathname once per lookup, then linear-scans for the first hit, returning `Option<RouteMatch>` with raw string params.
 - Boundary resolution is nearest-wins: `resolveErrorBoundary`, `resolveNotFoundBoundary`, and `resolveForbiddenBoundary` walk leaf, then ancestors, then the root manifest surface, and return the first defined boundary. `resolveLoadingBoundary` walks leaf then ancestors only — there is no root loading surface — and returns the nearest loading component or `Option.none()`.
 - Render and scroll strategy layers resolve the same way: `resolveRenderStrategy` and `resolveScrollStrategy` walk leaf then ancestors and return the nearest layer, or `undefined` for the default.
 - Decode happens only after a route matches. `decodeRouteParams` and `decodeRouteQuery` run the route's schema against the raw match; with no schema, params pass through unchanged and query returns an empty object.
-- `createMatcher` is the synchronous test helper — it resolves and compiles eagerly and exposes a plain `match` that returns `Option<RouteMatch>` directly. `RouteMatcher` is the same logic as an injectable Service: `RouteMatcher.make(manifest)` for production, `RouteMatcher.test(routes)` for tests, both returning a Layer whose error channel is `InvalidRoutePathPattern`.
+- `RouteMatcher.make(manifest)` resolves and compiles eagerly, then returns an effectful `RouteMatcherShape`. Its `match` operation returns `Effect<Option<RouteMatch>, InvalidRoutePathEncoding>`, so malformed percent encoding cannot be mistaken for a route miss. `RouteMatcher.fromResolved(routes)` constructs the same matcher directly from resolved routes.
 
 ## Related exports
 
-- `RouteMatcher` — injectable Service wrapping the match logic as a Layer
+- `RouteMatcher` — owner for configured matcher factories
 - `resolveRoutes` — flattens the nested tree into absolute resolved patterns
-- `createMatcher` — synchronous test helper exposing a plain `match`
+- `RouteMatcher.make` — constructs the canonical effectful matcher without installing a Layer
 - `decodeRouteParams` — runs the route's param schema against the raw match
 - `decodeRouteQuery` — runs the route's query schema against the raw match
 - `resolveErrorBoundary` — walks leaf to root for the nearest error boundary

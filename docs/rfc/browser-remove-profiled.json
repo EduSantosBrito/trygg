@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-04T21:34:08.245Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 45.5,
+          "frameMs": 52.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 81,
+          "frameMs": 87.59999996423721,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 38.19999998807907,
+          "frameMs": 44.40000003576279,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 37.19999998807907,
+          "frameMs": 49.69999998807907,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 36.19999998807907,
+          "frameMs": 55.799999952316284,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 78.19999998807907,
+          "frameMs": 84.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 36.89999997615814,
+          "frameMs": 52,
+          "rows": 999
+        }
+      ]
+    }
+  ]
+}

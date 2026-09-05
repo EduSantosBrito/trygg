@@ -11,7 +11,7 @@ import * as Context from "effect/Context";
 // Error type
 // =============================================================================
 
-export class LocationError extends Schema.TaggedErrorClass<LocationError>()("LocationError", {
+export class LocationError extends Schema.TaggedError<LocationError>()("LocationError", {
   operation: Schema.String,
   cause: Schema.Unknown,
 }) {}

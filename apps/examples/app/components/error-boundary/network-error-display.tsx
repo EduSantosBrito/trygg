@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class NetworkError extends Schema.TaggedErrorClass<NetworkError>()("NetworkError", {
+export class NetworkError extends Schema.TaggedError<NetworkError>()("NetworkError", {
   url: Schema.String,
   status: Schema.Number,
 }) {}

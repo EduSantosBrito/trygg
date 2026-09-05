@@ -17,7 +17,7 @@ import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 import * as Router from "../service.js";
 import { Outlet } from "../outlet.js";
-import { OutletRenderer } from "../outlet-services.js";
+import { renderComponent, renderError, renderLayout } from "../outlet-services.js";
 import * as Signal from "../../primitives/signal.js";
 import { Element, text } from "../../primitives/element.js";
 import { setFiberRef } from "../../internal/fiber-ref.js";
@@ -41,14 +41,11 @@ const renderLayoutChild = Effect.fn("outletRendering.renderLayoutChild")(functio
 
 const layoutComp = (_name: string): RouteComponent => renderLayoutChild();
 
-class TestMiddlewareError extends Schema.TaggedErrorClass<TestMiddlewareError>()(
-  "TestMiddlewareError",
-  {
-    message: Schema.String,
-  },
-) {}
+class TestMiddlewareError extends Schema.TaggedError<TestMiddlewareError>()("TestMiddlewareError", {
+  message: Schema.String,
+}) {}
 
-class LoaderFailure extends Schema.TaggedErrorClass<LoaderFailure>()("LoaderFailure", {
+class LoaderFailure extends Schema.TaggedError<LoaderFailure>()("LoaderFailure", {
   reason: Schema.String,
 }) {}
 
@@ -953,12 +950,11 @@ describe("Outlet - Lazy loader (resolveComponent)", () => {
 // InvalidRouteComponent error
 // =============================================================================
 
-describe("OutletRenderer - InvalidRouteComponent", () => {
+describe("outlet rendering - InvalidRouteComponent", () => {
   it.effect("renderComponent fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
-      const renderer = yield* OutletRenderer;
       // @ts-expect-error exercising runtime validation for invalid route components.
-      const exit = yield* renderer.renderComponent("not-a-component", {}).pipe(Effect.exit);
+      const exit = yield* renderComponent("not-a-component", {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -970,14 +966,13 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
           }
         }
       }
-    }).pipe(Effect.provide(OutletRenderer.Live)),
+    }),
   );
 
   it.effect("renderLayout fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
-      const renderer = yield* OutletRenderer;
       // @ts-expect-error exercising runtime validation for invalid route layouts.
-      const exit = yield* renderer.renderLayout(42, text("child"), {}).pipe(Effect.exit);
+      const exit = yield* renderLayout(42, text("child"), {}).pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -989,14 +984,13 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
           }
         }
       }
-    }).pipe(Effect.provide(OutletRenderer.Live)),
+    }),
   );
 
   it.effect("renderError fails with InvalidRouteComponent on invalid input", () =>
     Effect.gen(function* () {
-      const renderer = yield* OutletRenderer;
       // @ts-expect-error exercising runtime validation for invalid error boundaries.
-      const exit = yield* renderer.renderError(null, Cause.empty, "/test").pipe(Effect.exit);
+      const exit = yield* renderError(null, Cause.empty, "/test").pipe(Effect.exit);
       assert.isTrue(Exit.isFailure(exit));
       if (Exit.isFailure(exit)) {
         const error = Cause.findErrorOption(exit.cause);
@@ -1008,6 +1002,6 @@ describe("OutletRenderer - InvalidRouteComponent", () => {
           }
         }
       }
-    }).pipe(Effect.provide(OutletRenderer.Live)),
+    }),
   );
 });

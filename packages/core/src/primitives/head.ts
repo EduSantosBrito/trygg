@@ -1,5 +1,5 @@
 /**
- * Head hoisting and deduplication services.
+ * Head hoisting and deduplication management.
  *
  * @remarks
  * Owner module for the `Head` topic. Use this module when components should
@@ -10,7 +10,7 @@
  * @since 1.0.0
  * @module trygg/primitives/head
  */
-import { Data, Effect, Option, Ref, Schema, Scope } from "effect";
+import { Data, Effect, Option, Ref, Scope } from "effect";
 import * as Context from "effect/Context";
 import { getFiberRef, setFiberRef } from "../internal/fiber-ref.js";
 import type { ElementProps } from "./element.js";
@@ -24,7 +24,7 @@ import type { ElementProps } from "./element.js";
  *
  * @remarks
  * The renderer uses this set to decide which intrinsic elements should be sent
- * through the current `Head` service instead of mounting inline.
+ * through the current head manager instead of mounting inline.
  *
  * @example
  * ```ts
@@ -64,104 +64,11 @@ export const isHoistable = (tag: string): Effect.Effect<boolean> =>
   Effect.sync(() => HOISTABLE_TAGS.has(tag));
 
 // =============================================================================
-// HeadStrategy — Controls WHERE head computation happens
-// =============================================================================
-
-/**
- * HeadStrategy service — determines whether head elements are computed
- * server-side (in initial HTML) or client-side (after JS).
- *
- * @remarks
- * Defaults to following RenderStrategy:
- * - RenderStrategy.SSR → HeadStrategy.Server
- * - RenderStrategy.Lazy/Eager → HeadStrategy.Client
- *
- * Can be explicitly overridden per-route.
- *
- * @example
- * ```ts
- * const strategy = Head.HeadStrategy.Server
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export type HeadStrategyService = Data.TaggedEnum<{
-  readonly HeadStrategy: { readonly isServer: boolean };
-}>;
-
-const HeadStrategyService = Data.taggedEnum<HeadStrategyService>();
-
-/**
- * Service tag for the active head-computation strategy.
- *
- * @remarks
- * Resolve this tag to learn whether head elements are computed server-side (in
- * the initial HTML) or client-side (after JS). It follows {@link RenderStrategy}
- * by default — SSR maps to the server strategy, Lazy/Eager to the client one —
- * and can be overridden per route. Use the `HeadStrategy.Server` /
- * `HeadStrategy.Client` constructors to build a value.
- *
- * @example
- * ```ts
- * const strategy = yield* HeadStrategy
- * if (strategy.isServer) {
- *   // compute the document <head> during SSR
- * }
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export class HeadStrategy extends Context.Service<
-  HeadStrategy,
-  {
-    readonly _tag: "HeadStrategy";
-    readonly isServer: boolean;
-  }
->()("trygg/HeadStrategy") {
-  /**
-   * Head computed server-side (in initial HTML).
-   * SEO-optimal — crawlers see head content immediately.
-   */
-  static readonly Server: HeadStrategyService = HeadStrategyService.HeadStrategy({
-    isServer: true,
-  });
-
-  /**
-   * Head computed client-side (after JS loads).
-   * For personalization, A/B testing, device-specific tags.
-   */
-  static readonly Client: HeadStrategyService = HeadStrategyService.HeadStrategy({
-    isServer: false,
-  });
-}
-
-/**
- * HeadStrategy service interface.
- *
- * @remarks
- * This is the structural contract yielded by `HeadStrategy` when routes or
- * render code need to inspect whether head work should happen on the server.
- *
- * @example
- * ```ts
- * const strategy: Head.HeadStrategyService = Head.HeadStrategy.Client
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-
-// =============================================================================
 // Head Entry — Represents a mounted head element
 // =============================================================================
 
 /**
- * A head element entry tracked by the Head service.
+ * A head element entry tracked by the head manager.
  *
  * @remarks
  * Browser and test implementations return these entries so tests or SSR code
@@ -201,7 +108,7 @@ export interface HeadEntry {
  *
  * @remarks
  * Use this helper when custom render code needs the same dedup key strategy as
- * the built-in head service.
+ * the built-in head manager.
  *
  * @example
  * ```ts
@@ -262,88 +169,50 @@ export type HoistAction = Data.TaggedEnum<{
 
 export const HoistAction = Data.taggedEnum<HoistAction>();
 
-/**
- * Head-owned hoisting seam consumed by the renderer.
- *
- * @remarks
- * Implementations decide whether an intrinsic element needs special mounting and
- * return the action the renderer should apply.
- *
- * @internal
- */
-export interface HeadHoist {
-  readonly maybeHoist: (
-    tag: string,
-    props: ElementProps,
-  ) => Effect.Effect<Option.Option<HoistAction>>;
-}
-
 const stripHeadMode = (props: ElementProps): ElementProps => {
   const { mode: _mode, ...domProps } = props;
   return domProps;
 };
 
 /**
- * Build the default Head hoisting policy.
+ * Resolve the default Head hoisting policy.
  *
  * @remarks
  * The default policy owns document mount detection, head tag detection, mode
- * handling, key derivation, and dispatch to the active Head service.
+ * handling, key derivation, and dispatch to the active head manager.
  *
  * @internal
  */
-export const makeHeadHoist = (): HeadHoist => ({
-  maybeHoist: (tag, props) =>
-    Effect.gen(function* () {
-      const domProps = props.mode === undefined ? props : stripHeadMode(props);
-      const isDocumentMount = yield* getFiberRef(IsDocumentMount);
-      if (isDocumentMount && DOCUMENT_TAGS.has(tag)) {
-        return Option.some(HoistAction.document({ props: domProps }));
-      }
+export const maybeHoist: (
+  tag: string,
+  props: ElementProps,
+) => Effect.Effect<Option.Option<HoistAction>> = Effect.fnUntraced(function* (tag, props) {
+  const domProps = props.mode === undefined ? props : stripHeadMode(props);
+  const isDocumentMount = yield* getFiberRef(IsDocumentMount);
+  if (isDocumentMount && DOCUMENT_TAGS.has(tag)) {
+    return Option.some(HoistAction.document({ props: domProps }));
+  }
 
-      const headService = yield* getFiberRef(CurrentHead);
-      if (headService === null || !HOISTABLE_TAGS.has(tag) || props.mode === "static") {
-        return Option.none();
-      }
+  const headManager = yield* getFiberRef(CurrentHead);
+  if (headManager === null || !HOISTABLE_TAGS.has(tag) || props.mode === "static") {
+    return Option.none();
+  }
 
-      const key = yield* deriveKey(tag, domProps);
-      return Option.some(
-        HoistAction.head({
-          props: domProps,
-          mount: (node) => headService.mount(tag, node, key),
-        }),
-      );
+  const key = yield* deriveKey(tag, domProps);
+  return Option.some(
+    HoistAction.head({
+      props: domProps,
+      mount: (node) => headManager.mount(tag, node, key),
     }),
+  );
 });
 
 // =============================================================================
-// Head Service
+// Head manager
 // =============================================================================
 
 /**
- * Head service error — mounting failed.
- *
- * @remarks
- * Browser head implementations can raise this when a head node cannot be
- * mounted or reconciled as requested.
- *
- * @example
- * ```ts
- * const error = new Head.HeadMountError({ tagName: "title", key: Option.none(), cause: "boom" })
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export class HeadMountError extends Schema.TaggedErrorClass<HeadMountError>()("HeadMountError", {
-  tagName: Schema.String,
-  key: Schema.Unknown,
-  cause: Schema.Unknown,
-}) {}
-
-/**
- * Head service interface.
+ * Head manager interface.
  *
  * @remarks
  * `HeadService` owns the mount and inspection operations used by browser,
@@ -378,64 +247,6 @@ export interface HeadService {
   readonly entries: Effect.Effect<ReadonlyArray<HeadEntry>>;
 }
 
-/**
- * Head service key.
- * Provided implicitly by `mount` (browser) or `renderToString` (SSR).
- * Components never provide this manually.
- *
- * @remarks
- * This interface describes the typed service identity threaded through Effect
- * context for the current head manager.
- *
- * @example
- * ```ts
- * const service = yield* Head.Head
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export interface Head extends Context.Service<
-  Head,
-  {
-    readonly mount: (
-      tagName: string,
-      node: HTMLElement,
-      key: Option.Option<string>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
-    readonly entries: Effect.Effect<ReadonlyArray<HeadEntry>>;
-  }
-> {}
-
-/**
- * Service tag for the current head manager.
- *
- * @remarks
- * Yield this tag in Effects when low-level head utilities need direct access to
- * the active `HeadService` implementation.
- *
- * @example
- * ```ts
- * const head = yield* Head.Head
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export const Head = Context.Service<
-  Head,
-  {
-    readonly mount: (
-      tagName: string,
-      node: HTMLElement,
-      key: Option.Option<string>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
-    readonly entries: Effect.Effect<ReadonlyArray<HeadEntry>>;
-  }
->("trygg/Head");
-
 // =============================================================================
 // Dedup Stack — Stack-based deduplication for keyed head elements
 // =============================================================================
@@ -461,23 +272,23 @@ type DedupStacks = Map<string, Array<DedupEntry>>;
 // =============================================================================
 
 /**
- * Create a browser Head service implementation.
+ * Create a browser head manager.
  * Mounts elements to document.head with stack-based dedup.
  *
  * @remarks
  * Use this when mounting into a real browser DOM and you need direct access to
- * the service instead of the higher-level `browserHeadLayer` effect.
+ * the service directly.
  *
  * @example
  * ```ts
- * const head = yield* Head.makeBrowserHead()
+ * const head = yield* Head.makeBrowser()
  * ```
  *
  * @category Head Management
  * @public
  * @since 1.0.0
  */
-export const makeBrowserHead = Effect.fn("Head.makeBrowserHead")(function* () {
+export const makeBrowser = Effect.fn("Head.makeBrowser")(function* () {
   const stacks: DedupStacks = new Map();
   const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
 
@@ -564,7 +375,7 @@ export const makeBrowserHead = Effect.fn("Head.makeBrowserHead")(function* () {
 // =============================================================================
 
 /**
- * Create a test Head service implementation.
+ * Create a test head manager.
  * Collects entries in-memory without touching the DOM.
  * Useful for unit tests.
  *
@@ -574,14 +385,14 @@ export const makeBrowserHead = Effect.fn("Head.makeBrowserHead")(function* () {
  *
  * @example
  * ```ts
- * const head = yield* Head.makeTestHead()
+ * const head = yield* Head.makeTest()
  * ```
  *
  * @category Head Management
  * @public
  * @since 1.0.0
  */
-export const makeTestHead = Effect.fn("Head.makeTestHead")(function* () {
+export const makeTest = Effect.fn("Head.makeTest")(function* () {
   const entriesRef = yield* Ref.make<ReadonlyArray<HeadEntry>>([]);
 
   const mount: HeadService["mount"] = Effect.fn("Head.testMount")(function* (tagName, node, key) {
@@ -599,17 +410,17 @@ export const makeTestHead = Effect.fn("Head.makeTestHead")(function* () {
 });
 
 // =============================================================================
-// FiberRef — Thread Head service through the render tree
+// FiberRef — Thread the head manager through the render tree
 // =============================================================================
 
 /**
- * FiberRef to track the current Head service.
+ * FiberRef to track the current head manager.
  * Set by `mount()` — read by the renderer's Intrinsic case.
  * When null, hoistable elements render normally (append to parent).
  *
  * @remarks
  * Exported for renderer integration and tests that need to simulate the active
- * head service explicitly.
+ * head manager explicitly.
  *
  * @internal
  * @since 1.0.0
@@ -661,7 +472,7 @@ export const DOCUMENT_TAGS: ReadonlySet<string> = new Set(["html", "head", "body
  * action (head-hoistable tags, or document-shell tags during a document mount).
  *
  * @remarks
- * For any tag outside `HOISTABLE_TAGS ∪ DOCUMENT_TAGS`, `makeHeadHoist().maybeHoist`
+ * For any tag outside `HOISTABLE_TAGS ∪ DOCUMENT_TAGS`, `maybeHoist`
  * provably returns `Option.none()` regardless of fiber-ref state — the
  * `!HOISTABLE_TAGS.has(tag)` branch short-circuits before either ref is read.
  * Renderers use this to skip allocating the hoist closure and running its
@@ -673,43 +484,3 @@ export const DOCUMENT_TAGS: ReadonlySet<string> = new Set(["html", "head", "body
  */
 export const isHoistCandidate = (tag: string): boolean =>
   HOISTABLE_TAGS.has(tag) || DOCUMENT_TAGS.has(tag);
-
-// =============================================================================
-// Layers
-// =============================================================================
-
-/**
- * Browser Head layer — mounts elements to document.head.
- *
- * @remarks
- * Use this effect when a parent component or test needs to provide a browser
- * head service explicitly.
- *
- * @example
- * ```ts
- * const layer = Head.browserHeadLayer
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export const browserHeadLayer: Effect.Effect<HeadService, never, Scope.Scope> = makeBrowserHead();
-
-/**
- * Test Head layer — collects entries in-memory.
- *
- * @remarks
- * Use this effect in tests that need a head service without mutating the real
- * document head.
- *
- * @example
- * ```ts
- * const layer = Head.testHeadLayer
- * ```
- *
- * @category Head Management
- * @public
- * @since 1.0.0
- */
-export const testHeadLayer: Effect.Effect<HeadService, never, Scope.Scope> = makeTestHead();

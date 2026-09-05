@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "../../src",
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["spike-call.tsx"]
+}

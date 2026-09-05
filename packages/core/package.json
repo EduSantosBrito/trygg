@@ -54,6 +54,10 @@
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing.js"
     },
+    "./profiling": {
+      "types": "./dist/profiling.d.ts",
+      "import": "./dist/profiling.js"
+    },
     "./config": {
       "types": "./dist/config.d.ts",
       "import": "./dist/config.js"
@@ -66,35 +70,35 @@
     "prepublishOnly": "bun run build",
     "prepare": "effect-language-service patch",
     "build": "rm -rf dist && rolldown -c && tsgo --project tsconfig.build.json",
-    "test:types": "bun run build && bun ./type-tests/verify-jsx-requirement-fixture.ts && tsd --files 'type-tests/*.test-d.ts'",
+    "test:types": "bun run build && bun ./type-tests/verify-jsx-requirement-fixture.ts && tsgo -p type-tests/spike-call/tsconfig.json && tsgo -p type-tests/route-schema-inputs/tsconfig.json && tsd --files 'type-tests/*.test-d.ts'",
     "docs:check": "bun ./src/internal/docs-check.ts",
     "docs:check:json": "bun ./src/internal/docs-check.ts --json",
     "typecheck": "tsgo --noEmit",
     "effect:check": "effect-language-service diagnostics --project tsconfig.json",
-    "test": "npx vitest run",
-    "test:watch": "npx vitest"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "consola": "^3.4.2"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.85.1",
-    "@effect/platform-bun": "4.0.0-beta.58",
-    "@effect/platform-node": "4.0.0-beta.58",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.58",
-    "@effect/vitest": "4.0.0-beta.58",
+    "@effect/language-service": "^0.87.2",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
+    "@effect/vitest": "catalog:",
     "@types/bun": "^1.3.13",
     "happy-dom": "^20.3.1",
     "rolldown": "^1.0.0-rc.1",
     "tsd": "^0.33.0",
     "vite": "^6.0.0",
-    "vitest": "^3.2.0"
+    "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect/platform-browser": "4.0.0-beta.58",
-    "@effect/platform-bun": "4.0.0-beta.58",
-    "@effect/platform-node": "4.0.0-beta.58",
-    "effect": "4.0.0-beta.58",
+    "@effect/platform-browser": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "typescript": "^5",
     "vite": "^5.0.0 || ^6.0.0"
   },

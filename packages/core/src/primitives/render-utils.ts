@@ -108,12 +108,157 @@ export const clearPropValue = (node: globalThis.Element, key: string): void => {
   }
 };
 
+const isAsciiWhitespace = (character: string): boolean =>
+  character === "\t" ||
+  character === "\n" ||
+  character === "\f" ||
+  character === "\r" ||
+  character === " ";
+
+// Extract candidate URLs using the delimiter rules from the HTML srcset
+// algorithm. Commas inside a URL (notably data URLs) are preserved.
+const srcSetUrls = (value: string): ReadonlyArray<string> => {
+  const urls: Array<string> = [];
+  let position = 0;
+
+  while (position < value.length) {
+    while (
+      position < value.length &&
+      (isAsciiWhitespace(value[position] ?? "") || value[position] === ",")
+    ) {
+      position++;
+    }
+    if (position >= value.length) break;
+
+    const urlStart = position;
+    while (position < value.length && !isAsciiWhitespace(value[position] ?? "")) {
+      position++;
+    }
+
+    let url = value.slice(urlStart, position);
+    if (url.endsWith(",")) {
+      url = url.replace(/,+$/, "");
+      if (url !== "") urls.push(url);
+      continue;
+    }
+
+    let inParentheses = false;
+    while (position < value.length) {
+      const character = value[position];
+      position++;
+      if (!inParentheses && character === "(") {
+        inParentheses = true;
+      } else if (inParentheses && character === ")") {
+        // HTML's tokenizer has no nesting depth: the first ')' returns to the
+        // descriptor state, where a following comma starts the next candidate.
+        inParentheses = false;
+      } else if (!inParentheses && character === ",") {
+        break;
+      }
+    }
+    if (url !== "") urls.push(url);
+  }
+
+  return urls;
+};
+
+const spaceSeparatedUrls = (value: string): ReadonlyArray<string> =>
+  value.split(/[\t\n\f\r ]+/).filter((candidate) => candidate !== "");
+
+type UrlAttributeGrammar = "single" | "srcset" | "space-separated";
+
+interface UrlAttributePolicy {
+  readonly sink: SafeUrl.UrlSink;
+  readonly grammar: UrlAttributeGrammar;
+}
+
+interface UrlAttributeRule {
+  readonly fallback: UrlAttributePolicy;
+  readonly elements: Readonly<Record<string, UrlAttributePolicy>>;
+}
+
+const NAVIGATION_URL: UrlAttributePolicy = { sink: "navigation", grammar: "single" };
+const FORM_URL: UrlAttributePolicy = { sink: "form", grammar: "single" };
+const RESOURCE_URL: UrlAttributePolicy = { sink: "resource", grammar: "single" };
+const IMAGE_URL: UrlAttributePolicy = { sink: "image", grammar: "single" };
+const MEDIA_URL: UrlAttributePolicy = { sink: "media", grammar: "single" };
+const IMAGE_SRCSET: UrlAttributePolicy = { sink: "image", grammar: "srcset" };
+const RESOURCE_URL_LIST: UrlAttributePolicy = {
+  sink: "resource",
+  grammar: "space-separated",
+};
+
+// Every URL-bearing prop exposed by Element types is owned here. The fallback
+// prevents invalid element/attribute combinations from reaching generic DOM
+// assignment, while element overrides grant only the capability that sink needs.
+const URL_ATTRIBUTE_RULES: Readonly<Record<string, UrlAttributeRule>> = {
+  action: { fallback: FORM_URL, elements: { form: FORM_URL } },
+  cite: {
+    fallback: RESOURCE_URL,
+    elements: {
+      blockquote: RESOURCE_URL,
+      del: RESOURCE_URL,
+      ins: RESOURCE_URL,
+      q: RESOURCE_URL,
+    },
+  },
+  data: { fallback: RESOURCE_URL, elements: { object: RESOURCE_URL } },
+  formaction: {
+    fallback: FORM_URL,
+    elements: { button: FORM_URL, input: FORM_URL },
+  },
+  href: {
+    fallback: RESOURCE_URL,
+    elements: {
+      a: NAVIGATION_URL,
+      area: NAVIGATION_URL,
+      base: RESOURCE_URL,
+      image: IMAGE_URL,
+      link: RESOURCE_URL,
+      use: RESOURCE_URL,
+    },
+  },
+  ping: {
+    fallback: RESOURCE_URL_LIST,
+    elements: { a: RESOURCE_URL_LIST, area: RESOURCE_URL_LIST },
+  },
+  poster: { fallback: IMAGE_URL, elements: { video: IMAGE_URL } },
+  src: {
+    fallback: RESOURCE_URL,
+    elements: {
+      audio: MEDIA_URL,
+      img: IMAGE_URL,
+      input: IMAGE_URL,
+      source: MEDIA_URL,
+      track: MEDIA_URL,
+      video: MEDIA_URL,
+    },
+  },
+  srcset: {
+    fallback: IMAGE_SRCSET,
+    elements: { img: IMAGE_SRCSET, source: IMAGE_SRCSET },
+  },
+};
+
+export const isUrlBearingAttributeName = (key: string): boolean =>
+  Object.hasOwn(URL_ATTRIBUTE_RULES, key.toLowerCase());
+
+const urlAttributePolicy = (node: globalThis.Element, key: string): UrlAttributePolicy | null => {
+  const rule = URL_ATTRIBUTE_RULES[key];
+  if (rule === undefined) return null;
+
+  return rule.elements[node.localName.toLowerCase()] ?? rule.fallback;
+};
+
 export const applyPropValue = (
   node: globalThis.Element,
   key: string,
   value: unknown,
   safeUrlConfig: SafeUrl.SafeUrlConfigService,
 ): Option.Option<BlockedSafeUrlAttribute> => {
+  const normalizedKey = key.toLowerCase();
+  if (normalizedKey.startsWith("on")) return Option.none();
+
   if (key === "style" && typeof value === "object" && value !== null) {
     if (node instanceof HTMLElement || node instanceof SVGElement) {
       Object.assign(node.style, value);
@@ -153,23 +298,43 @@ export const applyPropValue = (
     } else {
       node.setAttribute(key, String(value));
     }
-  } else if (key === "href" || key === "src") {
-    const url = String(value);
-    const validated = SafeUrl.validateSyncWithConfig(url, safeUrlConfig);
-    if (Option.isSome(validated)) {
-      node.setAttribute(key, validated.value);
-    } else {
-      return Option.some({ key, url, allowedSchemes: safeUrlConfig.allowedSchemes });
-    }
-  } else if (key !== "children" && key !== "key" && typeof value !== "function") {
-    if (typeof value === "boolean") {
-      if (value) {
-        node.setAttribute(key, "");
+  } else {
+    const policy = urlAttributePolicy(node, normalizedKey);
+    if (policy !== null) {
+      const url = String(value);
+      const allowedSchemes = SafeUrl.allowedSchemesForSink(policy.sink, safeUrlConfig);
+
+      if (policy.grammar === "single") {
+        const validated = SafeUrl.validateSyncForSink(url, policy.sink, safeUrlConfig);
+        if (Option.isSome(validated)) {
+          node.setAttribute(normalizedKey, validated.value);
+        } else {
+          node.removeAttribute(normalizedKey);
+          return Option.some({ key, url, allowedSchemes });
+        }
       } else {
-        node.removeAttribute(key);
+        const candidates = policy.grammar === "srcset" ? srcSetUrls(url) : spaceSeparatedUrls(url);
+        if (
+          candidates.length === 0 ||
+          candidates.some((candidate) =>
+            Option.isNone(SafeUrl.validateSyncForSink(candidate, policy.sink, safeUrlConfig)),
+          )
+        ) {
+          node.removeAttribute(normalizedKey);
+          return Option.some({ key, url, allowedSchemes });
+        }
+        node.setAttribute(normalizedKey, url);
       }
-    } else {
-      node.setAttribute(key, String(value));
+    } else if (key !== "children" && key !== "key" && typeof value !== "function") {
+      if (typeof value === "boolean") {
+        if (value) {
+          node.setAttribute(key, "");
+        } else {
+          node.removeAttribute(key);
+        }
+      } else {
+        node.setAttribute(key, String(value));
+      }
     }
   }
 

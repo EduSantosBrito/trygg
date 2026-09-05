@@ -1,0 +1,73 @@
+{
+  "status": "validated; paused by user; final queue change not benchmarked",
+  "tests": {
+    "core": 1703,
+    "cli": 87,
+    "website": 104,
+    "total": 1894
+  },
+  "focusedTests": 35,
+  "source": {
+    "packages/core/src/primitives/renderer.ts": "c6fd5df4c4085ed65c812f6c8300e68df6ef44001a32d34b3ec8ba539965a39e",
+    "packages/core/src/primitives/render-keyed-list.ts": "9d3646cb4cdd7d13ddad7acfd176fa23061504fda505b64e74958d8141fb408a",
+    "packages/core/src/primitives/renderer.docs.md": "6e17f829f319998205dac211aa1351c6b5e2b6ac0d00bf8229a9de4c31904033",
+    "packages/core/src/primitives/__tests__/keyed-row-context.test.tsx": "8d44ccb0eb0fda17da08c123e34673d185d854d5bcc2208639182632d66ca5f1"
+  },
+  "builtJavaScript": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-_6iipCSJ.js": "fa2e49c11b48d6c9bc80526be8c9704c25faf51cff4cf4727d06110829362f02",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-GNvM4kAL.js": "56a51714a8d413b8552efc499dcda324ac672a915096d446441e12fa8d24a092",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-D1WXKgFV.js": "3edd993c6b440f4937f8b9430180bb3ee756ede1af68e7f2869ebe1e4c9b72ff",
+    "packages/core/dist/dev-platform-bun-BnsKVO3q.js": "dfe09e2a741000583234b846b24a062f7a7e1a053cc3d107b10c116c861d51ed",
+    "packages/core/dist/index.js": "5ba6ca30b1051a350d452dfafab4ff1075efeeb422a2d046ad52b72f49e634f4",
+    "packages/core/dist/jsx-dev-runtime.js": "ce9e73deb8b7f1c88a4074d5e656391e241999f57e1cf2a4cc7209bfa98d4fd1",
+    "packages/core/dist/jsx-runtime-CGeQGggT.js": "c72570cacae59f89e4dda70eff87ad8b27f0eda740b589f2e91d4cc5766436dd",
+    "packages/core/dist/jsx-runtime.js": "e9ac92133c5989c15240d19e1c467970870b68e2041a85b6cce0b4be02aacf19",
+    "packages/core/dist/observer-Diz3Tqwm.js": "3942477bc8bcb3eb8d8b33681c9696a3b9ee6b286e34497c4e1565188f5517a5",
+    "packages/core/dist/renderer-D5N5e5uO.js": "a2424fa04b5b8ac09a00bc44a5825d1e01287fd68c0b7542762bf099bd6616b1",
+    "packages/core/dist/router.js": "304d0b57b252e8de2344067ec5bc88c4c124b6f91c3770a53723a5871f408e66",
+    "packages/core/dist/testing.js": "45f59f4792dd8a59461dd9a77c588f676674537b5861b2e45e7d075245841f45",
+    "packages/core/dist/trace-BTUDXjuJ.js": "e34b05dee9ca0d294a5de36e77443b9cdfef428f7767e1604d2834dda896d033",
+    "packages/core/dist/unsafe-DQ74TVkG.js": "f052095db49e9558ad3b2577f7109903046bc0a4a4cf5ca156bcaf40d31a3f62",
+    "packages/core/dist/vite-plugin.js": "c402aaaaf82742698e68e23c283e3fcb40e7c14ec24c98ace32638fea4fc6edc"
+  },
+  "gates": {
+    "focused": {
+      "log": "/tmp/trygg-row-context-queue-green.log",
+      "exitCode": 0,
+      "sha256": "efbe8df5ec6246c23ac9e6ec34053dbbb1ea99222f01880084a85fc960f04aeb"
+    },
+    "check": {
+      "log": "/tmp/trygg-row-context-queue-check.log",
+      "exitCode": 0,
+      "sha256": "759b34b2b446837b17c3ca45f420edba85bac8d39bcdf7d51419bff7ed7df61d"
+    },
+    "fullTests": {
+      "log": "/tmp/trygg-row-context-queue-full-tests-authorized.log",
+      "exitCode": 0,
+      "sha256": "8d12b2fa80acbe0004bb0fe1da807993d0a47ef1e58caf61cf7c4dd9fc57bef8"
+    },
+    "docs": {
+      "log": "/tmp/trygg-row-context-queue-docs.log",
+      "exitCode": 0,
+      "sha256": "8730c0d166e0ca910699347a63264fc43987899bec517a0844ed9286337bcf64"
+    },
+    "examples": {
+      "log": "/tmp/trygg-row-context-queue-examples.log",
+      "exitCode": 0,
+      "sha256": "a555cbe36655e83fc33116043cda27f7827a78ec0cf8beab070984f763bb6c22"
+    },
+    "website": {
+      "log": "/tmp/trygg-row-context-queue-www.log",
+      "exitCode": 0,
+      "sha256": "bdb28c35b95e1d0f4a67a47e8ca33a800085e8dcec53302e0045f1320d6766ba"
+    }
+  },
+  "priorMeasurement": "keyed-context-environment.json",
+  "laterCorrectnessDiff": {
+    "file": "keyed-context-queue.diff",
+    "sha256": "178d88d9887485acbe56897f8e041edd86df2e4f9563dd80d7b0b7df3a59617e"
+  }
+}

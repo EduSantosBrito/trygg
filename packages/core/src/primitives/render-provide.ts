@@ -1,7 +1,12 @@
 import { Effect, Predicate } from "effect";
 import * as Context from "effect/Context";
 import type { Element } from "./element.js";
-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
+import type {
+  ErrorBoundaryHandler,
+  RenderContext,
+  RenderPreparation,
+  RenderResult,
+} from "./renderer.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -42,7 +47,14 @@ export const renderProvide: <R>(
         return childResult.node;
       },
       cleanup: childResult.cleanup,
-      reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
+      get preparation() {
+        return childResult.preparation;
+      },
+      reconcile: (
+        nextElement: Element,
+        nextContext: Context.Context<unknown> | null,
+        preparation?: RenderPreparation,
+      ) =>
         Effect.gen(function* () {
           if (!Predicate.isTagged(nextElement, "Provide") || childResult.reconcile === undefined) {
             return false;
@@ -53,7 +65,7 @@ export const renderProvide: <R>(
               ? Context.merge(nextContext, nextElement.context)
               : nextElement.context;
 
-          return yield* childResult.reconcile(nextElement.child, nextMergedContext);
+          return yield* childResult.reconcile(nextElement.child, nextMergedContext, preparation);
         }),
     };
   },

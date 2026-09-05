@@ -10,6 +10,7 @@ export default defineConfig({
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts",
     api: "src/api/types.ts",
     config: "src/config.ts",
+    profiling: "src/profiling.ts",
   },
   output: {
     dir: "dist",

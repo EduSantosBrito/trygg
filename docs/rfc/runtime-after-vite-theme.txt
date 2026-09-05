@@ -1,0 +1,15 @@
+2026-09-05; Bun 1.4.0; Effect 4.0.0-rc.112
+Command: bun scripts/benchmark-runtime.ts
+Five warmups; median of seven samples. Local observation, not a controlled comparison.
+
+resolve 100 routes: 0.023 ms/op
+match last of 100 routes: 0.018 ms/op
+miss 100 routes: 0.013 ms/op
+resolve 1000 routes: 0.012 ms/op
+match last of 1000 routes: 0.036 ms/op
+miss 1000 routes: 0.023 ms/op
+resolve 4000 routes: 0.056 ms/op
+match last of 4000 routes: 0.149 ms/op
+miss 4000 routes: 0.120 ms/op
+cleanup 1000 releases: 0.033 ms/op
+cleanup 10000 releases: 0.275 ms/op

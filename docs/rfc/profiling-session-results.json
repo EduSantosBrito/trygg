@@ -1,0 +1,1031 @@
+{
+  "startedAt": "2026-09-05T14:03:12.370489+00:00",
+  "hashes": {
+    "packages/core/src/profiling.ts": "f9017ca1930822730a2d8b17f59836f0d5ba0c10e5d111c99e45d9ee96b3116d",
+    "packages/core/src/primitives/render-profiling.ts": "7cd48b3eeb9cfc34d4c20f6620aba2301719d6adb7fa57b5e2d7623139a3c091",
+    "packages/core/src/primitives/render-keyed-list.ts": "1acc45b48ca6b2a6fab80d48fce79c3e3db3823fd55bb4a216aa120389d646e1",
+    "scripts/benchmark-browser.ts": "f9d5f65a9bc970ba722fc0ffc97f1e8eabb9790da7b9d00175dbc4fb230e02a8",
+    "scripts/benchmarks/browser.ts": "66fd07d97841411f7a5a908b56e5fb8a0f84739b1bf0355da1b875acce06d62d",
+    "scripts/benchmarks/profiling.ts": "1130d3c1d59a6d3abeefb2242b65969c9dc14dbaf1f5e65ebdf153f6ee8bf612",
+    "scripts/benchmarks/profile-report.ts": "868cfb7d8d8f7ebd98697808c988641409e418206fbb0e47b54ec0e0fac16cbe",
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-CjbTpqSx.js": "44594806c0f98a6cb5febb144bf5cead0c9c5abd99c81e6515a29221aa9d8ea9",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-GNvM4kAL.js": "56a51714a8d413b8552efc499dcda324ac672a915096d446441e12fa8d24a092",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DcD59i4D.js": "2fa3b823832811c51544dac55e340055fd33cb3ea09539c12b49bc9fe9d7d14e",
+    "packages/core/dist/dev-platform-bun-DNJ0NM8p.js": "9b4175b4f84bbc327bac494dd27cf044cef63ed367ef01eb18fb32a2882e8726",
+    "packages/core/dist/index.js": "f81ff8713e43eba45cee52e7ad07724e4c2ae4e16f94a12d281c9d32c1546921",
+    "packages/core/dist/jsx-dev-runtime.js": "ce9e73deb8b7f1c88a4074d5e656391e241999f57e1cf2a4cc7209bfa98d4fd1",
+    "packages/core/dist/jsx-runtime-CGeQGggT.js": "c72570cacae59f89e4dda70eff87ad8b27f0eda740b589f2e91d4cc5766436dd",
+    "packages/core/dist/jsx-runtime.js": "e9ac92133c5989c15240d19e1c467970870b68e2041a85b6cce0b4be02aacf19",
+    "packages/core/dist/observer-Diz3Tqwm.js": "3942477bc8bcb3eb8d8b33681c9696a3b9ee6b286e34497c4e1565188f5517a5",
+    "packages/core/dist/profiling.js": "6587cc7401fe76f5b6544e8ef4fba3c7e3c0421ab0453e8801f3d84bd7f741a5",
+    "packages/core/dist/render-profiling-BeDTqPf8.js": "c45c5bc8306dfba24d7bfae0964d5f7425af599cb208542ea40e4460d52d2c38",
+    "packages/core/dist/renderer-CGFgkd2q.js": "f88b17af934071e070a797e48f369cb82e672ac79208fb9267698b76a9faf809",
+    "packages/core/dist/router.js": "530ba77d7495c0dfbff5c8fc0c5342a239789cd5acdfeee395372ac2c70c81d3",
+    "packages/core/dist/testing.js": "64b99daa7ca382c0b7d08ad6920e549891baa9b64840b23db41a35cfd1c1d0b0",
+    "packages/core/dist/trace-BTUDXjuJ.js": "e34b05dee9ca0d294a5de36e77443b9cdfef428f7767e1604d2834dda896d033",
+    "packages/core/dist/unsafe-DQ74TVkG.js": "f052095db49e9558ad3b2577f7109903046bc0a4a4cf5ca156bcaf40d31a3f62",
+    "packages/core/dist/vite-plugin.js": "579df4f1a819ccf43ecf17c479a6d3bdf7d2a34499a740bc3e296a73c75d90be"
+  },
+  "order": [
+    "off1",
+    "paused1",
+    "record1",
+    "record2",
+    "paused2",
+    "off2"
+  ],
+  "runs": [
+    {
+      "name": "off1",
+      "result": {
+        "date": "2026-09-05T14:03:18.378Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "off",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 18.5,
+                "frameMs": 33.89999997615814,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 8.800000011920929,
+                "frameMs": 23.599999964237213,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 37.39999997615814,
+                "frameMs": 40.09999996423721,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 8.900000035762787,
+                "frameMs": 23.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 39.40000003576279,
+                "frameMs": 42.40000003576279,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 8.600000023841858,
+                "frameMs": 24.399999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 34.60000002384186,
+                "frameMs": 37.39999997615814,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.69999998807907,
+                "frameMs": 29.5,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 18.69999998807907,
+                "frameMs": 34.19999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 11.5,
+                "frameMs": 26.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 18,
+                "frameMs": 33.80000001192093,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642395,
+            "gzipBytes": 199336
+          }
+        ]
+      },
+      "log": "update: handler median 18.50 ms\n"
+    },
+    {
+      "name": "paused1",
+      "result": {
+        "date": "2026-09-05T14:03:24.989Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "paused",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 44.39999997615814,
+                "frameMs": 47.19999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 11.199999988079071,
+                "frameMs": 25.5,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 40.299999952316284,
+                "frameMs": 43.89999997615814,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.200000047683716,
+                "frameMs": 30.700000047683716,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 11,
+                "frameMs": 25.100000023841858,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.099999964237213,
+                "frameMs": 29.80000001192093,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.100000023841858,
+                "frameMs": 28.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 25.900000035762787,
+                "frameMs": 28.600000023841858,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 30.30000001192093,
+                "frameMs": 33,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.5,
+                "frameMs": 29.399999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 49.700000047683716,
+                "frameMs": 53.30000001192093,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642436,
+            "gzipBytes": 199367
+          }
+        ]
+      },
+      "log": "update: handler median 26.50 ms\n",
+      "profiling": {
+        "sessionId": "granular-1788616998622-4ef4fd4f-8a7f-40c8-9c69-46afcbb8f3d0",
+        "mode": "paused",
+        "snapshot": {
+          "active": false,
+          "closed": false,
+          "admitted": 0,
+          "recorded": 0,
+          "dropped": 0,
+          "filtered": 148865
+        },
+        "phases": [],
+        "traceCount": 0,
+        "firstTraceId": null,
+        "missingParentCount": 0
+      }
+    },
+    {
+      "name": "record1",
+      "result": {
+        "date": "2026-09-05T14:03:31.633Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "record",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 31.899999976158142,
+                "frameMs": 34.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28,
+                "frameMs": 30.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 45.10000002384186,
+                "frameMs": 48,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 29.69999998807907,
+                "frameMs": 33,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 12.899999976158142,
+                "frameMs": 29,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.899999976158142,
+                "frameMs": 30.5,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 30.69999998807907,
+                "frameMs": 33.90000003576279,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.099999964237213,
+                "frameMs": 30.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 56.5,
+                "frameMs": 59.30000001192093,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 29,
+                "frameMs": 32.30000001192093,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 42.200000047683716,
+                "frameMs": 45.200000047683716,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642436,
+            "gzipBytes": 199365
+          }
+        ]
+      },
+      "log": "update: handler median 29.70 ms\nOTLP: 7700 recorded spans, 17 accepted batches; session granular-1788617005252-a0aa09ac-f5b0-42d2-81a4-48c2e84a4abf\n",
+      "profiling": {
+        "sessionId": "granular-1788617005252-a0aa09ac-f5b0-42d2-81a4-48c2e84a4abf",
+        "mode": "record",
+        "snapshot": {
+          "active": false,
+          "closed": false,
+          "admitted": 7700,
+          "recorded": 7700,
+          "dropped": 0,
+          "filtered": 141165
+        },
+        "phases": [
+          {
+            "name": "Signal.derive",
+            "count": 1100,
+            "totalMs": 12.499999999999972,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.2
+          },
+          {
+            "name": "trygg.keyedList.render",
+            "count": 1100,
+            "totalMs": 71.90000000000059,
+            "medianMs": 0.1,
+            "p95Ms": 0.2,
+            "maxMs": 2.3
+          },
+          {
+            "name": "trygg.keyedList.properties",
+            "count": 1100,
+            "totalMs": 9.799999999999981,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.2
+          },
+          {
+            "name": "trygg.keyedList.prepare",
+            "count": 1100,
+            "totalMs": 96.4000000000008,
+            "medianMs": 0.1,
+            "p95Ms": 0.2,
+            "maxMs": 2.3
+          },
+          {
+            "name": "trygg.keyedList.reconcile",
+            "count": 1100,
+            "totalMs": 37.10000000000025,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.3
+          },
+          {
+            "name": "trygg.keyedList.cleanup",
+            "count": 1100,
+            "totalMs": 5.999999999999995,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.1
+          },
+          {
+            "name": "trygg.keyedList.granular",
+            "count": 1100,
+            "totalMs": 165.7000000000012,
+            "medianMs": 0.1,
+            "p95Ms": 0.4,
+            "maxMs": 2.4
+          }
+        ],
+        "acknowledgments": [
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          }
+        ],
+        "traceCount": 1100,
+        "firstTraceId": "b44bbb10c9581ecfa3b149bd90ecfdf4",
+        "missingParentCount": 0
+      },
+      "rawArtifact": "docs/rfc/profiling-record1-otlp.json.gz",
+      "rawSha256": "260aedbdacf21f98461c379a3f627214e3a68f35dc924415613024a19c46c005",
+      "gzipSha256": "a14ce0e2bb5b595eef266ff6a0b857655b61e3530d5910520fce9f4588fc3c4d"
+    },
+    {
+      "name": "record2",
+      "result": {
+        "date": "2026-09-05T14:03:38.377Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "record",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 16.099999964237213,
+                "frameMs": 30.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.5,
+                "frameMs": 31.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.19999998807907,
+                "frameMs": 30.799999952316284,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 13.100000023841858,
+                "frameMs": 28.900000035762787,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 45.19999998807907,
+                "frameMs": 48.10000002384186,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 12.699999988079071,
+                "frameMs": 27.599999964237213,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 12.899999976158142,
+                "frameMs": 29.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.100000023841858,
+                "frameMs": 31.100000023841858,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 12.599999964237213,
+                "frameMs": 31.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.69999998807907,
+                "frameMs": 30.399999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 41.80000001192093,
+                "frameMs": 44.700000047683716,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642436,
+            "gzipBytes": 199366
+          }
+        ]
+      },
+      "log": "update: handler median 27.70 ms\nOTLP: 7700 recorded spans, 16 accepted batches; session granular-1788617012047-81b225a4-7f19-486d-8e35-18e71552a31d\n",
+      "profiling": {
+        "sessionId": "granular-1788617012047-81b225a4-7f19-486d-8e35-18e71552a31d",
+        "mode": "record",
+        "snapshot": {
+          "active": false,
+          "closed": false,
+          "admitted": 7700,
+          "recorded": 7700,
+          "dropped": 0,
+          "filtered": 141165
+        },
+        "phases": [
+          {
+            "name": "Signal.derive",
+            "count": 1100,
+            "totalMs": 11.599999999999975,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.1
+          },
+          {
+            "name": "trygg.keyedList.render",
+            "count": 1100,
+            "totalMs": 62.10000000000052,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 2.2
+          },
+          {
+            "name": "trygg.keyedList.properties",
+            "count": 1100,
+            "totalMs": 8.599999999999985,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.2
+          },
+          {
+            "name": "trygg.keyedList.prepare",
+            "count": 1100,
+            "totalMs": 85.20000000000077,
+            "medianMs": 0.1,
+            "p95Ms": 0.2,
+            "maxMs": 2.2
+          },
+          {
+            "name": "trygg.keyedList.reconcile",
+            "count": 1100,
+            "totalMs": 30.80000000000012,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.2
+          },
+          {
+            "name": "trygg.keyedList.cleanup",
+            "count": 1100,
+            "totalMs": 6.099999999999994,
+            "medianMs": 0,
+            "p95Ms": 0.1,
+            "maxMs": 0.1
+          },
+          {
+            "name": "trygg.keyedList.granular",
+            "count": 1100,
+            "totalMs": 146.60000000000107,
+            "medianMs": 0.1,
+            "p95Ms": 0.3,
+            "maxMs": 2.4
+          }
+        ],
+        "acknowledgments": [
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          },
+          {
+            "status": 200,
+            "rejectedSpans": 0,
+            "errorMessage": ""
+          }
+        ],
+        "traceCount": 1100,
+        "firstTraceId": "d80856f62a9d64e19fc7fcda82d8146f",
+        "missingParentCount": 0
+      },
+      "rawArtifact": "docs/rfc/profiling-record2-otlp.json.gz",
+      "rawSha256": "0adb23c704ecd19a531ad154758832ab4fa9a1eacebe0db74ab9d7b60b91e892",
+      "gzipSha256": "a2f5ac74a517041ec4fa9e858d8b4f9c5f1bc2b876753b70267348fa46937399"
+    },
+    {
+      "name": "paused2",
+      "result": {
+        "date": "2026-09-05T14:03:45.232Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "paused",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 12,
+                "frameMs": 30.600000023841858,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 25.899999976158142,
+                "frameMs": 28.599999964237213,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.600000023841858,
+                "frameMs": 29,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.19999998807907,
+                "frameMs": 30.099999964237213,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.80000001192093,
+                "frameMs": 29.19999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.69999998807907,
+                "frameMs": 32.09999996423721,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.099999964237213,
+                "frameMs": 30.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 11.600000023841858,
+                "frameMs": 29.19999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 11.5,
+                "frameMs": 28,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 40.69999998807907,
+                "frameMs": 43.69999998807907,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 26.200000047683716,
+                "frameMs": 28.600000023841858,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642436,
+            "gzipBytes": 199368
+          }
+        ]
+      },
+      "log": "update: handler median 26.60 ms\n",
+      "profiling": {
+        "sessionId": "granular-1788617018796-20673f7c-49e0-4528-9642-d01656542571",
+        "mode": "paused",
+        "snapshot": {
+          "active": false,
+          "closed": false,
+          "admitted": 0,
+          "recorded": 0,
+          "dropped": 0,
+          "filtered": 148865
+        },
+        "phases": [],
+        "traceCount": 0,
+        "firstTraceId": null,
+        "missingParentCount": 0
+      }
+    },
+    {
+      "name": "off2",
+      "result": {
+        "date": "2026-09-05T14:03:51.393Z",
+        "browser": "141.0.7390.122",
+        "transport": "inline",
+        "fixture": "granular",
+        "profiling": "off",
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "warmup": 20,
+        "samples": 11,
+        "results": [
+          {
+            "operation": "update",
+            "samples": [
+              {
+                "operation": "update",
+                "handlerMs": 24,
+                "frameMs": 26.600000023841858,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 37.30000001192093,
+                "frameMs": 40.39999997615814,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 24.69999998807907,
+                "frameMs": 27.30000001192093,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 46.30000001192093,
+                "frameMs": 49.5,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 28.30000001192093,
+                "frameMs": 31.399999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 20.900000035762787,
+                "frameMs": 36.30000001192093,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.30000001192093,
+                "frameMs": 29.899999976158142,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 36.80000001192093,
+                "frameMs": 40,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.900000035762787,
+                "frameMs": 30.400000035762787,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 36.40000003576279,
+                "frameMs": 39.40000003576279,
+                "rows": 1000
+              },
+              {
+                "operation": "update",
+                "handlerMs": 27.19999998807907,
+                "frameMs": 29.899999976158142,
+                "rows": 1000
+              }
+            ]
+          }
+        ],
+        "operationConsoleMessages": [
+          {
+            "operation": "update",
+            "messages": 0
+          }
+        ],
+        "startup": null,
+        "bundleSizes": [
+          {
+            "file": "browser.js",
+            "loadedAtStartup": null,
+            "bytes": 642395,
+            "gzipBytes": 199337
+          }
+        ]
+      },
+      "log": "update: handler median 27.90 ms\n"
+    }
+  ],
+  "hostDedicated": false,
+  "transport": "inline Chromium; in-memory OTLP capture; host collector POST after measurements",
+  "command": "bun scripts/benchmark-browser.ts",
+  "runnerSource": "import gzip\nimport hashlib\nimport json\nimport os\nfrom pathlib import Path\nimport subprocess\nfrom datetime import datetime, timezone\n\nroot = Path('/home/host/dev/trygg')\npaths = [root / p for p in [\n    'packages/core/src/profiling.ts', 'packages/core/src/primitives/render-profiling.ts',\n    'packages/core/src/primitives/render-keyed-list.ts', 'scripts/benchmark-browser.ts',\n    'scripts/benchmarks/browser.ts', 'scripts/benchmarks/profiling.ts',\n    'scripts/benchmarks/profile-report.ts',\n]] + sorted((root / 'packages/core/dist').glob('*.js'))\nhashes = lambda: {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}\nbefore = hashes()\nreport = {'startedAt': datetime.now(timezone.utc).isoformat(), 'hashes': before,\n          'order': ['off1', 'paused1', 'record1', 'record2', 'paused2', 'off2'],\n          'runs': [], 'hostDedicated': False,\n          'transport': 'inline Chromium; in-memory OTLP capture; host collector POST after measurements',\n          'command': 'bun scripts/benchmark-browser.ts', 'runnerSource': Path(__file__).read_text()}\nfor name in report['order']:\n    mode = name[:-1]\n    out = Path('/tmp/opencode') / f'trygg-profile-{name}.json'\n    env = {**os.environ, 'TMPDIR': '/tmp/opencode', 'CHROME_BINARY': '/tmp/trygg-chromium/bin/chromium',\n           'BENCHMARK_INLINE': '1', 'BENCHMARK_GRANULAR': '1', 'BENCHMARK_CASE': 'update',\n           'BENCHMARK_WARMUP': '20', 'BENCHMARK_SAMPLES': '11', 'BENCHMARK_OTLP': mode,\n           'BENCHMARK_OUTPUT': str(out)}\n    if mode == 'record': env['BENCHMARK_OTLP_EXPORT'] = '1'\n    log = out.with_suffix('.log')\n    with log.open('w') as f:\n        subprocess.run(['bun', 'scripts/benchmark-browser.ts'], cwd=root, env=env, stdout=f, stderr=subprocess.STDOUT, check=True)\n    run = {'name': name, 'result': json.loads(out.read_text()), 'log': log.read_text()}\n    if mode != 'off':\n        raw = Path(str(out) + '.otlp.json')\n        otlp = json.loads(raw.read_text())\n        run['profiling'] = {k: v for k, v in otlp.items() if k not in ['batches', 'traceIds']}\n        run['profiling']['traceCount'] = len(otlp['traceIds'])\n        run['profiling']['firstTraceId'] = next(iter(otlp['traceIds']), None)\n        spans = [s for b in otlp['batches'] for r in json.loads(b)['resourceSpans'] for g in r['scopeSpans'] for s in g['spans']]\n        known = {s['spanId'] for s in spans}\n        run['profiling']['missingParentCount'] = sum(bool(s.get('parentSpanId')) and s['parentSpanId'] not in known for s in spans)\n        if mode == 'record':\n            assert len(spans) == 7700 and len(otlp['traceIds']) == 1100\n            assert run['profiling']['missingParentCount'] == 0\n            assert otlp['snapshot']['dropped'] == 0\n            dest = root / f'docs/rfc/profiling-{name}-otlp.json.gz'\n            dest.write_bytes(gzip.compress(raw.read_bytes(), mtime=0))\n            run['rawArtifact'] = str(dest.relative_to(root))\n            run['rawSha256'] = hashlib.sha256(raw.read_bytes()).hexdigest()\n            run['gzipSha256'] = hashlib.sha256(dest.read_bytes()).hexdigest()\n    report['runs'].append(run)\n    print(name, run['log'], flush=True)\nreport['hashesUnchanged'] = before == hashes()\nassert report['hashesUnchanged']\nreport['finishedAt'] = datetime.now(timezone.utc).isoformat()\n(root / 'docs/rfc/profiling-session-results.json').write_text(json.dumps(report, indent=2) + '\\n')\n",
+  "hashesUnchanged": true,
+  "finishedAt": "2026-09-05T14:03:51.452035+00:00"
+}

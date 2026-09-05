@@ -581,7 +581,7 @@ const extractHistogramValue = (
  *
  * @example
  * ```ts
- * const sink: Metrics.MetricsSink = Metrics.createSink("capture", () => Effect.void)
+ * const sink: Metrics.MetricsSink = Metrics.MetricsSink.make("capture", () => Effect.void)
  * ```
  *
  * @category Metrics
@@ -599,26 +599,50 @@ export interface MetricsSink {
   readonly export: (snapshot: MetricsSnapshot) => Effect.Effect<void, unknown>;
 }
 
-/**
- * Create a metrics sink.
- *
- * @remarks
- * Prefer this helper over hand-writing objects so sink construction stays terse
- * and aligned with the public `MetricsSink` shape.
- *
- * @example
- * ```ts
- * const sink = Metrics.createSink("capture", () => Effect.void)
- * ```
- *
- * @category Metrics
- * @public
- * @since 1.0.0
- */
-export const createSink = (
-  name: string,
-  exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void, unknown>,
-): MetricsSink => ({ name, export: exportFn });
+export namespace MetricsSink {
+  /**
+   * Create a metrics sink.
+   *
+   * @remarks
+   * Prefer this helper over hand-writing objects so sink construction stays terse
+   * and aligned with the public `MetricsSink` shape.
+   *
+   * @example
+   * ```ts
+   * const sink = Metrics.MetricsSink.make("capture", () => Effect.void)
+   * ```
+   *
+   * @category Metrics
+   * @public
+   * @since 1.0.0
+   */
+  export const make = (
+    name: string,
+    exportFn: (snapshot: MetricsSnapshot) => Effect.Effect<void, unknown>,
+  ): MetricsSink => ({ name, export: exportFn });
+
+  /**
+   * Create a collector sink that stores snapshots in the supplied array.
+   *
+   * @remarks
+   * Prefer this in tests that need to capture exported snapshots for assertions.
+   *
+   * @example
+   * ```ts
+   * const sink = Metrics.MetricsSink.makeCollector("capture", [])
+   * ```
+   *
+   * @category Metrics
+   * @public
+   * @since 1.0.0
+   */
+  export const makeCollector = (name: string, snapshots: MetricsSnapshot[]): MetricsSink =>
+    make(name, (snapshot) =>
+      Effect.sync(() => {
+        snapshots.push(snapshot);
+      }),
+    );
+}
 
 /**
  * Registered metrics sinks.
@@ -753,7 +777,7 @@ export const exportToSinks: Effect.Effect<void> = Effect.gen(function* () {
  * @public
  * @since 1.0.0
  */
-export const consoleSink: MetricsSink = createSink("console", (s) =>
+export const consoleSink: MetricsSink = MetricsSink.make("console", (s) =>
   Effect.sync(() => {
     metricsLogger.withTag("metrics").log({
       navigation: s.navigationCount,
@@ -797,26 +821,3 @@ export const consoleSink: MetricsSink = createSink("console", (s) =>
     });
   }),
 );
-
-/**
- * Create a collector sink that stores snapshots in an array.
- * Useful for testing.
- *
- * @remarks
- * Prefer this in tests that need to capture exported snapshots for assertions.
- *
- * @example
- * ```ts
- * const sink = Metrics.createCollectorSink("capture", [])
- * ```
- *
- * @category Metrics
- * @public
- * @since 1.0.0
- */
-export const createCollectorSink = (name: string, snapshots: MetricsSnapshot[]): MetricsSink =>
-  createSink(name, (s) =>
-    Effect.sync(() => {
-      snapshots.push(s);
-    }),
-  );

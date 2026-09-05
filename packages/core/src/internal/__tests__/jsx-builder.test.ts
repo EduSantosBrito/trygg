@@ -1,3 +1,4 @@
+/* oxlint-disable effect/no-raw-throw, effect/no-built-in-error-constructor -- Hostile getter regression tests require direct JavaScript throws. */
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Predicate } from "effect";
 
@@ -73,37 +74,27 @@ describe("JsxBuilder.build", () => {
     }),
   );
 
-  it.effect(
-    "should preserve safe props and explicit key while malformed jsx-only props throw",
-    () =>
-      Effect.gen(function* () {
-        // Test: should preserve safe props and explicit key while malformed jsx-only props throw.
-        // Scope: guards the shared builder against hostile JavaScript prop objects without relying on the public sync runtime wrapper.
-        // Assertion: keeps readable props, drops throwing children/key reads, and still returns a normal intrinsic element.
-        const context = yield* Effect.context<never>();
-        const element = yield* JsxBuilder.build(
-          "div",
-          {
-            id: "root",
-            get children() {
-              return Effect.runSyncWith(context)(Effect.fail("boom-children"));
-            },
-            get key() {
-              return Effect.runSyncWith(context)(Effect.fail("boom-key"));
-            },
+  it.effect("should fail the whole build while an intrinsic prop getter throws", () =>
+    Effect.gen(function* () {
+      // Test: should fail the whole build while an intrinsic prop getter throws.
+      // Scope: guards the JavaScript props introspection boundary against partial recovery.
+      // Assertion: preserves the getter defect and returns no partially populated Intrinsic.
+      const failure = new Error("boom-href");
+      const exit = yield* Effect.exit(
+        JsxBuilder.build("a", {
+          id: "root",
+          get href() {
+            throw failure;
           },
-          7,
-        );
+        }),
+      );
 
-        assert.isTrue(Predicate.isTagged(element, "Intrinsic"));
-        if (!Predicate.isTagged(element, "Intrinsic")) {
-          return assert.fail("Expected Intrinsic element");
-        }
+      if (Exit.isSuccess(exit)) {
+        return assert.fail("Expected hostile props to fail");
+      }
 
-        assert.deepStrictEqual(element.props, { id: "root" });
-        assert.strictEqual(element.key, 7);
-        assert.deepStrictEqual(element.children, []);
-      }),
+      assert.strictEqual(Cause.squash(exit.cause), failure);
+    }),
   );
 
   it.effect(

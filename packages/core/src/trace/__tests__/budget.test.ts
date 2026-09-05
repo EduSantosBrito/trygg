@@ -5,7 +5,7 @@ import type { TraceRecord } from "../trace.js";
 const swapRecords = [
   {
     name: "contract.action.start",
-    payload: { actionId: "swap100", scenario: "swap100" },
+    payload: { actionId: "swap100", facts: { scenario: "swap100" } },
     actionId: undefined,
   },
   { name: "keyedList.item.add", payload: { key: 1 }, actionId: "swap100" },

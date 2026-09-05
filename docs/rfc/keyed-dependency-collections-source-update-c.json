@@ -1,0 +1,89 @@
+{
+  "date": "2026-09-05T11:01:49.993Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 0,
+  "samples": 1,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 8.899999976158142,
+          "frameMs": 26.099999964237213,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 47.90000003576279,
+    "firstContentfulPaintMs": 80
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3144,
+      "gzipBytes": 1509
+    },
+    {
+      "file": "chunk-2spj9jcz.js",
+      "loadedAtStartup": true,
+      "bytes": 82284,
+      "gzipBytes": 25539
+    },
+    {
+      "file": "chunk-tqnwm4eg.js",
+      "loadedAtStartup": true,
+      "bytes": 287703,
+      "gzipBytes": 82110
+    },
+    {
+      "file": "chunk-sxw003ty.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46533
+    },
+    {
+      "file": "chunk-yb4wf5jt.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 558
+    },
+    {
+      "file": "chunk-ywpzpezq.js",
+      "loadedAtStartup": true,
+      "bytes": 62537,
+      "gzipBytes": 18077
+    },
+    {
+      "file": "chunk-6y8jbnta.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 999
+    }
+  ],
+  "work": [
+    {
+      "operation": "update",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "maps": 1407,
+      "sets": 704,
+      "tags": {}
+    }
+  ]
+}

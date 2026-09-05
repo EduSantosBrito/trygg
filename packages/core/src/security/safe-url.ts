@@ -1,9 +1,9 @@
 /**
- * SafeUrl validation for secure href/src attributes.
+ * SafeUrl validation for URL-bearing DOM attributes.
  *
  * @remarks
  * Owner module for the `SafeUrl` topic. Use this module when URLs can cross an
- * untrusted boundary before they reach DOM attributes like `href` or `src`.
+ * untrusted boundary before they reach URL-bearing DOM attributes.
  * The root `trygg` entrypoint publishes this topic as `SafeUrl.*` and
  * `UnsafeUrlError`.
  *
@@ -13,7 +13,7 @@
  * @since 1.0.0
  * @module trygg/security/safe-url
  */
-import { Effect, Exit, Layer, Match, Option, Schema } from "effect";
+import { Effect, Exit, Layer, Match, Option, Result, Schema } from "effect";
 import * as Context from "effect/Context";
 
 /**
@@ -32,7 +32,7 @@ import * as Context from "effect/Context";
  * @public
  * @since 1.0.0
  */
-export class UnsafeUrlError extends Schema.TaggedErrorClass<UnsafeUrlError>()("UnsafeUrlError", {
+export class UnsafeUrlError extends Schema.TaggedError<UnsafeUrlError>()("UnsafeUrlError", {
   url: Schema.String,
   reason: Schema.Literals(["invalid_url", "unsafe_scheme", "empty_url"]),
   scheme: Schema.optional(Schema.String),
@@ -161,18 +161,130 @@ export const defaultConfig: SafeUrlConfigService = {
   allowedSchemes: DEFAULT_ALLOWED_SCHEMES,
 };
 
+/**
+ * URL-bearing DOM sink classes with distinct scheme policies.
+ *
+ * @remarks
+ * Pass a sink to `allowedSchemesForSink` or `validateSyncForSink` so URL
+ * validation follows the security contract of the target attribute.
+ *
+ * @example
+ * ```ts
+ * const sink: SafeUrl.UrlSink = "form"
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
+ */
+export type UrlSink = "navigation" | "form" | "resource" | "image" | "media";
+
+const HTTP_SCHEMES: ReadonlyArray<string> = ["http", "https"];
+const IMAGE_SCHEMES: ReadonlyArray<string> = ["http", "https", "blob", "data"];
+const NAVIGATION_FORBIDDEN_SCHEMES: ReadonlyArray<string> = [
+  "blob",
+  "data",
+  "javascript",
+  "vbscript",
+];
+
+/**
+ * Resolve the configured schemes that are safe for a concrete DOM sink.
+ *
+ * @remarks
+ * Navigation supports configured custom schemes, while forms and executable
+ * resources remain HTTP(S)-only. Blob and data URLs are limited to image and
+ * media sinks.
+ *
+ * @example
+ * ```ts
+ * const schemes = SafeUrl.allowedSchemesForSink("image", SafeUrl.defaultConfig)
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
+ */
+export const allowedSchemesForSink = (
+  sink: UrlSink,
+  config: SafeUrlConfigService,
+): ReadonlyArray<string> => {
+  const configured = Array.from(
+    new Set(config.allowedSchemes.map((scheme) => scheme.toLowerCase())),
+  );
+
+  switch (sink) {
+    case "navigation":
+      return configured.filter((scheme) => !NAVIGATION_FORBIDDEN_SCHEMES.includes(scheme));
+    case "form":
+    case "resource":
+      return configured.filter((scheme) => HTTP_SCHEMES.includes(scheme));
+    case "image":
+    case "media":
+      return configured.filter((scheme) => IMAGE_SCHEMES.includes(scheme));
+  }
+};
+
 // =============================================================================
 // Internal helpers (pure sync)
 // =============================================================================
 
-/**
- * Parse a URL and extract its scheme.
- * Returns None for relative URLs (no scheme).
- * @internal
- */
-const extractScheme = (url: string): Option.Option<string> => {
-  const scheme = url.match(/^([a-z][a-z0-9+.-]*):/)?.[1];
-  return scheme === undefined ? Option.none() : Option.some(scheme.toLowerCase());
+const URL_PARSE_BASE = "https://trygg.invalid/";
+const EXPLICIT_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const SPECIAL_SCHEMES: ReadonlyArray<string> = ["ftp", "file", "http", "https", "ws", "wss"];
+const parseUrl = Option.liftThrowable((url: string) => new URL(url, URL_PARSE_BASE));
+const parseAbsoluteUrl = Option.liftThrowable((url: string) => new URL(url));
+
+type UrlInspectionFailure =
+  | { readonly reason: "empty_url" | "invalid_url" }
+  | { readonly reason: "unsafe_scheme"; readonly scheme: string };
+
+const hasAmbiguousUrlControl = (url: string): boolean => {
+  for (let index = 0; index < url.length; index++) {
+    const code = url.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+};
+
+const inspectUrl = (
+  url: string,
+  allowedSchemes: ReadonlyArray<string>,
+): Result.Result<string, UrlInspectionFailure> => {
+  if (url.trim() === "") {
+    return Result.fail({ reason: "empty_url" });
+  }
+  if (hasAmbiguousUrlControl(url)) {
+    return Result.fail({ reason: "invalid_url" });
+  }
+
+  const parsed = parseUrl(url);
+  if (Option.isNone(parsed)) {
+    return Result.fail({ reason: "invalid_url" });
+  }
+
+  // Relative and scheme-relative references inherit the document's protocol.
+  // Parsing still occurs first so browser-canonicalized scheme disguises cannot
+  // be mistaken for a relative URL.
+  const explicitUrl = url.replace(/^ +/, "");
+  if (!EXPLICIT_SCHEME.test(explicitUrl)) {
+    return Result.succeed(url);
+  }
+
+  const scheme = parsed.value.protocol.slice(0, -1).toLowerCase();
+  if (!allowedSchemes.includes(scheme)) {
+    return Result.fail({ reason: "unsafe_scheme", scheme });
+  }
+
+  const schemeEnd = explicitUrl.indexOf(":") + 1;
+  if (SPECIAL_SCHEMES.includes(scheme) && !explicitUrl.startsWith("//", schemeEnd)) {
+    return Result.succeed(url);
+  }
+
+  const absolute = parseAbsoluteUrl(url);
+  return Result.succeed(
+    Option.isSome(absolute) && absolute.value.href === parsed.value.href ? parsed.value.href : url,
+  );
 };
 
 // =============================================================================
@@ -200,23 +312,37 @@ export const validateSyncWithConfig = (
   url: string,
   config: SafeUrlConfigService,
 ): Option.Option<string> => {
-  if (url.trim() === "") {
-    return Option.none();
-  }
+  return validateSyncForSink(url, "navigation", config);
+};
 
-  const schemeOption = extractScheme(url);
-
-  if (Option.isNone(schemeOption)) {
-    // Relative URL - always allowed
-    return Option.some(url);
-  }
-
-  const scheme = schemeOption.value;
-  if (config.allowedSchemes.includes(scheme.toLowerCase())) {
-    return Option.some(url);
-  }
-
-  return Option.none();
+/**
+ * Validate a URL synchronously for a concrete DOM sink.
+ *
+ * @remarks
+ * The WHATWG parser classifies the URL before the sink policy is applied.
+ * Self-contained absolute URLs are canonicalized; references whose result
+ * depends on the document base retain their original form.
+ *
+ * @example
+ * ```ts
+ * const safe = SafeUrl.validateSyncForSink(
+ *   "data:image/png;base64,iVBORw0KGgo=",
+ *   "image",
+ *   SafeUrl.defaultConfig,
+ * )
+ * ```
+ *
+ * @category Security
+ * @public
+ * @since 1.0.0
+ */
+export const validateSyncForSink = (
+  url: string,
+  sink: UrlSink,
+  config: SafeUrlConfigService,
+): Option.Option<string> => {
+  const result = inspectUrl(url, allowedSchemesForSink(sink, config));
+  return Result.isSuccess(result) ? Option.some(result.success) : Option.none();
 };
 
 /**
@@ -269,35 +395,27 @@ export const validateSync = (url: string): Option.Option<string> =>
 export const validate: (url: string) => Effect.Effect<string, UnsafeUrlError, SafeUrlConfig> =
   Effect.fn("SafeUrl.validate")(function* (url: string) {
     const config = yield* SafeUrlConfig;
+    const allowedSchemes = allowedSchemesForSink("navigation", config);
+    const result = inspectUrl(url, allowedSchemes);
 
-    // Empty URL check
-    if (url.trim() === "") {
+    if (Result.isSuccess(result)) {
+      return result.success;
+    }
+
+    if (result.failure.reason === "unsafe_scheme") {
       return yield* new UnsafeUrlError({
         url,
-        reason: "empty_url",
-        allowedSchemes: config.allowedSchemes,
+        reason: result.failure.reason,
+        scheme: result.failure.scheme,
+        allowedSchemes,
       });
     }
 
-    // Parse and check scheme
-    const schemeOption = extractScheme(url);
-
-    if (Option.isNone(schemeOption)) {
-      // Relative URL - always allowed
-      return url;
-    }
-
-    const scheme = schemeOption.value;
-    if (!config.allowedSchemes.includes(scheme.toLowerCase())) {
-      return yield* new UnsafeUrlError({
-        url,
-        reason: "unsafe_scheme",
-        scheme,
-        allowedSchemes: config.allowedSchemes,
-      });
-    }
-
-    return url;
+    return yield* new UnsafeUrlError({
+      url,
+      reason: result.failure.reason,
+      allowedSchemes,
+    });
   });
 
 /**

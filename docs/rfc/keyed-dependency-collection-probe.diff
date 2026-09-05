@@ -1,0 +1,34 @@
+--- native-probe/scripts/benchmark-browser.ts
++++ collection-probe/scripts/benchmark-browser.ts
+@@ -164,7 +164,21 @@
+           // This separate probe is excluded from timing samples. Proxy forwarding
+           // preserves native receivers, overloads, return values, and exceptions.
+           const tags: Record<string, number> = {};
+-          const counts = { operation, rows: 0, elements: 0, textNodes: 0, comments: 0, tags };
++          const counts = { operation, rows: 0, elements: 0, textNodes: 0, comments: 0, maps: 0, sets: 0, tags };
++          const MapConstructor = globalThis.Map;
++          const SetConstructor = globalThis.Set;
++          globalThis.Map = new Proxy(MapConstructor, {
++            construct(target, args, newTarget) {
++              counts.maps++;
++              return Reflect.construct(target, args, newTarget);
++            },
++          });
++          globalThis.Set = new Proxy(SetConstructor, {
++            construct(target, args, newTarget) {
++              counts.sets++;
++              return Reflect.construct(target, args, newTarget);
++            },
++          });
+           const createElement = Document.prototype.createElement;
+           const createTextNode = Document.prototype.createTextNode;
+           const createComment = Document.prototype.createComment;
+@@ -192,6 +206,8 @@
+             counts.rows = (await window.tryggBenchmark.run(operation)).rows;
+             return counts;
+           } finally {
++            globalThis.Map = MapConstructor;
++            globalThis.Set = SetConstructor;
+             Document.prototype.createElement = createElement;
+             Document.prototype.createTextNode = createTextNode;
+             Document.prototype.createComment = createComment;

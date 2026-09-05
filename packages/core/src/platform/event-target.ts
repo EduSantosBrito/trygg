@@ -6,20 +6,17 @@
  * Internally acquires a runtime, creates a sync listener that forks the handler,
  * and registers a finalizer that removes the listener.
  */
-import { Effect, Layer, Schema, Scope } from "effect";
+import { Cause, Effect, Layer, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 
 // =============================================================================
 // Error type
 // =============================================================================
 
-export class EventTargetError extends Schema.TaggedErrorClass<EventTargetError>()(
-  "EventTargetError",
-  {
-    operation: Schema.String,
-    cause: Schema.Unknown,
-  },
-) {}
+export class EventTargetError extends Schema.TaggedError<EventTargetError>()("EventTargetError", {
+  operation: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Service interface
@@ -30,8 +27,12 @@ export interface EventTargetService {
     target: EventTarget,
     event: string,
     handler: (event: Event) => Effect.Effect<void>,
-  ) => Effect.Effect<void, never, Scope.Scope>;
-  readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
+  ) => Effect.Effect<void, EventTargetError, Scope.Scope>;
+  readonly dispatch: (
+    target: EventTarget,
+    event: string,
+    data: Event,
+  ) => Effect.Effect<void, EventTargetError>;
 }
 
 // =============================================================================
@@ -51,8 +52,12 @@ export interface PlatformEventTarget extends Context.Service<
       target: EventTarget,
       event: string,
       handler: (event: Event) => Effect.Effect<void>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
-    readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
+    ) => Effect.Effect<void, EventTargetError, Scope.Scope>;
+    readonly dispatch: (
+      target: EventTarget,
+      event: string,
+      data: Event,
+    ) => Effect.Effect<void, EventTargetError>;
   }
 > {}
 
@@ -63,14 +68,33 @@ export const PlatformEventTarget = Context.Service<
       target: EventTarget,
       event: string,
       handler: (event: Event) => Effect.Effect<void>,
-    ) => Effect.Effect<void, never, Scope.Scope>;
-    readonly dispatch: (target: EventTarget, event: string, data: Event) => Effect.Effect<void>;
+    ) => Effect.Effect<void, EventTargetError, Scope.Scope>;
+    readonly dispatch: (
+      target: EventTarget,
+      event: string,
+      data: Event,
+    ) => Effect.Effect<void, EventTargetError>;
   }
 >("trygg/platform/EventTarget");
 
 // =============================================================================
 // Browser layer
 // =============================================================================
+
+const reportCallbackFailure = (cause: Cause.Cause<never>): Effect.Effect<void> =>
+  Cause.hasInterruptsOnly(cause)
+    ? Effect.void
+    : Effect.logError("EventTarget handler failed", Cause.pretty(cause));
+
+const removeListener = (
+  target: EventTarget,
+  event: string,
+  listener: EventListener,
+): Effect.Effect<void> =>
+  Effect.try({
+    try: () => target.removeEventListener(event, listener),
+    catch: (cause) => new EventTargetError({ operation: "removeEventListener", cause }),
+  }).pipe(Effect.catch((error) => Effect.logError("EventTarget listener cleanup failed", error)));
 
 export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
   PlatformEventTarget,
@@ -80,22 +104,35 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
         const scope = yield* Effect.scope;
         const services = yield* Effect.context();
         const listener = (e: Event) => {
-          Effect.runForkWith(services)(
-            Effect.forkIn(handler(e), scope, { startImmediately: true }),
+          // Register ownership before the first user instruction, including
+          // callbacks already queued when the host removes the listener.
+          Effect.runSyncWith(services)(
+            Effect.forkIn(
+              Effect.suspend(() => handler(e)).pipe(
+                Effect.onError(reportCallbackFailure),
+                Effect.provide(services),
+              ),
+              scope,
+            ),
           );
         };
-        yield* Effect.sync(() => {
-          target.addEventListener(event, listener);
-        });
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            target.removeEventListener(event, listener);
+        yield* Effect.acquireRelease(
+          Effect.try({
+            try: () => {
+              target.addEventListener(event, listener);
+              return listener;
+            },
+            catch: (cause) => new EventTargetError({ operation: "addEventListener", cause }),
           }),
+          (registered) => removeListener(target, event, registered),
         );
       }),
     dispatch: (target, _event, data) =>
-      Effect.sync(() => {
-        target.dispatchEvent(data);
+      Effect.try({
+        try: () => {
+          target.dispatchEvent(data);
+        },
+        catch: (cause) => new EventTargetError({ operation: "dispatchEvent", cause }),
       }),
   }),
 );
@@ -104,51 +141,4 @@ export const browser: Layer.Layer<PlatformEventTarget> = Layer.succeed(
 // Test layer
 // =============================================================================
 
-export const test: Layer.Layer<PlatformEventTarget> = Layer.sync(PlatformEventTarget, () => {
-  const handlers = new Map<string, Array<(e: Event) => Effect.Effect<void>>>();
-  const targetIds = new WeakMap<EventTarget, string>();
-  let nextTargetId = 0;
-
-  const makeKey = (target: EventTarget, event: string): string => {
-    const existing = targetIds.get(target);
-    if (existing !== undefined) {
-      return `${existing}:${event}`;
-    }
-    const id = `target-${nextTargetId}`;
-    nextTargetId += 1;
-    targetIds.set(target, id);
-    return `${id}:${event}`;
-  };
-
-  const service: TestEventTargetService = {
-    on: (target, event, handler) =>
-      Effect.gen(function* () {
-        const key = makeKey(target, event);
-        const existing = handlers.get(key) ?? [];
-        existing.push(handler);
-        handlers.set(key, existing);
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            const list = handlers.get(key);
-            if (list !== undefined) {
-              const idx = list.indexOf(handler);
-              if (idx >= 0) {
-                list.splice(idx, 1);
-              }
-            }
-          }),
-        );
-      }),
-
-    dispatch: (target, event, data) =>
-      Effect.gen(function* () {
-        const key = makeKey(target, event);
-        const list = handlers.get(key) ?? [];
-        for (const h of list) {
-          yield* h(data);
-        }
-      }),
-  };
-
-  return PlatformEventTarget.of(service);
-});
+export const test: Layer.Layer<PlatformEventTarget> = browser;

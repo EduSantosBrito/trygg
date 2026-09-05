@@ -30,11 +30,18 @@ export const parsePath = (
  * Build a full path from path and optional query record.
  * @since 1.0.0
  */
-export const buildPath = (path: string, query?: Record<string, string>): Effect.Effect<string> =>
+export const buildPath = (
+  path: string,
+  query?: Readonly<Record<string, string | undefined>>,
+): Effect.Effect<string> =>
   Effect.sync(() => {
-    if (!query || Object.keys(query).length === 0) {
+    if (query === undefined) {
       return path;
     }
-    const params = new URLSearchParams(query);
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) params.set(key, value);
+    }
+    if (params.size === 0) return path;
     return `${path}?${params.toString()}`;
   });

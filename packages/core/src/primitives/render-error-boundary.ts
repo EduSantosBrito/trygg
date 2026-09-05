@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import type { Element } from "./element.js";
 import * as Trace from "../trace/index.js";
 import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
+import { cleanupAll } from "./render-cleanup.js";
 
 interface RenderOptions {
   readonly errorHandler: ErrorBoundaryHandler | null;
@@ -40,6 +41,8 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
 ) {
   const anchor = document.createComment("error-boundary");
   parent.appendChild(anchor);
+  const boundaryScope = yield* Scope.fork(renderContext.scope);
+  const boundaryContext: RenderContext = { ...renderContext, scope: boundaryScope };
 
   let currentResult: RenderResult | null = null;
   let currentScope: Scope.Closeable | null = null;
@@ -49,13 +52,14 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
   const cleanupRendered = Effect.fnUntraced(function* (
     result: RenderResult | null,
     scope: Scope.Closeable | null,
+    exit: Exit.Exit<unknown, unknown> = Exit.void,
   ) {
+    const cleanups: Array<Effect.Effect<void, unknown, R>> = [];
     if (result !== null) {
-      yield* result.cleanup;
+      cleanups.push(Effect.provide(result.cleanup, boundaryContext.services));
     }
-    if (scope !== null) {
-      yield* Scope.close(scope, Exit.void);
-    }
+    if (scope !== null) cleanups.push(Scope.close(scope, exit));
+    yield* cleanupAll(cleanups);
   });
 
   const cleanupCurrent = Effect.gen(function* () {
@@ -89,18 +93,21 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
     const renderParent = anchor.parentNode;
     if (renderParent === null) return null;
 
-    const fallbackScope = yield* Scope.fork(yield* Effect.scope);
+    const fallbackScope = yield* Scope.fork(boundaryScope);
+    const fallbackContext: RenderContext = { ...boundaryContext, scope: fallbackScope };
     const fallbackResult = yield* deps
       .renderElement(
         fallbackElement,
         renderParent,
-        renderContext,
+        fallbackContext,
         context,
         deps.defaultRenderOptions,
       )
       .pipe(
         Scope.provide(fallbackScope),
-        Effect.onError(() => Scope.close(fallbackScope, Exit.void)),
+        Effect.onExit((exit) =>
+          Exit.isFailure(exit) ? Scope.close(fallbackScope, Exit.asVoid(exit)) : Effect.void,
+        ),
       );
 
     const inserted = yield* insertBeforeAnchor(fallbackResult.node);
@@ -116,10 +123,14 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
     onError === null ? Effect.void : Effect.provide(onError(cause), context ?? deps.emptyContext);
 
   const mountFallbackForCause = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-    yield* Trace.emit("errorBoundary.caught", () => ({ reason: Cause.pretty(cause) }));
+    yield* Trace.emit("errorBoundary.caught", () => ({
+      cause_type: Trace.causeValueType(cause),
+    }));
     yield* runOnError(cause);
 
-    const fallbackElement = typeof fallback === "function" ? fallback(cause) : fallback;
+    const fallbackElement = yield* Effect.sync(() =>
+      typeof fallback === "function" ? fallback(cause) : fallback,
+    );
     const mounted = yield* mountFallback(fallbackElement);
     if (mounted === null) return null;
 
@@ -128,7 +139,9 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
   });
 
   const errorHandler: ErrorBoundaryHandler = (cause) => {
-    if (isUnmounted || hasErrored) return;
+    if (isUnmounted || hasErrored || Cause.hasDies(cause) || Cause.hasInterrupts(cause)) {
+      return;
+    }
     hasErrored = true;
 
     deps.runForkInRenderContext(
@@ -151,7 +164,7 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
           }),
         ),
       ),
-      renderContext,
+      boundaryContext,
       context,
     );
   };
@@ -167,17 +180,32 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
     currentScope = mounted.scope;
   });
 
-  const childScope = yield* Scope.fork(yield* Effect.scope);
+  const childScope = yield* Scope.fork(boundaryScope);
+  const childContext: RenderContext = { ...boundaryContext, scope: childScope };
   const childRenderResult = yield* deps
-    .renderElement(child, parent, renderContext, context, childOptions)
+    .renderElement(child, parent, childContext, context, childOptions)
     .pipe(
       Scope.provide(childScope),
-      Effect.onError(() => Scope.close(childScope, Exit.void)),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(childScope, Exit.asVoid(exit)) : Effect.void,
+      ),
       Effect.map((result): ChildRenderResult => ({ success: true, result, scope: childScope })),
-      Effect.catchCause((cause) =>
-        renderFallbackForError(cause).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasDies(cause) || Cause.hasInterrupts(cause)) {
+          return Effect.failCause(cause);
+        }
+        return renderFallbackForError(cause).pipe(
           Effect.map((): ChildRenderResult => ({ success: false })),
-        ),
+        );
+      }),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? cleanupAll([
+              cleanupCurrent,
+              Scope.close(boundaryScope, Exit.asVoid(exit)),
+              Effect.sync(() => anchor.remove()),
+            ])
+          : Effect.void,
       ),
     );
 
@@ -196,8 +224,11 @@ export const renderErrorBoundary = Effect.fn("renderErrorBoundary")(function* <E
     node: anchor,
     cleanup: Effect.gen(function* () {
       isUnmounted = true;
-      yield* cleanupCurrent;
-      anchor.remove();
+      yield* cleanupAll([
+        cleanupCurrent,
+        Scope.close(boundaryScope, Exit.void),
+        Effect.sync(() => anchor.remove()),
+      ]);
     }),
   };
 });

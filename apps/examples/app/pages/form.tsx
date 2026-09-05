@@ -5,18 +5,15 @@ import { FormField } from "../components/form-field";
 import { SuccessMessage } from "../components/form/success-message";
 
 // Typed Validation Errors
-class EmailRequired extends Schema.TaggedErrorClass<EmailRequired>()("EmailRequired", {}) {}
-class EmailInvalid extends Schema.TaggedErrorClass<EmailInvalid>()("EmailInvalid", {
+class EmailRequired extends Schema.TaggedError<EmailRequired>()("EmailRequired", {}) {}
+class EmailInvalid extends Schema.TaggedError<EmailInvalid>()("EmailInvalid", {
   email: Schema.String,
 }) {}
-class PasswordTooShort extends Schema.TaggedErrorClass<PasswordTooShort>()("PasswordTooShort", {
+class PasswordTooShort extends Schema.TaggedError<PasswordTooShort>()("PasswordTooShort", {
   minLength: Schema.Number,
   actualLength: Schema.Number,
 }) {}
-class PasswordNoNumber extends Schema.TaggedErrorClass<PasswordNoNumber>()(
-  "PasswordNoNumber",
-  {},
-) {}
+class PasswordNoNumber extends Schema.TaggedError<PasswordNoNumber>()("PasswordNoNumber", {}) {}
 
 type ValidationError = EmailRequired | EmailInvalid | PasswordTooShort | PasswordNoNumber;
 

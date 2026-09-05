@@ -45,7 +45,7 @@ interface ErrorHandler {
  * @public
  * @since 1.0.0
  */
-export class UnhandledErrorsError extends Schema.TaggedErrorClass<UnhandledErrorsError>()(
+export class UnhandledErrorsError extends Schema.TaggedError<UnhandledErrorsError>()(
   "UnhandledErrorsError",
   {
     unhandledTags: Schema.Array(Schema.String),

@@ -6,7 +6,7 @@ import { DocsSidebar } from "../../components/docs-sidebar";
 import { Footer } from "../../components/footer";
 import { Header } from "../../components/header";
 import { docsContent } from "../../content/docs-content";
-import { setDocsHeadings } from "../../content/headings";
+import { DocsHeadingsLive, setDocsHeadings } from "../../content/headings";
 import { sidebarGroups, type SidebarGroup } from "../../content/sidebar";
 
 const quickPath = [
@@ -227,4 +227,4 @@ export default Component.gen(function* () {
       <Footer />
     </>
   );
-});
+}).pipe(Component.provide(DocsHeadingsLive));

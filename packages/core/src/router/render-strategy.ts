@@ -120,7 +120,7 @@ export const RenderStrategyType = Data.taggedEnum<RenderStrategyType>();
  * @public
  * @since 1.0.0
  */
-export class RenderLoadError extends Schema.TaggedErrorClass<RenderLoadError>()("RenderLoadError", {
+export class RenderLoadError extends Schema.TaggedError<RenderLoadError>()("RenderLoadError", {
   cause: Schema.Unknown,
 }) {}
 

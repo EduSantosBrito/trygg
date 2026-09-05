@@ -1,8 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
 import { incidentResource, incidentsResource, type Incident } from "../resources/incidents";
-import { IncidentNotFound, type Status } from "../errors/incidents";
+import { IncidentId, IncidentNotFound, type Status } from "../errors/incidents";
 import { ApiClient } from "trygg/api";
 import { TRANSITIONS } from "../services/incidents";
 import { StatusBadge } from "../components/status-badge";
@@ -10,6 +10,8 @@ import { SeverityBadge } from "../components/severity-badge";
 import { IncidentSkeleton } from "../components/incident-skeleton";
 import { ErrorView } from "../components/error-view";
 import { formatRelative } from "../utils/date";
+
+const decodeIncidentId = Schema.decodeUnknownEffect(IncidentId);
 
 const STATUS_JOURNEY: ReadonlyArray<Status> = [
   "Detected",
@@ -21,7 +23,7 @@ const STATUS_JOURNEY: ReadonlyArray<Status> = [
 
 export default Component.gen(function* () {
   const { id } = yield* Router.params("/incidents/:id");
-  const numericId = Number(id);
+  const numericId = yield* decodeIncidentId(id);
   const state = yield* Resource.fetch(incidentResource({ id: numericId }));
 
   return yield* Resource.match(state).pipe(
@@ -162,7 +164,7 @@ export default Component.gen(function* () {
                       {new Intl.DateTimeFormat("en-US", {
                         dateStyle: "short",
                         timeStyle: "short",
-                      }).format(new Date(incident.createdAt))}
+                      }).format(incident.createdAt)}
                     </span>
                   </div>
                 </div>

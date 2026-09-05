@@ -16,6 +16,7 @@
  * @internal
  */
 export * from "./catalog.js";
+export { causeValueType, valueType } from "./payload.js";
 export * from "./trace.js";
 export * from "./report.js";
 export * from "./analyze.js";

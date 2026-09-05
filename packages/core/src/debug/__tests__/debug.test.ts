@@ -80,16 +80,23 @@ describe("consoleLogger", () => {
     ),
   );
 
-  it.effect("does not fail framework work when payload stringification throws", () =>
+  it.effect("renders opaque application values without invoking serialization hooks", () =>
     withConsoleCapture((lines) =>
       Effect.gen(function* () {
-        // Test: should isolate debug payload rendering failures.
-        // Scope: trace payloads with hostile serialization hooks.
-        // Assertion: the event is logged with a fallback payload representation.
+        // Test: should render only the trap-free classification of an application value.
+        // Scope: Debug formatting after the Trace opaque-value boundary.
+        // Assertion: the hook is not called and no live application object reaches Debug.
+        let toJsonCalls = 0;
         const hostilePayload = {
-          toJSON: () => decodeURIComponent("%"),
+          toJSON: () => {
+            toJsonCalls++;
+            return decodeURIComponent("%");
+          },
         };
-        const exit = yield* Trace.emit("signal.set", () => ({ signal_id: hostilePayload })).pipe(
+        const exit = yield* Trace.emit("signal.set", () => ({
+          signal_id: "s1",
+          value_type: Trace.valueType(hostilePayload),
+        })).pipe(
           Effect.provide(Logger.layer([Debug.consoleLogger])),
           Effect.provideService(References.MinimumLogLevel, "Trace"),
           Effect.exit,
@@ -97,7 +104,31 @@ describe("consoleLogger", () => {
 
         assert.strictEqual(exit._tag, "Success");
         assert.strictEqual(lines.length, 1);
-        assert.include(textOf(lines[0]), "signal_id:[Unserializable]");
+        assert.strictEqual(toJsonCalls, 0);
+        assert.include(textOf(lines[0]), "value_type:object");
+      }),
+    ),
+  );
+
+  it.effect("deduplicates preserved annotation replays per Debug logger", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        // Test: should render an exact Trace envelope at most once per Debug reader.
+        // Scope: a malicious logger synchronously replays logger options before normal fanout completes.
+        // Assertion: direct replays plus the original invocation produce one console line.
+        const malicious = Logger.make<unknown, void>((options) => {
+          Debug.consoleLogger.log(options);
+          Debug.consoleLogger.log(options);
+        });
+
+        yield* Trace.emit("signal.notify", () => ({ signal_id: "s1", listener_count: 1 })).pipe(
+          Effect.provide(Logger.layer([malicious, Debug.consoleLogger])),
+          Effect.provideService(References.MinimumLogLevel, "Trace"),
+        );
+
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "signal");
+        assert.include(textOf(lines[0]), "notify");
       }),
     ),
   );
@@ -106,7 +137,7 @@ describe("consoleLogger", () => {
     withConsoleCapture((lines) =>
       Effect.gen(function* () {
         // signal.set is a `cost` event (Debug); the default minimum level is Info.
-        yield* Trace.emit("signal.set");
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
 
         assert.strictEqual(lines.length, 0);
       }).pipe(Effect.provide(Logger.layer([Debug.consoleLogger]))),
@@ -120,7 +151,11 @@ describe("consoleLogger", () => {
       // Assertion: the traced effect succeeds even when the console is hostile.
       const original = console.log;
       console.log = () => decodeURIComponent("%");
-      const exit = yield* Trace.emit("router.navigate.request", () => ({ to: "/x" })).pipe(
+      const exit = yield* Trace.emit("router.navigate.request", () => ({
+        fromPath: "/",
+        toPath: "/x",
+        replace: false,
+      })).pipe(
         Effect.provide(Logger.layer([Debug.consoleLogger])),
         Effect.provideService(References.MinimumLogLevel, "Trace"),
         Effect.exit,
@@ -156,7 +191,11 @@ describe("layer", () => {
     withConsoleCapture((lines) =>
       Effect.gen(function* () {
         yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
-        yield* Trace.emit("router.navigate.request", () => ({ to: "/x" }));
+        yield* Trace.emit("router.navigate.request", () => ({
+          fromPath: "/",
+          toPath: "/x",
+          replace: false,
+        }));
 
         assert.strictEqual(lines.length, 1);
         assert.include(textOf(lines[0]), "signal");
@@ -169,7 +208,11 @@ describe("layer", () => {
       Effect.gen(function* () {
         yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
         yield* Trace.emit("render.schedule", () => ({}));
-        yield* Trace.emit("router.navigate.request", () => ({ to: "/x" }));
+        yield* Trace.emit("router.navigate.request", () => ({
+          fromPath: "/",
+          toPath: "/x",
+          replace: false,
+        }));
 
         assert.strictEqual(lines.length, 2);
         assert.include(textOf(lines[0]), "signal");
@@ -203,6 +246,54 @@ describe("layer", () => {
           recorder,
         );
 
+        assert.deepStrictEqual(
+          recorder.records().map((record) => record.name),
+          ["signal.set"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("an inner Debug layer overrides the root logger and filter", () =>
+    withConsoleCapture((lines) => {
+      const program = Effect.gen(function* () {
+        // Test: should replace the nearest Debug-owned logger instead of composing two console sinks.
+        // Scope: nested root/subtree Debug layers with a narrower subtree filter.
+        // Assertion: the matching event prints once and the root cannot leak the rejected event.
+        yield* Trace.emit("signal.set", () => ({ signal_id: "s1" }));
+        yield* Trace.emit("router.navigate.request", () => ({
+          fromPath: "/",
+          toPath: "/x",
+          replace: false,
+        }));
+
+        assert.strictEqual(lines.length, 1);
+        assert.include(textOf(lines[0]), "signal");
+      });
+      return Effect.provide(
+        Effect.provide(program, Debug.layer({ minLevel: "Trace", filter: "signal" })),
+        Logger.layer([Debug.consoleLogger]),
+      );
+    }),
+  );
+
+  it.effect("nested Debug layers preserve an independent recorder", () =>
+    withConsoleCapture((lines) =>
+      Effect.gen(function* () {
+        // Test: should identify only Debug-owned loggers when applying a nested override.
+        // Scope: recorder plus root and filtered subtree Debug layers.
+        // Assertion: one console line is written while the recorder independently receives the event.
+        const recorder = Trace.makeRecorder();
+        const nestedDebug = Effect.provide(
+          Effect.provide(
+            Trace.emit("signal.set", () => ({ signal_id: "s1" })),
+            Debug.layer({ minLevel: "Trace", filter: "signal" }),
+          ),
+          Debug.layer({ minLevel: "Trace" }),
+        );
+        yield* Trace.record(nestedDebug, recorder);
+
+        assert.strictEqual(lines.length, 1);
         assert.deepStrictEqual(
           recorder.records().map((record) => record.name),
           ["signal.set"],
@@ -380,7 +471,7 @@ describe("Metrics snapshot", () => {
 describe("Metrics sinks", () => {
   it.effect("should register sink", () =>
     Effect.sync(() => {
-      const sink = Metrics.createSink("test-sink", () => Effect.void);
+      const sink = Metrics.MetricsSink.make("test-sink", () => Effect.void);
       Metrics.registerSink(sink);
 
       assert.isTrue(Metrics.hasSink("test-sink"));
@@ -391,7 +482,7 @@ describe("Metrics sinks", () => {
 
   it.effect("should unregister sink by name", () =>
     Effect.sync(() => {
-      const sink = Metrics.createSink("to-remove", () => Effect.void);
+      const sink = Metrics.MetricsSink.make("to-remove", () => Effect.void);
       Metrics.registerSink(sink);
 
       assert.isTrue(Metrics.hasSink("to-remove"));
@@ -407,8 +498,8 @@ describe("Metrics sinks", () => {
       const snapshots1: Metrics.MetricsSnapshot[] = [];
       const snapshots2: Metrics.MetricsSnapshot[] = [];
 
-      const sink1 = Metrics.createCollectorSink("sink1", snapshots1);
-      const sink2 = Metrics.createCollectorSink("sink2", snapshots2);
+      const sink1 = Metrics.MetricsSink.makeCollector("sink1", snapshots1);
+      const sink2 = Metrics.MetricsSink.makeCollector("sink2", snapshots2);
 
       Metrics.registerSink(sink1);
       Metrics.registerSink(sink2);
@@ -428,8 +519,8 @@ describe("Metrics sinks", () => {
       const snapshots: Metrics.MetricsSnapshot[] = [];
 
       // First sink throws
-      const throwingSink = Metrics.createSink("thrower", () => Effect.fail("Sink error"));
-      const collectorSink = Metrics.createCollectorSink("collector", snapshots);
+      const throwingSink = Metrics.MetricsSink.make("thrower", () => Effect.fail("Sink error"));
+      const collectorSink = Metrics.MetricsSink.makeCollector("collector", snapshots);
 
       Metrics.registerSink(throwingSink);
       Metrics.registerSink(collectorSink);
@@ -454,7 +545,7 @@ describe("Metrics sinks", () => {
   it.effect("should collect snapshots in array", () =>
     Effect.gen(function* () {
       const snapshots: Metrics.MetricsSnapshot[] = [];
-      const sink = Metrics.createCollectorSink("collector", snapshots);
+      const sink = Metrics.MetricsSink.makeCollector("collector", snapshots);
       Metrics.registerSink(sink);
 
       yield* Metrics.exportToSinks;

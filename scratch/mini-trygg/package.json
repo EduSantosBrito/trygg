@@ -1,0 +1,35 @@
+{
+  "name": "mini-check",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mini-check": "./src/cli.ts"
+  },
+  "scripts": {
+    "check": "bun ./src/cli.ts demo",
+    "check:machine": "bun ./src/cli.ts demo --output machine",
+    "check:fixed": "bun ./src/cli.ts demo --tsconfig demo/tsconfig.fixed.json",
+    "lsp": "bun ./src/lsp.ts --stdio",
+    "test": "bun test",
+    "typecheck": "bunx tsc -p tsconfig.src.json && bunx tsc -p tsconfig.lsp.json && bunx tsc -p editors/vscode/tsconfig.json",
+    "build:lsp": "bun build src/lsp.ts --target=node --format=esm --outfile=dist/lsp.mjs",
+    "build:vscode": "bun build src/lsp.ts --target=node --format=esm --outfile=editors/vscode/dist/lsp.mjs && bun build editors/vscode/src/extension.ts --target=node --format=cjs --external vscode --outfile=editors/vscode/dist/extension.js",
+    "check:zed": "cargo check --locked --manifest-path editors/zed/Cargo.toml",
+    "build:zed": "cargo build --locked --manifest-path editors/zed/Cargo.toml --target wasm32-wasip2 --release",
+    "build": "bun run build:lsp && bun run build:vscode",
+    "verify": "bun run typecheck && bun test && bun run build"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.58",
+    "typescript": "^5.9.3",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.14"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/node": "^26.4.0",
+    "@types/vscode": "^1.134.0",
+    "vscode-languageclient": "^10.1.0"
+  }
+}

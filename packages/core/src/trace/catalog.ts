@@ -84,7 +84,7 @@ export const CATALOG = defineCatalog({
   "contract.action.end": {
     family: "contract",
     level: "semantic",
-    summary: "A named verifier action completed or failed.",
+    summary: "A named verifier action completed, failed, or was interrupted.",
   },
   "contract.observation": {
     family: "contract",
@@ -628,6 +628,12 @@ export const CATALOG = defineCatalog({
     level: "cost",
     summary: "A SignalElement reconciled against existing content.",
   },
+  "render.child.reconcile": {
+    family: "render",
+    level: "cost",
+    summary:
+      "An internal child contributed its reconciliation outcome to the enclosing render operation.",
+  },
   "signalElement.swap.start": {
     family: "render",
     level: "semantic",
@@ -775,8 +781,9 @@ export const CATALOG = defineCatalog({
   },
   "keyedList.reorder": {
     family: "keyedList",
-    level: "cost",
-    summary: "Keyed list reordered items.",
+    level: "semantic",
+    summary:
+      "A keyed list published its next order and counts of inserted, removed, reconciled, and replaced rows.",
   },
   "keyedList.item.add": {
     family: "keyedList",

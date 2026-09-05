@@ -1,0 +1,70 @@
+{
+  "name": "mini-check-vscode",
+  "displayName": "Mini Check",
+  "description": "Thin VS Code client for the mini-check language server prototype.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "trygg-prototype",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onCommand:mini-check.restartLanguageServer",
+    "onCommand:mini-check.explainDiagnostic",
+    "onCommand:mini-check.showProviderScopes",
+    "onCommand:mini-check.openDocs"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "mini-check.restartLanguageServer",
+        "title": "Mini Check: Restart Language Server"
+      },
+      {
+        "command": "mini-check.explainDiagnostic",
+        "title": "Mini Check: Explain Diagnostic"
+      },
+      {
+        "command": "mini-check.showProviderScopes",
+        "title": "Mini Check: Show Provider Scopes"
+      },
+      {
+        "command": "mini-check.openDocs",
+        "title": "Mini Check: Open Documentation"
+      }
+    ],
+    "configuration": {
+      "title": "Mini Check",
+      "properties": {
+        "miniCheck.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the built mini-check LSP entry point. Relative paths are resolved from the workspace folder; empty uses the server bundled with this extension."
+        },
+        "miniCheck.projectDir": {
+          "type": "string",
+          "default": "",
+          "description": "Project directory sent to the language server. Relative paths are resolved from the workspace folder; empty uses the workspace folder."
+        },
+        "miniCheck.tsconfigPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional tsconfig path sent to the language server. Relative paths are resolved from the configured project directory."
+        }
+      }
+    }
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "package.json"
+  ]
+}

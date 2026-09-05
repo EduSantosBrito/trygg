@@ -1,0 +1,13 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "effect": "4.0.0-rc.112",
+  "sha256": {
+    "scripts/benchmark-router.ts": "d52f6115518fd1b80600e5c91b1265ab1fd74f321244a6e863df0a16629da278",
+    "packages/core/src/router/navigation-core.ts": "01d060e6f16a63b7dd49ecd09a204f80b9392f82f2f8671e07c6985d0bd86d63",
+    "packages/core/src/router/service.ts": "bff1f3a1a5adae9a377b993930f76f2edce7f882832599c0fc1f0f8b3a729423",
+    "packages/core/src/primitives/signal.ts": "4cb2c94316266d4ee29b18b7d14dbf7817c4fee96f2ef987332a85fd55936669",
+    "packages/core/src/trace/payload.ts": "98721ceda1ab89577e9c379c9e16fc3c1ad5f98fc5b18757622af2ecf4ddd3fe",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  },
+  "limits": "Two sequential fresh Bun processes; actual Router.testLayer, bounded replace history, one route subscriber reading the matching query; 200 warmup batches plus seven 1000-batch samples at concurrency 1 and 8. No DOM, browser history, scrolling, console I/O, or controlled before/after comparison. Timed batches include subscriber reads; acceptance assertions run outside timed batches."
+}

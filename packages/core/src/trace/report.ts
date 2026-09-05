@@ -6,10 +6,12 @@
  * `toJSON` produces a stable, serializable timeline. `toMarkdown` produces a
  * compact ordered timeline annotated with each event's family, level, and
  * one-line summary from the {@link ./catalog.ts | catalog}. Neither mutates
- * input; both are pure given a record array.
+ * input; both are pure given a record array. Recorder payloads are already
+ * detached and frozen, so reports reuse them rather than traversing live values.
  *
  * @internal
  */
+import { Option, type Schema } from "effect";
 import { CATALOG, type TraceLevel } from "./catalog.js";
 import type { TraceRecord } from "./trace.js";
 
@@ -20,7 +22,7 @@ export interface TimelineEntry {
   readonly level: TraceLevel;
   readonly summary: string;
   readonly actionId?: string;
-  readonly payload?: Readonly<Record<string, unknown>>;
+  readonly payload?: Schema.JsonObject;
 }
 
 export interface ReportOptions {
@@ -48,8 +50,8 @@ const select = (
 export const toJSON = (
   records: ReadonlyArray<TraceRecord>,
   options?: ReportOptions,
-): ReadonlyArray<TimelineEntry> =>
-  select(records, options).map((record, index) => {
+): ReadonlyArray<TimelineEntry> => {
+  const timeline = select(records, options).map((record, index) => {
     const meta = CATALOG[record.name];
     const base: TimelineEntry = {
       order: index + 1,
@@ -60,25 +62,21 @@ export const toJSON = (
     };
     const withAction =
       record.actionId === undefined ? base : { ...base, actionId: record.actionId };
-    return record.payload === undefined ? withAction : { ...withAction, payload: record.payload };
+    return Object.freeze(
+      record.payload === undefined ? withAction : { ...withAction, payload: record.payload },
+    );
   });
-
-// Circular/bigint-safe stringify: the replacer keeps `JSON.stringify` from
-// throwing, so no try/catch is needed for display-only payload rendering.
-const safeStringify = (value: unknown): string => {
-  const seen = new WeakSet<object>();
-  const json = JSON.stringify(value, (_key, val) => {
-    if (typeof val === "bigint") return `${val}n`;
-    if (typeof val === "object" && val !== null) {
-      if (seen.has(val)) return "[Circular]";
-      seen.add(val);
-    }
-    return val;
-  });
-  return json ?? String(value);
+  return Object.freeze(timeline);
 };
 
-const compactPayload = (payload: Readonly<Record<string, unknown>> | undefined): string => {
+const stringifyJson = Option.liftThrowable((value: Schema.Json): string | undefined =>
+  JSON.stringify(value),
+);
+
+const safeStringify = (value: Schema.Json): string =>
+  Option.getOrElse(stringifyJson(value), () => "null") ?? "null";
+
+const compactPayload = (payload: Schema.JsonObject | undefined): string => {
   if (payload === undefined) return "";
   if (Object.keys(payload).length === 0) return "";
   return ` ${safeStringify(payload)}`;

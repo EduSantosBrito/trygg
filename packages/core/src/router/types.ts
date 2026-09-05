@@ -25,7 +25,7 @@ import { Component } from "../primitives/component.js";
 import type { Signal } from "../primitives/signal.js";
 import type { Element } from "../primitives/element.js";
 import type { ScrollStrategyType } from "./scroll-strategy.js";
-import type { NavigationPrefetchState } from "./navigation-outlet-coordination.js";
+import type { NavigationPrefetchState, ScrollIntent } from "./navigation-outlet-coordination.js";
 import type { Router } from "./service.js";
 import {
   compileRoutePathPattern,
@@ -58,10 +58,37 @@ import {
  * @public
  * @since 1.0.0
  */
-export class NavigationError extends Schema.TaggedErrorClass<NavigationError>()("NavigationError", {
+export class NavigationError extends Schema.TaggedError<NavigationError>()("NavigationError", {
   operation: Schema.String,
   cause: Schema.Unknown,
 }) {}
+
+/**
+ * Decoded params were requested for a pattern outside the active route chain.
+ *
+ * @remarks
+ * `Router.params(path)` validates the requested pattern at runtime before
+ * narrowing to its generated decoded type.
+ *
+ * @example
+ * ```ts
+ * const error = new RouteParamsPatternMismatch({
+ *   requestedPattern: "/users/:id",
+ *   activePatterns: ["/"],
+ * })
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export class RouteParamsPatternMismatch extends Schema.TaggedError<RouteParamsPatternMismatch>()(
+  "RouteParamsPatternMismatch",
+  {
+    requestedPattern: Schema.String,
+    activePatterns: Schema.Array(Schema.String),
+  },
+) {}
 
 /**
  * RouteComponent value was neither a Component.Type nor Effect<Element>.
@@ -80,7 +107,7 @@ export class NavigationError extends Schema.TaggedErrorClass<NavigationError>()(
  * @public
  * @since 1.0.0
  */
-export class InvalidRouteComponent extends Schema.TaggedErrorClass<InvalidRouteComponent>()(
+export class InvalidRouteComponent extends Schema.TaggedError<InvalidRouteComponent>()(
   "InvalidRouteComponent",
   {
     actual: Schema.Unknown,
@@ -118,6 +145,66 @@ export class InvalidRouteComponent extends Schema.TaggedErrorClass<InvalidRouteC
  * @since 1.0.0
  */
 export interface RouteMap {
+  // Augmented by vite plugin
+}
+
+/**
+ * Generated URL-construction parameter inputs for known routes.
+ *
+ * @remarks
+ * The Vite plugin augments this map from each params Schema's encoded type.
+ * `Link` and navigation use it separately from decoded {@link RouteMap} values.
+ *
+ * @example
+ * ```ts
+ * interface Inputs extends RouteInputMap {}
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export interface RouteInputMap {
+  // Augmented by vite plugin
+}
+
+/**
+ * Generated Schema-decoded query values for known routes.
+ *
+ * @remarks
+ * The Vite plugin augments this map from each query Schema's output type for
+ * typed `Router.query` access.
+ *
+ * @example
+ * ```ts
+ * interface Queries extends RouteQueryMap {}
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export interface RouteQueryMap {
+  // Augmented by vite plugin
+}
+
+/**
+ * Generated URL-construction query inputs for known routes.
+ *
+ * @remarks
+ * The Vite plugin augments this map from each query Schema's encoded type so
+ * URL construction cannot accidentally receive decoded domain values.
+ *
+ * @example
+ * ```ts
+ * interface QueryInputs extends RouteQueryInputMap {}
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export interface RouteQueryInputMap {
   // Augmented by vite plugin
 }
 
@@ -299,6 +386,15 @@ export type ExtractRouteParams<T extends string> =
       : // No params found
         {};
 
+type ExtractRouteParamInputs<T extends string> =
+  T extends `${infer _Start}:${infer Param}/${infer Rest}`
+    ? {
+        readonly [K in CleanParamName<Param>]: string | number;
+      } & ExtractRouteParamInputs<`/${Rest}`>
+    : T extends `${infer _Start}:${infer Param}`
+      ? { readonly [K in CleanParamName<Param>]: string | number }
+      : {};
+
 /**
  * Simplify intersection types for better display
  * @internal
@@ -316,8 +412,8 @@ export type HasKeys<T> = keyof T extends never ? false : true;
  * Uses RouteMap if available (from vite plugin), otherwise extracts from path pattern.
  *
  * @remarks
- * `RouteParamsFor` is the main path-to-param helper used by `Link`,
- * `Router.params`, and typed navigation helpers.
+ * `RouteParamsFor` describes decoded values returned by `Router.params`.
+ * URL construction uses {@link RouteParamsInputFor} instead.
  *
  * @example
  * ```ts
@@ -337,11 +433,89 @@ export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
   : Simplify<ExtractRouteParams<Path>>;
 
 /**
+ * URL-safe parameter inputs for constructing a route path.
+ *
+ * @remarks
+ * Known routes use {@link RouteInputMap}; other literal patterns fall back to
+ * string-or-number inputs supported by the path interpolator.
+ *
+ * @example
+ * ```ts
+ * type UserInput = RouteParamsInputFor<"/users/:id">
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export type RouteParamsInputFor<Path extends string> = Path extends keyof RouteInputMap
+  ? Simplify<RouteInputMap[Path]>
+  : Simplify<ExtractRouteParamInputs<Path>>;
+
+/**
+ * Query values accepted by URL construction without a generated query Schema.
+ *
+ * @remarks
+ * Undefined values are omitted rather than serialized as the text `undefined`.
+ *
+ * @example
+ * ```ts
+ * const query: RouteQueryInput = { page: "2", filter: undefined }
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export type RouteQueryInput = Readonly<Record<string, string | undefined>>;
+
+/**
+ * Schema-decoded query values for a route path.
+ *
+ * @remarks
+ * Known routes use {@link RouteQueryMap}; paths without generated query
+ * metadata retain an unknown-value record.
+ *
+ * @example
+ * ```ts
+ * type SearchQuery = RouteQueryFor<"/search">
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export type RouteQueryFor<Path extends string> = Path extends keyof RouteQueryMap
+  ? Simplify<RouteQueryMap[Path]>
+  : Record<string, unknown>;
+
+/**
+ * Encoded query values accepted when constructing a route URL.
+ *
+ * @remarks
+ * Known routes use {@link RouteQueryInputMap}; other paths accept the generic
+ * string-valued {@link RouteQueryInput} transport shape.
+ *
+ * @example
+ * ```ts
+ * type SearchInput = RouteQueryInputFor<"/search">
+ * ```
+ *
+ * @category Route Types
+ * @public
+ * @since 1.0.0
+ */
+export type RouteQueryInputFor<Path extends string> = Path extends keyof RouteQueryInputMap
+  ? Simplify<RouteQueryInputMap[Path]>
+  : RouteQueryInput;
+
+/**
  * Props for type-safe Link component.
  *
  * @remarks
  * `TypeSafeLinkProps` expresses the core conditional typing used by `LinkProps`
- * without the extra forwarded-attribute fields.
+ * without the extra forwarded-attribute fields. Params and query use generated
+ * encoded input maps rather than decoded route values.
  *
  * When the path contains dynamic segments (`:param`), the `params` prop is required.
  * When the path is static, `params` is optional/unnecessary.
@@ -363,11 +537,11 @@ export type RouteParamsFor<Path extends string> = Path extends keyof RouteMap
  * @since 1.0.0
  */
 export type TypeSafeLinkProps<Path extends string> =
-  HasKeys<RouteParamsFor<Path>> extends true
+  HasKeys<RouteParamsInputFor<Path>> extends true
     ? {
         readonly to: Path;
-        readonly params: RouteParamsFor<Path>;
-        readonly query?: Record<string, string>;
+        readonly params: RouteParamsInputFor<Path>;
+        readonly query?: RouteQueryInputFor<Path>;
         readonly replace?: boolean;
         readonly children?: unknown;
         readonly className?: string;
@@ -375,7 +549,7 @@ export type TypeSafeLinkProps<Path extends string> =
     : {
         readonly to: Path;
         readonly params?: never;
-        readonly query?: Record<string, string>;
+        readonly query?: RouteQueryInputFor<Path>;
         readonly replace?: boolean;
         readonly children?: unknown;
         readonly className?: string;
@@ -403,7 +577,7 @@ export type TypeSafeLinkProps<Path extends string> =
  */
 export const buildPathWithParams: <Path extends string>(
   path: Path,
-  params: RouteParamsFor<Path>,
+  params: RouteParamsInputFor<Path>,
 ) => Effect.Effect<
   string,
   | InvalidRoutePathPattern
@@ -412,7 +586,7 @@ export const buildPathWithParams: <Path extends string>(
   | InvalidRoutePathParamValue
 > = Effect.fn("RouterTypes.buildPathWithParams")(function* <Path extends string>(
   path: Path,
-  params: RouteParamsFor<Path>,
+  params: RouteParamsInputFor<Path>,
 ) {
   const pattern = yield* compileRoutePathPattern(path);
   return yield* interpolateCompiledRoutePathPattern(pattern, params);
@@ -469,6 +643,12 @@ export const interpolateParams: (
  */
 export type RouteParams = Record<string, string>;
 
+/** Schema-decoded route params exposed to route components. */
+export type DecodedRouteParams = Record<string, unknown>;
+
+/** Cumulative schema-decoded params keyed by each resolved active pattern. */
+export type DecodedRouteParamsByPattern = ReadonlyMap<string, DecodedRouteParams>;
+
 /**
  * Current route state
  *
@@ -491,14 +671,22 @@ export interface Route {
   readonly params: RouteParams;
   /** Query string parameters */
   readonly query: URLSearchParams;
+  /** Atomic navigation identity and scroll restoration context. */
+  readonly navigation: NavigationContext;
 }
+
+type NavigateParamsOption<Path extends string> = string extends Path
+  ? { readonly params?: Readonly<Record<string, string | number>> }
+  : HasKeys<RouteParamsInputFor<Path>> extends true
+    ? { readonly params: RouteParamsInputFor<Path> }
+    : { readonly params?: never };
 
 /**
  * Navigation options
  *
  * @remarks
- * `NavigateOptions` controls replace behavior plus optional path-param and
- * query interpolation during navigation.
+ * `NavigateOptions` controls replace behavior plus path-param and query
+ * interpolation. Literal dynamic paths require their generated encoded params.
  *
  * @example
  * ```ts
@@ -509,21 +697,26 @@ export interface Route {
  * @public
  * @since 1.0.0
  */
-export interface NavigateOptions {
+export type NavigateOptions<Path extends string = string> = {
   /** Replace current history entry instead of pushing */
   readonly replace?: boolean;
   /** Query parameters to set */
-  readonly query?: Record<string, string>;
-  /** Path params to interpolate into path pattern (e.g., { id: 123 } for "/users/:id") */
-  readonly params?: Record<string, string | number>;
-}
+  readonly query?: RouteQueryInputFor<Path>;
+} & NavigateParamsOption<Path>;
+
+/** @internal */
+export type NavigateArguments<Path extends string> = string extends Path
+  ? readonly [options?: NavigateOptions<Path>]
+  : HasKeys<RouteParamsInputFor<Path>> extends true
+    ? readonly [options: NavigateOptions<Path>]
+    : readonly [options?: NavigateOptions<Path>];
 
 /**
  * Options for Router.isActive check.
  *
  * @remarks
- * `IsActiveOptions` lets callers request exact matching or interpolate path
- * params before active-state comparison.
+ * `IsActiveOptions` lets callers request exact matching or interpolate the
+ * generated encoded path params before active-state comparison.
  *
  * @example
  * ```ts
@@ -534,12 +727,17 @@ export interface NavigateOptions {
  * @public
  * @since 1.0.0
  */
-export interface IsActiveOptions {
-  /** Path params to interpolate before comparison (e.g., { id: 123 } for "/users/:id") */
-  readonly params?: Record<string, string | number>;
+export type IsActiveOptions<Path extends string = string> = {
   /** If true, path must match exactly. If false (default), prefix matching is used. */
   readonly exact?: boolean;
-}
+} & NavigateParamsOption<Path>;
+
+/** @internal */
+export type IsActiveArguments<Path extends string> = string extends Path
+  ? readonly [options?: IsActiveOptions<Path>]
+  : HasKeys<RouteParamsInputFor<Path>> extends true
+    ? readonly [options: IsActiveOptions<Path>]
+    : readonly [options?: IsActiveOptions<Path>];
 
 /**
  * Route error info - available to .error() boundary components via RouteError FiberRef
@@ -573,6 +771,7 @@ export interface RouteErrorInfo {
  * @internal
  */
 export interface NavigationContext {
+  readonly navigationId: number;
   readonly isPopstate: boolean;
   readonly hash: string;
   readonly scrollKey: string;
@@ -598,10 +797,13 @@ export interface RouterService {
   /** Signal containing current route state */
   readonly current: Signal<Route>;
 
-  /** Navigate to a path. Fails with NavigationError if history/location operations fail. */
-  readonly navigate: (
-    path: string,
-    options?: NavigateOptions,
+  /**
+   * Settle a serialized history transition and publish its snapshot when still current.
+   * Completion does not await the Outlet's DOM replacement or scroll application.
+   */
+  readonly navigate: <Path extends RoutePath>(
+    path: Path,
+    ...options: NavigateArguments<Path>
   ) => Effect.Effect<void, NavigationError>;
 
   /** Go back in history */
@@ -611,7 +813,9 @@ export interface RouterService {
   readonly forward: () => Effect.Effect<void, NavigationError>;
 
   /** Get current route params (type-safe by path pattern) */
-  readonly params: <Path extends RoutePath>(path: Path) => Effect.Effect<RouteParamsFor<Path>>;
+  readonly params: <Path extends RoutePath>(
+    path: Path,
+  ) => Effect.Effect<RouteParamsFor<Path>, RouteParamsPatternMismatch>;
 
   /** Get query params signal */
   readonly query: Signal<URLSearchParams>;
@@ -627,9 +831,9 @@ export interface RouterService {
    *
    * @since 1.0.0
    */
-  readonly isActive: (
-    path: string,
-    options?: IsActiveOptions,
+  readonly isActive: <Path extends RoutePath>(
+    path: Path,
+    ...options: IsActiveArguments<Path>
   ) => Effect.Effect<Signal<boolean>, NavigationError, Scope.Scope>;
 
   /**
@@ -665,23 +869,65 @@ export interface RouterService {
 export type OutletPrefetchState = NavigationPrefetchState;
 
 /**
- * Verifier-facing scroll decision applied after route activation commits DOM.
+ * Describe the post-swap scroll decision resolved for an Outlet activation.
  *
+ * @remarks
+ * `strategy`, `hash`, `isPopstate`, and `scrollKey` identify the strategy and
+ * activation intent used for the decision. `restored` is present only when
+ * `kind` is `"restore"`: `true` means a saved position was applied, while
+ * `false` means no position existed for that history entry.
+ *
+ * Scroll application converts a non-empty `Cause` to `"ignoredError"` only
+ * when all of its reasons are typed `Fail` reasons. A `Cause` containing `Die`
+ * or `Interrupt`, including a mixed Cause, is preserved and produces no payload.
+ *
+ * @example
+ * ```ts
+ * const payload: ScrollApplyPayload = {
+ *   kind: "restore",
+ *   strategy: "Auto",
+ *   hash: "",
+ *   isPopstate: true,
+ *   scrollKey: "history-entry-4",
+ *   restored: true,
+ * }
+ * ```
+ *
+ * @category Route Types
  * @public
  * @since 1.0.0
  */
 export interface ScrollApplyPayload {
+  /** `none`, `hash`, `restore`, `top`, or recovered typed failure. */
   readonly kind: "none" | "hash" | "restore" | "top" | "ignoredError";
+  /** Resolved scroll strategy tag. */
   readonly strategy: ScrollStrategyType["_tag"];
+  /** Hash carried by the activation, whether or not it resolved to an element. */
   readonly hash: string;
+  /** Whether the activation came from browser history traversal. */
   readonly isPopstate: boolean;
+  /** History-entry key used for restoration. */
   readonly scrollKey: string;
+  /** Present for `restore`: whether a saved position was found and applied. */
   readonly restored?: boolean;
 }
 
 /**
- * Public coordination seam from Router service to Outlet.
+ * Coordinate Outlet prefetch readiness and activation-owned scroll work.
  *
+ * @remarks
+ * The Router service captures platform dependencies while the Outlet owns the
+ * exact DOM-swap acknowledgement and passes the matching navigation intent.
+ * Scroll application recovers all-`Fail` Causes as `ignoredError`; `Die`,
+ * `Interrupt`, and mixed Causes remain failures.
+ *
+ * @example
+ * ```ts
+ * declare const router: RouterService
+ * const coordination: OutletCoordination = router.outletCoordination
+ * ```
+ *
+ * @category Route Types
  * @public
  * @since 1.0.0
  */
@@ -696,10 +942,14 @@ export interface OutletCoordination {
     prefetch: (path: string) => Effect.Effect<void>,
   ) => Effect.Effect<void>;
 
+  /** Wait until an Outlet has installed its prefetch resolver. */
+  readonly awaitOutletReady: Effect.Effect<void>;
+
   /**
-   * Apply scroll behavior using router-captured platform services.
+   * Apply scroll for an activation after the Outlet acknowledges its exact DOM swap.
    */
   readonly applyScroll: (options: {
     readonly strategy: ScrollStrategyType;
-  }) => Effect.Effect<ScrollApplyPayload>;
+    readonly intent: ScrollIntent;
+  }) => Effect.Effect<ScrollApplyPayload, unknown>;
 }

@@ -2,11 +2,11 @@
  * Node.js platform configuration layer
  * @since 1.0.0
  */
-import { layer, type PlatformConfigService } from "../platform-config.js";
+import * as PlatformConfig from "../platform-config.js";
 
-const NODE_VERSION = "4.0.0-beta.58";
+const NODE_VERSION = "4.0.0-rc.112";
 
-const config: PlatformConfigService = {
+const config: PlatformConfig.PlatformConfigService = {
   name: "node",
   devScript: "vite",
   buildScript: "vite build",
@@ -22,4 +22,4 @@ const config: PlatformConfigService = {
  * Layer providing Node.js platform configuration
  * @since 1.0.0
  */
-export const NodePlatformConfig = layer(config);
+export const layer = PlatformConfig.layer(config);

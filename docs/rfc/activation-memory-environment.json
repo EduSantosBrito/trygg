@@ -1,0 +1,17 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "effect": "4.0.0-rc.112",
+  "order": [
+    "opaque/a1",
+    "navigation/b1",
+    "navigation/b2",
+    "opaque/a2"
+  ],
+  "sha256": {
+    "scripts/benchmark-activation-memory.ts": "a0b60eb7907441b3d8901b7302ee20750e8f9fac0891b7f061577bf85f33d495",
+    "packages/core/src/router/route-activation.ts": "05c83b9d66a90c9b42e4dca20053f339b7625945735cebc6b818d724928dbd5f",
+    "packages/core/src/router/outlet.ts": "9fb6e7f5983cb5141b92ebe5ff666765d42dc668dea2e4f3dbd3f5713fed7dee",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  },
+  "limits": "One live RouteActivation coordinator per fresh Bun process; 101,000 claims, numeric versions with gaps; gcAndSweep after host yield at each checkpoint. No DOM, browser history, or production telemetry exporter. This compares exact opaque-ID history with the built-in monotonic navigation protocol."
+}

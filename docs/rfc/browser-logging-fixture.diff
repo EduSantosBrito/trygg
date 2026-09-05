@@ -1,0 +1,80 @@
+--- a/scripts/benchmark-browser.ts
++++ b/scripts/benchmark-browser.ts
+@@ -86,8 +86,10 @@
+   });
+   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+   const failures: Array<string> = [];
++  let consoleMessages = 0;
+   page.on("pageerror", (error) => failures.push(error.message));
+   page.on("console", (message) => {
++    consoleMessages++;
+     if (message.type() === "error") failures.push(message.text());
+   });
+   await page.goto(`http://127.0.0.1:${server.port}`);
+@@ -105,6 +107,7 @@
+       .map((entry) => new URL(entry.name).pathname.split("/").pop()),
+   );
+   const results: Array<{ operation: string; samples: Array<Measurement> }> = [];
++  const operationConsoleMessages: Array<{ operation: string; messages: number }> = [];
+   const work: Array<{
+     operation: string;
+     rows: number;
+@@ -117,6 +120,7 @@
+     if (process.env.BENCHMARK_CASE !== undefined && process.env.BENCHMARK_CASE !== test.operation)
+       continue;
+     const samples: Array<Measurement> = [];
++    let operationMessages = 0;
+     for (let index = 0; index < warmupCount + sampleCount; index++) {
+       await page.evaluate((operation) => window.tryggBenchmark.run(operation), test.setup);
+       const profile =
+@@ -128,10 +132,15 @@
+         await profile.send("Profiler.setSamplingInterval", { interval: 100 });
+         await profile.send("Profiler.start");
+       }
++      const messagesBefore = consoleMessages;
+       const result = await page.evaluate(
+         (operation) => window.tryggBenchmark.run(operation),
+         test.operation,
+       );
++      const emittedMessages = consoleMessages - messagesBefore;
++      operationMessages += emittedMessages;
++      if (emittedMessages !== 0)
++        throw new Error(`${test.operation}: emitted ${emittedMessages} console messages; timing requires a silent application`);
+       if (profile !== undefined) {
+         const recorded = await profile.send("Profiler.stop");
+         await Bun.write(
+@@ -145,6 +154,7 @@
+       if (index >= warmupCount) samples.push(result);
+     }
+     results.push({ operation: test.operation, samples });
++    operationConsoleMessages.push({ operation: test.operation, messages: operationMessages });
+     const sorted = samples.map((sample) => sample.handlerMs).sort((a, b) => a - b);
+     console.log(`${test.operation}: handler median ${sorted[Math.floor(sampleCount / 2)]?.toFixed(2)} ms`);
+     if (process.env.BENCHMARK_WORK === "1") {
+@@ -225,6 +235,7 @@
+     warmup: warmupCount,
+     samples: sampleCount,
+     results,
++    operationConsoleMessages,
+     startup,
+     bundleSizes,
+     ...(process.env.BENCHMARK_WORK === "1" ? { work } : {}),
+--- a/scripts/benchmarks/browser.ts
++++ b/scripts/benchmarks/browser.ts
+@@ -173,11 +173,10 @@
+     intrinsic("nav", {}, buttons),
+     intrinsic("table", {}, [intrinsic("tbody", {}, [table])]),
+   ]);
+-}).pipe(Component.provide(Layer.effect(Scope.Scope, Effect.scope)));
++}).pipe(Component.provide(Layer.mergeAll(
++  Layer.effect(Scope.Scope, Effect.scope),
++  Layer.succeed(References.MinimumLogLevel, "None"),
++)));
+ 
+ const root = document.getElementById("root");
+-if (root !== null)
+-  mount(
+-    root,
+-    Effect.succeed(App({})).pipe(Effect.provideService(References.MinimumLogLevel, "None")),
+-  );
++if (root !== null) mount(root, Effect.succeed(App({})));

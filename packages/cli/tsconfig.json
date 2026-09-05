@@ -1,8 +1,10 @@
 {
   "include": ["src/**/*", "index.ts"],
   "compilerOptions": {
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ES2022",
+    "jsx": "react-jsx",
+    "jsxImportSource": "trygg",
     "module": "Preserve",
     "moduleDetection": "force",
     "allowJs": true,
@@ -17,6 +19,9 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true,
+    "paths": {
+      "trygg/api": ["./test-fixtures/trygg-api.ts"]
+    },
     "types": ["node"],
     "plugins": [
       {

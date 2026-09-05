@@ -1,0 +1,9 @@
+{
+  "scope": "Two fresh Bun processes after RESOURCE-002 shutdown admission guards. Same timed operations, warmup and samples as resource-cache-before/after. Separate follow-up, no randomized or interleaved ordering.",
+  "bun": "1.4.0",
+  "effect": "4.0.0-rc.112",
+  "sourceSha256": {
+    "packages/core/src/primitives/resource.ts": "577a5e570a30313d0a08eadadaef0a3e82705527e0520a5de9f998213cc549ad",
+    "scripts/benchmark-resource.ts": "c03028e735a151382486314d783a0c19f6c4e2032c0be7b3c78686e4926c54a7"
+  }
+}

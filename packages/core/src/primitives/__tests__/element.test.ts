@@ -31,7 +31,7 @@ import {
 } from "../element.js";
 import * as Signal from "../signal.js";
 
-class BoomError extends Schema.TaggedErrorClass<BoomError>()("BoomError", {
+class BoomError extends Schema.TaggedError<BoomError>()("BoomError", {
   message: Schema.String,
 }) {}
 

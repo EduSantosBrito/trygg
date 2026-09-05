@@ -1,0 +1,13 @@
+{
+  "scope": "Final frame-settled runner and independent-mount fixture; immediate-snapshot reports predate the settlement and batch-count changes in host runner/memory.ts. Portal source hash includes a documentation-only clarification after the measured build. The render-cleanup hash describes the measured version, before the subsequent error-only fix preserving reason annotations.",
+  "bun": "1.4.0",
+  "effect": "4.0.0-rc.112",
+  "sourceSha256": {
+    "scripts/benchmark-browser.ts": "b1a7f1ff49fc8d0e82d08db65773b9b2ffef668b578af0484e3289d1ed972521",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db",
+    "scripts/benchmarks/mounts.ts": "7be8a95d314497a26d631647d942e98c010b06cb63f3294f77d682b9592006a2",
+    "scripts/benchmarks/memory.ts": "c24ca14d7743cb5a4449978365bf4c9736fb09fc43a370926ab98cf41fff8bf2",
+    "packages/core/src/primitives/portal.ts": "2239cdec0eaadc299b9b59b5e1c5d1236b09a46bcd2fdf396dfa96a72f78d7ce",
+    "packages/core/src/primitives/render-cleanup.ts": "8e86da81456efe5f20568653050f3904d1fdea94a9737900b506f952009245b9"
+  }
+}

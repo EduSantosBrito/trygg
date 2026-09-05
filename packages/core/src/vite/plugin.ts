@@ -14,12 +14,12 @@
 import type { Connect, ResolvedConfig, ViteDevServer } from "vite";
 import { build } from "vite";
 import {
-  Array,
   Cause,
   Data,
   Deferred,
   Effect,
   Exit,
+  Fiber,
   FileSystem,
   Layer,
   Logger,
@@ -29,7 +29,6 @@ import {
   Option,
   Predicate,
   References,
-  Result,
   Schema,
   Scope,
   SynchronizedRef,
@@ -37,7 +36,7 @@ import {
 import type { Layer as LayerType } from "effect/Layer";
 import * as Context from "effect/Context";
 import * as nodePath from "node:path";
-import type { TryggConfig, Platform, Output } from "../config.js";
+import { defineConfig, type TryggConfig, type Platform, type Output } from "../config.js";
 import {
   DevPlatform,
   ServerPlatform,
@@ -51,22 +50,26 @@ import {
   ImportError,
 } from "./dev-platform.js";
 import * as Trace from "../trace/index.js";
-import { NodeDevPlatformLive } from "./dev-platform-node.js";
-import { Bootstrap, makeBootstrapLayer } from "./bootstrap.js";
+import * as CallbackRuntime from "./callback-runtime.js";
+import * as NodeDevPlatform from "./dev-platform-node.js";
+import { Bootstrap } from "./bootstrap.js";
 import {
   PluginBootstrapError as PluginBootstrapErrorImpl,
   PluginFileSystemError as PluginFileSystemErrorImpl,
+  PluginParseError as PluginParseErrorImpl,
 } from "./errors.js";
 import {
+  BuildArtifactPlanner,
+  GeneratedArtifactPlanner,
   InvalidBuildOutputCombination,
-  makeBuildArtifactPlanner,
-  makeGeneratedArtifactPlanner,
   BuildArtifactOperation,
   BuildPlanDiagnostic,
   type GeneratedArtifactPlan,
 } from "./build-artifact-planner.js";
+import { generateRouteTypes } from "./route-codegen.js";
 import { transformTryggJsxForRequirements } from "./jsx-requirement-transform.js";
-// BunDevPlatformLive is loaded dynamically to avoid loading @effect/platform-bun in Node.js
+import { unsafeAsUnrecoverableCause } from "../internal/unsafe.js";
+// The Bun adapter is loaded dynamically to avoid loading @effect/platform-bun in Node.js.
 
 // =============================================================================
 // Constants
@@ -160,7 +163,7 @@ export interface ClientEntryModuleOwnerInput {
  *
  * @remarks
  * Renderer input only; callers should construct it with
- * `makeClientEntryModuleOwner` so path normalization stays consistent.
+ * `ClientEntryModuleOwner.make` so path normalization stays consistent.
  *
  * @internal
  * @since 1.0.0
@@ -185,6 +188,88 @@ export interface ProductionServerEntryModuleOwner {
   readonly platform: ServerPlatformService;
 }
 
+// Shared by development factories and standalone production server bundles.
+// Project before delegating: exporters may consume attributes immediately.
+const renderHttpTelemetry = (): string => `
+const projectHttpCause = (cause) => Cause.fromReasons(cause.reasons.map((reason) =>
+  reason._tag === "Fail" ? Cause.makeFailReason("HttpRequestFailure") :
+  reason._tag === "Die" ? Cause.makeDieReason("HttpRequestDefect") :
+  Cause.makeInterruptReason()
+));
+
+// Methods live on the prototype; requests allocate only a delegate instance.
+class HttpTelemetrySpan {
+  constructor(span) { this.span = span; }
+  get _tag() { return "Span"; }
+  get name() { return this.span.name; }
+  get spanId() { return this.span.spanId; }
+  get traceId() { return this.span.traceId; }
+  get parent() { return this.span.parent; }
+  get annotations() { return this.span.annotations; }
+  get status() { return this.span.status; }
+  get attributes() { return this.span.attributes; }
+  get links() { return this.span.links; }
+  get sampled() { return this.span.sampled; }
+  get kind() { return this.span.kind; }
+  attribute(key, value) {
+    if (key === "url.full" || key === "url.query" ||
+        key === "user_agent.original" || key === "client.address" ||
+        key.startsWith("http.request.header.") ||
+        key.startsWith("http.response.header.")) return;
+    this.span.attribute(key, value);
+  }
+  end(time, exit) {
+    // HTTP success values contain the entire response; failure values may
+    // contain request bodies and Causes. Preserve outcome without those values.
+    const safeExit = Exit.isSuccess(exit) ? Exit.void : Exit.failCause(projectHttpCause(exit.cause));
+    this.span.end(time, safeExit);
+  }
+  event(name, time, attributes) { this.span.event(name, time, attributes); }
+  addLinks(links) { this.span.addLinks(links); }
+}
+
+const makeHttpTracer = (tracer) => Tracer.make({
+  context: tracer.context?.bind(tracer),
+  span(options) {
+    const span = tracer.span(options);
+    return options.kind === "server" ? new HttpTelemetrySpan(span) : span;
+  },
+});
+
+const withHttpTelemetry = (layer) => Layer.flatMap(layer, (services) =>
+  Layer.effectContext(Effect.map(Tracer.Tracer, (inherited) => {
+    const tracer = Context.get(Context.merge(Context.make(Tracer.Tracer, inherited), services), Tracer.Tracer);
+    return Context.add(services, Tracer.Tracer, makeHttpTracer(tracer));
+  }))
+);
+
+const httpLogger = HttpMiddleware.make((app) => {
+  // Reuse the middleware graph for each scoped logger configuration. Weak keys
+  // do not retain configurations that disappear with a request or API generation.
+  const loggedByLoggers = new WeakMap();
+  return Effect.withFiber((fiber) => {
+    const original = fiber.getRef(Logger.CurrentLoggers);
+    let logged = loggedByLoggers.get(original);
+    if (logged === undefined) {
+      const projected = new Set();
+      for (const logger of original) {
+        projected.add(Logger.make((options) => logger.log(options.cause.reasons.length === 0
+          ? options
+          : { ...options, cause: projectHttpCause(options.cause) }
+        )));
+      }
+      // Only the automatic HTTP logger sees the projection. Application code
+      // retains the original logger identities and scoped override semantics.
+      logged = HttpMiddleware.logger(Effect.provideService(app, Logger.CurrentLoggers, original)).pipe(
+        Effect.provideService(Logger.CurrentLoggers, projected)
+      );
+      loggedByLoggers.set(original, logged);
+    }
+    return logged;
+  });
+});
+`;
+
 const HandlerFactoryModule = {
   /**
    * Shared handler factory logic for virtual modules.
@@ -193,8 +278,10 @@ const HandlerFactoryModule = {
    * @internal
    */
   makeShared: (): string => `
-import { HttpRouter, HttpServer } from "effect/unstable/http";
-import { Data, Effect, Layer } from "effect";
+import { HttpBody, HttpEffect, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
+import { Cause, Context, Data, Effect, Exit, Fiber, Layer, Logger, Scope, Stream, Tracer } from "effect";
+
+${renderHttpTelemetry()}
 
 class FactoryError extends Data.TaggedError("FactoryError") {}
 
@@ -212,13 +299,54 @@ export const makeApiLayer = (mod) =>
     return mod.default;
   });
 
-export const makeWebHandler = (apiLive) => {
-  // Decision (#120): pure constructor. This only composes layer values and
-  // builds the handler facade; resource acquisition is owned by handler usage
-  // and the returned dispose callback.
+export const makeWebHandler = (apiLive) => Effect.gen(function* () {
   const apiLayer = Layer.mergeAll(apiLive, HttpServer.layerServices);
-  return HttpRouter.toWebHandler(apiLayer);
-};
+  const services = yield* Layer.build(withHttpTelemetry(Layer.provideMerge(apiLayer, HttpRouter.layer)));
+  const router = Context.get(services, HttpRouter.HttpRouter);
+  const requests = yield* Scope.fork(yield* Effect.scope);
+  const middleware = HttpMiddleware.make((app) => {
+    const logged = httpLogger(app);
+    return Effect.withFiber((fiber) => {
+      if (requests.state._tag === "Closed") return Effect.interrupt;
+      // The Web response Promise can settle before request finalizers. Attach
+      // the actual HTTP fiber before user code so services outlive its cleanup.
+      Fiber.runIn(fiber, requests);
+      return logged;
+    });
+  });
+  const ownResponse = (request, response) => Effect.sync(() => {
+    if (response.body._tag !== "Stream") return response;
+    const body = response.body;
+    // HEAD never starts a body stream. Keep its metadata without transferring
+    // request cleanup to a stream that the HTTP converter will discard.
+    if (request.method === "HEAD") {
+      return HttpServerResponse.setBody(response, HttpBody.raw(undefined, {
+        contentType: body.contentType,
+        contentLength: body.contentLength,
+      }));
+    }
+    // HttpEffect transfers request cleanup to the body stream. Own that
+    // fiber too, even when no bridge reader has consumed the Response yet.
+    const stream = Stream.onStart(body.stream, Effect.withFiber((streamFiber) => {
+      if (requests.state._tag === "Closed") return Effect.interrupt;
+      Fiber.runIn(streamFiber, requests);
+      return Effect.void;
+    }));
+    return HttpServerResponse.setBody(response, HttpBody.stream(stream, body.contentType, body.contentLength));
+  });
+  // Register last so a user's pre-response handler can replace the body before
+  // ownership is attached, including on failure and interruption responses.
+  const app = router.asHttpEffect().pipe(
+    Effect.onExit(() => HttpEffect.appendPreResponseHandler(ownResponse)),
+  );
+  const handler = HttpEffect.toWebHandlerWith(services)(app, middleware);
+  return {
+    handler: (request) => requests.state._tag === "Closed"
+      ? Promise.resolve(new Response("Service Unavailable", { status: 503 }))
+      : handler(request),
+    dispose: Scope.close(requests, Exit.void),
+  };
+});
 `,
 
   /**
@@ -228,7 +356,11 @@ export const makeWebHandler = (apiLive) => {
   makeNode: (): string =>
     HandlerFactoryModule.makeShared() +
     `
-export const getBody = (req) => {
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
+class ApiRequestError extends Data.TaggedError("ApiRequestError") {}
+
+export const getBody = (req, signal) => {
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") {
     return Promise.resolve(undefined);
@@ -236,30 +368,81 @@ export const getBody = (req) => {
 
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(new Uint8Array(chunk)));
-    req.on("end", () => {
-      const total = chunks.reduce((n, chunk) => n + chunk.length, 0);
-      const body = new Uint8Array(total);
+    let length = 0;
+    let settled = false;
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+      req.off("aborted", onAborted);
+      req.off("close", onClose);
+      signal?.removeEventListener("abort", onAborted);
+    };
+    const succeed = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onData = (chunk) => {
+      length += chunk.byteLength;
+      if (length > MAX_REQUEST_BODY_BYTES) {
+        fail(new ApiRequestError({
+          reason: "BodyTooLarge",
+          message: "Request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes",
+          limit: MAX_REQUEST_BODY_BYTES,
+        }));
+        req.resume();
+        return;
+      }
+      chunks.push(new Uint8Array(chunk));
+    };
+    const onEnd = () => {
+      const body = new Uint8Array(length);
       let offset = 0;
       for (const chunk of chunks) {
         body.set(chunk, offset);
         offset += chunk.length;
       }
-      resolve(body);
-    });
-    req.on("error", reject);
+      succeed(body);
+    };
+    const onError = (cause) => fail(new ApiRequestError({
+      reason: "ReadFailed",
+      message: "Request body read failed",
+      cause,
+    }));
+    const onAborted = () => fail(new ApiRequestError({
+      reason: "Aborted",
+      message: "Request was aborted",
+    }));
+    const onClose = () => {
+      if (!req.complete) onAborted();
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    req.on("aborted", onAborted);
+    req.on("close", onClose);
+    signal?.addEventListener("abort", onAborted, { once: true });
+    if (signal?.aborted) onAborted();
   });
 };
 
-export const fromNodeRequest = async (req) => {
+export const fromNodeRequest = async (req, signal) => {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
     headers.set(key, Array.isArray(value) ? value.join(", ") : value);
   }
 
-  const body = await getBody(req);
-  const init = { method: req.method ?? "GET", headers };
+  const body = await getBody(req, signal);
+  const init = { method: req.method ?? "GET", headers, signal };
   if (body !== undefined) {
     init.body = body;
   }
@@ -267,51 +450,210 @@ export const fromNodeRequest = async (req) => {
   return new Request("http://" + (req.headers.host ?? "localhost") + (req.url ?? "/"), init);
 };
 
-export const toNodeResponse = async (response, res) => {
+const abortedRequestError = () => new ApiRequestError({
+  reason: "Aborted",
+  message: "Request was aborted",
+});
+
+const awaitWebHandler = (handler, request, signal) => new Promise((resolve, reject) => {
+  let settled = false;
+  const cleanup = () => signal.removeEventListener("abort", onAbort);
+  const succeed = (response) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolve(response);
+  };
+  const fail = (cause) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    reject(cause);
+  };
+  const onAbort = () => fail(abortedRequestError());
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) {
+    onAbort();
+    return;
+  }
+  Promise.resolve().then(() => handler(request)).then(succeed, fail);
+});
+
+export const toNodeResponse = async (response, res, signal) => {
+  if (signal?.aborted) throw abortedRequestError();
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
-    res.setHeader(key, value);
+    if (key !== "set-cookie") res.setHeader(key, value);
   });
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) res.setHeader("set-cookie", cookies);
 
   if (!response.body) {
+    if (signal?.aborted) throw abortedRequestError();
     res.end();
     return;
   }
 
   const reader = response.body.getReader();
-  for (;;) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    await new Promise((resolve, reject) => {
-      res.write(chunk.value, (error) => (error ? reject(error) : resolve()));
-    });
+  const readChunk = () => new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      res.off("close", onClose);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const succeed = (chunk) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(chunk);
+    };
+    const fail = (cause) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(cause);
+    };
+    const onClose = () => fail(new ApiRequestError({
+      reason: "Aborted",
+      message: "Response connection closed",
+    }));
+    const onAbort = () => fail(abortedRequestError());
+    res.on("close", onClose);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    Promise.resolve().then(() => reader.read()).then(
+      succeed,
+      (cause) => fail(new ApiRequestError({
+        reason: "ReadFailed",
+        message: "Failed to read response body",
+        cause,
+      })),
+    );
+  });
+  let completed = false;
+  try {
+    for (;;) {
+      const chunk = await readChunk();
+      if (chunk.done) {
+        completed = true;
+        break;
+      }
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+          res.off("close", onClose);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const succeed = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+        const fail = (cause) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(cause);
+        };
+        const onClose = () => fail(new ApiRequestError({
+          reason: "Aborted",
+          message: "Response connection closed",
+        }));
+        const onAbort = () => fail(abortedRequestError());
+        res.on("close", onClose);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        try {
+          res.write(chunk.value, (error) => error
+            ? fail(new ApiRequestError({
+                reason: "WriteFailed",
+                message: "Failed to write response",
+                cause: error,
+              }))
+            : succeed());
+        } catch (cause) {
+          fail(new ApiRequestError({
+            reason: "WriteFailed",
+            message: "Failed to write response",
+            cause,
+          }));
+        }
+      });
+    }
+    res.end();
+  } finally {
+    if (!completed) {
+      await reader.cancel().catch(() => undefined);
+    }
+    reader.releaseLock();
   }
-
-  res.end();
 };
 
 export const makeNodeHandler = (apiLive) =>
-  Effect.succeed((() => {
-    const webHandler = makeWebHandler(apiLive);
+  Effect.gen(function* () {
+    const webHandler = yield* makeWebHandler(apiLive);
+    const activeRequests = new Map();
+    let disposed = false;
+
+    const dispose = Effect.gen(function* () {
+      yield* Effect.promise(async () => {
+        if (disposed) return;
+        disposed = true;
+        for (const controller of activeRequests.keys()) controller.abort();
+        await Promise.allSettled(activeRequests.values());
+      });
+      yield* webHandler.dispose;
+    });
 
     return {
       handler: (req, res) => {
-        void fromNodeRequest(req)
-          .then((request) => webHandler.handler(request))
-          .then((response) => toNodeResponse(response, res))
-          .catch(() => {
+        if (disposed) {
+          res.statusCode = 503;
+          res.end("Service Unavailable");
+          return;
+        }
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const abortIncompleteRequest = () => {
+          if (!req.complete) abort();
+        };
+        const abortIncompleteResponse = () => {
+          if (!res.writableEnded) abort();
+        };
+        req.on("aborted", abort);
+        req.on("close", abortIncompleteRequest);
+        res.on("close", abortIncompleteResponse);
+
+        const request = fromNodeRequest(req, controller.signal)
+          .then((request) => awaitWebHandler(webHandler.handler, request, controller.signal))
+          .then((response) => toNodeResponse(response, res, controller.signal))
+          .catch((error) => {
+            if (error?._tag === "ApiRequestError" && error.reason === "Aborted") return;
             if (!res.headersSent) {
-              res.statusCode = 500;
-              res.end("Internal Server Error");
+              res.statusCode = error?._tag === "ApiRequestError" && error.reason === "BodyTooLarge"
+                ? 413
+                : 500;
+              res.end(res.statusCode === 413 ? "Payload Too Large" : "Internal Server Error");
             }
+          })
+          .finally(() => {
+            req.off("aborted", abort);
+            req.off("close", abortIncompleteRequest);
+            res.off("close", abortIncompleteResponse);
+            activeRequests.delete(controller);
           });
+        activeRequests.set(controller, request);
       },
-      dispose: Effect.tryPromise({
-        try: () => webHandler.dispose(),
-        catch: (cause) => cause,
-      }).pipe(Effect.orDie),
+      dispose,
     };
-  })());
+  });
 `,
 
   /**
@@ -327,7 +669,7 @@ export const makeNodeHandler = (apiLive) =>
 // =============================================================================
 
 // =============================================================================
-// Error Types - Yieldable via Schema.TaggedErrorClass
+// Error Types - Yieldable via Schema.TaggedError
 // =============================================================================
 
 /**
@@ -340,7 +682,7 @@ export const makeNodeHandler = (apiLive) =>
  * @internal
  * @since 1.0.0
  */
-export class PluginValidationError extends Schema.TaggedErrorClass<PluginValidationError>()(
+export class PluginValidationError extends Schema.TaggedError<PluginValidationError>()(
   "PluginValidationError",
   {
     reason: Schema.Union([
@@ -393,6 +735,11 @@ export class PluginValidationError extends Schema.TaggedErrorClass<PluginValidat
   }
 }
 
+class RollupPluginError extends Schema.TaggedError<RollupPluginError>()("RollupPluginError", {
+  message: Schema.String,
+  cause: Schema.Unknown,
+}) {}
+
 /**
  * Multiple plugin validation errors.
  *
@@ -403,7 +750,7 @@ export class PluginValidationError extends Schema.TaggedErrorClass<PluginValidat
  * @internal
  * @since 1.0.0
  */
-export class PluginValidationErrors extends Schema.TaggedErrorClass<PluginValidationErrors>()(
+export class PluginValidationErrors extends Schema.TaggedError<PluginValidationErrors>()(
   "PluginValidationErrors",
   {
     errors: Schema.NonEmptyArray(Schema.instanceOf(PluginValidationError)),
@@ -430,17 +777,7 @@ export class PluginValidationErrors extends Schema.TaggedErrorClass<PluginValida
  * @internal
  * @since 1.0.0
  */
-export class PluginParseError extends Schema.TaggedErrorClass<PluginParseError>()(
-  "PluginParseError",
-  {
-    description: Schema.String,
-    input: Schema.Unknown,
-  },
-) {
-  override get message(): string {
-    return this.description;
-  }
-}
+export const PluginParseError = PluginParseErrorImpl;
 
 /**
  * Plugin file system error.
@@ -467,6 +804,7 @@ export const PluginFileSystemError = PluginFileSystemErrorImpl;
 export const PluginBootstrapError = PluginBootstrapErrorImpl;
 
 type PluginFileSystemError = PluginFileSystemErrorImpl;
+type PluginParseError = PluginParseErrorImpl;
 
 // =============================================================================
 // Logging (consola - async reporters, non-blocking I/O)
@@ -502,15 +840,15 @@ const PluginLogger = Logger.make((options) => {
 });
 
 /**
- * Dynamically import BunDevPlatformLive to avoid loading @effect/platform-bun in Node.js.
+ * Dynamically import the Bun dev-platform Layer to avoid loading @effect/platform-bun in Node.js.
  * @internal
  */
 const importBunDevPlatform = Effect.tryPromise({
-  try: () => import("./dev-platform-bun.js").then((m) => m.BunDevPlatformLive),
+  try: () => import("./dev-platform-bun.js").then((module) => module.layer),
   catch: (cause) =>
     new ImportError({
       module: "./dev-platform-bun.js",
-      message: "Failed to import BunDevPlatformLive",
+      message: "Failed to import Bun dev-platform Layer",
       cause,
     }),
 });
@@ -521,17 +859,20 @@ const importBunDevPlatform = Effect.tryPromise({
  * @internal
  */
 const makePluginLayer = (
-  platform: Platform,
+  devPlatform: Platform,
+  productionPlatform: Platform,
 ): LayerType<
   FileSystem.FileSystem | DevPlatform | ServerPlatform | PluginFiles | BuildOutput,
   ImportError
 > => {
-  const devLayer = platform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatformLive;
-  const serverLayer = platform === "bun" ? BunServerPlatform : NodeServerPlatform;
+  const devLayer =
+    devPlatform === "bun" ? Layer.unwrap(importBunDevPlatform) : NodeDevPlatform.layer;
+  const serverLayer =
+    productionPlatform === "bun" ? BunServerPlatform.layer : NodeServerPlatform.layer;
 
   const platformLayer = Layer.mergeAll(devLayer, serverLayer);
-  const pluginFilesLayer = makePluginFilesLayer().pipe(Layer.provideMerge(platformLayer));
-  const buildOutputLayer = makeBuildOutputLayer().pipe(Layer.provideMerge(pluginFilesLayer));
+  const pluginFilesLayer = PluginFiles.layer.pipe(Layer.provideMerge(platformLayer));
+  const buildOutputLayer = BuildOutput.layer.pipe(Layer.provideMerge(pluginFilesLayer));
 
   return Layer.mergeAll(
     buildOutputLayer,
@@ -595,341 +936,6 @@ const logApiValidationError = (
     Match.tag("PluginFileSystemError", logFileSystemError),
     Match.exhaustive,
   );
-
-// =============================================================================
-// Pure Helper Effects
-// =============================================================================
-
-/**
- * Extract param names from a route path.
- *
- * @remarks
- * Internal helper for route typing codegen. It keeps only colon-prefixed path
- * segments and strips the leading `:`.
- *
- * @internal
- * @since 1.0.0
- */
-export const extractParamNames: (routePath: string) => Effect.Effect<ReadonlyArray<string>> =
-  Effect.fn("VitePlugin.extractParamNames")(function* (routePath: string) {
-    const segments = routePath.split("/").filter(Boolean);
-    return Array.filterMap(segments, (segment) =>
-      segment.startsWith(":") ? Result.succeed(segment.slice(1)) : Result.failVoid,
-    );
-  });
-
-/**
- * Generate TypeScript type for route params.
- *
- * @remarks
- * Builds the stringified object type written into generated route maps from a
- * route path's extracted params.
- *
- * @internal
- * @since 1.0.0
- */
-export const generateParamType: (routePath: string) => Effect.Effect<string> = Effect.fn(
-  "VitePlugin.generateParamType",
-)(function* (routePath: string) {
-  const params = yield* extractParamNames(routePath);
-  if (params.length === 0) {
-    return "{}";
-  }
-  const fields = params.map((p) => `readonly ${p}: string`);
-  return `{ ${fields.join("; ")} }`;
-});
-
-// =============================================================================
-// Route Parsing & Type Generation
-// =============================================================================
-
-/**
- * Parsed route info extracted from a routes.ts source file.
- *
- * @remarks
- * Internal intermediate shape used between textual route parsing and final
- * route-type generation.
- *
- * @internal
- * @since 1.0.0
- */
-export interface ParsedRoute {
-  readonly path: string;
-  readonly params: ReadonlyArray<ParsedParam>;
-  readonly query: ReadonlyArray<ParsedParam>;
-  readonly children: ReadonlyArray<ParsedRoute>;
-  readonly isIndex: boolean;
-}
-
-/**
- * Parsed parameter with name and TypeScript type.
- *
- * @remarks
- * Internal description of one decoded param or query field recovered from a
- * route schema expression.
- *
- * @internal
- * @since 1.0.0
- */
-export interface ParsedParam {
-  readonly name: string;
-  readonly type: string;
-  readonly optional: boolean;
-}
-
-/**
- * Map a Schema type expression to its TypeScript output type.
- *
- * @remarks
- * Internal mapper used by route codegen. It intentionally handles only the
- * schema forms emitted in route param and query definitions.
- *
- * @internal
- * @since 1.0.0
- */
-export const schemaToType = (schemaExpr: string): string => {
-  const trimmed = schemaExpr.trim();
-
-  // Schema.optional(inner) -> inner type | undefined
-  const optionalMatch = trimmed.match(/^Schema\.optional\((.+)\)$/);
-  if (optionalMatch !== null && optionalMatch[1] !== undefined) {
-    const innerType = schemaToType(optionalMatch[1]);
-    return `${innerType} | undefined`;
-  }
-
-  // Schema.NumberFromString -> number
-  if (trimmed === "Schema.NumberFromString") return "number";
-
-  // Schema.Number -> number
-  if (trimmed === "Schema.Number") return "number";
-
-  // Schema.String -> string
-  if (trimmed === "Schema.String") return "string";
-
-  // Schema.Boolean -> boolean
-  if (trimmed === "Schema.Boolean") return "boolean";
-
-  // Schema.Literal("a", "b") -> "a" | "b"
-  const literalMatch = trimmed.match(/^Schema\.Literal\((.+)\)$/);
-  if (literalMatch !== null && literalMatch[1] !== undefined) {
-    const values = literalMatch[1].split(",").map((v) => v.trim());
-    return values.join(" | ");
-  }
-
-  // Fallback to string for unknown types
-  return "string";
-};
-
-/**
- * Parse a Schema.Struct({ ... }) expression to extract field names and types.
- *
- * @remarks
- * Internal regex-based parser for simple route schema structs used during
- * route-type generation.
- *
- * @internal
- * @since 1.0.0
- */
-export const parseSchemaStruct = (structBody: string): ReadonlyArray<ParsedParam> => {
-  const params: Array<ParsedParam> = [];
-  // Match field: Type patterns (handles nested parens for Schema.optional(Schema.X))
-  const fieldRegex = /(\w+)\s*:\s*(Schema\.\w+(?:\([^)]*(?:\([^)]*\))*[^)]*\))?|Schema\.\w+)/g;
-  let match: RegExpExecArray | null = fieldRegex.exec(structBody);
-  while (match !== null) {
-    const name = match[1];
-    const schemaExpr = match[2];
-    if (name !== undefined && schemaExpr !== undefined) {
-      const optional = schemaExpr.startsWith("Schema.optional(");
-      params.push({
-        name,
-        type: schemaToType(schemaExpr),
-        optional,
-      });
-    }
-    match = fieldRegex.exec(structBody);
-  }
-  return params;
-};
-
-/**
- * Parse routes from a routes.ts source string.
- * Extracts Route.make() paths, .params() schemas, .query() schemas, and children.
- *
- * @remarks
- * Internal parser that recovers enough route metadata from source text to feed
- * generated type declarations and build transforms.
- *
- * @internal
- * @since 1.0.0
- */
-export const parseRoutes: (source: string) => Effect.Effect<ReadonlyArray<ParsedRoute>> = Effect.fn(
-  "VitePlugin.parseRoutes",
-)(function* (source: string) {
-  const routes: Array<ParsedRoute> = [];
-
-  // Extract all Route.make("path") occurrences with their chained methods
-  // Strategy: find Route.make or Route.index calls and capture the chain
-  const routeMakeRegex = /Route\.make\(\s*"([^"]+)"\s*\)/g;
-  const routeIndexRegex = /Route\.index\(\s*\w+\s*\)/g;
-
-  let routeMatch: RegExpExecArray | null = routeMakeRegex.exec(source);
-  while (routeMatch !== null) {
-    const path = routeMatch[1];
-    if (path !== undefined) {
-      // Get the chain after Route.make("path")
-      const chainStart = routeMatch.index + routeMatch[0].length;
-      const chain = extractChain(source, chainStart);
-
-      const params = extractParamsFromChain(chain);
-      const query = extractQueryFromChain(chain);
-      const children = yield* extractChildrenFromChain(chain);
-
-      routes.push({ path, params, query, children, isIndex: false });
-    }
-    routeMatch = routeMakeRegex.exec(source);
-  }
-
-  // Extract Route.index() calls (index routes don't have paths)
-  let indexMatch: RegExpExecArray | null = routeIndexRegex.exec(source);
-  while (indexMatch !== null) {
-    routes.push({ path: "", params: [], query: [], children: [], isIndex: true });
-    indexMatch = routeIndexRegex.exec(source);
-  }
-
-  return routes;
-});
-
-/**
- * Extract the method chain following a Route.make() call.
- * Captures up to the next top-level statement boundary.
- * @internal
- */
-const extractChain = (source: string, startIndex: number): string => {
-  let depth = 0;
-  let i = startIndex;
-  const len = source.length;
-
-  while (i < len) {
-    const ch = source[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") {
-      if (depth === 0) break;
-      depth--;
-    } else if (ch === "\n" && depth === 0) {
-      // Check if next non-whitespace is a dot (continuation)
-      let j = i + 1;
-      while (j < len && (source[j] === " " || source[j] === "\t")) j++;
-      if (source[j] !== ".") break;
-    }
-    i++;
-  }
-
-  return source.slice(startIndex, i);
-};
-
-/**
- * Extract .params(Schema.Struct({...})) from a method chain.
- * @internal
- */
-const extractParamsFromChain = (chain: string): ReadonlyArray<ParsedParam> => {
-  const paramsMatch = chain.match(/\.params\(\s*Schema\.Struct\(\s*\{([^}]*)\}\s*\)\s*\)/);
-  if (paramsMatch === null || paramsMatch[1] === undefined) return [];
-  return parseSchemaStruct(paramsMatch[1]);
-};
-
-/**
- * Extract .query(Schema.Struct({...})) from a method chain.
- * @internal
- */
-const extractQueryFromChain = (chain: string): ReadonlyArray<ParsedParam> => {
-  const queryMatch = chain.match(/\.query\(\s*Schema\.Struct\(\s*\{([^}]*)\}\s*\)\s*\)/);
-  if (queryMatch === null || queryMatch[1] === undefined) return [];
-  return parseSchemaStruct(queryMatch[1]);
-};
-
-/**
- * Extract .children(...) nested routes from a method chain.
- * @internal
- */
-const extractChildrenFromChain: (chain: string) => Effect.Effect<ReadonlyArray<ParsedRoute>> =
-  Effect.fn("VitePlugin.extractChildrenFromChain")(function* (chain: string) {
-    const childrenMatch = chain.match(/\.children\(\s*\n?([\s\S]*?)\n?\s*\)/);
-    if (childrenMatch === null || childrenMatch[1] === undefined) return [];
-    return yield* parseRoutes(childrenMatch[1]);
-  });
-
-/**
- * Resolve child routes against parent path to produce absolute paths.
- *
- * @remarks
- * Flattens nested parsed routes into absolute route records before codegen.
- *
- * @internal
- * @since 1.0.0
- */
-export const resolveRoutePaths = (
-  routes: ReadonlyArray<ParsedRoute>,
-  parentPath?: string,
-): ReadonlyArray<{ readonly path: string; readonly params: ReadonlyArray<ParsedParam> }> => {
-  const result: Array<{ readonly path: string; readonly params: ReadonlyArray<ParsedParam> }> = [];
-
-  for (const route of routes) {
-    const absolutePath = route.isIndex
-      ? (parentPath ?? "/")
-      : parentPath !== undefined
-        ? `${parentPath}${route.path}`
-        : route.path;
-
-    result.push({ path: absolutePath, params: route.params });
-
-    if (route.children.length > 0) {
-      const childResults = resolveRoutePaths(route.children, absolutePath);
-      for (const child of childResults) {
-        result.push(child);
-      }
-    }
-  }
-
-  return result;
-};
-
-/**
- * Generate RouteMap type declarations from parsed routes.
- *
- * @remarks
- * Produces the ambient `trygg/router` RouteMap augmentation written to the
- * generated `.trygg/routes.d.ts` file.
- *
- * @internal
- * @since 1.0.0
- */
-export const generateRouteTypes: (
-  parsedRoutes: ReadonlyArray<ParsedRoute>,
-) => Effect.Effect<string> = Effect.fn("VitePlugin.generateRouteTypes")(function* (
-  parsedRoutes: ReadonlyArray<ParsedRoute>,
-) {
-  const resolved = resolveRoutePaths(parsedRoutes);
-
-  const mapEntries = resolved.map(({ path, params }) => {
-    if (params.length === 0) {
-      return `    readonly "${path}": {}`;
-    }
-    const fields = params.filter((p) => !p.optional).map((p) => `readonly ${p.name}: ${p.type}`);
-    return `    readonly "${path}": { ${fields.join("; ")} }`;
-  });
-
-  return `// Auto-generated by trygg
-export type Routes = never
-
-declare module "trygg/router" {
-  interface RouteMap {
-${mapEntries.join("\n")}
-  }
-}
-
-export {}
-`;
-});
 
 /**
  * Collected import info for route transform.
@@ -1314,11 +1320,24 @@ const stripNonCodeText = (source: string): string => {
  * Check if path exists.
  * @internal
  */
-const pathExists: (filePath: string) => Effect.Effect<boolean, never, FileSystem.FileSystem> =
-  Effect.fn("VitePlugin.pathExists")(function* (filePath: string) {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));
-  });
+const pathExists: (
+  filePath: string,
+) => Effect.Effect<boolean, PluginFileSystemError, FileSystem.FileSystem> = Effect.fn(
+  "VitePlugin.pathExists",
+)(function* (filePath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  return yield* fs
+    .exists(filePath)
+    .pipe(
+      Effect.catchTag("PlatformError", (error) =>
+        Predicate.isTagged(error.reason, "NotFound")
+          ? Effect.succeed(false)
+          : Effect.fail(
+              new PluginFileSystemError({ operation: "exists", path: filePath, cause: error }),
+            ),
+      ),
+    );
+});
 
 /**
  * Write file with directory creation.
@@ -1480,21 +1499,23 @@ const stripTypeScriptExtension = (modulePath: string): string => modulePath.repl
  * @internal
  * @since 1.0.0
  */
-export const makeClientEntryModuleOwner = ({
-  appDir,
-  generatedDir,
-  routesFilePath,
-}: ClientEntryModuleOwnerInput): ClientEntryModuleOwner => {
-  const appImportPath = toModuleImportPath(generatedDir, appDir);
-  const routesImportPath =
-    routesFilePath === undefined
-      ? `${appImportPath}/routes`
-      : stripTypeScriptExtension(toModuleImportPath(generatedDir, routesFilePath));
+export const ClientEntryModuleOwner = {
+  make: ({
+    appDir,
+    generatedDir,
+    routesFilePath,
+  }: ClientEntryModuleOwnerInput): ClientEntryModuleOwner => {
+    const appImportPath = toModuleImportPath(generatedDir, appDir);
+    const routesImportPath =
+      routesFilePath === undefined
+        ? `${appImportPath}/routes`
+        : stripTypeScriptExtension(toModuleImportPath(generatedDir, routesFilePath));
 
-  return {
-    layoutImportPath: `${appImportPath}/layout`,
-    routesImportPath,
-  };
+    return {
+      layoutImportPath: `${appImportPath}/layout`,
+      routesImportPath,
+    };
+  },
 };
 
 /**
@@ -1543,7 +1564,7 @@ export const generateEntryModule = (
 ): Effect.Effect<string> =>
   Effect.succeed(
     renderClientEntryModule(
-      makeClientEntryModuleOwner({
+      ClientEntryModuleOwner.make({
         appDir,
         generatedDir,
         routesFilePath: routesFile,
@@ -1581,25 +1602,26 @@ interface PluginFilePaths {
 
 interface PluginFilesService {
   readonly appApiPath: (paths: PluginFilePaths) => string;
-  readonly appApiExists: (paths: PluginFilePaths) => Effect.Effect<boolean>;
-  readonly routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined>;
-  readonly isRoutesFile: (paths: PluginFilePaths, filePath: string) => Effect.Effect<boolean>;
+  readonly appApiExists: (paths: PluginFilePaths) => Effect.Effect<boolean, PluginFileSystemError>;
+  readonly routesFilePath: (
+    paths: PluginFilePaths,
+  ) => Effect.Effect<string | undefined, PluginFileSystemError>;
+  readonly isRoutesFile: (
+    paths: PluginFilePaths,
+    filePath: string,
+  ) => Effect.Effect<boolean, PluginFileSystemError>;
   readonly writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeGeneratedRouteTypes: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
   readonly regenerateGeneratedRouteTypes: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
   readonly writeClientEntryFiles: (
     paths: PluginFilePaths,
-  ) => Effect.Effect<void, PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
   readonly executeArtifactOperations: (
     operations: ReadonlyArray<BuildArtifactOperation>,
-  ) => Effect.Effect<void, PluginFileSystemError>;
-  readonly writeBuildEntryFiles: (
-    paths: PluginFilePaths,
-    options: { readonly output: Output; readonly platform: Platform },
   ) => Effect.Effect<void, PluginFileSystemError>;
   readonly writeProductionServerEntry: (
     paths: PluginFilePaths,
@@ -1620,25 +1642,28 @@ export class PluginFiles extends Context.Service<
   PluginFiles,
   {
     readonly appApiPath: (paths: PluginFilePaths) => string;
-    readonly appApiExists: (paths: PluginFilePaths) => Effect.Effect<boolean>;
-    readonly routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined>;
-    readonly isRoutesFile: (paths: PluginFilePaths, filePath: string) => Effect.Effect<boolean>;
+    readonly appApiExists: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<boolean, PluginFileSystemError>;
+    readonly routesFilePath: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<string | undefined, PluginFileSystemError>;
+    readonly isRoutesFile: (
+      paths: PluginFilePaths,
+      filePath: string,
+    ) => Effect.Effect<boolean, PluginFileSystemError>;
     readonly writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError>;
     readonly writeGeneratedRouteTypes: (
       paths: PluginFilePaths,
-    ) => Effect.Effect<void, PluginFileSystemError>;
+    ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
     readonly regenerateGeneratedRouteTypes: (
       paths: PluginFilePaths,
-    ) => Effect.Effect<void, PluginFileSystemError>;
+    ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
     readonly writeClientEntryFiles: (
       paths: PluginFilePaths,
-    ) => Effect.Effect<void, PluginFileSystemError>;
+    ) => Effect.Effect<void, PluginFileSystemError | PluginParseError>;
     readonly executeArtifactOperations: (
       operations: ReadonlyArray<BuildArtifactOperation>,
-    ) => Effect.Effect<void, PluginFileSystemError>;
-    readonly writeBuildEntryFiles: (
-      paths: PluginFilePaths,
-      options: { readonly output: Output; readonly platform: Platform },
     ) => Effect.Effect<void, PluginFileSystemError>;
     readonly writeProductionServerEntry: (
       paths: PluginFilePaths,
@@ -1670,208 +1695,219 @@ const sameFilePath = (left: string, right: string): boolean =>
  * @internal
  * @since 1.0.0
  */
-export const makePluginFilesLayer = (): Layer.Layer<PluginFiles, never, FileSystem.FileSystem> =>
-  Layer.effect(
-    PluginFiles,
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
+const pluginFilesLayer: Layer.Layer<PluginFiles, never, FileSystem.FileSystem> = Layer.effect(
+  PluginFiles,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
 
-      const pathExists = (filePath: string): Effect.Effect<boolean> =>
-        fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));
-
-      const writeFileSafe: (
-        filePath: string,
-        content: string,
-      ) => Effect.Effect<void, PluginFileSystemError> = Effect.fn("PluginFiles.writeFileSafe")(
-        function* (filePath: string, content: string) {
-          const dir = nodePath.dirname(filePath);
-
-          yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-            Effect.catchTag("PlatformError", (e) =>
-              Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(e),
-            ),
-            Effect.mapError(
-              (cause) =>
+    const pathExists = (filePath: string): Effect.Effect<boolean, PluginFileSystemError> =>
+      fs.exists(filePath).pipe(
+        Effect.catchTag("PlatformError", (error) =>
+          Predicate.isTagged(error.reason, "NotFound")
+            ? Effect.succeed(false)
+            : Effect.fail(
                 new PluginFileSystemError({
-                  operation: "mkdir",
-                  path: dir,
-                  cause,
-                }),
-            ),
-          );
-
-          yield* fs.writeFileString(filePath, content).pipe(
-            Effect.mapError(
-              (cause) =>
-                new PluginFileSystemError({
-                  operation: "write",
+                  operation: "exists",
                   path: filePath,
-                  cause,
+                  cause: error,
                 }),
-            ),
-          );
-        },
+              ),
+        ),
       );
 
-      const routesFilePath: (paths: PluginFilePaths) => Effect.Effect<string | undefined> =
-        Effect.fn("PluginFiles.routesFilePath")(function* (paths: PluginFilePaths) {
-          const filePath = routeSourcePath(paths);
-          const exists = yield* pathExists(filePath);
-          return exists ? filePath : undefined;
-        });
+    const writeFileSafe: (
+      filePath: string,
+      content: string,
+    ) => Effect.Effect<void, PluginFileSystemError> = Effect.fn("PluginFiles.writeFileSafe")(
+      function* (filePath: string, content: string) {
+        const dir = nodePath.dirname(filePath);
 
-      const writeRouteTypesFromRoutesWithFs: (
-        routesFilePath: string,
-        routeTypesPath: string,
-      ) => Effect.Effect<boolean, PluginFileSystemError> = Effect.fn(
-        "PluginFiles.writeRouteTypesFromRoutesWithFs",
-      )(function* (routesFilePath: string, routeTypesPath: string) {
-        const routeSource = yield* fs
-          .readFileString(routesFilePath)
-          .pipe(Effect.orElseSucceed(() => ""));
-        if (routeSource.length === 0) {
-          return false;
-        }
+        yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+          Effect.catchTag("PlatformError", (e) =>
+            Predicate.isTagged(e.reason, "AlreadyExists") ? Effect.void : Effect.fail(e),
+          ),
+          Effect.mapError(
+            (cause) =>
+              new PluginFileSystemError({
+                operation: "mkdir",
+                path: dir,
+                cause,
+              }),
+          ),
+        );
 
-        const parsed = yield* parseRoutes(routeSource);
-        const content = yield* generateRouteTypes(parsed);
-        yield* writeFileSafe(routeTypesPath, content);
-        return true;
-      });
+        yield* fs.writeFileString(filePath, content).pipe(
+          Effect.mapError(
+            (cause) =>
+              new PluginFileSystemError({
+                operation: "write",
+                path: filePath,
+                cause,
+              }),
+          ),
+        );
+      },
+    );
 
-      const writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError> =
-        Effect.fn("PluginFiles.writeEntryFile")(function* (paths: PluginFilePaths) {
-          const routesFile = yield* routesFilePath(paths);
-          const content = yield* generateEntryModule(paths.appDir, paths.generatedDir, routesFile);
-          yield* writeFileSafe(generatedEntryPath(paths), content);
-        });
+    const routesFilePath: (
+      paths: PluginFilePaths,
+    ) => Effect.Effect<string | undefined, PluginFileSystemError> = Effect.fn(
+      "PluginFiles.routesFilePath",
+    )(function* (paths: PluginFilePaths) {
+      const filePath = routeSourcePath(paths);
+      const exists = yield* pathExists(filePath);
+      return exists ? filePath : undefined;
+    });
 
-      const writeRouteTypesWithLog: (
-        paths: PluginFilePaths,
-        message: string,
-      ) => Effect.Effect<void, PluginFileSystemError> = Effect.fn(
-        "PluginFiles.writeRouteTypesWithLog",
-      )(function* (paths: PluginFilePaths, message: string) {
+    const writeRouteTypesFromRoutesWithFs: (
+      routesFilePath: string,
+      routeTypesPath: string,
+    ) => Effect.Effect<boolean, PluginFileSystemError | PluginParseError> = Effect.fn(
+      "PluginFiles.writeRouteTypesFromRoutesWithFs",
+    )(function* (routesFilePath: string, routeTypesPath: string) {
+      const routeSource = yield* fs.readFileString(routesFilePath).pipe(
+        Effect.catchTag("PlatformError", (error) =>
+          Predicate.isTagged(error.reason, "NotFound")
+            ? Effect.succeed("")
+            : Effect.fail(
+                new PluginFileSystemError({
+                  operation: "read",
+                  path: routesFilePath,
+                  cause: error,
+                }),
+              ),
+        ),
+      );
+      if (routeSource.length === 0) {
+        return false;
+      }
+
+      const content = yield* generateRouteTypes(routeSource, routesFilePath, routeTypesPath);
+      yield* writeFileSafe(routeTypesPath, content);
+      return true;
+    });
+
+    const writeEntryFile: (paths: PluginFilePaths) => Effect.Effect<void, PluginFileSystemError> =
+      Effect.fn("PluginFiles.writeEntryFile")(function* (paths: PluginFilePaths) {
         const routesFile = yield* routesFilePath(paths);
-        if (routesFile !== undefined) {
-          const wroteTypes = yield* writeRouteTypesFromRoutesWithFs(
-            routesFile,
-            generatedRouteTypesPath(paths),
-          );
-          if (wroteTypes) {
-            yield* Effect.logDebug(message);
-          }
-        }
+        const content = yield* generateEntryModule(paths.appDir, paths.generatedDir, routesFile);
+        yield* writeFileSafe(generatedEntryPath(paths), content);
       });
 
-      const writeGeneratedRouteTypes = (paths: PluginFilePaths) =>
-        writeRouteTypesWithLog(paths, "Generated route types");
+    const writeRouteTypesWithLog: (
+      paths: PluginFilePaths,
+      message: string,
+    ) => Effect.Effect<void, PluginFileSystemError | PluginParseError> = Effect.fn(
+      "PluginFiles.writeRouteTypesWithLog",
+    )(function* (paths: PluginFilePaths, message: string) {
+      const routesFile = yield* routesFilePath(paths);
+      if (routesFile !== undefined) {
+        const wroteTypes = yield* writeRouteTypesFromRoutesWithFs(
+          routesFile,
+          generatedRouteTypesPath(paths),
+        );
+        if (wroteTypes) {
+          yield* Effect.logDebug(message);
+        }
+      }
+    });
 
-      return {
-        appApiPath,
-        appApiExists: (paths) =>
-          pathExists(appApiPath(paths)).pipe(
-            Effect.flatMap((exists) =>
-              exists
-                ? fs.stat(appApiPath(paths)).pipe(
-                    Effect.map((info) => info.type === "File"),
-                    Effect.orElseSucceed(() => false),
-                  )
-                : Effect.succeed(false),
-            ),
-          ),
-        routesFilePath,
-        isRoutesFile: Effect.fn("PluginFiles.isRoutesFile")(function* (
-          paths: PluginFilePaths,
-          filePath: string,
-        ) {
-          const routesFile = yield* routesFilePath(paths);
-          return routesFile !== undefined && sameFilePath(filePath, routesFile);
-        }),
-        writeEntryFile,
-        writeGeneratedRouteTypes,
-        regenerateGeneratedRouteTypes: (paths) =>
-          writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
-        writeClientEntryFiles: Effect.fn("PluginFiles.writeClientEntryFiles")(function* (
-          paths: PluginFilePaths,
-        ) {
-          const entryPath = generatedEntryPath(paths);
-          const hasEntry = yield* pathExists(entryPath);
-          const routesFile = yield* routesFilePath(paths);
+    const writeGeneratedRouteTypes = (paths: PluginFilePaths) =>
+      writeRouteTypesWithLog(paths, "Generated route types");
 
-          if (!hasEntry || routesFile !== undefined) {
-            yield* writeEntryFile(paths);
-          }
-
-          yield* writeGeneratedRouteTypes(paths);
-        }),
-        executeArtifactOperations: (operations) =>
-          Effect.forEach(
-            operations,
-            (operation) => {
-              return BuildArtifactOperation.$match(operation, {
-                WriteFile: (writeFile) => writeFileSafe(writeFile.path, writeFile.contents),
-                RemoveFile: (removeFile) =>
-                  pathExists(removeFile.path).pipe(
-                    Effect.flatMap((exists) =>
-                      exists
-                        ? fs.remove(removeFile.path).pipe(
-                            Effect.mapError(
-                              (cause) =>
-                                new PluginFileSystemError({
-                                  operation: "remove",
-                                  path: removeFile.path,
-                                  cause,
-                                }),
-                            ),
-                          )
-                        : Effect.void,
-                    ),
+    return {
+      appApiPath,
+      appApiExists: (paths) =>
+        pathExists(appApiPath(paths)).pipe(
+          Effect.flatMap((exists) =>
+            exists
+              ? fs.stat(appApiPath(paths)).pipe(
+                  Effect.map((info) => info.type === "File"),
+                  Effect.catchTag("PlatformError", (error) =>
+                    Predicate.isTagged(error.reason, "NotFound")
+                      ? Effect.succeed(false)
+                      : Effect.fail(
+                          new PluginFileSystemError({
+                            operation: "stat",
+                            path: appApiPath(paths),
+                            cause: error,
+                          }),
+                        ),
                   ),
-                RunNestedBuild: () => Effect.void,
-              });
-            },
-            { discard: true },
+                )
+              : Effect.succeed(false),
           ),
-        writeBuildEntryFiles: Effect.fn("PluginFiles.writeBuildEntryFiles")(function* (
-          paths: PluginFilePaths,
-          options: { readonly output: Output; readonly platform: Platform },
-        ) {
-          const entryPath = generatedEntryPath(paths);
-          const hasEntry = yield* pathExists(entryPath);
-          const routesFile = yield* routesFilePath(paths);
+        ),
+      routesFilePath,
+      isRoutesFile: Effect.fn("PluginFiles.isRoutesFile")(function* (
+        paths: PluginFilePaths,
+        filePath: string,
+      ) {
+        const routesFile = yield* routesFilePath(paths);
+        return routesFile !== undefined && sameFilePath(filePath, routesFile);
+      }),
+      writeEntryFile,
+      writeGeneratedRouteTypes,
+      regenerateGeneratedRouteTypes: (paths) =>
+        writeRouteTypesWithLog(paths, "Regenerated routes.d.ts"),
+      writeClientEntryFiles: Effect.fn("PluginFiles.writeClientEntryFiles")(function* (
+        paths: PluginFilePaths,
+      ) {
+        const entryPath = generatedEntryPath(paths);
+        const hasEntry = yield* pathExists(entryPath);
+        const routesFile = yield* routesFilePath(paths);
 
-          if (!hasEntry || routesFile !== undefined) {
-            yield* writeEntryFile(paths);
-          }
+        if (!hasEntry || routesFile !== undefined) {
+          yield* writeEntryFile(paths);
+        }
 
-          yield* writeGeneratedRouteTypes(paths);
+        yield* writeGeneratedRouteTypes(paths);
+      }),
+      executeArtifactOperations: (operations) =>
+        Effect.forEach(
+          operations,
+          (operation) => {
+            return BuildArtifactOperation.$match(operation, {
+              WriteFile: (writeFile) => writeFileSafe(writeFile.path, writeFile.contents),
+              RemoveFile: (removeFile) =>
+                pathExists(removeFile.path).pipe(
+                  Effect.flatMap((exists) =>
+                    exists
+                      ? fs.remove(removeFile.path).pipe(
+                          Effect.mapError(
+                            (cause) =>
+                              new PluginFileSystemError({
+                                operation: "remove",
+                                path: removeFile.path,
+                                cause,
+                              }),
+                          ),
+                        )
+                      : Effect.void,
+                  ),
+                ),
+              RunNestedBuild: () => Effect.void,
+            });
+          },
+          { discard: true },
+        ),
+      writeProductionServerEntry: Effect.fn("PluginFiles.writeProductionServerEntry")(function* (
+        paths: PluginFilePaths,
+      ) {
+        const hasApi = yield* pathExists(nodePath.join(paths.appDir, "api.ts"));
+        const serverEntryPath = nodePath.join(paths.generatedDir, "server-entry.ts");
+        const content = yield* generateServerEntry(hasApi);
 
-          yield* writeFileSafe(
-            nodePath.join(paths.generatedDir, "index.html"),
-            generateHtmlTemplate(),
-          );
+        yield* writeFileSafe(serverEntryPath, content);
+        return serverEntryPath;
+      }),
+    } satisfies PluginFilesService;
+  }).pipe(Effect.annotateLogs({ service: "PluginFiles" })),
+);
 
-          if (options.platform === "cloudflare" && options.output === "static") {
-            yield* writeFileSafe(
-              nodePath.join(paths.generatedDir, "worker-entry.js"),
-              renderCloudflareStaticWorkerEntryModule(),
-            );
-          }
-        }),
-        writeProductionServerEntry: Effect.fn("PluginFiles.writeProductionServerEntry")(function* (
-          paths: PluginFilePaths,
-        ) {
-          const hasApi = yield* pathExists(nodePath.join(paths.appDir, "api.ts"));
-          const serverEntryPath = nodePath.join(paths.generatedDir, "server-entry.ts");
-          const content = yield* generateServerEntry(hasApi);
-
-          yield* writeFileSafe(serverEntryPath, content);
-          return serverEntryPath;
-        }),
-      } satisfies PluginFilesService;
-    }).pipe(Effect.annotateLogs({ service: "PluginFiles" })),
-  );
+export namespace PluginFiles {
+  export const layer: Layer.Layer<PluginFiles, never, FileSystem.FileSystem> = pluginFilesLayer;
+}
 
 const generatedApiClientTypesPath = (generatedDir: string): string =>
   nodePath.join(generatedDir, "api.d.ts");
@@ -1926,84 +1962,6 @@ const writeGeneratedApiClientTypes: (
   const typesPath = generatedApiClientTypesPath(generatedDir);
   yield* removeFileIfExists(typesPath);
 });
-
-/**
- * Render the generated Cloudflare Static SPA Worker entry.
- *
- * @remarks
- * The Worker is a generated build artifact for `platform: "cloudflare"` with
- * `output: "static"`. It asks the Cloudflare `ASSETS` binding first and falls
- * back eligible document requests to public `/index.html`.
- *
- * @category Vite Plugin
- * @internal
- * @since 1.0.0
- */
-export const renderCloudflareStaticWorkerEntryModule = (): string =>
-  [
-    `const GENERATED_ASSET_EXTENSIONS = new Set([`,
-    `  ".avif",`,
-    `  ".css",`,
-    `  ".gif",`,
-    `  ".ico",`,
-    `  ".jpeg",`,
-    `  ".jpg",`,
-    `  ".js",`,
-    `  ".json",`,
-    `  ".map",`,
-    `  ".mjs",`,
-    `  ".png",`,
-    `  ".svg",`,
-    `  ".wasm",`,
-    `  ".webp",`,
-    `  ".woff",`,
-    `  ".woff2",`,
-    `]);`,
-    ``,
-    `const isDocumentRequest = (request) => {`,
-    `  if (request.method !== "GET" && request.method !== "HEAD") {`,
-    `    return false;`,
-    `  }`,
-    ``,
-    `  const destination = request.headers.get("Sec-Fetch-Dest");`,
-    `  if (destination === "document") {`,
-    `    return true;`,
-    `  }`,
-    `  if (destination !== null && destination !== "") {`,
-    `    return false;`,
-    `  }`,
-    ``,
-    `  const accept = request.headers.get("Accept") ?? "";`,
-    `  return accept.includes("text/html") || accept.includes("*/*");`,
-    `};`,
-    ``,
-    `const isGeneratedAssetLike = (pathname) => {`,
-    `  const dot = pathname.lastIndexOf(".");`,
-    `  if (dot === -1) {`,
-    `    return false;`,
-    `  }`,
-    `  return GENERATED_ASSET_EXTENSIONS.has(pathname.slice(dot).toLowerCase());`,
-    `};`,
-    ``,
-    `export default {`,
-    `  async fetch(request, env) {`,
-    `    const assetResponse = await env.ASSETS.fetch(request);`,
-    `    if (assetResponse.status !== 404) {`,
-    `      return assetResponse;`,
-    `    }`,
-    ``,
-    `    const url = new URL(request.url);`,
-    `    if (!isDocumentRequest(request) || isGeneratedAssetLike(url.pathname)) {`,
-    `      return assetResponse;`,
-    `    }`,
-    ``,
-    `    const shell = new URL(request.url);`,
-    `    shell.pathname = "/";`,
-    `    shell.search = "";`,
-    `    return env.ASSETS.fetch(new Request(shell, request));`,
-    `  },`,
-    `};`,
-  ].join("\n");
 
 /**
  * Render the generated API client runtime module.
@@ -2061,23 +2019,29 @@ const renderProductionServerLive = ({
   platform,
 }: ProductionServerEntryModuleOwner): string =>
   hasApi
-    ? `const ServerLive = HttpRouter.serve(ApiLive, {
-  middleware: flow(ProductionMiddleware, HttpMiddleware.logger)
+    ? `{
+  return HttpRouter.serve(withHttpTelemetry(ApiLive), {
+  disableLogger: true,
+  middleware: flow(ProductionMiddleware, httpLogger)
 }).pipe(
   Layer.provide(HttpServer.layerServices),
   Layer.provide(${platform.serverLayer})
-)`
-    : `const NotFoundApp = Effect.succeed(HttpServerResponse.empty({ status: 404 }))
+ )
+}`
+    : `{
+  const NotFoundApp = Effect.succeed(HttpServerResponse.empty({ status: 404 }))
 
-const ServerLive = HttpServer.serve(
-  flow(ProductionMiddleware, HttpMiddleware.logger)
+  return HttpServer.serve(
+  flow(ProductionMiddleware, httpLogger)
 )(NotFoundApp).pipe(
+  Layer.provide(withHttpTelemetry(Layer.empty)),
   Layer.provide(${platform.serverLayer})
-)`;
+ )
+}`;
 
 const renderProductionMiddleware =
   (): string => `// Single composed middleware: static → API passthrough → SPA fallback
-const ProductionMiddleware = HttpMiddleware.make((app) =>
+const makeProductionMiddleware = (indexHtml) => HttpMiddleware.make((app) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = new URL(request.url, "http://localhost")
@@ -2090,10 +2054,7 @@ const ProductionMiddleware = HttpMiddleware.make((app) =>
       if (!filePath.startsWith(clientDir + "/")) {
         return yield* HttpServerResponse.text("Forbidden", { status: 403 })
       }
-      return yield* Effect.tryPromise({
-        try: () => nodeFs.promises.readFile(filePath),
-        catch: () => "not-found"
-      }).pipe(
+      return yield* readServerFile("read", filePath).pipe(
         Effect.map((buf) => {
           const ext = nodePath.extname(pathname).toLowerCase()
           const ct = MIME[ext] ?? "application/octet-stream"
@@ -2104,7 +2065,7 @@ const ProductionMiddleware = HttpMiddleware.make((app) =>
             headers: { "content-type": ct, "cache-control": cache }
           })
         }),
-        Effect.catch(() => app)
+        Effect.catch((error) => error.reason === "NotFound" ? app : Effect.fail(error))
       )
     }
 
@@ -2125,6 +2086,67 @@ const ProductionMiddleware = HttpMiddleware.make((app) =>
   })
 )`;
 
+const renderBunServerStartupAdapter = (): string => `
+const BunServeStartupFailureSchema = Schema.Struct({
+  code: Schema.Literals([
+    "EADDRINUSE",
+    "EACCES",
+    "EPERM",
+    "EADDRNOTAVAIL",
+    "EAFNOSUPPORT",
+    "EINVAL"
+  ]),
+  syscall: Schema.Literal("listen")
+})
+const decodeBunServeStartupFailure = Schema.decodeUnknownOption(BunServeStartupFailureSchema)
+const BunStartupReasons = {
+  EADDRINUSE: "AddressInUse",
+  EACCES: "PermissionDenied",
+  EPERM: "PermissionDenied",
+  EADDRNOTAVAIL: "AddressNotAvailable",
+  EAFNOSUPPORT: "AddressFamilyUnsupported",
+  EINVAL: "InvalidAddress"
+} as const
+const BunStartupDetails = {
+  EADDRINUSE: "The configured server address is already in use.",
+  EACCES: "The server process is not allowed to bind the configured address.",
+  EPERM: "The server process is not allowed to bind the configured address.",
+  EADDRNOTAVAIL: "The configured server address is not available on this host.",
+  EAFNOSUPPORT: "The configured server address family is not supported.",
+  EINVAL: "The configured server address cannot be bound."
+} as const
+
+const makeBunServer = Effect.fn("GeneratedServer.makeBunServer")(function* (options) {
+  const scope = yield* Effect.scope
+  return yield* Effect.try({
+    try: () =>
+      Effect.runSync(
+        BunHttpServer.make(options).pipe(
+          Effect.provideService(Scope.Scope, scope)
+        )
+      ),
+    catch: (cause) => cause
+  }).pipe(
+    Effect.catch((cause) => {
+      const failure = decodeBunServeStartupFailure(cause)
+      if (Option.isNone(failure)) return Effect.die(cause)
+
+      const { code, syscall } = failure.value
+      return Effect.fail(new ServerStartupError({
+        reason: BunStartupReasons[code],
+        details: BunStartupDetails[code],
+        cause: { code, syscall }
+      }))
+    })
+  )
+})
+
+const makeBunServerLayer = (options) => Layer.mergeAll(
+  Layer.effect(HttpServer.HttpServer, makeBunServer(options)),
+  BunHttpServer.layerHttpServices
+)
+`;
+
 /**
  * Render the generated production server entry module from owner state.
  *
@@ -2139,6 +2161,11 @@ export const renderProductionServerEntryModule = (
   owner: ProductionServerEntryModuleOwner,
 ): string => {
   const apiImport = owner.hasApi ? `import ApiLive from "../app/api.js"` : "";
+  const isBun = owner.platform.runtime === "BunRuntime";
+  const effectImports = isBun
+    ? "Cause, Context, Effect, Exit, Layer, Logger, Option, Schema, Scope, Tracer, flow"
+    : "Cause, Context, Effect, Exit, Layer, Logger, Option, Schema, Tracer, flow";
+  const serverStartupAdapter = isBun ? renderBunServerStartupAdapter() : "";
 
   return `/**
  * Production server entry point
@@ -2146,23 +2173,71 @@ export const renderProductionServerEntryModule = (
  */
 import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 ${owner.platform.imports}
-import { Layer, Effect, flow } from "effect"
+import { ${effectImports} } from "effect"
 import * as nodePath from "node:path"
 import * as nodeFs from "node:fs"
 import { fileURLToPath } from "node:url"
 ${apiImport}
 
+${renderHttpTelemetry()}
+
 const __dirname = nodePath.dirname(fileURLToPath(import.meta.url))
 const clientDir = nodePath.join(__dirname, "client")
 
-const PORT = Number(process.env.PORT ?? 4173)
-const HOST = process.env.HOST ?? "0.0.0.0"
+const ServerConfigSchema = Schema.Struct({
+  PORT: Schema.NumberFromString.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 1, maximum: 65535 })
+  ),
+  HOST: Schema.NonEmptyString
+})
 
-// SPA shell — read once at startup
-const indexHtml = nodeFs.readFileSync(
-  nodePath.join(clientDir, ".trygg", "index.html"),
-  "utf-8"
-)
+class ServerConfigError extends Schema.TaggedError<ServerConfigError>()("ServerConfigError", {
+  cause: Schema.Unknown
+}) {}
+
+class ServerStartupError extends Schema.TaggedError<ServerStartupError>()("ServerStartupError", {
+  reason: Schema.optional(Schema.Literals([
+    "AddressInUse",
+    "PermissionDenied",
+    "AddressNotAvailable",
+    "AddressFamilyUnsupported",
+    "InvalidAddress"
+  ])),
+  details: Schema.optional(Schema.String),
+  cause: Schema.Unknown
+}) {
+  override get message(): string {
+    return this.details ?? ""
+  }
+}
+
+${serverStartupAdapter}
+
+class ServerFileSystemError extends Schema.TaggedError<ServerFileSystemError>()(
+  "ServerFileSystemError",
+  {
+    operation: Schema.String,
+    path: Schema.String,
+    reason: Schema.Literals(["NotFound", "Other"]),
+    cause: Schema.Unknown
+  }
+) {}
+
+const NodeErrorSchema = Schema.Struct({ code: Schema.String })
+const decodeNodeError = Schema.decodeUnknownOption(NodeErrorSchema)
+const readServerFile = (operation, path) => Effect.tryPromise({
+  try: () => nodeFs.promises.readFile(path),
+  catch: (cause) => new ServerFileSystemError({
+    operation,
+    path,
+    reason: Option.match(decodeNodeError(cause), {
+      onNone: () => "Other",
+      onSome: (error) => error.code === "ENOENT" ? "NotFound" : "Other"
+    }),
+    cause
+  })
+})
 
 // MIME types for static assets
 const MIME = /** @type {Record<string, string>} */ ({
@@ -2186,14 +2261,29 @@ const MIME = /** @type {Record<string, string>} */ ({
 
 ${renderProductionMiddleware()}
 
-${renderProductionServerLive(owner)}
+const makeServerLive = (ProductionMiddleware, PORT, HOST) => ${renderProductionServerLive(owner)}
 
 // Launch server
 ${owner.platform.runtime}.runMain(
-  Effect.gen(function* () {
+  Effect.scoped(Effect.gen(function* () {
+    const { HOST, PORT } = yield* Schema.decodeUnknownEffect(ServerConfigSchema)({
+      PORT: process.env.PORT ?? "4173",
+      HOST: process.env.HOST ?? "0.0.0.0"
+    }).pipe(Effect.mapError((cause) => new ServerConfigError({ cause })))
+    const shellPath = nodePath.join(clientDir, ".trygg", "index.html")
+    const indexHtml = yield* readServerFile("read", shellPath).pipe(
+      Effect.map((contents) => contents.toString("utf8"))
+    )
+    const ProductionMiddleware = makeProductionMiddleware(indexHtml)
+    const ServerLive = makeServerLive(ProductionMiddleware, PORT, HOST)
+    yield* Layer.build(ServerLive).pipe(
+      Effect.mapError((cause) => cause instanceof ServerStartupError
+        ? cause
+        : new ServerStartupError({ cause }))
+    )
     yield* Effect.log(\`Server listening on http://\${HOST}:\${PORT}\`)
-    yield* Layer.launch(ServerLive)
-  })
+    yield* Effect.never
+  }))
 )
 `;
 };
@@ -2246,10 +2336,10 @@ interface BuildOutputCloseInput {
 interface BuildOutputService {
   readonly buildStart: (
     input: BuildOutputStartInput,
-  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError | PluginParseError>;
   readonly closeBundle: (
     input: BuildOutputCloseInput,
-  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+  ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError | PluginParseError>;
 }
 
 interface BuildOutputDeps {
@@ -2262,17 +2352,31 @@ interface BuildOutputDeps {
   readonly serverPlatform: ServerPlatformService;
 }
 
-class BuildOutput extends Context.Service<
+/**
+ * Build-output hook capability owned by the Vite plugin lifecycle.
+ *
+ * @remarks
+ * Keeps validation, generated artifact publication, and nested server builds
+ * behind one replaceable seam for plugin orchestration and focused tests.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export class BuildOutput extends Context.Service<
   BuildOutput,
   {
     readonly buildStart: (
       input: BuildOutputStartInput,
-    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError | PluginParseError>;
     readonly closeBundle: (
       input: BuildOutputCloseInput,
-    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError>;
+    ) => Effect.Effect<void, PluginValidationError | PluginFileSystemError | PluginParseError>;
   }
->()("trygg/vite/BuildOutput") {}
+>()("trygg/vite/BuildOutput") {
+  static readonly make = (dependencies: BuildOutputDeps): BuildOutputService =>
+    makeService(dependencies);
+}
 
 /**
  * Create build output hook operations.
@@ -2283,14 +2387,16 @@ class BuildOutput extends Context.Service<
  *
  * @internal
  */
-export const makeBuildOutput = ({
+const makeService = ({
   buildServer,
   fileSystem,
   files,
   serverPlatform,
 }: BuildOutputDeps): BuildOutputService => {
-  const planner = makeBuildArtifactPlanner({ failOnWarnings: false });
-  const generatedArtifactPlanner = makeGeneratedArtifactPlanner({ includeCleanupOperations: true });
+  const planner = BuildArtifactPlanner.make({ failOnWarnings: false });
+  const generatedArtifactPlanner = GeneratedArtifactPlanner.make({
+    includeCleanupOperations: true,
+  });
   const emitDiagnostic = (diagnostic: BuildPlanDiagnostic) =>
     BuildPlanDiagnostic.$is("Warning")(diagnostic)
       ? Effect.logWarning(diagnostic.message)
@@ -2491,20 +2597,27 @@ const viteServerBuild = (
       }),
   }).pipe(Effect.asVoid);
 
-const makeBuildOutputLayer = (): Layer.Layer<
+const buildOutputLayer: Layer.Layer<
   BuildOutput,
   never,
   FileSystem.FileSystem | PluginFiles | ServerPlatform
-> =>
-  Layer.effect(
+> = Layer.effect(
+  BuildOutput,
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const files = yield* PluginFiles;
+    const serverPlatform = yield* ServerPlatform;
+    return BuildOutput.make({ buildServer: viteServerBuild, fileSystem, files, serverPlatform });
+  }).pipe(Effect.annotateLogs({ service: "BuildOutput" })),
+);
+
+export namespace BuildOutput {
+  export const layer: Layer.Layer<
     BuildOutput,
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const files = yield* PluginFiles;
-      const serverPlatform = yield* ServerPlatform;
-      return makeBuildOutput({ buildServer: viteServerBuild, fileSystem, files, serverPlatform });
-    }).pipe(Effect.annotateLogs({ service: "BuildOutput" })),
-  );
+    never,
+    FileSystem.FileSystem | PluginFiles | ServerPlatform
+  > = buildOutputLayer;
+}
 
 // =============================================================================
 // Plugin
@@ -2626,7 +2739,8 @@ interface PreviewServerLike {
 export interface ViteServerSource {
   readonly ssrLoadModule: (id: string) => Promise<Record<string, unknown>>;
   readonly watcher: {
-    readonly on: (event: "change", handler: (file: string) => void | Promise<void>) => void;
+    readonly on: (event: "change", handler: (file: string) => void) => void;
+    readonly off?: ((event: "change", handler: (file: string) => void) => void) | undefined;
   };
   readonly httpServer?:
     | {
@@ -2656,16 +2770,30 @@ export interface ViteServer {
     id: string,
     message: string,
   ) => Effect.Effect<Record<string, unknown>, ApiInitError>;
-  readonly onFileChange: (handler: (file: string) => void | Promise<void>) => Effect.Effect<void>;
-  readonly closeApiScopeOnServerClose: (scope: Scope.Closeable) => Effect.Effect<void>;
+  readonly onFileChange: <E, R>(
+    handler: (file: string) => Effect.Effect<void, E, R>,
+    report: (cause: Cause.Cause<E>) => Effect.Effect<void>,
+  ) => Effect.Effect<void, never, R | Scope.Scope>;
   readonly mountApiMiddleware: (middleware: Connect.NextHandleFunction) => Effect.Effect<void>;
   readonly useMiddleware: (middleware: Connect.NextHandleFunction) => Effect.Effect<void>;
   readonly transformIndexHtml: (
     url: string,
     html: string,
   ) => Effect.Effect<string, PluginFileSystemError>;
-  readonly mountHtmlFallbackMiddleware: (html: string) => Effect.Effect<void>;
+  readonly mountHtmlFallbackMiddleware: (html: string) => Effect.Effect<void, never, Scope.Scope>;
 }
+
+const isDevApiError = (error: unknown): error is DevApiErrors =>
+  Predicate.isTagged(error, "ApiInitError") || Predicate.isTagged(error, "ImportError");
+
+const allDevApiFailures = (
+  cause: Cause.Cause<DevApiErrors>,
+): ReadonlyArray<DevApiErrors> | undefined => {
+  const failures = cause.reasons.filter(Cause.isFailReason);
+  if (failures.length === 0 || failures.length !== cause.reasons.length) return undefined;
+  const errors = failures.map(({ error }) => error);
+  return errors.every(isDevApiError) ? errors : undefined;
+};
 
 export namespace PluginApi {
   export type InitialState = Data.TaggedEnum<{
@@ -2716,29 +2844,22 @@ export namespace PluginApi {
     readonly Running: {
       readonly followUp: boolean;
       readonly done: Deferred.Deferred<void, DevApiErrors>;
+      readonly owner: Fiber.Fiber<void, DevApiErrors>;
     };
   }>;
 
   const ReloadState = Data.taggedEnum<ReloadState>();
 
-  type ReloadDecision = Data.TaggedEnum<{
-    readonly Run: { readonly done: Deferred.Deferred<void, DevApiErrors> };
-    readonly Await: { readonly done: Deferred.Deferred<void, DevApiErrors> };
-  }>;
-
-  const ReloadDecision = Data.taggedEnum<ReloadDecision>();
-
   const reloadIdle = ReloadState.Idle();
 
-  const isDevApiError = (error: unknown): error is DevApiErrors =>
-    Predicate.isTagged(error, "ApiInitError") || Predicate.isTagged(error, "ImportError");
   export interface InitialLoadOptions<RHasApi> {
     readonly apiPath: string;
-    readonly hasApi: Effect.Effect<boolean, never, RHasApi>;
+    readonly hasApi: Effect.Effect<boolean, PluginFileSystemError, RHasApi>;
     readonly loadHandlerFactory: Effect.Effect<HandlerFactory, ApiInitError>;
     readonly makeApi: (
       handlerFactory: HandlerFactory,
     ) => Effect.Effect<DevApiHandle, ImportError | ApiInitError, Scope.Scope>;
+    readonly ownerScope?: Scope.Scope | undefined;
     readonly observe?: (state: InitialState) => Effect.Effect<void>;
   }
 
@@ -2751,160 +2872,180 @@ export namespace PluginApi {
     options: InitialLoadOptions<RHasApi>,
     reload: DevApiHandle["reload"],
     getReady: () => Ready,
+    ownerScope: Scope.Scope,
   ) => Effect.Effect<DevApiHandle["reload"]> = Effect.fn("PluginApi.coalesceReload")(function* <
     RHasApi,
-  >(options: InitialLoadOptions<RHasApi>, reload: DevApiHandle["reload"], getReady: () => Ready) {
+  >(
+    options: InitialLoadOptions<RHasApi>,
+    reload: DevApiHandle["reload"],
+    getReady: () => Ready,
+    ownerScope: Scope.Scope,
+  ) {
     const reloadState = yield* SynchronizedRef.make<ReloadState>(reloadIdle);
+
+    const takeFollowUp = (done: Deferred.Deferred<void, DevApiErrors>): Effect.Effect<boolean> =>
+      SynchronizedRef.modifyEffect(reloadState, (state) => {
+        if (ReloadState.$is("Running")(state) && state.done === done && state.followUp) {
+          const next = ReloadState.Running({
+            followUp: false,
+            done: state.done,
+            owner: state.owner,
+          });
+          const result: readonly [boolean, ReloadState] = [true, next];
+          return Effect.succeed(result);
+        }
+
+        const result: readonly [boolean, ReloadState] = [false, state];
+        return Effect.succeed(result);
+      });
+
+    const settleReload = (
+      done: Deferred.Deferred<void, DevApiErrors>,
+      exit: Exit.Exit<void, DevApiErrors>,
+    ): Effect.Effect<void> =>
+      SynchronizedRef.modifyEffect(reloadState, (state) => {
+        const next = ReloadState.$is("Running")(state) && state.done === done ? reloadIdle : state;
+        const result: readonly [void, ReloadState] = [undefined, next];
+        return Deferred.done(done, exit).pipe(Effect.as(result));
+      });
 
     const runReload = (
       done: Deferred.Deferred<void, DevApiErrors>,
-    ): Effect.Effect<void, DevApiErrors, Scope.Scope> =>
-      Effect.suspend(() =>
-        Effect.uninterruptibleMask((restore) =>
-          Effect.gen(function* () {
-            const ready = getReady();
-            const reloading = InitialState.Reloading({
-              apiPath: ready.apiPath,
-              handle: ready.handle,
-              scope: ready.scope,
-            });
-            yield* observe(options, reloading);
-            const exit = yield* restore(reload).pipe(Effect.exit);
-            if (Exit.isFailure(exit)) {
-              const foundError = Cause.findErrorOption(exit.cause);
-              const canRetry = yield* Option.match(foundError, {
-                onNone: () => Effect.succeed(false),
-                onSome: (error) => {
-                  if (!isDevApiError(error)) {
-                    return Effect.succeed(false);
-                  }
-
-                  const failed = InitialState.Failed({ apiPath: ready.apiPath, error });
-                  return observe(options, failed).pipe(Effect.as(true));
-                },
-              });
-
-              if (canRetry) {
-                const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
-                  if (ReloadState.$is("Running")(state) && state.followUp) {
-                    const next = ReloadState.Running({ followUp: false, done });
-                    const result: readonly [boolean, ReloadState] = [true, next];
-                    return Effect.succeed(result);
-                  }
-
-                  const result: readonly [boolean, ReloadState] = [false, reloadIdle];
-                  return Effect.succeed(result);
-                });
-
-                if (shouldReload) {
-                  return yield* runReload(done);
-                }
-              }
-
-              yield* SynchronizedRef.set(reloadState, reloadIdle);
-              yield* Deferred.done(done, exit).pipe(Effect.asVoid);
+    ): Effect.Effect<void, DevApiErrors> =>
+      Effect.uninterruptibleMask((restore) => {
+        const loop: () => Effect.Effect<void, DevApiErrors> = Effect.fnUntraced(function* () {
+          const ready = getReady();
+          const reloading = InitialState.Reloading({
+            apiPath: ready.apiPath,
+            handle: ready.handle,
+            scope: ready.scope,
+          });
+          const exit = yield* restore(
+            observe(options, reloading).pipe(Effect.andThen(reload)),
+          ).pipe(Effect.exit);
+          if (Exit.isFailure(exit)) {
+            const failures = allDevApiFailures(exit.cause);
+            if (failures === undefined) {
               return yield* Effect.failCause(exit.cause);
             }
 
-            const shouldReload = yield* SynchronizedRef.modifyEffect(reloadState, (state) => {
-              if (ReloadState.$is("Running")(state) && state.followUp) {
-                const next = ReloadState.Running({ followUp: false, done });
-                const result: readonly [boolean, ReloadState] = [true, next];
-                return Effect.succeed(result);
-              }
-
-              const result: readonly [boolean, ReloadState] = [false, reloadIdle];
-              return Effect.succeed(result);
-            });
-
-            if (shouldReload) {
-              return yield* runReload(done);
+            const error = failures[0];
+            if (error === undefined) {
+              return yield* Effect.failCause(exit.cause);
             }
+            yield* restore(
+              observe(options, InitialState.Failed({ apiPath: ready.apiPath, error })),
+            );
+            if (yield* takeFollowUp(done)) return yield* loop();
+            return yield* Effect.failCause(exit.cause);
+          }
 
-            yield* observe(options, ready);
-            yield* Deferred.succeed(done, undefined).pipe(Effect.asVoid);
-          }),
-        ),
-      );
+          if (yield* takeFollowUp(done)) return yield* loop();
+          yield* restore(observe(options, ready));
+        });
+
+        return loop().pipe(Effect.onExit((exit) => settleReload(done, exit)));
+      });
 
     return yield* Effect.succeed(
-      Effect.gen(function* () {
-        const decision = yield* SynchronizedRef.modifyEffect(reloadState, (state) =>
-          Effect.gen(function* () {
-            if (ReloadState.$is("Running")(state)) {
-              const next = ReloadState.Running({ done: state.done, followUp: true });
-              const result: readonly [ReloadDecision, ReloadState] = [
-                ReloadDecision.Await({ done: state.done }),
-                next,
-              ];
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const claim = yield* SynchronizedRef.modifyEffect(reloadState, (state) =>
+            Effect.gen(function* () {
+              if (ReloadState.$is("Running")(state)) {
+                const next = ReloadState.Running({
+                  done: state.done,
+                  followUp: true,
+                  owner: state.owner,
+                });
+                const result: readonly [
+                  {
+                    readonly done: Deferred.Deferred<void, DevApiErrors>;
+                    readonly owner: Fiber.Fiber<void, DevApiErrors>;
+                  },
+                  ReloadState,
+                ] = [{ done: state.done, owner: state.owner }, next];
+                return result;
+              }
+
+              const done = yield* Deferred.make<void, DevApiErrors>();
+              const owner = yield* Effect.forkIn(runReload(done), ownerScope);
+              const next = ReloadState.Running({ followUp: false, done, owner });
+              const result: readonly [
+                {
+                  readonly done: Deferred.Deferred<void, DevApiErrors>;
+                  readonly owner: Fiber.Fiber<void, DevApiErrors>;
+                },
+                ReloadState,
+              ] = [{ done, owner }, next];
               return result;
-            }
+            }),
+          );
 
-            const done = yield* Deferred.make<void, DevApiErrors>();
-            const next = ReloadState.Running({ followUp: false, done });
-            const result: readonly [ReloadDecision, ReloadState] = [
-              ReloadDecision.Run({ done }),
-              next,
-            ];
-            return result;
-          }),
-        );
-
-        if (ReloadDecision.$is("Await")(decision)) {
-          return yield* Deferred.await(decision.done);
-        }
-
-        return yield* runReload(decision.done);
-      }).pipe(Effect.withSpan("PluginApi.reloadApi")),
+          const ownerExit = claim.owner.pollUnsafe();
+          if (ownerExit !== undefined) {
+            yield* settleReload(claim.done, ownerExit);
+          }
+          return yield* restore(Deferred.await(claim.done));
+        }),
+      ).pipe(Effect.withSpan("PluginApi.reloadApi")),
     );
   });
 
   export const loadInitial: <RHasApi>(
     options: InitialLoadOptions<RHasApi>,
-  ) => Effect.Effect<Absent | Ready | Failed, never, RHasApi> = Effect.fn("PluginApi.loadInitial")(
-    function* <RHasApi>(options: InitialLoadOptions<RHasApi>) {
-      const hasApi = yield* options.hasApi;
-      if (!hasApi) {
-        const state = InitialState.Absent({ apiPath: options.apiPath });
-        yield* observe(options, state);
-        return state;
-      }
+  ) => Effect.Effect<Absent | Ready | Failed, PluginFileSystemError, RHasApi> = Effect.fn(
+    "PluginApi.loadInitial",
+  )(function* <RHasApi>(options: InitialLoadOptions<RHasApi>) {
+    const hasApi = yield* options.hasApi;
+    if (!hasApi) {
+      const state = InitialState.Absent({ apiPath: options.apiPath });
+      yield* observe(options, state);
+      return state;
+    }
 
-      const loading = InitialState.Loading({ apiPath: options.apiPath });
-      yield* observe(options, loading);
-      const scope = yield* Scope.make();
+    const loading = InitialState.Loading({ apiPath: options.apiPath });
+    yield* observe(options, loading);
+    const scope =
+      options.ownerScope === undefined
+        ? yield* Scope.make()
+        : yield* Scope.fork(options.ownerScope);
 
-      return yield* Effect.gen(function* () {
-        const handlerFactory = yield* options.loadHandlerFactory;
-        const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
-        const initialReady = InitialState.Ready({
-          apiPath: options.apiPath,
-          handle,
-          scope,
+    return yield* Effect.gen(function* () {
+      const handlerFactory = yield* options.loadHandlerFactory;
+      const handle = yield* Scope.provide(options.makeApi(handlerFactory), scope);
+      const initialReady = InitialState.Ready({
+        apiPath: options.apiPath,
+        handle,
+        scope,
+      });
+      let readyState = initialReady;
+      const reload = yield* coalesceReload(options, handle.reload, () => readyState, scope);
+      const readyHandle: DevApiHandle = { ...handle, reload };
+      const ready = InitialState.Ready({
+        apiPath: initialReady.apiPath,
+        handle: readyHandle,
+        scope: initialReady.scope,
+      });
+      readyState = ready;
+      yield* observe(options, ready);
+      return ready;
+    }).pipe(
+      Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void)),
+      Effect.catchCause((cause) => {
+        const failures = allDevApiFailures(cause);
+        const error = failures?.[0];
+        if (error === undefined) {
+          return Effect.failCause(unsafeAsUnrecoverableCause(cause));
+        }
+        return Effect.gen(function* () {
+          const failed = InitialState.Failed({ apiPath: options.apiPath, error });
+          yield* observe(options, failed);
+          return failed;
         });
-        let readyState = initialReady;
-        const reload = yield* coalesceReload(options, handle.reload, () => readyState);
-        const readyHandle: DevApiHandle = { ...handle, reload };
-        const ready = InitialState.Ready({
-          apiPath: initialReady.apiPath,
-          handle: readyHandle,
-          scope: initialReady.scope,
-        });
-        readyState = ready;
-        yield* observe(options, ready);
-        return ready;
-      }).pipe(
-        Effect.catch((error: ImportError | ApiInitError) =>
-          Effect.gen(function* () {
-            yield* Scope.close(scope, Exit.fail(error));
-            const failed = InitialState.Failed({ apiPath: options.apiPath, error });
-            yield* observe(options, failed);
-            return failed;
-          }),
-        ),
-      );
-    },
-  );
+      }),
+    );
+  });
 
   export const closeInitial = (state: InitialState): Effect.Effect<void> =>
     InitialState.$is("Ready")(state) ? Scope.close(state.scope, Exit.void) : Effect.void;
@@ -2930,23 +3071,60 @@ const logPluginApiReloadError = (error: DevApiErrors): Effect.Effect<void> =>
  * @category Vite Plugin
  * @since 1.0.0
  */
-export const makePluginApi = (handle: DevApiHandle): PluginApi.Active => ({
-  middleware: handle.middleware,
-  reloadChangedFile: (file) => {
-    if (!file.endsWith("api.ts")) {
-      return Effect.void;
-    }
+export namespace PluginApi {
+  export const make = (handle: DevApiHandle): Active => ({
+    middleware: handle.middleware,
+    reloadChangedFile: (file) => {
+      if (!file.endsWith("api.ts")) {
+        return Effect.void;
+      }
 
-    return Effect.scoped(handle.reload).pipe(
-      Effect.tap(() => Effect.logDebug("Reloaded API handlers")),
-      Effect.catchTags({
-        ApiInitError: logPluginApiReloadError,
-        ImportError: logPluginApiReloadError,
-      }),
-    );
-  },
-});
-type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
+      return handle.reload.pipe(
+        Effect.tap(() => Effect.logDebug("Reloaded API handlers")),
+        Effect.catchCause((cause) => {
+          const failures = allDevApiFailures(cause);
+          if (failures === undefined) {
+            return Effect.failCause(unsafeAsUnrecoverableCause(cause));
+          }
+          return Effect.forEach(failures, logPluginApiReloadError, { discard: true });
+        }),
+      );
+    },
+  });
+}
+
+/**
+ * Recover an expected pre-commit HTML transform failure by delegating to Vite.
+ *
+ * @remarks
+ * Delegation is valid only when every Cause reason is a typed transform failure.
+ * Defects, interruptions, mixed Causes, and failures from other operations are
+ * preserved for the server-owned terminal reporter.
+ *
+ * @internal
+ * @category Vite Plugin
+ * @since 1.0.0
+ */
+export const transformHtmlForFallback = (
+  transform: Effect.Effect<string, PluginFileSystemError>,
+  next: () => void,
+): Effect.Effect<Option.Option<string>, PluginFileSystemError> =>
+  transform.pipe(
+    Effect.map(Option.some),
+    Effect.catchCause((cause) => {
+      const failures = cause.reasons.filter(Cause.isFailReason);
+      const expected =
+        failures.length > 0 &&
+        failures.length === cause.reasons.length &&
+        failures.every(
+          ({ error }) =>
+            Predicate.isTagged(error, "PluginFileSystemError") && error.operation === "transform",
+        );
+      return expected
+        ? Effect.sync(next).pipe(Effect.as(Option.none<string>()))
+        : Effect.failCause(cause);
+    }),
+  );
 
 /**
  * Build the short-lived Vite server adapter for dev-server hooks.
@@ -2959,63 +3137,99 @@ type ViteServerRunPromise = (effect: Effect.Effect<void>) => Promise<void>;
  * @category Vite Plugin
  * @since 1.0.0
  */
-export const makeViteServer = (
-  server: ViteServerSource,
-  runPromise: ViteServerRunPromise = Effect.runPromise,
-): ViteServer => {
-  const transformIndexHtml: ViteServer["transformIndexHtml"] = (url, html) =>
-    Effect.tryPromise({
-      try: () => server.transformIndexHtml(url, html),
-      catch: (cause) =>
-        new PluginFileSystemError({
-          operation: "transform",
-          path: "bootstrap-shell",
-          cause,
-        }),
-    });
+export namespace ViteServer {
+  export const make = (
+    server: ViteServerSource,
+    reportCause: (cause: Cause.Cause<unknown>) => Effect.Effect<void> = (cause) =>
+      Effect.logError(`[vite] callback.failed: ${Cause.pretty(cause)}`),
+  ): ViteServer => {
+    const reportSafely = <E>(
+      report: (cause: Cause.Cause<E>) => Effect.Effect<void>,
+      cause: Cause.Cause<E>,
+    ): Effect.Effect<void> => report(cause).pipe(Effect.catchCause(() => Effect.void));
 
-  return {
-    loadModule: (id, message) =>
+    const transformIndexHtml: ViteServer["transformIndexHtml"] = (url, html) =>
       Effect.tryPromise({
-        try: () => server.ssrLoadModule(id),
-        catch: (cause) => new ApiInitError({ message, cause }),
-      }),
-    onFileChange: (handler) =>
-      Effect.sync(() => server.watcher.on("change", handler)).pipe(Effect.asVoid),
-    closeApiScopeOnServerClose: (scope) =>
-      Effect.sync(() =>
-        server.httpServer?.on("close", () => {
-          runPromise(Scope.close(scope, Exit.void)).catch(() => undefined);
-        }),
-      ).pipe(Effect.asVoid),
-    mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
-    useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
-    transformIndexHtml,
-    mountHtmlFallbackMiddleware: (htmlTemplate) =>
-      Effect.sync(() =>
-        server.middlewares.use((req, res, next) => {
-          if (
-            !req.url ||
-            req.url.includes(".") ||
-            req.method !== "GET" ||
-            req.url.startsWith("/api/")
-          ) {
-            return next();
-          }
+        try: () => server.transformIndexHtml(url, html),
+        catch: (cause) =>
+          new PluginFileSystemError({
+            operation: "transform",
+            path: "bootstrap-shell",
+            cause,
+          }),
+      });
 
-          const requestUrl = req.url;
-          const effect = Effect.gen(function* () {
-            const html = yield* transformIndexHtml(requestUrl, htmlTemplate);
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "text/html");
-            res.end(html);
-          }).pipe(Effect.catchCause(() => Effect.sync(() => next())));
+    const onFileChange: ViteServer["onFileChange"] = Effect.fn("ViteServer.onFileChange")(
+      function* <E, R>(
+        handler: (file: string) => Effect.Effect<void, E, R>,
+        report: (cause: Cause.Cause<E>) => Effect.Effect<void>,
+      ) {
+        const runFork = yield* CallbackRuntime.make<R>();
+        const listener = (file: string): void => {
+          runFork(
+            Effect.suspend(() => handler(file)).pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) ? reportSafely(report, exit.cause) : Effect.void,
+              ),
+            ),
+          );
+        };
+        yield* Effect.acquireRelease(
+          Effect.sync(() => server.watcher.on("change", listener)),
+          () => Effect.sync(() => server.watcher.off?.("change", listener)),
+        );
+      },
+    );
 
-          runPromise(effect).catch(() => undefined);
+    return {
+      loadModule: (id, message) =>
+        Effect.tryPromise({
+          try: () => server.ssrLoadModule(id),
+          catch: (cause) => new ApiInitError({ message, cause }),
         }),
-      ),
+      onFileChange,
+      mountApiMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
+      useMiddleware: (middleware) => Effect.sync(() => server.middlewares.use(middleware)),
+      transformIndexHtml,
+      mountHtmlFallbackMiddleware: (htmlTemplate) =>
+        Effect.gen(function* () {
+          const runFork = yield* CallbackRuntime.make();
+          yield* Effect.sync(() =>
+            server.middlewares.use((req, res, next) => {
+              if (
+                !req.url ||
+                req.url.includes(".") ||
+                req.method !== "GET" ||
+                req.url.startsWith("/api/")
+              ) {
+                return next();
+              }
+
+              const requestUrl = req.url;
+              const effect = Effect.gen(function* () {
+                const transformed = yield* transformHtmlForFallback(
+                  transformIndexHtml(requestUrl, htmlTemplate),
+                  next,
+                );
+                if (Option.isNone(transformed)) {
+                  return;
+                }
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html");
+                res.end(transformed.value);
+              }).pipe(
+                Effect.onExit((exit) =>
+                  Exit.isFailure(exit) ? reportSafely(reportCause, exit.cause) : Effect.void,
+                ),
+              );
+
+              runFork(effect);
+            }),
+          );
+        }),
+    };
   };
-};
+}
 
 const loadHandlerFactory: (viteServer: ViteServer) => Effect.Effect<HandlerFactory, ApiInitError> =
   Effect.fn("VitePlugin.loadHandlerFactory")(function* (viteServer: ViteServer) {
@@ -3060,45 +3274,54 @@ const loadHandlerFactory: (viteServer: ViteServer) => Effect.Effect<HandlerFacto
  * @category Vite Plugin
  * @since 1.0.0
  */
-export const makeStableHandlerFactoryLoader = (
-  load: Effect.Effect<HandlerFactory, ApiInitError>,
-): Effect.Effect<HandlerFactory, ApiInitError> => Effect.runSync(Effect.cached(load));
+export namespace HandlerFactoryLoader {
+  export const make = (
+    load: Effect.Effect<HandlerFactory, ApiInitError>,
+  ): Effect.Effect<HandlerFactory, ApiInitError> => Effect.runSync(Effect.cached(load));
+}
 
 /**
- * Create trygg Vite plugin with platform-aware dev API.
+ * Configure trygg's JSX, generated routes, build output, and dev API lifecycle
+ * with one Vite plugin.
  *
  * @remarks
- * `trygg` wires JSX transforms, generated entry modules, route types, and the
- * optional dev API bridge behind one Vite plugin instance.
+ * Configuration is decoded when the plugin is created. If `app/api.ts` exists,
+ * dev setup waits for a usable handler before reporting readiness; reloads keep
+ * the last healthy handler until a replacement is ready. Vite shutdown awaits
+ * plugin-owned watcher, API, and request cleanup.
  *
  * @example
  * ```ts
- * import { trygg } from "trygg/vite-plugin"
- * import tryggConfig from "./trygg.config"
+ * import { defineConfig } from "vite";
+ * import { trygg } from "trygg/vite-plugin";
  *
  * export default defineConfig({
- *   plugins: [trygg(tryggConfig)]
- * })
+ *   plugins: [trygg({ platform: "node", output: "server" })],
+ * });
  * ```
  *
+ * @param tryggConfig - Production platform and output mode. Defaults to Node server output.
+ * @returns The configured Vite plugin.
+ * @see ./plugin.docs.md - Source-owned Vite plugin guide
  * @category Vite Plugin
  * @public
  * @since 1.0.0
  */
 export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
-  const configPlatform = tryggConfig?.platform ?? "node";
-  const output = tryggConfig?.output ?? "server";
+  const decodedConfig = defineConfig(tryggConfig ?? { platform: "node", output: "server" });
+  const configPlatform = decodedConfig.platform;
+  const output = decodedConfig.output;
 
   // Dev server always runs in Node.js (Vite), so use node platform for dev
   // regardless of config platform which is for production runtime
   const devPlatform = typeof Bun === "undefined" ? "node" : configPlatform;
 
   // Create platform-specific plugin layer for dev server
-  const pluginLayer = makePluginLayer(devPlatform);
+  const pluginLayer = makePluginLayer(devPlatform, configPlatform);
   const pluginRuntime = ManagedRuntime.make(
     Layer.mergeAll(
       pluginLayer,
-      makeBootstrapLayer({
+      Bootstrap.layer({
         appDirName: APP_DIR,
         generatedDirName: GENERATED_DIR,
         platform: configPlatform,
@@ -3106,6 +3329,33 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       }),
     ),
   );
+  const lifecycleScope = Scope.makeUnsafe("sequential");
+  interface DevServerOwner {
+    readonly scope: Scope.Closeable;
+    legacyClaimed: boolean;
+    closePromise?: Promise<void> | undefined;
+  }
+
+  const environmentOwners = new WeakMap<object, DevServerOwner>();
+  const serverOwners: Array<DevServerOwner> = [];
+  let latestServerOwner: DevServerOwner | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  let buildClosePromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    shutdownPromise ??= Effect.runPromise(
+      Scope.close(lifecycleScope, Exit.void).pipe(Effect.ensuring(pluginRuntime.disposeEffect)),
+    );
+    return shutdownPromise;
+  };
+  const closeServerOwner = (owner: DevServerOwner): Promise<void> => {
+    owner.closePromise ??= Effect.runPromise(Scope.close(owner.scope, Exit.void));
+    return owner.closePromise;
+  };
+  const claimLegacyServerOwner = (): DevServerOwner | undefined => {
+    const owner = serverOwners.find((candidate) => !candidate.legacyClaimed);
+    if (owner !== undefined) owner.legacyClaimed = true;
+    return owner;
+  };
 
   const plugin = {
     name: "trygg",
@@ -3194,15 +3444,37 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
 
     async configResolved(resolvedConfig: ResolvedConfig) {
       await pluginRuntime.runPromise(
-        Effect.flatMap(Bootstrap.asEffect(), (bootstrap) =>
-          bootstrap.initialize(resolvedConfig).pipe(Effect.tapError(logFileSystemError)),
+        Effect.flatMap(Effect.service(Bootstrap), (bootstrap) =>
+          bootstrap
+            .initialize(resolvedConfig)
+            .pipe(
+              Effect.tapError((error) =>
+                Predicate.isTagged(error, "PluginFileSystemError")
+                  ? logFileSystemError(error)
+                  : Effect.void,
+              ),
+            ),
         ),
       );
     },
 
     async configureServer(server: ViteDevServer) {
-      const viteServer = makeViteServer(server, (effect) => pluginRuntime.runPromise(effect));
+      const serverScope = Scope.forkUnsafe(lifecycleScope, "sequential");
+      const serverOwner: DevServerOwner = { scope: serverScope, legacyClaimed: false };
+      serverOwners.push(serverOwner);
+      latestServerOwner = serverOwner;
+      for (const environment of Object.values(server.environments ?? {})) {
+        environmentOwners.set(environment, serverOwner);
+      }
+      const viteServer = ViteServer.make(server);
+      server.httpServer?.once("close", () => {
+        closeServerOwner(serverOwner).then(
+          () => undefined,
+          () => undefined,
+        );
+      });
       const effect = Effect.gen(function* () {
+        const runPostHook = yield* CallbackRuntime.make<Scope.Scope>();
         const bootstrap = yield* Bootstrap;
         const { appDir, generatedDir } = yield* bootstrap.awaitReady;
         const paths = { appDir, generatedDir };
@@ -3226,7 +3498,7 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           Effect.annotateLogs("style", "success"),
         );
 
-        const stableHandlerFactory = makeStableHandlerFactoryLoader(loadHandlerFactory(viteServer));
+        const stableHandlerFactory = HandlerFactoryLoader.make(loadHandlerFactory(viteServer));
         const apiState = yield* PluginApi.loadInitial({
           apiPath,
           hasApi: pathExists(apiPath),
@@ -3238,14 +3510,14 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
                 Effect.logError(`[api] middleware.error: ${Cause.pretty(Cause.fail(error))}`),
               handlerFactory,
             }),
+          ownerScope: serverScope,
         });
 
         const pluginApi = PluginApi.InitialState.$is("Ready")(apiState)
-          ? makePluginApi(apiState.handle)
+          ? PluginApi.make(apiState.handle)
           : undefined;
 
         if (PluginApi.InitialState.$is("Ready")(apiState)) {
-          yield* viteServer.closeApiScopeOnServerClose(apiState.scope);
           yield* Effect.logInfo("API handlers loaded").pipe(
             Effect.annotateLogs("style", "success"),
           );
@@ -3258,37 +3530,47 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
           return yield* apiState.error;
         }
 
-        // Vite boundary: file watcher callbacks use extracted runtime
-        yield* viteServer.onFileChange(async (file) => {
-          await pluginRuntime.runPromise(
-            Effect.scoped(
-              Effect.gen(function* () {
-                const isRoutesFile = yield* files.isRoutesFile(paths, file);
-                if (isRoutesFile) {
-                  yield* files.regenerateGeneratedRouteTypes(paths);
-                }
+        yield* viteServer.onFileChange(
+          (file) =>
+            Effect.gen(function* () {
+              const isRoutesFile = yield* files.isRoutesFile(paths, file);
+              if (isRoutesFile) {
+                yield* files.regenerateGeneratedRouteTypes(paths);
+              }
 
-                if (pluginApi !== undefined) {
-                  yield* writeGeneratedApiClientTypes(appDir, generatedDir);
-                  yield* pluginApi.reloadChangedFile(file);
-                }
-              }),
-            ),
-          );
-        });
+              if (pluginApi !== undefined) {
+                yield* writeGeneratedApiClientTypes(appDir, generatedDir);
+                yield* pluginApi.reloadChangedFile(file);
+              }
+            }),
+          (cause) => Effect.logError(`[watcher] change.failed: ${Cause.pretty(cause)}`),
+        );
 
         if (pluginApi !== undefined) {
           yield* viteServer.mountApiMiddleware(pluginApi.middleware);
         }
 
-        return () => {
-          pluginRuntime
-            .runPromise(viteServer.mountHtmlFallbackMiddleware(generateHtmlTemplate()))
-            .catch(() => undefined);
+        return (): void => {
+          runPostHook(
+            viteServer.mountHtmlFallbackMiddleware(generateHtmlTemplate()).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError(`[vite] post-hook.failed: ${Cause.pretty(cause)}`).pipe(
+                  Effect.catchCause(() => Effect.void),
+                  Effect.andThen(Effect.failCause(cause)),
+                ),
+              ),
+            ),
+          );
         };
       });
 
-      return await pluginRuntime.runPromise(effect);
+      return await pluginRuntime.runPromise(
+        Scope.provide(effect, serverScope).pipe(
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) ? Scope.close(serverScope, exit) : Effect.void,
+          ),
+        ),
+      );
     },
 
     configurePreviewServer(server: PreviewServerLike) {
@@ -3348,7 +3630,24 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
             const apiPath = nodePath.join(appDir, "api.ts");
             yield* validateGeneratedApiClient(apiPath);
             return generateApiClientModule(apiPath);
-          }),
+          }).pipe(
+            Effect.mapError(
+              // Rollup appends import context by assigning to `error.message`.
+              (cause) =>
+                new RollupPluginError({
+                  message: Match.value(cause).pipe(
+                    Match.tag("PluginValidationError", ({ description }) => description),
+                    Match.tag("PluginBootstrapError", () => "Plugin bootstrap is not ready"),
+                    Match.tag(
+                      "PluginFileSystemError",
+                      ({ operation, path }) => `Failed to ${operation} ${path}`,
+                    ),
+                    Match.exhaustive,
+                  ),
+                  cause,
+                }),
+            ),
+          ),
         );
       }
       return null;
@@ -3401,7 +3700,21 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
       await pluginRuntime.runPromise(effect);
     },
 
-    async closeBundle() {
+    buildEnd(error?: Error) {
+      if (error !== undefined) return buildClosePromise ?? shutdown();
+    },
+
+    closeBundle(this: { readonly environment?: object } | undefined) {
+      const serverOwner =
+        this?.environment === undefined
+          ? claimLegacyServerOwner()
+          : environmentOwners.get(this.environment);
+      if (serverOwner !== undefined) {
+        return serverOwner === latestServerOwner ? shutdown() : closeServerOwner(serverOwner);
+      }
+
+      if (buildClosePromise !== undefined) return buildClosePromise;
+      if (shutdownPromise !== undefined) return shutdownPromise;
       const effect = Effect.gen(function* () {
         const bootstrap = yield* Bootstrap;
         const { config, appDir, generatedDir } = yield* bootstrap.awaitReady;
@@ -3416,7 +3729,11 @@ export const trygg = (tryggConfig?: TryggConfig): TryggPlugin => {
         });
       });
 
-      await pluginRuntime.runPromise(effect);
+      buildClosePromise = pluginRuntime.runPromise(effect).then(
+        () => shutdown(),
+        (cause) => shutdown().then(() => Effect.runPromise(Effect.fail(cause))),
+      );
+      return buildClosePromise;
     },
   };
 

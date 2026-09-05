@@ -1,8 +1,13 @@
 import { assert, describe } from "@effect/vitest";
-import { Effect } from "effect";
+import { Cause, Context, Effect, Exit, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
+import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
+import * as SafeUrl from "../../security/safe-url.js";
+import { Element } from "../element.js";
+import { renderIntrinsic } from "../render-intrinsic.js";
+import type { RenderContext, RenderResult } from "../renderer.js";
 import * as Signal from "../signal.js";
 
 const measureErrorConstructions = <A, E, R>(
@@ -43,6 +48,73 @@ const measureErrorConstructions = <A, E, R>(
   );
 
 describe("renderIntrinsic", () => {
+  scoped("should attempt every child cleanup while preserving a cleanup defect", () =>
+    Effect.gen(function* () {
+      // Scope: covers Intrinsic child teardown after an earlier release dies.
+      // Assertion: sibling cleanup still runs and the returned Exit retains the Die Cause.
+      const scope = yield* Scope.make();
+      const parent = document.createElement("div");
+      const cleanupDefect = "intrinsic cleanup defect";
+      const attempts: Array<string> = [];
+      let childIndex = 0;
+      const renderContext: RenderContext = {
+        services: unsafeWidenContext(Context.empty()),
+        scope,
+        safeUrlConfig: SafeUrl.defaultConfig,
+      };
+
+      const intrinsic = yield* unsafeEraseR(
+        renderIntrinsic(
+          "div",
+          {},
+          [Element.Text({ content: "first" }), Element.Text({ content: "second" })],
+          null,
+          parent,
+          renderContext,
+          null,
+          { errorHandler: null },
+          {
+            renderElement: (_element, target): Effect.Effect<RenderResult> =>
+              Effect.sync(() => {
+                const index = childIndex++;
+                const label = index === 0 ? "first" : "second";
+                const node = document.createTextNode(label);
+                target.appendChild(node);
+                return {
+                  node,
+                  cleanup:
+                    index === 0
+                      ? // oxlint-disable-next-line effect/no-effect-escape-hatch -- Deliberately verifies that sibling cleanup continues after a defect.
+                        Effect.die(cleanupDefect).pipe(
+                          Effect.ensuring(
+                            Effect.sync(() => {
+                              attempts.push(label);
+                              node.remove();
+                            }),
+                          ),
+                        )
+                      : Effect.sync(() => {
+                          attempts.push(label);
+                          node.remove();
+                        }),
+                };
+              }),
+            // oxlint-disable-next-line effect/no-effect-escape-hatch -- Fail-loud adapter for an impossible document-render branch in this test.
+            renderDocumentElement: () => Effect.die("unexpected document render"),
+            runForkInRenderContext: () => {},
+          },
+        ),
+      );
+
+      const exit = yield* Effect.exit(unsafeEraseR(intrinsic.cleanup));
+
+      assert.deepStrictEqual(attempts, ["first", "second"]);
+      assert.isTrue(Exit.hasDies(exit));
+      if (Exit.isFailure(exit)) assert.strictEqual(Cause.squash(exit.cause), cleanupDefect);
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
   scoped("creates standard and void DOM elements", () =>
     Effect.gen(function* () {
       const { getByTestId } = yield* render(

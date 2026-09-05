@@ -13,7 +13,7 @@ const InvalidJsxComponentInputReason = Schema.Union([
   Schema.Literal("unknown"),
 ]);
 
-export class InvalidJsxComponentInput extends Schema.TaggedErrorClass<InvalidJsxComponentInput>()(
+export class InvalidJsxComponentInput extends Schema.TaggedError<InvalidJsxComponentInput>()(
   "InvalidJsxComponentInput",
   {
     reason: InvalidJsxComponentInputReason,
@@ -55,42 +55,21 @@ const stripReservedProps = (props: RuntimeProps): RuntimeProps => {
   return result;
 };
 
-const PropReadFailedTypeId: unique symbol = Symbol("trygg/PropReadFailed");
-
-interface PropReadFailed {
-  readonly [PropReadFailedTypeId]: true;
-}
-
-const PropReadFailed: PropReadFailed = { [PropReadFailedTypeId]: true };
-
-const readPropKeys = (props: RuntimeProps): Effect.Effect<ReadonlyArray<string>> =>
-  Effect.try({
-    try: () => Object.keys(props),
-    catch: () => PropReadFailed,
-  }).pipe(Effect.catch(() => Effect.succeed([])));
-
-const readPropValue = (
-  props: RuntimeProps,
-  property: string,
-): Effect.Effect<unknown | PropReadFailed> =>
-  Effect.try({
-    try: () => props[property],
-    catch: () => PropReadFailed,
-  }).pipe(Effect.catch((failed: PropReadFailed) => Effect.succeed(failed)));
-
-const collectProps = Effect.fnUntraced(function* (props: RuntimeProps) {
+const collectPropsSync = (props: RuntimeProps): RuntimeProps => {
   const result: RuntimeProps = {};
-  const keys = yield* readPropKeys(props);
+  const keys = Object.keys(props);
 
   for (const property of keys) {
-    const value = yield* readPropValue(props, property);
-    if (value !== PropReadFailed) {
-      result[property] = value;
-    }
+    result[property] = props[property];
   }
 
   return result;
-});
+};
+
+// Prop enumeration and getters are an input boundary. A hostile object aborts
+// the whole build as a defect rather than silently producing partial props.
+const collectProps = (props: RuntimeProps): Effect.Effect<RuntimeProps> =>
+  Effect.sync(() => collectPropsSync(props));
 
 const normalizeInput: (props: unknown, key?: ElementKey) => Effect.Effect<NormalizedJsxInput> =
   Effect.fnUntraced(function* (props: unknown, key?: ElementKey) {
@@ -163,9 +142,9 @@ const build: (
  * Synchronous fast path for {@link build}.
  *
  * @remarks
- * JSX element construction is pure data-building; the Effect wrapper exists only
- * for the defensive per-prop reads and the lazy invalid-component failure. For
- * the overwhelmingly common cases — an intrinsic tag, or a valid Effect
+ * JSX element construction is pure data-building; the Effect path preserves prop
+ * introspection defects, resolves effectful children, and represents invalid
+ * component failures. For the overwhelmingly common cases — an intrinsic tag, or a valid Effect
  * component, with no `Signal` children — this builds the identical `Element`
  * synchronously so the runtime never spins a fiber per node. Returns `null` to
  * defer to the Effect-based {@link build} when a child needs effectful
@@ -174,7 +153,7 @@ const build: (
  * `build` already produces).
  */
 const buildSync = (type: unknown, props: unknown, key?: ElementKey): ElementType | null => {
-  const resolvedProps: RuntimeProps = isRecord(props) ? props : {};
+  const resolvedProps: RuntimeProps = isRecord(props) ? collectPropsSync(props) : {};
   const childElements = Element.fromChildrenSync(resolvedProps.children);
   if (childElements === null) {
     return null;

@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "vite";
-import { Data, Deferred, Effect, FileSystem, Layer, Predicate, Ref } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, FileSystem, Layer, Predicate, Ref } from "effect";
 import * as Context from "effect/Context";
 import * as nodePath from "node:path";
 import type { Platform, TryggConfig } from "../config.js";
@@ -11,13 +11,13 @@ interface BootstrapState {
   readonly generatedDir: string;
 }
 
-type BootstrapFailure = PluginFileSystemError;
+type BootstrapFailure = PluginBootstrapError | PluginFileSystemError;
 
 type BootstrapStatus = Data.TaggedEnum<{
   readonly Pending: {};
   readonly Bootstrapping: {};
   readonly Ready: { readonly state: BootstrapState };
-  readonly Failed: { readonly error: BootstrapFailure };
+  readonly Failed: { readonly cause: Cause.Cause<BootstrapFailure> };
 }>;
 
 const BootstrapStatus = Data.taggedEnum<BootstrapStatus>();
@@ -25,8 +25,8 @@ const BootstrapStatus = Data.taggedEnum<BootstrapStatus>();
 export interface BootstrapService {
   readonly initialize: (
     resolvedConfig: ResolvedConfig,
-  ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
-  readonly awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure>;
+  ) => Effect.Effect<void, BootstrapFailure, FileSystem.FileSystem>;
+  readonly awaitReady: Effect.Effect<BootstrapState, BootstrapFailure>;
 }
 
 export class Bootstrap extends Context.Service<
@@ -34,10 +34,15 @@ export class Bootstrap extends Context.Service<
   {
     readonly initialize: (
       resolvedConfig: ResolvedConfig,
-    ) => Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>;
-    readonly awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure>;
+    ) => Effect.Effect<void, BootstrapFailure, FileSystem.FileSystem>;
+    readonly awaitReady: Effect.Effect<BootstrapState, BootstrapFailure>;
   }
->()("trygg/vite/Bootstrap") {}
+>()("trygg/vite/Bootstrap") {
+  static readonly layer = (
+    options: BootstrapOptions,
+    initializeState: typeof makeState = makeState,
+  ): Layer.Layer<Bootstrap> => makeLayer(options, initializeState);
+}
 
 interface BootstrapOptions {
   readonly appDirName: string;
@@ -83,7 +88,10 @@ const makeState: (
   };
 });
 
-export const makeBootstrapLayer = (options: BootstrapOptions): Layer.Layer<Bootstrap> =>
+const makeLayer = (
+  options: BootstrapOptions,
+  initializeState: typeof makeState = makeState,
+): Layer.Layer<Bootstrap> =>
   Layer.effect(
     Bootstrap,
     Effect.gen(function* () {
@@ -95,60 +103,56 @@ export const makeBootstrapLayer = (options: BootstrapOptions): Layer.Layer<Boots
         yield* Deferred.succeed(ready, state).pipe(Effect.asVoid);
       });
 
-      const markFailed = Effect.fn("Bootstrap.markFailed")(function* (error: BootstrapFailure) {
-        yield* Ref.set(statusRef, BootstrapStatus.Failed({ error }));
-        yield* Deferred.fail(ready, error).pipe(Effect.asVoid);
+      const markFailed = Effect.fn("Bootstrap.markFailed")(function* (
+        cause: Cause.Cause<BootstrapFailure>,
+      ) {
+        yield* Ref.set(statusRef, BootstrapStatus.Failed({ cause }));
+        yield* Deferred.failCause(ready, cause).pipe(Effect.asVoid);
       });
-
-      const transition = (
-        effect: Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
-        status: BootstrapStatus,
-      ): readonly [
-        Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
-        BootstrapStatus,
-      ] => [effect, status];
 
       const initialize = Effect.fn("Bootstrap.initialize")(function* (
         resolvedConfig: ResolvedConfig,
       ) {
-        yield* Effect.flatten(
-          Ref.modify(
-            statusRef,
-            (
-              status,
-            ): readonly [
-              Effect.Effect<void, PluginFileSystemError, FileSystem.FileSystem>,
-              BootstrapStatus,
-            ] =>
-              BootstrapStatus.$match(status, {
-                Pending: () =>
-                  transition(
-                    makeState(resolvedConfig, options).pipe(
-                      Effect.tap(markReady),
-                      Effect.tapError(markFailed),
-                      Effect.asVoid,
-                    ),
-                    BootstrapStatus.Bootstrapping(),
-                  ),
-                Bootstrapping: () => transition(Deferred.await(ready).pipe(Effect.asVoid), status),
-                Ready: () => transition(Effect.void, status),
-                Failed: ({ error }) => transition(Effect.fail(error), status),
-              }),
-          ),
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const previous = yield* Ref.modify(
+              statusRef,
+              (status): readonly [BootstrapStatus, BootstrapStatus] =>
+                BootstrapStatus.$is("Pending")(status)
+                  ? [status, BootstrapStatus.Bootstrapping()]
+                  : [status, status],
+            );
+
+            if (BootstrapStatus.$is("Pending")(previous)) {
+              const exit = yield* restore(initializeState(resolvedConfig, options)).pipe(
+                Effect.exit,
+              );
+              if (Exit.isSuccess(exit)) {
+                yield* markReady(exit.value);
+                return;
+              }
+              yield* markFailed(exit.cause);
+              return yield* Effect.failCause(exit.cause);
+            }
+            if (BootstrapStatus.$is("Bootstrapping")(previous)) {
+              return yield* restore(Deferred.await(ready)).pipe(Effect.asVoid);
+            }
+            if (BootstrapStatus.$is("Ready")(previous)) return;
+            return yield* Effect.failCause(previous.cause);
+          }),
         );
       });
 
-      const awaitReady: Effect.Effect<BootstrapState, PluginBootstrapError | BootstrapFailure> =
-        Ref.get(statusRef).pipe(
-          Effect.flatMap((status) =>
-            BootstrapStatus.$match(status, {
-              Pending: () => Effect.fail(PluginBootstrapError.notReady()),
-              Bootstrapping: () => Deferred.await(ready),
-              Ready: ({ state }) => Effect.succeed(state),
-              Failed: ({ error }) => Effect.fail(error),
-            }),
-          ),
-        );
+      const awaitReady: Effect.Effect<BootstrapState, BootstrapFailure> = Ref.get(statusRef).pipe(
+        Effect.flatMap((status) =>
+          BootstrapStatus.$match(status, {
+            Pending: () => Effect.fail(PluginBootstrapError.notReady()),
+            Bootstrapping: () => Deferred.await(ready),
+            Ready: ({ state }) => Effect.succeed(state),
+            Failed: ({ cause }) => Effect.failCause(cause),
+          }),
+        ),
+      );
 
       return {
         initialize,

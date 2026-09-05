@@ -18,7 +18,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Deferred, Effect, Fiber, Layer, Ref, Schema } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Schema, Scope } from "effect";
 import * as Context from "effect/Context";
 import { TestClock } from "effect/testing";
 import * as Components from "../../primitives/component.js";
@@ -33,8 +33,11 @@ import { Element } from "../../index.js";
 import * as Signal from "../../primitives/signal.js";
 import { AsyncLoader } from "../outlet-services.js";
 import type { NavigationError, RouteComponent } from "../types.js";
+import { InvalidRoutePathEncoding } from "../path-pattern.js";
+import { RouteActivationError } from "../route-activation.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import type { Layer as LayerType } from "effect/Layer";
+import * as Trace from "../../trace/index.js";
 
 // =============================================================================
 // Helpers
@@ -136,35 +139,113 @@ describe("AsyncLoader - view signal during track", () => {
     }).pipe(Effect.provide(testLayerAt("/"))),
   );
 
-  scoped("drops stale uninterruptible loader results without blocking the latest route", () =>
+  scoped("lets a reentrant previous finalizer supersede replacement without deadlock", () =>
     Effect.gen(function* () {
-      // Test: should let a newer match proceed even when the previous load ignores interruption.
-      // Scope: AsyncLoader publication boundary for shared loading components.
-      // Assertion: the stale result never becomes the visible Ready element.
-      const firstReady = yield* Deferred.make<ElementType>();
-      const secondReady = yield* Deferred.make<ElementType>();
+      // Scope: AsyncLoader replacement ownership when the interrupted finalizer re-enters track.
+      // Assertion: reentrant tracking returns and only its winner starts after cleanup completes.
+      const firstStarted = yield* Deferred.make<void>();
+      const finalizerStarted = yield* Deferred.make<void>();
+      const reentrantTrackReturned = yield* Deferred.make<void>();
+      const releaseFinalizer = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      const thirdStarted = yield* Deferred.make<void>();
+      const events: Array<string> = [];
       const loadingElement = text("Loading...");
       const scope = yield* Effect.scope;
       const loader = yield* AsyncLoader.make(loadingElement, scope);
+      const secondLoad = Effect.gen(function* () {
+        events.push("second-start");
+        yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+        return text("Second");
+      });
+      const thirdLoad = Effect.gen(function* () {
+        events.push("third-start");
+        yield* Deferred.succeed(thirdStarted, undefined).pipe(Effect.asVoid);
+        return text("Third");
+      });
 
-      yield* loader.track("first", Effect.uninterruptible(Deferred.await(firstReady)));
-      yield* loader.track("second", Deferred.await(secondReady));
-
-      yield* Deferred.succeed(firstReady, text("First"));
-      yield* TestClock.adjust(20);
-      const afterStale = yield* Signal.peek(loader.view);
-      assert.isFalse(
-        Element.$is("Text")(afterStale) && afterStale.content === "First",
-        "Stale first loader result must not publish after a newer match starts",
+      yield* loader.track(
+        "first",
+        Effect.gen(function* () {
+          events.push("first-start");
+          yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
+          return yield* Effect.never;
+        }).pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              events.push("first-finalizer-start");
+              yield* Deferred.succeed(finalizerStarted, undefined).pipe(Effect.asVoid);
+              yield* loader.track("third", thirdLoad);
+              yield* Deferred.succeed(reentrantTrackReturned, undefined).pipe(Effect.asVoid);
+              yield* Deferred.await(releaseFinalizer);
+              events.push("first-finalized");
+            }),
+          ),
+        ),
       );
+      yield* Deferred.await(firstStarted);
 
-      yield* Deferred.succeed(secondReady, text("Second"));
-      yield* TestClock.adjust(20);
-      const finalView = yield* Signal.peek(loader.view);
-      assert.isTrue(Element.$is("Text")(finalView));
-      if (Element.$is("Text")(finalView)) {
-        assert.strictEqual(finalView.content, "Second");
-      }
+      const replacement = yield* Effect.forkScoped(loader.track("second", secondLoad));
+      yield* Deferred.await(finalizerStarted);
+      yield* Deferred.await(reentrantTrackReturned);
+      yield* Effect.yieldNow;
+      assert.isFalse(yield* Deferred.isDone(secondStarted));
+      assert.isFalse(yield* Deferred.isDone(thirdStarted));
+
+      yield* Deferred.succeed(releaseFinalizer, undefined).pipe(Effect.asVoid);
+      yield* Fiber.join(replacement);
+      yield* Deferred.await(thirdStarted);
+      assert.isFalse(yield* Deferred.isDone(secondStarted));
+      assert.deepStrictEqual(events, [
+        "first-start",
+        "first-finalizer-start",
+        "first-finalized",
+        "third-start",
+      ]);
+    }),
+  );
+
+  scoped("waits for the current load finalizer when its owner scope closes", () =>
+    Effect.gen(function* () {
+      // Scope: explicit AsyncLoader owner shutdown with an in-flight load.
+      // Assertion: Scope.close remains pending until current-fiber cleanup has completed.
+      const ownerScope = yield* Scope.make();
+      yield* Effect.addFinalizer(() => Scope.close(ownerScope, Exit.void));
+      const loadStarted = yield* Deferred.make<void>();
+      const finalizerStarted = yield* Deferred.make<void>();
+      const releaseFinalizer = yield* Deferred.make<void>();
+      const finalized = yield* Deferred.make<void>();
+      const closeCompleted = yield* Deferred.make<void>();
+      const loader = yield* AsyncLoader.make(text("Loading..."), ownerScope);
+
+      yield* loader.track(
+        "current",
+        Deferred.succeed(loadStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(
+            Deferred.succeed(finalizerStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseFinalizer)),
+              Effect.andThen(Deferred.succeed(finalized, undefined)),
+              Effect.asVoid,
+            ),
+          ),
+        ),
+      );
+      yield* Deferred.await(loadStarted);
+
+      const closing = yield* Effect.forkScoped(
+        Scope.close(ownerScope, Exit.void).pipe(
+          Effect.ensuring(Deferred.succeed(closeCompleted, undefined).pipe(Effect.asVoid)),
+        ),
+      );
+      yield* Deferred.await(finalizerStarted);
+      yield* Effect.yieldNow;
+      assert.isFalse(yield* Deferred.isDone(closeCompleted));
+
+      yield* Deferred.succeed(releaseFinalizer, undefined).pipe(Effect.asVoid);
+      yield* Fiber.join(closing);
+      assert.isTrue(yield* Deferred.isDone(finalized));
+      assert.isTrue(yield* Deferred.isDone(closeCompleted));
     }),
   );
 });
@@ -264,6 +345,147 @@ describe("Outlet - provided route components", () => {
 // =============================================================================
 
 describe("Outlet - Component re-render on navigation (root cause)", () => {
+  scoped("acknowledges and traces the winner only after its exact DOM request commits", () =>
+    Effect.gen(function* () {
+      // Scope: A commits, B starts a blocked replacement, then navigation returns to A.
+      // Assertion: old A DOM cannot satisfy the new A request; only its exact swap commits.
+      const cleanupStarted = yield* Deferred.make<void>();
+      const releaseCleanup = yield* Deferred.make<void>();
+      const bClaimed = yield* Deferred.make<void>();
+      const bRenderStarted = yield* Deferred.make<void>();
+      const releaseBRender = yield* Deferred.make<void>();
+      const aReclaimStarted = yield* Deferred.make<void>();
+      const releaseAReclaim = yield* Deferred.make<void>();
+      const scrollApplied = yield* Deferred.make<void>();
+      const scrollDom = yield* Ref.make<ReadonlyArray<string>>([]);
+      const recorder = Trace.makeRecorder();
+      let mountedContainer: HTMLElement | null = null;
+      let aMiddlewareRuns = 0;
+
+      const Initial = Components.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.uninterruptible(
+            Deferred.succeed(cleanupStarted, undefined).pipe(
+              Effect.flatMap(() => Deferred.await(releaseCleanup)),
+            ),
+          ),
+        );
+        return <div data-testid="swap-initial">Initial</div>;
+      });
+      const PageA = Components.gen(function* () {
+        return <div data-testid="swap-a">A</div>;
+      });
+      const PageB = Components.gen(function* () {
+        yield* Deferred.succeed(bRenderStarted, undefined).pipe(Effect.asVoid);
+        yield* Deferred.await(releaseBRender);
+        return <div data-testid="swap-b">B</div>;
+      });
+      const manifest = Routes.make()
+        .add(Route.make("/initial").component(Initial))
+        .add(
+          Route.make("/a")
+            .middleware(
+              Effect.suspend(() => {
+                aMiddlewareRuns++;
+                return aMiddlewareRuns === 2
+                  ? Deferred.succeed(aReclaimStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(releaseAReclaim)),
+                    )
+                  : Effect.void;
+              }),
+            )
+            .component(PageA),
+        )
+        .add(
+          Route.make("/b")
+            .middleware(Deferred.succeed(bClaimed, undefined).pipe(Effect.asVoid))
+            .component(PageB),
+        ).manifest;
+
+      yield* Trace.record(
+        Effect.gen(function* () {
+          const baseRouter = yield* Router.Router;
+          const wrappedRouter = Router.Router.of({
+            ...baseRouter,
+            outletCoordination: {
+              ...baseRouter.outletCoordination,
+              applyScroll: (options) =>
+                Ref.update(scrollDom, (observed) => {
+                  const visible =
+                    mountedContainer?.querySelector("[data-testid='swap-b']") !== null
+                      ? "B"
+                      : mountedContainer?.querySelector("[data-testid='swap-a']") !== null
+                        ? "A"
+                        : "other";
+                  return [...observed, visible];
+                }).pipe(
+                  Effect.flatMap(() => baseRouter.outletCoordination.applyScroll(options)),
+                  Effect.tap(() => Deferred.succeed(scrollApplied, undefined)),
+                ),
+            },
+          });
+
+          const rendered = yield* renderElement(<Outlet routes={manifest} />).pipe(
+            Effect.provideService(Router.Router, wrappedRouter),
+          );
+          mountedContainer = rendered.container;
+          assert.isNotNull(rendered.container.querySelector("[data-testid='swap-initial']"));
+
+          yield* wrappedRouter.navigate("/a");
+          yield* Deferred.await(cleanupStarted);
+          assert.isNotNull(
+            rendered.container.querySelector("[data-testid='swap-a']"),
+            `A must be committed before its predecessor cleanup blocks. DOM: ${rendered.container.innerHTML}`,
+          );
+
+          yield* wrappedRouter.navigate("/b");
+          yield* Deferred.await(bClaimed);
+          yield* Deferred.succeed(releaseCleanup, undefined).pipe(Effect.asVoid);
+          yield* Deferred.await(bRenderStarted);
+
+          // Return to A while B's signal value is current but its DOM render is
+          // still blocked. A must enqueue its own swap rather than deduplicate
+          // against the older committed A DOM.
+          yield* wrappedRouter.navigate("/a");
+          yield* Deferred.await(aReclaimStarted);
+          yield* Deferred.succeed(releaseAReclaim, undefined).pipe(Effect.asVoid);
+          yield* TestClock.adjust(1);
+          yield* Effect.yieldNow;
+          const prematureScrollDom = yield* Ref.get(scrollDom);
+          assert.isFalse(
+            yield* Deferred.isDone(scrollApplied),
+            `The old committed A DOM must not deduplicate A's newer swap while B is pending. Scroll DOM: ${prematureScrollDom.join(",")}. DOM: ${rendered.container.innerHTML}`,
+          );
+
+          yield* Deferred.succeed(releaseBRender, undefined).pipe(Effect.asVoid);
+          yield* Deferred.await(scrollApplied);
+          yield* Effect.yieldNow;
+          assert.isNotNull(rendered.container.querySelector("[data-testid='swap-a']"));
+          assert.isNull(rendered.container.querySelector("[data-testid='swap-b']"));
+        }),
+        recorder,
+      );
+
+      assert.deepStrictEqual(yield* Ref.get(scrollDom), ["A"]);
+      const transitionRecords = recorder.records().filter((record) => {
+        const activationId = record.payload?.activationId;
+        return (
+          (record.name === "scroll.apply" || record.name === "outlet.process.commit") &&
+          (activationId === "navigation-1" ||
+            activationId === "navigation-2" ||
+            activationId === "navigation-3")
+        );
+      });
+      assert.deepStrictEqual(
+        transitionRecords.map((record) => [record.name, record.payload?.activationId]),
+        [
+          ["scroll.apply", "navigation-3"],
+          ["outlet.process.commit", "navigation-3"],
+        ],
+      );
+    }).pipe(Effect.provide(testLayerAt("/initial"))),
+  );
+
   scoped("should apply scroll once after fast ready navigation behind a loading boundary", () =>
     Effect.gen(function* () {
       // Test: should apply scroll once after fast ready navigation behind a loading boundary.
@@ -306,6 +528,86 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
         `Expected one scroll application after navigation but saw ${afterNavigate - beforeNavigate}`,
       );
     }).pipe(Effect.provide(testLayerAt("/dashboard"))),
+  );
+
+  scoped("acknowledges a wrapped persistent-layout child only after its DOM commits", () =>
+    Effect.gen(function* () {
+      // Scope: persistent layouts transform their child SignalElement value into a wrapper Component.
+      // Assertion: the winner's translated token releases scroll and terminal commit exactly once, after B is visible.
+      const bRenderStarted = yield* Deferred.make<void>();
+      const releaseBRender = yield* Deferred.make<void>();
+      const scrollDom = yield* Ref.make<ReadonlyArray<string>>([]);
+      const recorder = Trace.makeRecorder();
+      let mountedContainer: HTMLElement | null = null;
+
+      const DocsLayout = Components.gen(function* () {
+        return (
+          <section data-testid="persistent-layout">
+            <Outlet />
+          </section>
+        );
+      });
+      const PageA = Components.gen(function* () {
+        return <article data-testid="persistent-a">A</article>;
+      });
+      const PageB = Components.gen(function* () {
+        yield* Deferred.succeed(bRenderStarted, undefined).pipe(Effect.asVoid);
+        yield* Deferred.await(releaseBRender);
+        return <article data-testid="persistent-b">B</article>;
+      });
+      const manifest = Routes.make().add(
+        Route.make("/docs")
+          .layout(DocsLayout)
+          .children(Route.make("/a").component(PageA), Route.make("/b").component(PageB)),
+      ).manifest;
+
+      yield* Trace.record(
+        Effect.gen(function* () {
+          const baseRouter = yield* Router.Router;
+          const wrappedRouter = Router.Router.of({
+            ...baseRouter,
+            outletCoordination: {
+              ...baseRouter.outletCoordination,
+              applyScroll: (options) =>
+                Ref.update(scrollDom, (observed) => [
+                  ...observed,
+                  mountedContainer?.querySelector("[data-testid='persistent-b']") !== null
+                    ? "B"
+                    : "not-B",
+                ]).pipe(Effect.flatMap(() => baseRouter.outletCoordination.applyScroll(options))),
+            },
+          });
+          const rendered = yield* renderElement(<Outlet routes={manifest} />).pipe(
+            Effect.provideService(Router.Router, wrappedRouter),
+          );
+          mountedContainer = rendered.container;
+          assert.isNotNull(rendered.container.querySelector("[data-testid='persistent-a']"));
+
+          yield* wrappedRouter.navigate("/docs/b");
+          yield* Deferred.await(bRenderStarted);
+          yield* Effect.yieldNow;
+          assert.deepStrictEqual(yield* Ref.get(scrollDom), []);
+
+          yield* Deferred.succeed(releaseBRender, undefined).pipe(Effect.asVoid);
+          yield* TestClock.adjust(100);
+          assert.isNotNull(rendered.container.querySelector("[data-testid='persistent-b']"));
+        }),
+        recorder,
+      );
+
+      assert.deepStrictEqual(yield* Ref.get(scrollDom), ["B"]);
+      const terminal = recorder
+        .records()
+        .filter(
+          (record) =>
+            record.payload?.activationId === "navigation-1" &&
+            (record.name === "scroll.apply" || record.name === "outlet.process.commit"),
+        );
+      assert.deepStrictEqual(
+        terminal.map((record) => record.name),
+        ["scroll.apply", "outlet.process.commit"],
+      );
+    }).pipe(Effect.provide(testLayerAt("/docs/a"))),
   );
 
   scoped("Outlet component body should run only ONCE (not re-render on route change)", () =>
@@ -412,6 +714,36 @@ describe("Outlet - Component re-render on navigation (root cause)", () => {
           `(not torn down and recreated). This proves the component did not re-render.`,
       );
     }).pipe(Effect.provide(testLayerAt("/dashboard"))),
+  );
+});
+
+describe("Outlet - malformed route input", () => {
+  scoped("fails mount with the typed encoding error instead of blank success", () =>
+    Effect.gen(function* () {
+      // Scope: malformed boundary input entering the production matcher through a full Outlet mount.
+      // Assertion: mount fails with RouteActivationError(InvalidRoutePathEncoding), never success/404.
+      const manifest = Routes.make().add(
+        Route.make("/users/:id").component(routeElement("user", "User")),
+      ).manifest;
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      yield* Effect.addFinalizer(() => Effect.sync(() => container.remove()));
+      const renderer = yield* Renderer;
+
+      const exit = yield* Effect.exit(renderer.mount(container, <Outlet routes={manifest} />));
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.findErrorOption(exit.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) {
+          assert.instanceOf(error.value, RouteActivationError);
+          if (error.value instanceof RouteActivationError) {
+            assert.instanceOf(error.value.cause, InvalidRoutePathEncoding);
+          }
+        }
+      }
+      assert.notInclude(container.textContent ?? "", "404");
+    }).pipe(Effect.provide(testLayerAt("/users/%E0%A4%A"))),
   );
 });
 

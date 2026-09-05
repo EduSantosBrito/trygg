@@ -1,0 +1,71 @@
+--- source-list/scripts/benchmarks/browser.ts
++++ granular/scripts/benchmarks/browser.ts
+@@ -1,4 +1,4 @@
+-import { Effect, Layer, Scope } from "effect";
++import { Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect";
+ import { jsx } from "../../packages/core/dist/jsx-runtime.js";
+ import * as References from "effect/References";
+ import { Component, Element, Signal, intrinsic, mount } from "../../packages/core/dist/index.js";
+@@ -76,18 +76,33 @@
+   const items = yield* Signal.make<ReadonlyArray<Row>>([]);
+   const selected = yield* Signal.make(0);
+   const isSelected = yield* Signal.selector(selected);
++  const rowLabels = new Map<number, Signal.Signal<string>>();
++  const rowWorkers = new Map<number, Deferred.Deferred<Fiber.Fiber<unknown, unknown>>>();
+   let complete: ((handlerEnd: number) => void) | undefined;
+ 
+-  const operations: Readonly<Record<string, Effect.Effect<void>>> = {
++  const operations: Readonly<Record<string, Effect.Effect<void, unknown>>> = {
+     create1k: Signal.set(items, []).pipe(
+       Effect.andThen(Effect.suspend(() => Signal.set(items, rows(1_000)))),
+     ),
+     replace1k: Effect.suspend(() => Signal.set(items, rows(1_000))),
+     create10k: Effect.suspend(() => Signal.set(items, rows(10_000))),
+     append1k: Signal.update(items, (current) => [...current, ...rows(1_000)]),
+-    update: Signal.update(items, (current) =>
+-      current.map((row, index) => (index % 10 === 0 ? { ...row, label: `${row.label} !!!` } : row)),
+-    ),
++    update: Effect.gen(function* () {
++      const current = yield* Signal.peek(items);
++      for (let index = 0; index < current.length; index += 10) {
++        const row = current[index];
++        if (row === undefined) continue;
++        const label = rowLabels.get(row.id);
++        if (label === undefined) throw new Error(`Missing row Signal ${row.id}`);
++        const entered = yield* Deferred.make<Fiber.Fiber<unknown, unknown>>();
++        rowWorkers.set(row.id, entered);
++        yield* Signal.update(label, (value) => `${value} !!!`);
++        const worker = yield* Deferred.await(entered);
++        const exit = yield* Fiber.await(worker);
++        rowWorkers.delete(row.id);
++        if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause);
++      }
++    }),
+     swap: Signal.update(items, (current) => {
+       const second = current[1];
+       const beforeLast = current[current.length - 2];
+@@ -158,11 +173,23 @@
+     items,
+     (row) =>
+       Effect.gen(function* () {
++        const rowLabel = yield* Signal.make(row.label);
++        if (!rowLabels.has(row.id)) {
++          rowLabels.set(row.id, rowLabel);
++          yield* Effect.addFinalizer(() => Effect.sync(() => {
++            rowLabels.delete(row.id);
++            rowWorkers.delete(row.id);
++          }));
++        }
++        const label = yield* Signal.get(rowLabel);
++        const entered = rowWorkers.get(row.id);
++        if (entered !== undefined)
++          yield* Effect.withFiber((fiber) => Deferred.succeed(entered, fiber));
+         const active = yield* isSelected(row.id);
+         const className = yield* Signal.derive(active, (value) => (value ? "danger" : ""));
+         return jsx("tr", { "data-id": Effect.succeed(String(row.id)), className, children: [
+           intrinsic("td", {}, [Element.Text({ content: String(row.id) })]),
+-          intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: row.label })])]),
++          intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: label })])]),
+           intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: "remove" })])]),
+           intrinsic("td", {}, []),
+         ] });

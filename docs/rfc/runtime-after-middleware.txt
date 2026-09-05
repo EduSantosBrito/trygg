@@ -1,0 +1,14 @@
+Command: bun scripts/benchmark-runtime.ts
+Bun: 1.4.0; Effect: 4.0.0-rc.112
+Scope: router matching and cleanup only; this is not a measurement of middleware redirect latency.
+resolve 100 routes: 0.023 ms/op
+match last of 100 routes: 0.017 ms/op
+miss 100 routes: 0.013 ms/op
+resolve 1000 routes: 0.012 ms/op
+match last of 1000 routes: 0.035 ms/op
+miss 1000 routes: 0.022 ms/op
+resolve 4000 routes: 0.063 ms/op
+match last of 4000 routes: 0.164 ms/op
+miss 4000 routes: 0.121 ms/op
+cleanup 1000 releases: 0.032 ms/op
+cleanup 10000 releases: 0.266 ms/op

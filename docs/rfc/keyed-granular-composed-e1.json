@@ -1,0 +1,220 @@
+{
+  "date": "2026-09-05T12:47:55.859Z",
+  "browser": "141.0.7390.122",
+  "transport": "inline",
+  "fixture": "granular",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 20,
+  "samples": 31,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 19.400000035762787,
+          "frameMs": 36.60000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 27.30000001192093,
+          "frameMs": 30.399999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 38.90000003576279,
+          "frameMs": 42.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 26.69999998807907,
+          "frameMs": 29.900000035762787,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.299999952316284,
+          "frameMs": 36.89999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23,
+          "frameMs": 25.700000047683716,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.39999997615814,
+          "frameMs": 36.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.400000035762787,
+          "frameMs": 26.600000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.90000003576279,
+          "frameMs": 36.700000047683716,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.69999998807907,
+          "frameMs": 26.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.39999997615814,
+          "frameMs": 36.39999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 11.300000011920929,
+          "frameMs": 33.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 17.399999976158142,
+          "frameMs": 32.89999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.100000023841858,
+          "frameMs": 27.200000047683716,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 32.60000002384186,
+          "frameMs": 35.40000003576279,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24,
+          "frameMs": 26.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 35.69999998807907,
+          "frameMs": 38.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 28.299999952316284,
+          "frameMs": 31.599999964237213,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 43.19999998807907,
+          "frameMs": 46.299999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 28,
+          "frameMs": 31.599999964237213,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 21.19999998807907,
+          "frameMs": 36.59999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 25.30000001192093,
+          "frameMs": 29,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 38.69999998807907,
+          "frameMs": 41.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24,
+          "frameMs": 27.099999964237213,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 37.69999998807907,
+          "frameMs": 40.59999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 27.099999964237213,
+          "frameMs": 30.099999964237213,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.5,
+          "frameMs": 37.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.80000001192093,
+          "frameMs": 26.80000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.89999997615814,
+          "frameMs": 36.80000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.300000011920929,
+          "frameMs": 23.399999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.5,
+          "frameMs": 36.200000047683716,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": null,
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": null,
+      "bytes": 579634,
+      "gzipBytes": 177135
+    }
+  ]
+}

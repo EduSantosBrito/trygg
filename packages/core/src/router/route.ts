@@ -19,7 +19,7 @@
  * @since 1.0.0
  * @module trygg/router/route
  */
-import { Cause, Data, Effect, Option, Pipeable, Predicate, Schema } from "effect";
+import { Cause, Data, Effect, Pipeable, Predicate, Schema } from "effect";
 import type * as LayerTypes from "effect/Layer";
 import * as Context from "effect/Context";
 import type { ComponentInput, RouteComponentInput } from "./types.js";
@@ -702,7 +702,7 @@ export function provide(
  * Error produced when path params fail schema decode.
  * @since 1.0.0
  */
-export class ParamsDecodeError extends Schema.TaggedErrorClass<ParamsDecodeError>()(
+export class ParamsDecodeError extends Schema.TaggedError<ParamsDecodeError>()(
   "ParamsDecodeError",
   {
     path: Schema.String,
@@ -734,14 +734,11 @@ export const decodeParams = <S extends Schema.Top>(
  * Error produced when query params fail schema decode.
  * @since 1.0.0
  */
-export class QueryDecodeError extends Schema.TaggedErrorClass<QueryDecodeError>()(
-  "QueryDecodeError",
-  {
-    path: Schema.String,
-    rawQuery: Schema.Record(Schema.String, Schema.String),
-    cause: Schema.Unknown,
-  },
-) {}
+export class QueryDecodeError extends Schema.TaggedError<QueryDecodeError>()("QueryDecodeError", {
+  path: Schema.String,
+  rawQuery: Schema.Record(Schema.String, Schema.String),
+  cause: Schema.Unknown,
+}) {}
 
 /**
  * FiberRef holding the decoded query params for the current route.
@@ -792,7 +789,7 @@ export const decodeQuery = <S extends Schema.Top>(
  * Produced by `Router.redirect(path)`.
  * @since 1.0.0
  */
-export class RouterRedirectError extends Schema.TaggedErrorClass<RouterRedirectError>()(
+export class RouterRedirectError extends Schema.TaggedError<RouterRedirectError>()(
   "RouterRedirect",
   {
     path: Schema.String,
@@ -805,7 +802,7 @@ export class RouterRedirectError extends Schema.TaggedErrorClass<RouterRedirectE
  * Produced by `Router.forbidden()`.
  * @since 1.0.0
  */
-export class RouterForbiddenError extends Schema.TaggedErrorClass<RouterForbiddenError>()(
+export class RouterForbiddenError extends Schema.TaggedError<RouterForbiddenError>()(
   "RouterForbidden",
   {},
 ) {}
@@ -864,6 +861,32 @@ export const routeForbidden: Effect.Effect<never, RouterForbiddenError> = Effect
   new RouterForbiddenError(),
 );
 
+/**
+ * Owner for fluent route construction and route middleware exits.
+ *
+ * @remarks
+ * Groups the route builder factory, index constructor, strategy provider, and
+ * middleware control effects under the domain noun used by applications.
+ *
+ * @example
+ * ```tsx
+ * const route = Route.make("/settings")
+ *   .component(SettingsPage)
+ *   .pipe(Route.provide(RenderStrategy.Eager))
+ * ```
+ *
+ * @category Route Builders
+ * @public
+ * @since 1.0.0
+ */
+export const Route = {
+  make,
+  index,
+  provide,
+  redirect: routeRedirect,
+  forbidden: routeForbidden,
+};
+
 // =============================================================================
 // Middleware Runner
 // =============================================================================
@@ -882,7 +905,7 @@ export type MiddlewareResult = Data.TaggedEnum<{
   readonly Continue: {};
   readonly Redirect: { readonly path: string; readonly replace: boolean };
   readonly Forbidden: {};
-  readonly Error: { readonly cause: unknown };
+  readonly Error: { readonly cause: Cause.Cause<unknown> };
 }>;
 
 export const MiddlewareResult = Data.taggedEnum<MiddlewareResult>();
@@ -899,7 +922,7 @@ export const MiddlewareResult = Data.taggedEnum<MiddlewareResult>();
  */
 export const runMiddlewareChain: (
   middleware: ReadonlyArray<Effect.Effect<void, unknown, never>>,
-) => Effect.Effect<MiddlewareResult, never, never> = Effect.fn("Route.runMiddlewareChain")(
+) => Effect.Effect<MiddlewareResult, unknown, never> = Effect.fn("Route.runMiddlewareChain")(
   function* (middleware: ReadonlyArray<Effect.Effect<void, unknown, never>>) {
     if (middleware.length === 0) {
       return MiddlewareResult.Continue();
@@ -910,10 +933,7 @@ export const runMiddlewareChain: (
       const result = yield* unsafeEraseMiddlewareR(m).pipe(
         Effect.matchCauseEffect({
           onSuccess: () => Effect.succeed(continueResult),
-          onFailure: (cause) => {
-            const squashed = extractMiddlewareError(cause);
-            return Effect.succeed(squashed);
-          },
+          onFailure: classifyMiddlewareCause,
         }),
       );
 
@@ -929,36 +949,26 @@ export const runMiddlewareChain: (
  * Extract the middleware result from a Cause.
  * @internal
  */
-const extractMiddlewareError = (cause: unknown): MiddlewareResult => {
-  // Try to find RouterRedirect or RouterForbidden in the cause
-  const error = findFailure(cause);
+const classifyMiddlewareCause = (
+  cause: Cause.Cause<unknown>,
+): Effect.Effect<MiddlewareResult, unknown> => {
+  if (Cause.hasInterrupts(cause)) {
+    return Effect.failCause(cause);
+  }
+
+  const failureReasons = cause.reasons.filter(Cause.isFailReason);
+  const onlyFailure = cause.reasons.length === 1 ? failureReasons[0] : undefined;
+  const error = onlyFailure?.error;
 
   if (Predicate.isTagged(error, "RouterRedirect")) {
     const redirect = unsafeExtractFields<{ path: string; replace: boolean }>(error);
-    return MiddlewareResult.Redirect({ path: redirect.path, replace: redirect.replace });
+    return Effect.succeed(
+      MiddlewareResult.Redirect({ path: redirect.path, replace: redirect.replace }),
+    );
   }
   if (Predicate.isTagged(error, "RouterForbidden")) {
-    return MiddlewareResult.Forbidden();
+    return Effect.succeed(MiddlewareResult.Forbidden());
   }
 
-  return MiddlewareResult.Error({ cause });
-};
-
-/**
- * Extract the failure value from a Cause-like structure.
- * @internal
- */
-const findFailure = (cause: unknown): unknown => {
-  if (cause === null || cause === undefined) return cause;
-  if (typeof cause !== "object") return cause;
-
-  if (Cause.isCause(cause)) {
-    return Option.getOrNull(Cause.findErrorOption(cause));
-  }
-
-  if (Predicate.isTagged(cause, "RouterRedirect") || Predicate.isTagged(cause, "RouterForbidden")) {
-    return cause;
-  }
-
-  return cause;
+  return Effect.succeed(MiddlewareResult.Error({ cause }));
 };

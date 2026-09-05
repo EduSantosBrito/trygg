@@ -10,11 +10,12 @@
  * @since 1.0.0
  * @module trygg/primitives/portal
  */
-import { Effect, Schema, Scope } from "effect";
+import { Effect, Exit, Predicate, Schema, Scope } from "effect";
 import { gen, Component, type ComponentProps } from "./component.js";
 import { type Element, Element as ElementEnum, signalElement, empty } from "./element.js";
 import type { MaybeSignal } from "./element.js";
 import * as Signal from "./signal.js";
+import { asFinalizer } from "./render-cleanup.js";
 
 // =============================================================================
 // Errors
@@ -36,7 +37,7 @@ import * as Signal from "./signal.js";
  * @public
  * @since 1.0.0
  */
-export class PortalTargetNotFoundError extends Schema.TaggedErrorClass<PortalTargetNotFoundError>()(
+export class PortalTargetNotFoundError extends Schema.TaggedError<PortalTargetNotFoundError>()(
   "PortalTargetNotFoundError",
   {
     target: Schema.String,
@@ -46,6 +47,36 @@ export class PortalTargetNotFoundError extends Schema.TaggedErrorClass<PortalTar
     return `Portal target not found: ${this.target}`;
   }
 }
+
+/**
+ * A native DOM operation failed while acquiring or releasing a portal target.
+ *
+ * @remarks
+ * Acquisition failures stay in the typed error channel. A failed removal during
+ * Scope finalization is promoted to a defect because finalizers cannot expose a
+ * typed failure; it remains observable in the closing Scope's Cause.
+ *
+ * @example
+ * ```tsx
+ * const portal = Portal.make(<div />, { target: "[" }).pipe(
+ *   Effect.catchTag("PortalDomError", (error) => Effect.logError(error.operation)),
+ * )
+ * ```
+ *
+ * @category Portals
+ * @public
+ * @since 1.0.0
+ */
+export class PortalDomError extends Schema.TaggedError<PortalDomError>()("PortalDomError", {
+  operation: Schema.Literals([
+    "createElement",
+    "setAttribute",
+    "appendChild",
+    "querySelector",
+    "remove",
+  ]),
+  cause: Schema.Unknown,
+}) {}
 
 // =============================================================================
 // Types
@@ -99,6 +130,34 @@ export interface PortalOptions {
 const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<boolean> =>
   Signal.isSignal(value);
 
+const domOperation = <A>(operation: PortalDomError["operation"], evaluate: () => A) =>
+  Effect.try({ try: evaluate, catch: (cause) => new PortalDomError({ operation, cause }) });
+
+const dynamicTarget = Effect.gen(function* () {
+  const componentScope = yield* Signal.CurrentComponentScope;
+  const owner = componentScope ?? (yield* Effect.scope);
+  if (Predicate.isTagged(owner.state, "Closed")) return yield* Effect.interrupt;
+  const scope = yield* Scope.fork(owner);
+
+  return yield* Effect.gen(function* () {
+    // Acquire the detached node before publishing it. The child Scope rolls back
+    // a partial append immediately on failure, without closing the caller's Scope.
+    const container = yield* Effect.acquireRelease(
+      domOperation("createElement", () => document.createElement("div")),
+      // Scope finalizers have no typed error channel; retain failed removal as a
+      // defect so shutdown reports it while attempting its other finalizers.
+      (node) => domOperation("remove", () => node.remove()).pipe(asFinalizer),
+    );
+    if (Predicate.isTagged(scope.state, "Closed")) return yield* Effect.interrupt;
+    yield* domOperation("setAttribute", () => container.setAttribute("data-portal-container", ""));
+    yield* domOperation("appendChild", () => document.body.appendChild(container));
+    return container;
+  }).pipe(
+    Scope.provide(scope),
+    Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void)),
+  );
+});
+
 // =============================================================================
 // Portal.make
 // =============================================================================
@@ -109,6 +168,9 @@ const isBooleanSignal = (value: MaybeSignal<boolean>): value is Signal.Signal<bo
  * @remarks
  * Returns a ComponentType that accepts an optional `visible` prop to control
  * mount/unmount. When `visible` is a Signal, the portal reacts to changes.
+ * Invalid selectors and native DOM acquisition failures return `PortalDomError`.
+ * Dynamic containers are owned before insertion and rolled back on failed or
+ * interrupted acquisition. Dynamic acquisition into a closed owner is interrupted.
  *
  * @example
  * ```tsx
@@ -134,31 +196,17 @@ export const make: (
   options?: PortalOptions,
 ) => Effect.Effect<
   Component.Type<PortalProps, never, Scope.Scope>,
-  PortalTargetNotFoundError,
+  PortalTargetNotFoundError | PortalDomError,
   Scope.Scope
 > = Effect.fn("Portal.make")(function* (content, options) {
   let resolvedTarget: HTMLElement;
 
   if (options?.target === undefined) {
-    // Dynamic: create container on document.body
-    const container = document.createElement("div");
-    container.setAttribute("data-portal-container", "");
-    document.body.appendChild(container);
-
-    // Register cleanup: remove container when scope closes
-    const componentScope = yield* Signal.CurrentComponentScope;
-    const scope = componentScope ?? (yield* Effect.scope);
-    yield* Scope.addFinalizer(
-      scope,
-      Effect.sync(() => {
-        container.remove();
-      }),
-    );
-
-    resolvedTarget = container;
+    resolvedTarget = yield* dynamicTarget;
   } else if (typeof options.target === "string") {
     // CSS selector: resolve at creation time
-    const el = document.querySelector(options.target);
+    const selector = options.target;
+    const el = yield* domOperation("querySelector", () => document.querySelector(selector));
     if (el === null || !(el instanceof HTMLElement)) {
       return yield* new PortalTargetNotFoundError({ target: options.target });
     }

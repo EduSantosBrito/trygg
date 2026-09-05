@@ -17,7 +17,7 @@ Use `trygg/config` in `trygg.config.ts` when an app needs one typed place to cho
 
 ## Behavior
 
-`defineConfig` returns the provided object unchanged — its only job is to type the argument as `TryggConfig`. The two fields are orthogonal:
+`defineConfig` decodes the provided object with the same Schema used by the Vite plugin. Unsupported runtime values throw `TryggConfigError` immediately, with the original Schema error in `cause`, even when they come from JavaScript or bypass TypeScript. The two fields are orthogonal:
 
 - `platform` (`"bun" | "cloudflare" | "node"`) selects the runtime platform for dev API handling and the production server entrypoint. The field is `platform`, not `adapter`, because trygg models runtime behavior through Effect services and Layers rather than naming deploy-tool adapters.
 - `output` (`"server" | "static"`) selects the artifact mode generated for that platform.
@@ -26,11 +26,11 @@ Use `trygg/config` in `trygg.config.ts` when an app needs one typed place to cho
 
 `output: "server"` (on `platform: "bun"` or `platform: "node"`) generates a production server entry whose middleware serves static files, reserves `/api/*` for API routes, and falls back to the SPA shell for other GET requests. `app/api.ts` is optional: when it is absent the API route is simply not wired, so reach for `output: "server"` whenever the app has server-owned behavior and `output: "static"` otherwise. The server entry serves the static shell for navigation; it does not perform server-side route rendering.
 
-`platform: "cloudflare"` is supported with `output: "static"` only. That combination emits a Cloudflare Worker at `.trygg/worker-entry.js` that serves assets through the fixed `ASSETS` binding (the binding name is not configurable today) and falls back to `/index.html` for document-like requests. `output: "server"` with `platform: "cloudflare"` is rejected with a build error today, and `app/api.ts` alongside `platform: "cloudflare"` + `output: "static"` is also rejected — use `platform: "bun"` or `platform: "node"` for server output and API routes.
+`platform: "cloudflare"` is supported with `output: "static"` only. That combination emits a Cloudflare Worker at `.trygg/worker-entry.js` that serves assets through the fixed `ASSETS` binding (the binding name is not configurable today) and fetches the shell at `/` for document-like requests. `output: "server"` with `platform: "cloudflare"` is rejected with a build error today, and `app/api.ts` alongside `platform: "cloudflare"` + `output: "static"` is also rejected — use `platform: "bun"` or `platform: "node"` for server output and API routes.
 
 ## Related exports
 
-- `defineConfig` — type a config object as `TryggConfig`, returned unchanged
+- `defineConfig` — decode a config object and return its supported `TryggConfig` fields
 - `TryggConfig` — the `platform` and `output` config shape
 - `Platform` — the `"bun" | "cloudflare" | "node"` runtime union
 - `Output` — the `"server" | "static"` artifact-mode union

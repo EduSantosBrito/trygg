@@ -1,0 +1,11 @@
+--- a/scripts/benchmarks/browser.ts
++++ b/scripts/benchmarks/browser.ts
+@@ -159,7 +159,7 @@
+       Effect.gen(function* () {
+         const active = yield* isSelected(row.id);
+         const className = yield* Signal.derive(active, (value) => (value ? "danger" : ""));
+-        return intrinsic("tr", { "data-id": String(row.id), className }, [
++        return intrinsic("tr", { "data-id": Effect.succeed(String(row.id)), className }, [
+           intrinsic("td", {}, [Element.Text({ content: String(row.id) })]),
+           intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: row.label })])]),
+           intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: "remove" })])]),

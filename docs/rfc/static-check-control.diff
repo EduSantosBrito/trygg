@@ -1,0 +1,36 @@
+--- A/packages/core/src/primitives/render-intrinsic.ts
++++ B/packages/core/src/primitives/render-intrinsic.ts
+@@ -483,9 +483,12 @@
+   }
+ };
+ 
+-const hasStaticStructure = (built: StaticBuilt, next: IntrinsicElement): boolean => {
++const canReconcileStaticBuilt = (built: StaticBuilt, next: IntrinsicElement): boolean => {
+   if (next.tag !== built.element.tag || next.key !== built.element.key) return false;
+   if (next.children.length !== built.children.length) return false;
++  // Matching retained tags/keys proves the non-hoistable, unkeyed-child
++  // invariants. Validate each candidate's props during this same tree walk.
++  if (!isStaticProps(next.props)) return false;
+   for (let index = 0; index < next.children.length; index++) {
+     const child = next.children[index];
+     const previous = built.children[index];
+@@ -493,7 +496,8 @@
+     if (Predicate.isTagged(child, "Text")) {
+       if (previous.kind !== "text") return false;
+     } else if (Predicate.isTagged(child, "Intrinsic")) {
+-      if (previous.kind !== "element" || !hasStaticStructure(previous.built, child)) return false;
++      if (previous.kind !== "element" || !canReconcileStaticBuilt(previous.built, child))
++        return false;
+     } else {
+       return false;
+     }
+@@ -648,8 +652,7 @@
+       const resolved = resolveReconcileTarget(nextElement, nextContext);
+       return (
+         Predicate.isTagged(resolved.element, "Intrinsic") &&
+-        isStaticIntrinsic(resolved.element) &&
+-        hasStaticStructure(root, resolved.element)
++        canReconcileStaticBuilt(root, resolved.element)
+       );
+     },
+     reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>

@@ -1,0 +1,470 @@
+--- a/packages/core/src/primitives/render-provide.ts
++++ c/packages/core/src/primitives/render-provide.ts
+@@ -1,7 +1,12 @@
+ import { Effect, Predicate } from "effect";
+ import * as Context from "effect/Context";
+ import type { Element } from "./element.js";
+-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
++import type {
++  ErrorBoundaryHandler,
++  RenderContext,
++  RenderPreparation,
++  RenderResult,
++} from "./renderer.js";
+ 
+ interface RenderOptions {
+   readonly errorHandler: ErrorBoundaryHandler | null;
+@@ -42,7 +47,14 @@
+         return childResult.node;
+       },
+       cleanup: childResult.cleanup,
+-      reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
++      get preparation() {
++        return childResult.preparation;
++      },
++      reconcile: (
++        nextElement: Element,
++        nextContext: Context.Context<unknown> | null,
++        preparation?: RenderPreparation,
++      ) =>
+         Effect.gen(function* () {
+           if (!Predicate.isTagged(nextElement, "Provide") || childResult.reconcile === undefined) {
+             return false;
+@@ -53,7 +65,7 @@
+               ? Context.merge(nextContext, nextElement.context)
+               : nextElement.context;
+ 
+-          return yield* childResult.reconcile(nextElement.child, nextMergedContext);
++          return yield* childResult.reconcile(nextElement.child, nextMergedContext, preparation);
+         }),
+     };
+   },
+--- a/packages/core/src/primitives/render-fragment.ts
++++ c/packages/core/src/primitives/render-fragment.ts
+@@ -1,12 +1,18 @@
+ import { Effect, Predicate } from "effect";
+ import * as Context from "effect/Context";
+ import type { Element } from "./element.js";
+-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
++import type {
++  ErrorBoundaryHandler,
++  RenderContext,
++  RenderPreparation,
++  RenderResult,
++} from "./renderer.js";
+ import { resolveReconcileTarget } from "./render-utils.js";
+ import * as RenderTransaction from "./render-transaction.js";
+ import { cleanupAll, reportUnhandledRenderCause } from "./render-cleanup.js";
+ 
+ interface RenderOptions {
++  readonly preparation?: RenderPreparation | undefined;
+   readonly errorHandler: ErrorBoundaryHandler | null;
+ }
+ 
+@@ -40,9 +46,19 @@
+     cleanupAll(childResults.map((child) => RenderTransaction.cleanup(child))),
+   );
+ 
+-  for (const child of children) {
++  for (let index = 0; index < children.length; index++) {
++    const child = children[index];
++    if (child === undefined) continue;
+     const result = yield* deps
+-      .renderElement(child, parent, renderContext, context, options)
++      .renderElement(
++        child,
++        parent,
++        renderContext,
++        context,
++        options.preparation === undefined
++          ? options
++          : { ...options, preparation: options.preparation.children[index] },
++      )
+       .pipe(
+         Effect.onError(() =>
+           cleanupRenderedChildren.pipe(
+@@ -74,7 +90,17 @@
+   return {
+     node: maybeFirstChild.node,
+     cleanup: cleanupRenderedChildren,
+-    reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
++    get preparation(): RenderPreparation {
++      return {
++        propertyValues: undefined,
++        children: childResults.map((child) => child.preparation),
++      };
++    },
++    reconcile: (
++      nextElement: Element,
++      nextContext: Context.Context<unknown> | null,
++      preparation?: RenderPreparation,
++    ) =>
+       Effect.gen(function* () {
+         const resolved = resolveReconcileTarget(nextElement, nextContext);
+         const resolvedNextElement = resolved.element;
+@@ -96,6 +122,7 @@
+ 
+           const outcome = yield* RenderTransaction.reconcile({
+             previous: childResult,
++            preparation: preparation?.children[index],
+             nextElement: nextChild,
+             nextContext: resolvedNextContext,
+             context: renderContext,
+--- a/packages/core/src/primitives/renderer.ts
++++ c/packages/core/src/primitives/renderer.ts
+@@ -165,6 +165,12 @@
+   },
+ );
+ 
++/** @internal Values acquired by a prepared render, retained under its owning scope. */
++export interface RenderPreparation {
++  readonly propertyValues: ReadonlyMap<string, unknown> | undefined;
++  readonly children: ReadonlyArray<RenderPreparation | undefined>;
++}
++
+ /**
+  * Result of rendering an element - contains the DOM node and cleanup effect.
+  *
+@@ -209,9 +215,12 @@
+     nextElement: Element,
+     nextContext: Context.Context<unknown> | null,
+   ) => boolean;
++  /** @internal Snapshot acquired values before commit so rollback does not rerun user Effects. */
++  readonly preparation?: RenderPreparation | undefined;
+   readonly reconcile?: (
+     nextElement: Element,
+     nextContext: Context.Context<unknown> | null,
++    preparation?: RenderPreparation,
+   ) => Effect.Effect<boolean, unknown, RuntimeRequirements>;
+ }
+ 
+@@ -230,6 +239,7 @@
+  * @internal
+  */
+ interface RenderOptions {
++  readonly preparation?: RenderPreparation | undefined;
+   readonly errorHandler: ErrorBoundaryHandler | null;
+ }
+ 
+--- a/packages/core/src/primitives/render-transaction.ts
++++ c/packages/core/src/primitives/render-transaction.ts
+@@ -3,7 +3,7 @@
+ import { unsafeWidenContext } from "../internal/unsafe.js";
+ import * as Trace from "../trace/index.js";
+ import type { Element } from "./element.js";
+-import type { RenderContext, RenderResult } from "./renderer.js";
++import type { RenderContext, RenderPreparation, RenderResult } from "./renderer.js";
+ 
+ export interface RenderTransactionRequest<R> {
+   readonly parent: Node;
+@@ -17,6 +17,7 @@
+ 
+ export interface RenderTransactionReconcileRequest {
+   readonly boundary?: "operation" | "child";
++  readonly preparation?: RenderPreparation | undefined;
+   readonly previous: RenderResult;
+   readonly nextElement: Element;
+   readonly nextContext: Context.Context<unknown> | null;
+@@ -220,7 +221,7 @@
+ 
+   const reconciled = yield* Effect.exit(
+     request.previous
+-      .reconcile(request.nextElement, request.nextContext)
++      .reconcile(request.nextElement, request.nextContext, request.preparation)
+       .pipe(Effect.provide(request.context.services)),
+   );
+   if (Exit.isFailure(reconciled)) {
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ c/packages/core/src/primitives/render-intrinsic.ts
+@@ -13,13 +13,19 @@
+   shallowPropsEqual,
+ } from "./render-utils.js";
+ import * as Head from "./head.js";
+-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
++import type {
++  ErrorBoundaryHandler,
++  RenderContext,
++  RenderPreparation,
++  RenderResult,
++} from "./renderer.js";
+ import { InvalidEventHandlerError } from "./renderer.js";
+ import * as RenderContextTransaction from "./render-context-transaction.js";
+ import * as RenderTransaction from "./render-transaction.js";
+ import { cleanupAll, runOwnedRenderFiber } from "./render-cleanup.js";
+ 
+ interface RenderOptions {
++  readonly preparation?: RenderPreparation | undefined;
+   readonly errorHandler: ErrorBoundaryHandler | null;
+ }
+ 
+@@ -128,8 +134,10 @@
+   renderContext: RenderContext,
+   context: Context.Context<unknown> | null,
+   _deps: RenderIntrinsicDeps<E, R>,
++  preparedValues?: ReadonlyMap<string, unknown>,
+ ) {
+   const cleanups: Array<Effect.Effect<void>> = [];
++  let propertyValues: Map<string, unknown> | undefined;
+   // Keep partial bindings reachable until the complete property set is handed
+   // to the renderer. Cleanup failures remain in the failed acquisition's Cause.
+   return yield* Effect.gen(function* () {
+@@ -190,7 +198,14 @@
+         );
+         cleanups.push(unsubscribe);
+       } else if (isEffectProp(value)) {
+-        const resolved = yield* value;
++        let resolved: unknown;
++        if (preparedValues?.has(key)) {
++          resolved = preparedValues.get(key);
++        } else {
++          resolved = yield* value;
++          propertyValues ??= new Map(preparedValues);
++          propertyValues.set(key, resolved);
++        }
+         if (Signal.isSignal(resolved)) {
+           // peek (not get): binding owns its subscription below; do not subscribe
+           // the enclosing component's render phase to this resolved signal.
+@@ -226,7 +241,7 @@
+       }
+     }
+ 
+-    return cleanups;
++    return { cleanups, propertyValues: propertyValues ?? preparedValues };
+   }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? cleanupAll(cleanups) : Effect.void)));
+ });
+ 
+@@ -813,6 +828,7 @@
+           : domProps;
+ 
+       let currentProps = appliedProps;
++      let currentPropertyValues: ReadonlyMap<string, unknown> | undefined;
+       let propCleanups: Array<Effect.Effect<void>> = [];
+       const isHeadHoist = Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value);
+ 
+@@ -838,6 +854,7 @@
+       const renderChildSlot = Effect.fnUntraced(function* (
+         child: Element,
+         childContext: Context.Context<unknown> | null,
++        preparation?: RenderPreparation,
+       ) {
+         let startMarker: Comment | undefined;
+         let endMarker: Comment | undefined;
+@@ -849,7 +866,15 @@
+             startMarker = start;
+             fragment.appendChild(start);
+             const result = yield* restoreChild(
+-              deps.renderElement(child, fragment, renderContext, childContext, options),
++              deps.renderElement(
++                child,
++                fragment,
++                renderContext,
++                childContext,
++                preparation === undefined && options.preparation === undefined
++                  ? options
++                  : { ...options, preparation },
++              ),
+             );
+             acquired = result;
+             const end = document.createComment("child-end");
+@@ -905,18 +930,40 @@
+         return cleanupAll(cleanups);
+       });
+       rollback = cleanupProgressiveNode;
+-      propCleanups = yield* restore(applyProps(node, currentProps, renderContext, context, deps));
++      const acquiredProps = yield* restore(
++        applyProps(
++          node,
++          currentProps,
++          renderContext,
++          context,
++          deps,
++          options.preparation?.propertyValues,
++        ),
++      );
++      propCleanups = acquiredProps.cleanups;
++      currentPropertyValues = acquiredProps.propertyValues;
+       if (!isHeadHoist) parent.appendChild(node);
+       if (childrenAnchor !== null) node.appendChild(childrenAnchor);
+ 
+-      if (hasKeyedChildren) {
+-        for (const child of children)
+-          childSlots.push(yield* restore(renderChildSlot(child, context)));
+-      } else {
+-        for (const child of children)
++      for (let index = 0; index < children.length; index++) {
++        const child = children[index];
++        if (child === undefined) continue;
++        const preparation = options.preparation?.children[index];
++        if (hasKeyedChildren) {
++          childSlots.push(yield* restore(renderChildSlot(child, context, preparation)));
++        } else {
+           childResults.push(
+-            yield* restore(deps.renderElement(child, node, renderContext, context, options)),
++            yield* restore(
++              deps.renderElement(
++                child,
++                node,
++                renderContext,
++                context,
++                options.preparation === undefined ? options : { ...options, preparation },
++              ),
++            ),
+           );
++        }
+       }
+ 
+       if (Option.isSome(hoistAction) && isHeadHoistAction(hoistAction.value)) {
+@@ -968,9 +1015,18 @@
+           cleanups.push(...propCleanups);
+           return cleanupAll(cleanups);
+         }),
++        get preparation(): RenderPreparation {
++          return {
++            propertyValues: currentPropertyValues,
++            children: hasKeyedChildren
++              ? childSlots.map((slot) => slot.result.preparation)
++              : childResults.map((child) => child.preparation),
++          };
++        },
+         reconcile: Effect.fnUntraced(function* (
+           nextElement: Element,
+           nextContext: Context.Context<unknown> | null,
++          preparation?: RenderPreparation,
+         ) {
+           const resolved = resolveReconcileTarget(nextElement, nextContext);
+           const resolvedNextElement = resolved.element;
+@@ -984,16 +1040,22 @@
+               ? omitMode(resolvedNextElement.props)
+               : resolvedNextElement.props;
+ 
+-          if (!shallowPropsEqual(currentProps, nextProps)) {
++          if (
++            preparation?.propertyValues !== undefined ||
++            !shallowPropsEqual(currentProps, nextProps)
++          ) {
+             for (const cleanup of propCleanups) yield* cleanup;
+             clearRemovedProps(node, currentProps, nextProps);
+-            propCleanups = yield* applyProps(
++            const acquired = yield* applyProps(
+               node,
+               nextProps,
+               renderContext,
+               resolvedNextContext,
+               deps,
++              preparation?.propertyValues,
+             );
++            propCleanups = acquired.cleanups;
++            currentPropertyValues = acquired.propertyValues;
+             currentProps = nextProps;
+           }
+ 
+@@ -1013,6 +1075,7 @@
+               const outcome = yield* RenderTransaction.reconcile({
+                 boundary: "child",
+                 previous: childResult,
++                preparation: preparation?.children[index],
+                 nextElement: nextChild,
+                 nextContext: resolvedNextContext,
+                 context: renderContext,
+@@ -1036,6 +1099,7 @@
+           const tryReuse = Effect.fnUntraced(function* (
+             nextChild: Element,
+             slotIndex: number | undefined,
++            nextPreparation: RenderPreparation | undefined,
+           ) {
+             if (slotIndex === undefined || usedIndices.has(slotIndex)) return false;
+             const slot = childSlots[slotIndex];
+@@ -1043,6 +1107,7 @@
+             const outcome = yield* RenderTransaction.reconcile({
+               boundary: "child",
+               previous: slot.result,
++              preparation: nextPreparation,
+               nextElement: nextChild,
+               nextContext: resolvedNextContext,
+               context: renderContext,
+@@ -1060,9 +1125,20 @@
+             const nextKey = getKey(nextChild);
+             const reused =
+               nextKey !== null
+-                ? yield* tryReuse(nextChild, keyedIndices.get(nextKey))
+-                : yield* tryReuse(nextChild, index);
+-            if (!reused) nextSlots.push(yield* renderChildSlot(nextChild, resolvedNextContext));
++                ? yield* tryReuse(
++                    nextChild,
++                    keyedIndices.get(nextKey),
++                    preparation?.children[index],
++                  )
++                : yield* tryReuse(nextChild, index, preparation?.children[index]);
++            if (!reused)
++              nextSlots.push(
++                yield* renderChildSlot(
++                  nextChild,
++                  resolvedNextContext,
++                  preparation?.children[index],
++                ),
++              );
+           }
+ 
+           let beforeRef: Node = childrenAnchor;
+--- a/packages/core/src/primitives/render-keyed-list.ts
++++ c/packages/core/src/primitives/render-keyed-list.ts
+@@ -4,7 +4,12 @@
+ import * as Signal from "./signal.js";
+ import * as Trace from "../trace/index.js";
+ import { moveRange } from "./render-utils.js";
+-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
++import type {
++  ErrorBoundaryHandler,
++  RenderContext,
++  RenderPreparation,
++  RenderResult,
++} from "./renderer.js";
+ import * as RenderTransaction from "./render-transaction.js";
+ import { unsafeWidenContext } from "../internal/unsafe.js";
+ import { cleanupAll } from "./render-cleanup.js";
+@@ -883,16 +888,21 @@
+         // structure. Reconciliation itself can mutate live nodes, so retain the
+         // last committed element and restore every attempted row if a later one
+         // fails. Replacement candidates remain detached until commit.
+-        const attemptedReconciles: Array<(typeof newItemStates)[number]> = [];
++        const attemptedReconciles: Array<{
++          readonly entry: (typeof newItemStates)[number];
++          readonly preparation: RenderPreparation | undefined;
++        }> = [];
+         const rollbackAttemptedReconciles = Effect.fnUntraced(function* () {
+           let rollbackCause: Cause.Cause<unknown> | null = null;
+           for (let index = attemptedReconciles.length - 1; index >= 0; index--) {
+-            const entry = attemptedReconciles[index];
+-            if (entry === undefined || entry.state.result.reconcile === undefined) continue;
++            const attempted = attemptedReconciles[index];
++            if (attempted === undefined) continue;
++            const { entry, preparation } = attempted;
++            if (entry.state.result.reconcile === undefined) continue;
+ 
+             const rollbackExit = yield* Effect.exit(
+               entry.state.result
+-                .reconcile(entry.state.element, context)
++                .reconcile(entry.state.element, context, preparation)
+                 .pipe(Scope.provide(entry.state.scope)),
+             );
+             const cause = Exit.isFailure(rollbackExit)
+@@ -915,13 +925,15 @@
+             continue;
+           }
+ 
+-          attemptedReconciles.push(entry);
++          attemptedReconciles.push({ entry, preparation: entry.state.result.preparation });
+           const staged = entry.staged;
+           const reconcileExit = yield* Effect.exit(
+             Effect.gen(function* () {
+-              const matched = yield* reconcile(staged.element, context).pipe(
+-                Scope.provide(entry.state.scope),
+-              );
++              const matched = yield* reconcile(
++                staged.element,
++                context,
++                staged.result.preparation,
++              ).pipe(Scope.provide(entry.state.scope));
+               // A preflight is a hint, not permission to ignore a later divergence.
+               // Build under the already-owned preparation scope without rerunning user code.
+               if (!matched && staged.usesExistingDom) {

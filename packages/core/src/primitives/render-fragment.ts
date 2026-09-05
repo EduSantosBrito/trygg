@@ -1,11 +1,18 @@
 import { Effect, Predicate } from "effect";
 import * as Context from "effect/Context";
 import type { Element } from "./element.js";
-import type { ErrorBoundaryHandler, RenderContext, RenderResult } from "./renderer.js";
+import type {
+  ErrorBoundaryHandler,
+  RenderContext,
+  RenderPreparation,
+  RenderResult,
+} from "./renderer.js";
 import { resolveReconcileTarget } from "./render-utils.js";
-import { sharedRenderTransaction } from "./render-transaction.js";
+import * as RenderTransaction from "./render-transaction.js";
+import { cleanupAll, reportUnhandledRenderCause } from "./render-cleanup.js";
 
 interface RenderOptions {
+  readonly preparation?: RenderPreparation | undefined;
   readonly errorHandler: ErrorBoundaryHandler | null;
 }
 
@@ -35,18 +42,30 @@ export const renderFragment: <E, R>(
   deps: RenderFragmentDeps<E, R>,
 ) {
   const childResults: Array<RenderResult> = [];
-  const renderTransaction = sharedRenderTransaction;
+  const cleanupRenderedChildren = Effect.suspend(() =>
+    cleanupAll(childResults.map((child) => RenderTransaction.cleanup(child))),
+  );
 
-  const cleanupRenderedChildren = Effect.gen(function* () {
-    for (const child of childResults) {
-      yield* renderTransaction.cleanup(child);
-    }
-  }).pipe(Effect.catchCause(() => Effect.void));
-
-  for (const child of children) {
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index];
+    if (child === undefined) continue;
     const result = yield* deps
-      .renderElement(child, parent, renderContext, context, options)
-      .pipe(Effect.onError(() => cleanupRenderedChildren));
+      .renderElement(
+        child,
+        parent,
+        renderContext,
+        context,
+        options.preparation === undefined
+          ? options
+          : { ...options, preparation: options.preparation.children[index] },
+      )
+      .pipe(
+        Effect.onError(() =>
+          cleanupRenderedChildren.pipe(
+            Effect.catchCause((cause) => Effect.sync(() => reportUnhandledRenderCause(cause))),
+          ),
+        ),
+      );
     childResults.push(result);
   }
 
@@ -70,12 +89,18 @@ export const renderFragment: <E, R>(
 
   return {
     node: maybeFirstChild.node,
-    cleanup: Effect.gen(function* () {
-      for (const child of childResults) {
-        yield* renderTransaction.cleanup(child);
-      }
-    }),
-    reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
+    cleanup: cleanupRenderedChildren,
+    get preparation(): RenderPreparation {
+      return {
+        propertyValues: undefined,
+        children: childResults.map((child) => child.preparation),
+      };
+    },
+    reconcile: (
+      nextElement: Element,
+      nextContext: Context.Context<unknown> | null,
+      preparation?: RenderPreparation,
+    ) =>
       Effect.gen(function* () {
         const resolved = resolveReconcileTarget(nextElement, nextContext);
         const resolvedNextElement = resolved.element;
@@ -95,8 +120,9 @@ export const renderFragment: <E, R>(
             return false;
           }
 
-          const outcome = yield* renderTransaction.reconcile({
+          const outcome = yield* RenderTransaction.reconcile({
             previous: childResult,
+            preparation: preparation?.children[index],
             nextElement: nextChild,
             nextContext: resolvedNextContext,
             context: renderContext,

@@ -1,0 +1,39 @@
+--- measured-E/packages/core/src/primitives/render-keyed-list.ts
++++ queued-context-fix/packages/core/src/primitives/render-keyed-list.ts
+@@ -160,6 +160,7 @@
+   let isUnmounted = false;
+   let isUpdating = false;
+   let pendingUpdate = false;
++  let pendingUpdateContext: Context.Context<unknown> | null = null;
+   const pendingRerenderKeys = new Set<string | number>();
+ 
+   const handleUpdateCause = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
+@@ -534,6 +535,7 @@
+ 
+     if (isUpdating) {
+       pendingUpdate = true;
++      pendingUpdateContext = forkContext;
+       return;
+     }
+ 
+@@ -1346,8 +1348,10 @@
+         Effect.suspend(() => {
+           isUpdating = false;
+           if (pendingUpdate && !isUnmounted) {
++            const nextContext = pendingUpdateContext;
+             pendingUpdate = false;
+-            updateList();
++            pendingUpdateContext = null;
++            updateList(nextContext);
+             return Effect.void;
+           }
+           if (isUnmounted || pendingRerenderKeys.size === 0) return Effect.void;
+@@ -1408,6 +1412,8 @@
+     node: anchor,
+     cleanup: Effect.gen(function* () {
+       isUnmounted = true;
++      pendingUpdate = false;
++      pendingUpdateContext = null;
+ 
+       const mountedStates = currentStatesInDomOrder();
+       detachContiguousItemRange(mountedStates);

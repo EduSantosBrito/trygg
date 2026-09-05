@@ -18,12 +18,13 @@ import {
   HOISTABLE_TAGS,
   IsDocumentMount,
   isHoistable,
-  makeHeadHoist,
-  makeBrowserHead,
-  makeTestHead,
+  makeBrowser,
+  makeTest,
+  maybeHoist,
 } from "../head.js";
 import { render } from "../../testing/index.js";
 import * as Component from "../component.js";
+import { intrinsic } from "../element.js";
 import * as Signal from "../signal.js";
 
 // =============================================================================
@@ -138,18 +139,15 @@ describe("deriveKey", () => {
 });
 
 // =============================================================================
-// HeadHoist — Renderer seam
+// Head hoisting — Renderer seam
 // =============================================================================
 
-describe("HeadHoist", () => {
+describe("Head hoisting", () => {
   effect("should derive action and mount through test Head service", () =>
     Effect.gen(function* () {
-      const head = yield* makeTestHead();
-      const hoist = makeHeadHoist();
+      const head = yield* makeTest();
 
-      const action = yield* hoist
-        .maybeHoist("title", {})
-        .pipe(Effect.provideService(CurrentHead, head));
+      const action = yield* maybeHoist("title", {}).pipe(Effect.provideService(CurrentHead, head));
 
       assert.isTrue(Option.isSome(action));
       if (Option.isNone(action)) return;
@@ -172,12 +170,11 @@ describe("HeadHoist", () => {
 
   effect("should keep static hoistable tags inline", () =>
     Effect.gen(function* () {
-      const head = yield* makeTestHead();
-      const hoist = makeHeadHoist();
+      const head = yield* makeTest();
 
-      const action = yield* hoist
-        .maybeHoist("style", { mode: "static" })
-        .pipe(Effect.provideService(CurrentHead, head));
+      const action = yield* maybeHoist("style", { mode: "static" }).pipe(
+        Effect.provideService(CurrentHead, head),
+      );
 
       assert.deepStrictEqual(action, Option.none());
     }),
@@ -191,7 +188,7 @@ describe("HeadHoist", () => {
 describe("Browser Head", () => {
   effect("should mount unkeyed element to document.head", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
       const node = document.createElement("link");
       node.setAttribute("rel", "stylesheet");
       node.setAttribute("href", "/style.css");
@@ -208,7 +205,7 @@ describe("Browser Head", () => {
 
   effect("should mount keyed element (title) to document.head", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
       const node = document.createElement("title");
       node.textContent = "My Page";
 
@@ -225,7 +222,7 @@ describe("Browser Head", () => {
 
   effect("should deduplicate keyed elements — deepest wins", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       // Parent mounts title
       const parentTitle = document.createElement("title");
@@ -259,7 +256,7 @@ describe("Browser Head", () => {
 
   effect("should handle 3-level deep dedup stack", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       const t1 = document.createElement("title");
       t1.textContent = "Root";
@@ -298,7 +295,7 @@ describe("Browser Head", () => {
 
   effect("should allow multiple unkeyed elements of same tag", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       const link1 = document.createElement("link");
       link1.setAttribute("href", "/a.css");
@@ -326,7 +323,7 @@ describe("Browser Head", () => {
 
   effect("should deduplicate meta by name independently", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       // First meta[name=description]
       const m1 = document.createElement("meta");
@@ -366,7 +363,7 @@ describe("Browser Head", () => {
 
   effect("should track entries correctly", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       const title = document.createElement("title");
       title.textContent = "Test";
@@ -395,7 +392,7 @@ describe("Browser Head", () => {
 
   effect("should handle middle-of-stack removal gracefully", () =>
     Effect.gen(function* () {
-      const head = yield* makeBrowserHead();
+      const head = yield* makeBrowser();
 
       const t1 = document.createElement("title");
       t1.textContent = "First";
@@ -434,7 +431,7 @@ describe("Browser Head", () => {
 describe("Test Head", () => {
   effect("should collect entries without DOM manipulation", () =>
     Effect.gen(function* () {
-      const head = yield* makeTestHead();
+      const head = yield* makeTest();
       const node = document.createElement("title");
       node.textContent = "Test Title";
 
@@ -454,7 +451,7 @@ describe("Test Head", () => {
 
   effect("should track multiple entries", () =>
     Effect.gen(function* () {
-      const head = yield* makeTestHead();
+      const head = yield* makeTest();
 
       const title = document.createElement("title");
       const meta = document.createElement("meta");
@@ -775,6 +772,96 @@ describe("Document-Level Elements", () => {
       // lang should be reverted
       const afterLang = document.documentElement.getAttribute("lang");
       assert.strictEqual(afterLang, prevLang);
+    }),
+  );
+
+  effect("should apply the URL policy to every static document-shell URL prop", () =>
+    Effect.gen(function* () {
+      // Test: should route static document-shell URL props through the canonical URL policy.
+      // Scope: covers every URL-bearing prop exposed by the intrinsic element model and camel-case normalization.
+      // Assertion: hostile values are removed, safe values are written, and both renders restore exact prior state.
+      const target = document.documentElement;
+      const cases: ReadonlyArray<{
+        readonly prop: string;
+        readonly attribute: string;
+        readonly safe: string;
+        readonly blocked: string;
+      }> = [
+        { prop: "href", attribute: "href", safe: "/safe/href", blocked: "javascript:href" },
+        { prop: "src", attribute: "src", safe: "/safe/src", blocked: "javascript:src" },
+        { prop: "action", attribute: "action", safe: "/safe/action", blocked: "javascript:action" },
+        {
+          prop: "formAction",
+          attribute: "formaction",
+          safe: "/safe/form-action",
+          blocked: "javascript:form-action",
+        },
+        {
+          prop: "srcSet",
+          attribute: "srcset",
+          safe: "/safe/one.png 1x, /safe/two.png 2x",
+          blocked: "/safe/one.png 1x, javascript:srcset 2x",
+        },
+        {
+          prop: "ping",
+          attribute: "ping",
+          safe: "/safe/ping-one /safe/ping-two",
+          blocked: "/safe/ping-one javascript:ping",
+        },
+        { prop: "cite", attribute: "cite", safe: "/safe/cite", blocked: "javascript:cite" },
+        { prop: "data", attribute: "data", safe: "/safe/data", blocked: "javascript:data" },
+        {
+          prop: "poster",
+          attribute: "poster",
+          safe: "/safe/poster.png",
+          blocked: "javascript:poster",
+        },
+      ];
+      const previous = cases.map(({ attribute }) => ({
+        attribute,
+        value: target.getAttribute(attribute),
+      }));
+
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const { attribute, value } of previous) {
+            if (value === null) target.removeAttribute(attribute);
+            else target.setAttribute(attribute, value);
+          }
+        }),
+      );
+      for (const { attribute } of cases) {
+        target.setAttribute(attribute, `/before/${attribute}`);
+      }
+
+      const ownerScope = yield* Effect.scope;
+      const blockedScope = yield* Scope.fork(ownerScope);
+      const blockedProps = Object.fromEntries(cases.map(({ prop, blocked }) => [prop, blocked]));
+      yield* render(intrinsic("html", blockedProps, [])).pipe(
+        Effect.provideService(IsDocumentMount, true),
+        Scope.provide(blockedScope),
+      );
+      for (const { attribute } of cases) {
+        assert.isNull(target.getAttribute(attribute));
+      }
+      yield* Scope.close(blockedScope, Exit.void);
+      for (const { attribute } of cases) {
+        assert.strictEqual(target.getAttribute(attribute), `/before/${attribute}`);
+      }
+
+      const safeScope = yield* Scope.fork(ownerScope);
+      const safeProps = Object.fromEntries(cases.map(({ prop, safe }) => [prop, safe]));
+      yield* render(intrinsic("html", safeProps, [])).pipe(
+        Effect.provideService(IsDocumentMount, true),
+        Scope.provide(safeScope),
+      );
+      for (const { attribute, safe } of cases) {
+        assert.strictEqual(target.getAttribute(attribute), safe);
+      }
+      yield* Scope.close(safeScope, Exit.void);
+      for (const { attribute } of cases) {
+        assert.strictEqual(target.getAttribute(attribute), `/before/${attribute}`);
+      }
     }),
   );
 

@@ -27,8 +27,8 @@ import { render } from "../../testing/index.js";
 // Test Errors
 // =============================================================================
 
-class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {}) {}
-class NetworkError extends Schema.TaggedErrorClass<NetworkError>()("NetworkError", {}) {}
+class TestError extends Schema.TaggedError<TestError>()("TestError", {}) {}
+class NetworkError extends Schema.TaggedError<NetworkError>()("NetworkError", {}) {}
 
 const catchAllView = (content: string, testId?: string) =>
   Component.gen(function* (_Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {

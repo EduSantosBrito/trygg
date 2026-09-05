@@ -26,12 +26,9 @@ import {
 // resolving HighlightedLine from this module.
 export type { HighlightedLine };
 
-class HighlightCodeError extends Schema.TaggedErrorClass<HighlightCodeError>()(
-  "HighlightCodeError",
-  {
-    cause: Schema.Unknown,
-  },
-) {}
+class HighlightCodeError extends Schema.TaggedError<HighlightCodeError>()("HighlightCodeError", {
+  cause: Schema.Unknown,
+}) {}
 
 export interface IdentifierTooltip {
   readonly kind: string;
@@ -425,9 +422,7 @@ export const CodeBlock = Component.gen(function* (
   );
   const copyIdle = isCommand ? "Copy command to clipboard" : "Copy code to clipboard";
   const copyDone = isCommand ? "Command copied" : "Code copied";
-  const copyLabel = yield* Signal.derive(copied, (value) =>
-    value ? copyDone : copyIdle,
-  );
+  const copyLabel = yield* Signal.derive(copied, (value) => (value ? copyDone : copyIdle));
 
   const CopiedTooltip = yield* Signal.derive(copied, (value) =>
     value ? (

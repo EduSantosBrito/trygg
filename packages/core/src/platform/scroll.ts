@@ -11,7 +11,7 @@ import * as Context from "effect/Context";
 // Error type
 // =============================================================================
 
-export class ScrollError extends Schema.TaggedErrorClass<ScrollError>()("ScrollError", {
+export class ScrollError extends Schema.TaggedError<ScrollError>()("ScrollError", {
   operation: Schema.String,
   cause: Schema.Unknown,
 }) {}

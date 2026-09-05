@@ -1,0 +1,31 @@
+--- a/packages/core/src/primitives/render-keyed-list.ts
++++ b/packages/core/src/primitives/render-keyed-list.ts
+@@ -230,10 +230,7 @@
+     return { result, startMarker, endMarker };
+   });
+ 
+-  // Prepare a single item with a stable render phase. A compatible static result
+-  // lends its DOM until reconciliation; other cases build a detached candidate.
+-  // The row Effect and its scoped acquisition still execute exactly once.
+-  // `Effect.fnUntraced`
++  // Helper to render a single item with a stable render phase. `Effect.fnUntraced`
+   // (no span) — the Scope-provided inner `Effect.gen` is the only extra Effect
+   // boundary the run loop drives per row.
+   const renderItem = Effect.fnUntraced(function* (
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ b/packages/core/src/primitives/render-intrinsic.ts
+@@ -608,14 +608,6 @@
+     node: root.node,
+     cleanup: Effect.sync(() => cleanupSync()),
+     cleanupSync,
+-    canReconcile: (nextElement, nextContext) => {
+-      const resolved = resolveReconcileTarget(nextElement, nextContext);
+-      return (
+-        Predicate.isTagged(resolved.element, "Intrinsic") &&
+-        isStaticIntrinsic(resolved.element) &&
+-        hasStaticStructure(root, resolved.element)
+-      );
+-    },
+     reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
+       Effect.sync(() => {
+         const resolved = resolveReconcileTarget(nextElement, nextContext);

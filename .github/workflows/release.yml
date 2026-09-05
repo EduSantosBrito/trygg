@@ -22,11 +22,13 @@ jobs:
       contents: read
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
+      source_sha: ${{ steps.detect.outputs.source_sha }}
       trygg_version: ${{ steps.detect.outputs.trygg_version }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -48,6 +50,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -79,6 +83,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -97,11 +102,11 @@ jobs:
 
       - name: Publish trygg
         id: publish
-        run: bun ./scripts/release/cli.ts publish-package --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}" --cwd packages/core
+        run: bun ./scripts/release/cli.ts publish-package --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}" --source-sha "${{ needs.prepare.outputs.source_sha }}" --cwd packages/core
 
       - name: Push trygg tag
         if: steps.publish.outputs.published == 'true'
-        run: bun ./scripts/release/cli.ts push-tag --tag "trygg@${{ needs.prepare.outputs.trygg_version }}" --target "${{ github.sha }}" --message "trygg v${{ needs.prepare.outputs.trygg_version }}"
+        run: bun ./scripts/release/cli.ts push-tag --tag "trygg@${{ needs.prepare.outputs.trygg_version }}" --target "${{ needs.prepare.outputs.source_sha }}" --message "trygg v${{ needs.prepare.outputs.trygg_version }}"
 
       - name: Create trygg release
         if: steps.publish.outputs.published == 'true'
@@ -149,7 +154,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.ref_name }}
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -160,14 +165,14 @@ jobs:
 
       - name: Sync create-trygg release files
         id: sync
-        run: bun ./scripts/release/cli.ts sync
+        run: bun ./scripts/release/cli.ts sync --source-sha "${{ needs.prepare.outputs.source_sha }}" --trygg-version "${{ needs.prepare.outputs.trygg_version }}" --trygg-source-sha "${{ needs.prepare.outputs.source_sha }}"
 
       - name: Refresh lockfile
         run: bun install
 
       - name: Commit release sync
         id: commit
-        run: bun ./scripts/release/cli.ts commit-sync --branch "${{ github.ref_name }}" --trygg-version "${{ needs.prepare.outputs.trygg_version }}"
+        run: bun ./scripts/release/cli.ts commit-sync --branch "${{ github.ref_name }}" --source-sha "${{ needs.prepare.outputs.source_sha }}" --trygg-version "${{ needs.prepare.outputs.trygg_version }}"
 
   publish-create-trygg:
     needs:
@@ -175,7 +180,7 @@ jobs:
       - sync
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
@@ -197,15 +202,40 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify post-sync revision
+        run: test "$(git rev-parse HEAD)" = "${{ needs.sync.outputs.commit_sha }}"
+
       - name: Build
         run: bun run build
 
+      - name: Typecheck create-trygg
+        run: bun run --cwd packages/cli typecheck
+
+      - name: Typecheck templates
+        run: bun run typecheck:templates
+
+      - name: Test create-trygg
+        run: bun run --cwd packages/cli test
+
+      - name: Scaffold and build smoke
+        run: bun run --cwd packages/cli test:scaffold-smoke
+
       - name: Wait for trygg on npm
-        run: bun ./scripts/release/cli.ts wait-for-npm --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}"
+        run: bun ./scripts/release/cli.ts wait-for-npm --package trygg --package-version "${{ needs.prepare.outputs.trygg_version }}" --source-sha "${{ needs.prepare.outputs.source_sha }}"
+
+      - name: Verify create-trygg artifact revision
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ needs.sync.outputs.commit_sha }}"
+          git diff --exit-code -- packages/cli
+          test -z "$(git status --porcelain --untracked-files=all -- packages/cli)"
+
+      - name: Smoke packed create-trygg artifact
+        id: artifact
+        run: bun ./scripts/release/cli.ts smoke-create-trygg-artifact --source-sha "${{ needs.sync.outputs.commit_sha }}" --package-version "${{ needs.sync.outputs.cli_version }}" --trygg-version "${{ needs.prepare.outputs.trygg_version }}" --trygg-source-sha "${{ needs.prepare.outputs.source_sha }}" --output-directory "${RUNNER_TEMP}"
 
       - name: Publish create-trygg
         id: publish
-        run: bun ./scripts/release/cli.ts publish-package --package create-trygg --package-version "${{ needs.sync.outputs.cli_version }}" --cwd packages/cli
+        run: bun ./scripts/release/cli.ts publish-package --package create-trygg --package-version "${{ needs.sync.outputs.cli_version }}" --source-sha "${{ needs.sync.outputs.commit_sha }}" --cwd packages/cli --artifact "${{ steps.artifact.outputs.package_tarball }}"
 
       - name: Push create-trygg tag
         if: steps.publish.outputs.published == 'true'

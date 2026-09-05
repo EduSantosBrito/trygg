@@ -29,5 +29,11 @@
       }
     ]
   },
-  "include": ["templates/**/*.ts", "templates/**/*.tsx", "templates/**/*.d.ts"]
+  "include": [
+    "templates/**/*.ts",
+    "templates/**/*.tsx",
+    "templates/**/*.d.ts",
+    "src/__tests__/incident-template.test.ts",
+    "src/__tests__/incident-template-ui.test.tsx"
+  ]
 }

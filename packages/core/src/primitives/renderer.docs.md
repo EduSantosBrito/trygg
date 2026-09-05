@@ -51,7 +51,36 @@ mount(document.getElementById("root")!, <App />);
 
 `renderDocument` is the composable Effect form of `mountDocument`: it yields the `Renderer` service, so you provide `browserLayer` (and any other Layers) and manage the scope yourself.
 
+During keyed-row updates, the renderer retains values acquired by Effect
+properties. Compatible intrinsic trees can prepare those values without building
+provisional DOM. Preparation uses DOM rendering when getters or host value
+conversion require it, carrying forward values already acquired. Reconciliation
+and rollback reuse acquired values, including through fragments and context providers. A new render still
+executes each Effect property separately: sharing an Effect object between two
+properties does not merge their acquisitions. A returned Signal remains reactive,
+and a returned Effect is treated as a value without executing a second layer.
+The preparation scope continues to own acquired resources until its normal release.
+
+A keyed list captures its provided services for reuse across row renders. The
+active row Scope continues to own row acquisitions. Source-list updates use the
+triggering operation's log annotations, including inside row Effects and prepared
+properties; annotations captured by an earlier provider do not overwrite them.
+When source updates arrive during a suspended preparation, the latest pending
+update retains its own context after the preceding preparation succeeds, fails,
+or is interrupted. Closing the list discards pending updates and their contexts.
+
+Updates triggered by `Signal.get` inside a keyed row use the same preparation.
+A source-list update interrupts a suspended render of a changed or removed row
+and waits for its finalizers before publishing. Dependency changes received while
+the source update runs are coalesced against the committed row inputs. Failed or
+interrupted row preparation releases its staged resources; a failed live patch
+attempts to restore the previous values and preserves rollback and cleanup Causes.
+
+Closing a renderer mount's Scope attempts every child release and removes the mount's DOM, even when a release fails. The Scope's Exit retains release defects and interruption. Typed release errors become defects at this finalizer boundary because shutdown has no typed recovery channel. The runtime that owns the Scope is responsible for reporting its terminal failure.
+
 `Renderer` is the service tag for the active renderer implementation; `browserLayer` is its DOM-backed implementation of the `RendererService` contract. Yield `Renderer` only when you need the low-level `mount` / `render` methods directly. `RenderContext`, `RenderResult`, and the internal `CurrentRenderContext` FiberRef are renderer-internal plumbing — you touch them when writing a custom `Renderer`, not in app code.
+
+Every URL-bearing intrinsic prop crosses the same sink policy before DOM assignment, including static fast-path trees. Navigation, forms, resources, images, and media have separate scheme capabilities; `srcSet` and `ping` are written only when every candidate URL is valid. Blocked values remove the attribute and emit `safeUrl.blocked` rather than failing the render.
 
 ## Related exports
 

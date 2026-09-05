@@ -5,7 +5,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option, Result, Schema } from "effect";
 import * as Route from "../route.js";
-import { createMatcher } from "../matching.js";
+import { RouteMatcher } from "../matching.js";
 import { empty } from "../../primitives/element.js";
 import type { RouteComponent } from "../types.js";
 // Dummy component
@@ -95,8 +95,8 @@ describe(":param* (zero-or-more) matching", () => {
 
   it.effect("should match :param* with zero segments", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/docs");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/docs");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -107,8 +107,8 @@ describe(":param* (zero-or-more) matching", () => {
 
   it.effect("should match :param* with one segment", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/docs/intro");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/docs/intro");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -119,8 +119,8 @@ describe(":param* (zero-or-more) matching", () => {
 
   it.effect("should match :param* with multiple segments", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/docs/api/users");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/docs/api/users");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -131,8 +131,8 @@ describe(":param* (zero-or-more) matching", () => {
 
   it.effect("should match :param* with many segments", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/docs/a/b/c/d/e");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/docs/a/b/c/d/e");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -156,8 +156,8 @@ describe(":param+ (one-or-more) matching", () => {
 
   it.effect("should not match :param+ with zero segments", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files");
 
       assert.isTrue(Option.isNone(result));
     }),
@@ -165,8 +165,8 @@ describe(":param+ (one-or-more) matching", () => {
 
   it.effect("should match :param+ with one segment", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files/readme.txt");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files/readme.txt");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -177,8 +177,8 @@ describe(":param+ (one-or-more) matching", () => {
 
   it.effect("should match :param+ with multiple segments", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files/a/b/c");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files/a/b/c");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -189,8 +189,8 @@ describe(":param+ (one-or-more) matching", () => {
 
   it.effect("should match :param+ with deep path", () =>
     Effect.gen(function* () {
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/files/src/components/Button.tsx");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/files/src/components/Button.tsx");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -217,8 +217,8 @@ describe("Matching priority", () => {
         forbidden: undefined,
         error: undefined,
       };
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/admin");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/admin");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -235,8 +235,8 @@ describe("Matching priority", () => {
         forbidden: undefined,
         error: undefined,
       };
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/123");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/123");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -253,8 +253,8 @@ describe("Matching priority", () => {
         forbidden: undefined,
         error: undefined,
       };
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/admin");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/admin");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {
@@ -271,8 +271,8 @@ describe("Matching priority", () => {
         forbidden: undefined,
         error: undefined,
       };
-      const matcher = yield* createMatcher(manifest);
-      const result = matcher.match("/users/foo/bar");
+      const matcher = yield* RouteMatcher.make(manifest);
+      const result = yield* matcher.match("/users/foo/bar");
 
       assert.isTrue(Option.isSome(result));
       if (Option.isSome(result)) {

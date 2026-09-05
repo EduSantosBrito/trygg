@@ -219,7 +219,7 @@ describe("docs contract", () => {
         "trygg.Resource.fetch",
         "trygg.cx",
         "trygg/router.Route",
-        "trygg/router.routeMake",
+        "trygg/router.Route.make",
         "trygg/router.Router",
         "trygg/router.Link",
         "trygg/router.Outlet",
@@ -230,7 +230,7 @@ describe("docs contract", () => {
         "trygg/vite-plugin.trygg",
         "trygg.ErrorBoundary.catchAll",
         "trygg.Portal.make",
-        "trygg.Head.browserHeadLayer",
+        "trygg.Head.makeBrowser",
         "trygg.Debug.consoleLogger",
         "trygg.Metrics.snapshot",
       ]) {

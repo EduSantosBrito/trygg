@@ -1,0 +1,67 @@
+{
+  "date": "2026-09-05",
+  "kind": "projection of observed authenticated MCP response",
+  "tool": "signoz_get_trace_details",
+  "query": {
+    "traceId": "d80856f62a9d64e19fc7fcda82d8146f",
+    "startIso": "2026-09-05T13:55:00Z",
+    "endIso": "2026-09-05T14:10:00Z",
+    "timeConversion": "Date.parse in the MCP tool invocation",
+    "includeSpans": true
+  },
+  "status": "success",
+  "serviceName": "trygg-granular-profile",
+  "webUrl": "https://traces.brito.top/trace/d80856f62a9d64e19fc7fcda82d8146f",
+  "nextCursor": "",
+  "spans": [
+    {
+      "name": "trygg.keyedList.granular",
+      "spanId": "a3d4037d98d21b73",
+      "parentSpanId": "",
+      "durationNano": 700000
+    },
+    {
+      "name": "trygg.keyedList.prepare",
+      "spanId": "ee5255aacd1adb77",
+      "parentSpanId": "a3d4037d98d21b73",
+      "durationNano": 400000
+    },
+    {
+      "name": "trygg.keyedList.render",
+      "spanId": "09f12855b02bb8e9",
+      "parentSpanId": "ee5255aacd1adb77",
+      "durationNano": 400000
+    },
+    {
+      "name": "Signal.derive",
+      "spanId": "fd2494ca93fc243a",
+      "parentSpanId": "09f12855b02bb8e9",
+      "durationNano": 0
+    },
+    {
+      "name": "trygg.keyedList.properties",
+      "spanId": "0e5bb8c127027f75",
+      "parentSpanId": "ee5255aacd1adb77",
+      "durationNano": 0
+    },
+    {
+      "name": "trygg.keyedList.reconcile",
+      "spanId": "69898a81b873fded",
+      "parentSpanId": "a3d4037d98d21b73",
+      "durationNano": 100000
+    },
+    {
+      "name": "trygg.keyedList.cleanup",
+      "spanId": "53d77904f64d1c3b",
+      "parentSpanId": "a3d4037d98d21b73",
+      "durationNano": 0
+    }
+  ],
+  "scope": "Authenticated retrieval and indexing of one complete trace; not exhaustive reconciliation of all exported spans.",
+  "credentialDelivery": "Infisical run injects SIGNOZ_API_KEY into the MCP subprocess; no key is stored in the MCP JSON.",
+  "mcpStatus": {
+    "figma": "connected",
+    "plane": "connected",
+    "signoz": "connected"
+  }
+}

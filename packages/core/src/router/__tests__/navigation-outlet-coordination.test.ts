@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Option, Ref } from "effect";
-import { makeNavigationOutletCoordination } from "../navigation-outlet-coordination.js";
+import { Deferred, Effect, Ref } from "effect";
+import { NavigationOutletCoordination } from "../navigation-outlet-coordination.js";
 
 describe("NavigationOutletCoordination", () => {
-  const makeCoordination = makeNavigationOutletCoordination({ replayLatestPrefetchState: true });
+  const makeCoordination = NavigationOutletCoordination.make({ replayLatestPrefetchState: true });
 
   it.effect("keeps prefetch idle before activation", () =>
     Effect.gen(function* () {
@@ -46,23 +46,14 @@ describe("NavigationOutletCoordination", () => {
     }),
   );
 
-  it.effect("consumes scroll intent once", () =>
+  it.effect("marks the outlet ready when prefetch activates", () =>
     Effect.gen(function* () {
       const coordination = yield* makeCoordination;
-      yield* coordination.publishScrollIntent({
-        isPopstate: true,
-        hash: "#docs",
-        scrollKey: "nav-1",
-      });
-      const first = yield* coordination.takeScrollIntent;
-      const second = yield* coordination.takeScrollIntent;
+      const ready = yield* coordination.outletReady;
 
-      assert.deepStrictEqual(Option.getOrUndefined(first), {
-        isPopstate: true,
-        hash: "#docs",
-        scrollKey: "nav-1",
-      });
-      assert.isTrue(Option.isNone(second));
+      assert.isFalse(yield* Deferred.isDone(ready));
+      yield* coordination.activatePrefetch(() => Effect.void);
+      assert.isTrue(yield* Deferred.isDone(ready));
     }),
   );
 });

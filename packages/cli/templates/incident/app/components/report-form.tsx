@@ -1,9 +1,11 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import { ApiClient } from "trygg/api";
 import type { NavigationError, Router } from "trygg/router";
-import { type Severity } from "../errors/incidents";
+import { IncidentTitle, type Severity } from "../errors/incidents";
 import { incidentsResource } from "../resources/incidents";
+
+const decodeIncidentTitle = Schema.decodeUnknownEffect(IncidentTitle);
 
 const SEVERITIES: ReadonlyArray<{ value: Severity; label: string; description: string }> = [
   {
@@ -33,7 +35,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
 
   const submitDisabled = yield* Signal.deriveAll(
     [title, submitting],
-    (t, s) => t.trim() === "" || s,
+    (t, s) => t.trim() === "" || t.trim().length > 120 || s,
   );
 
   const buttonText = yield* Signal.derive(submitting, (s) => (s ? "Declaring…" : "Declare"));
@@ -41,8 +43,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
   const handleSubmit = (event: Event) =>
     Effect.gen(function* () {
       event.preventDefault();
-      const titleValue = yield* Signal.peek(title);
-      if (titleValue.trim() === "") return;
+      const titleValue = yield* decodeIncidentTitle(yield* Signal.peek(title));
 
       yield* Signal.set(submitting, true);
 
@@ -50,7 +51,7 @@ export const ReportForm = Component.gen(function* (Props: ComponentProps<ReportF
       const severityValue = yield* Signal.peek(severity);
 
       yield* client.incidents.create({
-        payload: { title: titleValue.trim(), severity: severityValue },
+        payload: { title: titleValue, severity: severityValue },
       });
 
       yield* Resource.invalidate(incidentsResource);

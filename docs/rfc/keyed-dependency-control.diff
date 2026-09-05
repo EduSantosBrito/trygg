@@ -1,0 +1,22 @@
+--- control/packages/core/src/primitives/render-keyed-list.ts
++++ candidate/packages/core/src/primitives/render-keyed-list.ts
+@@ -476,6 +476,19 @@
+     scheduleRerender: () => Effect.Effect<void>,
+   ) {
+     const oldSubs = state.subscriptions;
++    if (oldSubs.size === newAccessed.size) {
++      if (oldSubs.size === 0) return;
++      const previousIds = oldSubs.keys();
++      let unchanged = true;
++      for (const signal of newAccessed) {
++        if (previousIds.next().value !== signal._debugId) {
++          unchanged = false;
++          break;
++        }
++      }
++      // Keep both subscription identity and release order when the graph is stable.
++      if (unchanged) return;
++    }
+     const newSubs = new Map<string, Effect.Effect<void>>();
+ 
+     // Build set of new signal IDs

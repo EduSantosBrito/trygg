@@ -25,11 +25,13 @@ The `to` prop autocompletes against your declared routes, and `params` is requir
 <Router.Link to="/search" query={{ q: "effect" }} replace>Search</Router.Link>
 ```
 
+When a route has a Schema transform, `params` and `query` use its encoded URL input. For example, `Schema.DateFromString` is read as a decoded `Date` through `Router.params`, but `Link` accepts the encoded date string. The Vite plugin rejects route schemas whose encoded fields cannot round-trip through the router's string transport.
+
 When you need to navigate from inside an effect rather than from a click, call `Router.navigate` directly instead of rendering a `Link`.
 
 ## Behavior
 
-`Link` resolves the final href from `to`, `params`, and `query`, then renders an `intrinsic("a", ...)` with that href. It intercepts a plain click, calls `event.preventDefault()`, and delegates to `Router.navigate`. Clicks with a modifier key (meta, ctrl, shift) fall through to the browser so open-in-new-tab still works. Navigation failures are swallowed into a trace event rather than thrown into your render.
+`Link` resolves the final href from `to`, `params`, and `query`, then renders an `intrinsic("a", ...)` with that href. It intercepts a plain click, calls `event.preventDefault()`, and delegates to `Router.navigate`. Clicks with a modifier key (meta, ctrl, shift) fall through to the browser so open-in-new-tab still works. Expected navigation failures are handled and recorded in a trace event. Defects and interruption preserve their complete Cause for the event fiber's owner.
 
 `Link` reads the `Router` service when it renders, so it only works inside a mounted router tree — the same context an `Outlet` runs in. `mount` wires that service for you; rendering a `Link` with no router in context fails to resolve `Router`.
 

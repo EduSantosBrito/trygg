@@ -1,0 +1,154 @@
+--- a/packages/core/src/primitives/render-transaction.ts
++++ b/packages/core/src/primitives/render-transaction.ts
+@@ -16,6 +16,7 @@
+ }
+ 
+ export interface RenderTransactionReconcileRequest {
++  readonly boundary?: "operation" | "child";
+   readonly previous: RenderResult;
+   readonly nextElement: Element;
+   readonly nextContext: Context.Context<unknown> | null;
+@@ -208,8 +209,12 @@
+ ) => Effect.Effect<RenderTransactionOutcome, unknown> = Effect.fnUntraced(function* (
+   request: RenderTransactionReconcileRequest,
+ ) {
+-  yield* Trace.emit("signalElement.swap.start", () => ({ operation: "reconcile" }));
++  const operationBoundary = request.boundary !== "child";
++  if (operationBoundary)
++    yield* Trace.emit("signalElement.swap.start", () => ({ operation: "reconcile" }));
+   if (request.previous.reconcile === undefined) {
++    if (!operationBoundary)
++      yield* Trace.emit("render.child.reconcile", () => ({ reconciled: false }));
+     return RenderTransactionOutcome.NotReconciled({ result: request.previous });
+   }
+ 
+@@ -230,12 +235,16 @@
+     return RenderTransactionOutcome.FailedBeforeCommit({ cause: reconciled.cause });
+   }
+ 
+-  yield* Trace.emit("signalElement.swap.render", () => ({
+-    operation: "reconcile",
+-    reconciled: reconciled.value,
+-  }));
+-  if (reconciled.value) {
+-    yield* Trace.emit("signalElement.swap.commit", () => ({ operation: "reconcile" }));
++  if (operationBoundary) {
++    yield* Trace.emit("signalElement.swap.render", () => ({
++      operation: "reconcile",
++      reconciled: reconciled.value,
++    }));
++    if (reconciled.value)
++      yield* Trace.emit("signalElement.swap.commit", () => ({ operation: "reconcile" }));
++  } else {
++    // The enclosing renderer owns publication; children contribute one cost fact.
++    yield* Trace.emit("render.child.reconcile", () => ({ reconciled: reconciled.value }));
+   }
+   return reconciled.value
+     ? RenderTransactionOutcome.Reconciled({ result: request.previous })
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ b/packages/core/src/primitives/render-intrinsic.ts
+@@ -1011,6 +1011,7 @@
+                 return false;
+               }
+               const outcome = yield* RenderTransaction.reconcile({
++                boundary: "child",
+                 previous: childResult,
+                 nextElement: nextChild,
+                 nextContext: resolvedNextContext,
+@@ -1040,6 +1041,7 @@
+             const slot = childSlots[slotIndex];
+             if (slot === undefined || slot.result.reconcile === undefined) return false;
+             const outcome = yield* RenderTransaction.reconcile({
++              boundary: "child",
+               previous: slot.result,
+               nextElement: nextChild,
+               nextContext: resolvedNextContext,
+--- a/packages/core/src/primitives/render-keyed-list.ts
++++ b/packages/core/src/primitives/render-keyed-list.ts
+@@ -1050,9 +1050,13 @@
+               }
+             }
+ 
++            let insertedCount = 0;
++            let reconciledCount = 0;
++            let replacedCount = 0;
+             for (const entry of newItemStates) {
+               const { staged, state } = entry;
+               if (entry.isNew) {
++                insertedCount++;
+                 if (staged !== null) {
+                   staged.retainResult = true;
+                   staged.retainScope = true;
+@@ -1061,11 +1065,13 @@
+               } else if (entry.needsRerender && staged !== null) {
+                 staged.retainScope = true;
+                 if (entry.commitKind === "replaced") {
++                  replacedCount++;
+                   staged.retainResult = true;
+                   state.result = staged.result;
+                   state.startMarker = staged.startMarker;
+                   state.endMarker = staged.endMarker;
+                 }
++                if (entry.commitKind === "reconciled") reconciledCount++;
+                 state.renderPhase = staged.renderPhase;
+                 state.element = staged.element;
+               }
+@@ -1142,6 +1148,10 @@
+                 total_items: newItemStates.length,
+                 moves: moveCount,
+                 stable_nodes: newItemStates.length - moveCount,
++                inserted: insertedCount,
++                removed: removedItems.length,
++                reconciled: reconciledCount,
++                replaced: replacedCount,
+               })),
+               Trace.emit("keyedList.state", () => ({
+                 phase: "after-reorder",
+--- a/packages/core/src/trace/catalog.ts
++++ b/packages/core/src/trace/catalog.ts
+@@ -628,6 +628,12 @@
+     level: "cost",
+     summary: "A SignalElement reconciled against existing content.",
+   },
++  "render.child.reconcile": {
++    family: "render",
++    level: "cost",
++    summary:
++      "An internal child contributed its reconciliation outcome to the enclosing render operation.",
++  },
+   "signalElement.swap.start": {
+     family: "render",
+     level: "semantic",
+@@ -775,8 +781,9 @@
+   },
+   "keyedList.reorder": {
+     family: "keyedList",
+-    level: "cost",
+-    summary: "Keyed list reordered items.",
++    level: "semantic",
++    summary:
++      "A keyed list published its next order and counts of inserted, removed, reconciled, and replaced rows.",
+   },
+   "keyedList.item.add": {
+     family: "keyedList",
+--- a/packages/core/src/trace/payload.ts
++++ b/packages/core/src/trace/payload.ts
+@@ -285,6 +285,7 @@
+ 
+   "signalElement.insert": Schema.Struct({ signal_id: Schema.String }),
+   "signalElement.reconcile": Schema.Struct({ signal_id: Schema.String }),
++  "render.child.reconcile": Schema.Struct({ reconciled: Schema.Boolean }),
+   "signalElement.swap.start": Schema.Struct({
+     operation: Schema.Literals(["replace", "reconcile"]),
+     hasPrevious: OptionalBoolean,
+@@ -364,6 +365,10 @@
+     total_items: Schema.Number,
+     moves: Schema.Number,
+     stable_nodes: Schema.Number,
++    inserted: OptionalNumber,
++    removed: OptionalNumber,
++    reconciled: OptionalNumber,
++    replaced: OptionalNumber,
+   }),
+   "keyedList.item.add": Schema.Struct({ key: Key }),
+   "keyedList.item.remove": Schema.Struct({ key: Key }),

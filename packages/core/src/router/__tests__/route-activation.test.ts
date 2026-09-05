@@ -1,13 +1,18 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Cause, Data, Effect, Exit, Option, Predicate, Ref } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Fiber, Option, Predicate, Ref } from "effect";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
 import * as Trace from "../../trace/index.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { Element } from "../../primitives/element.js";
 import type { RouteMatch, RouteMatcherShape } from "../matching.js";
 import { MiddlewareResult, type RouteDefinition } from "../route.js";
 import {
-  makeRouteActivation,
-  makeRouteActivationBoundary,
+  DuplicateRouteActivationId,
+  makeNavigationActivation,
+  RouteActivation,
+  RouteActivationBoundary,
+  RouteActivationError,
   RouteActivationOutcome,
   RouteActivationRenderIntent,
 } from "../route-activation.js";
@@ -80,8 +85,10 @@ const eventNames = (
   records: ReadonlyArray<Trace.TraceRecord>,
 ): ReadonlyArray<Trace.TraceEventName> => records.map((record) => record.name);
 
-const makeBoundary = (overrides: Partial<Parameters<typeof makeRouteActivationBoundary>[1]> = {}) =>
-  makeRouteActivationBoundary(
+const makeBoundary = (
+  overrides: Partial<Parameters<typeof RouteActivationBoundary.make>[1]> = {},
+) =>
+  RouteActivationBoundary.make(
     { interruptStaleLoads: true },
     {
       matcher: makeMatcher("/docs"),
@@ -95,15 +102,101 @@ const makeBoundary = (overrides: Partial<Parameters<typeof makeRouteActivationBo
       resolveForbidden: () => Option.none(),
       runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
       isStale: () => Effect.succeed(false),
+      runWhileCurrent: (_, effect) => effect,
       ...overrides,
     },
   );
 
 describe("RouteActivation", () => {
+  it.effect("should reject malformed navigation identities before changing the current owner", () =>
+    Effect.gen(function* () {
+      // Scope: the internal Outlet protocol binds a safe version to its correlation label.
+      // Assertion: invalid versions/aliases fail in the typed channel without consuming the next version.
+      const activation = yield* makeNavigationActivation();
+      yield* activation.activate(request("navigation-0", "/initial"));
+      for (const [navigationId, activationId] of [
+        [-1, "navigation--1"],
+        [1.5, "navigation-1.5"],
+        [Number.NaN, "navigation-NaN"],
+        [1, "navigation-0"],
+      ] satisfies ReadonlyArray<readonly [number, string]>) {
+        const invalid = yield* Effect.exit(
+          activation.activate({
+            ...request(activationId, "/invalid"),
+            scrollIntent: Option.some({
+              navigationId,
+              isPopstate: false,
+              hash: "",
+              scrollKey: "key",
+            }),
+          }),
+        );
+        assert.isTrue(Exit.hasFails(invalid));
+        assert.isFalse(Exit.hasDies(invalid));
+        if (Exit.isFailure(invalid)) {
+          const error = Cause.findErrorOption(invalid.cause);
+          assert.isTrue(Option.isSome(error));
+          if (Option.isSome(error)) assert.instanceOf(error.value, RouteActivationError);
+        }
+        assert.deepStrictEqual(yield* activation.currentActivationId, Option.some("navigation-0"));
+      }
+      yield* activation.activate({
+        ...request("navigation-1", "/valid"),
+        scrollIntent: Option.some({
+          navigationId: 1,
+          isPopstate: false,
+          hash: "",
+          scrollKey: "key",
+        }),
+      });
+      assert.deepStrictEqual(yield* activation.currentActivationId, Option.some("navigation-1"));
+    }),
+  );
+
+  it.effect("should reject a skipped older navigation version without claiming it", () =>
+    Effect.gen(function* () {
+      // Scope: generated navigation IDs can skip versions when Outlet work coalesces.
+      // Assertion: a previously unseen older version cannot replace the current activation.
+      const activation = yield* makeNavigationActivation();
+      const navigationRequest = (version: number) => ({
+        ...request(`navigation-${version}`, `/page-${version}`),
+        scrollIntent: Option.some({
+          navigationId: version,
+          isPopstate: false,
+          hash: "",
+          scrollKey: `key-${version}`,
+        }),
+      });
+      yield* activation.activate(navigationRequest(10));
+      yield* activation.activate(navigationRequest(20));
+      const stale = yield* Effect.exit(activation.activate(navigationRequest(15)));
+      assert.isTrue(Exit.hasInterrupts(stale));
+      assert.deepStrictEqual(yield* activation.currentActivationId, Option.some("navigation-20"));
+      const duplicate = yield* Effect.exit(activation.activate(navigationRequest(20)));
+      assert.isTrue(Exit.isFailure(duplicate));
+      if (Exit.isFailure(duplicate)) {
+        const error = Cause.findErrorOption(duplicate.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) assert.instanceOf(error.value, DuplicateRouteActivationId);
+      }
+      let staleWork = 0;
+      const rejected = yield* Effect.exit(
+        activation.runWhileCurrent(
+          "navigation-15",
+          Effect.sync(() => {
+            staleWork++;
+          }),
+        ),
+      );
+      assert.isTrue(Exit.hasInterrupts(rejected));
+      assert.strictEqual(staleWork, 0);
+    }),
+  );
+
   it.effect("commits the latest activation", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         yield* activation.activate(request("nav-1", "/docs"));
         const outcome = yield* activation.commit({ activationId: "nav-1", path: "/docs" });
 
@@ -119,7 +212,7 @@ describe("RouteActivation", () => {
   it.effect("drops stale activations when a newer activation wins", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.activate(request("nav-2", "/fast"));
         const outcome = yield* activation.commit({ activationId: "nav-1", path: "/slow" });
@@ -132,10 +225,65 @@ describe("RouteActivation", () => {
     ),
   );
 
+  it.effect(
+    "rejects a duplicate activation ID while the original operation remains sole owner",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const activation = yield* RouteActivation.make();
+          const swapStarted = yield* Deferred.make<void>();
+          const releaseSwap = yield* Deferred.make<void>();
+          const events: Array<string> = [];
+          yield* activation.activate(request("nav-1", "/docs"));
+
+          const owner = yield* Effect.forkScoped(
+            activation.commitAfterDomSwap(
+              { activationId: "nav-1", path: "/docs" },
+              Effect.gen(function* () {
+                events.push("swap");
+                yield* Deferred.succeed(swapStarted, undefined).pipe(Effect.asVoid);
+                yield* Deferred.await(releaseSwap);
+              }),
+              Effect.sync(() => events.push("scroll")),
+            ),
+          );
+          yield* Deferred.await(swapStarted);
+
+          const duplicate = yield* Effect.exit(activation.activate(request("nav-1", "/docs")));
+          assert.isTrue(Exit.isFailure(duplicate));
+          if (Exit.isFailure(duplicate)) {
+            const error = Cause.findErrorOption(duplicate.cause);
+            assert.isTrue(Option.isSome(error));
+            if (Option.isSome(error)) assert.instanceOf(error.value, DuplicateRouteActivationId);
+          }
+
+          yield* Deferred.succeed(releaseSwap, undefined).pipe(Effect.asVoid);
+          yield* Fiber.join(owner);
+          assert.deepStrictEqual(events, ["swap", "scroll"]);
+        }),
+      ),
+  );
+
+  it.effect("keeps activation IDs single-use after their original activation completes", () =>
+    Effect.gen(function* () {
+      const activation = yield* RouteActivation.make();
+      yield* activation.activate(request("nav-1", "/docs"));
+      yield* activation.commit({ activationId: "nav-1", path: "/docs" });
+
+      const duplicate = yield* Effect.exit(activation.activate(request("nav-1", "/other")));
+      assert.isTrue(Exit.isFailure(duplicate));
+      if (Exit.isFailure(duplicate)) {
+        const error = Cause.findErrorOption(duplicate.cause);
+        assert.isTrue(Option.isSome(error));
+        if (Option.isSome(error)) assert.instanceOf(error.value, DuplicateRouteActivationId);
+      }
+    }),
+  );
+
   it.effect("returns NotFound when the canonical matcher has no match", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation(makeMatcher("/known"));
+        const activation = yield* RouteActivation.make(makeMatcher("/known"));
         const outcome = yield* activation.activate(request("nav-1", "/missing"));
 
         assert.deepStrictEqual(
@@ -149,7 +297,7 @@ describe("RouteActivation", () => {
   it.effect("controls loading fallback display for the latest activation", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.showLoadingFallback(
@@ -165,7 +313,7 @@ describe("RouteActivation", () => {
   it.effect("suppresses stale loading fallback display", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.activate(request("nav-2", "/fast"));
@@ -179,10 +327,41 @@ describe("RouteActivation", () => {
     ),
   );
 
+  it.effect("interrupts and finalizes a superseded loading fallback", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const activation = yield* RouteActivation.make();
+        const started = yield* Deferred.make<void>();
+        const blocked = yield* Deferred.make<void>();
+        const finalized = yield* Deferred.make<void>();
+        yield* activation.activate(request("nav-1", "/slow"));
+        const fiber = yield* Effect.forkScoped(
+          Effect.exit(
+            activation.showLoadingFallback(
+              { activationId: "nav-1", path: "/slow" },
+              Effect.gen(function* () {
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(blocked);
+              }).pipe(Effect.ensuring(Deferred.succeed(finalized, undefined).pipe(Effect.asVoid))),
+            ),
+          ),
+        );
+
+        yield* Deferred.await(started);
+        yield* activation.activate(request("nav-2", "/fast"));
+        const exit = yield* Fiber.join(fiber);
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause));
+        assert.isTrue(yield* Deferred.isDone(finalized));
+      }),
+    ),
+  );
+
   it.effect("runs scroll work only after the activation DOM swap", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/docs"));
         yield* activation.commitAfterDomSwap(
@@ -199,7 +378,7 @@ describe("RouteActivation", () => {
   it.effect("suppresses scroll if the activation becomes stale during DOM swap", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation();
+        const activation = yield* RouteActivation.make();
         const events: Array<string> = [];
         yield* activation.activate(request("nav-1", "/slow"));
         yield* activation.commitAfterDomSwap(
@@ -218,13 +397,95 @@ describe("RouteActivation", () => {
     ),
   );
 
+  it.effect("waits for a superseded swap to finalize before the winner swaps", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const activation = yield* RouteActivation.make();
+        const swapStarted = yield* Deferred.make<void>();
+        const blocked = yield* Deferred.make<void>();
+        const events: Array<string> = [];
+        yield* activation.activate(request("nav-1", "/slow"));
+        const staleFiber = yield* Effect.forkScoped(
+          Effect.exit(
+            activation.commitAfterDomSwap(
+              { activationId: "nav-1", path: "/slow" },
+              Effect.gen(function* () {
+                yield* Deferred.succeed(swapStarted, undefined);
+                yield* Deferred.await(blocked);
+                events.push("stale-swap");
+              }).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    events.push("stale-finalized");
+                  }),
+                ),
+              ),
+              Effect.sync(() => events.push("stale-scroll")),
+            ),
+          ),
+        );
+
+        yield* Deferred.await(swapStarted);
+        yield* activation.activate(request("nav-2", "/fast"));
+        const winnerFiber = yield* Effect.forkScoped(
+          activation.commitAfterDomSwap(
+            { activationId: "nav-2", path: "/fast" },
+            Effect.sync(() => events.push("winner-swap")),
+            Effect.sync(() => events.push("winner-scroll")),
+          ),
+        );
+        const staleExit = yield* Fiber.join(staleFiber);
+        yield* Fiber.join(winnerFiber);
+
+        assert.isTrue(Exit.isFailure(staleExit));
+        if (Exit.isFailure(staleExit)) assert.isTrue(Cause.hasInterrupts(staleExit.cause));
+        assert.deepStrictEqual(events, ["stale-finalized", "winner-swap", "winner-scroll"]);
+      }),
+    ),
+  );
+
+  it.effect("interrupts and finalizes superseded scroll work", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const activation = yield* RouteActivation.make();
+        const scrollStarted = yield* Deferred.make<void>();
+        const blocked = yield* Deferred.make<void>();
+        const finalized = yield* Deferred.make<void>();
+        const events: Array<string> = [];
+        yield* activation.activate(request("nav-1", "/slow"));
+        const fiber = yield* Effect.forkScoped(
+          Effect.exit(
+            activation.commitAfterDomSwap(
+              { activationId: "nav-1", path: "/slow" },
+              Effect.sync(() => events.push("swap")),
+              Effect.gen(function* () {
+                yield* Deferred.succeed(scrollStarted, undefined);
+                yield* Deferred.await(blocked);
+                events.push("stale-scroll");
+              }).pipe(Effect.ensuring(Deferred.succeed(finalized, undefined).pipe(Effect.asVoid))),
+            ),
+          ),
+        );
+
+        yield* Deferred.await(scrollStarted);
+        yield* activation.activate(request("nav-2", "/fast"));
+        const exit = yield* Fiber.join(fiber);
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause));
+        assert.isTrue(yield* Deferred.isDone(finalized));
+        assert.deepStrictEqual(events, ["swap"]);
+      }),
+    ),
+  );
+
   it.effect("resolves lazy loader routes to the nearest loading intent", () =>
     unsafeEraseR(
       Effect.gen(function* () {
         const loader = loaderReturning(textRouteComponent("Lazy"));
         const loading: ComponentInput = textRouteComponent("Loading");
         const match = makeMatch("/lazy", { component: loader, loading });
-        const boundary = yield* makeRouteActivationBoundary(
+        const boundary = yield* RouteActivationBoundary.make(
           { interruptStaleLoads: true },
           {
             matcher: makeMatcher("/lazy", match),
@@ -238,6 +499,7 @@ describe("RouteActivation", () => {
             resolveForbidden: () => Option.none(),
             runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
             isStale: () => Effect.succeed(false),
+            runWhileCurrent: (_, effect) => effect,
           },
         );
         const intent = yield* boundary.resolve(request("nav-1", "/lazy"), match);
@@ -255,7 +517,7 @@ describe("RouteActivation", () => {
       Effect.gen(function* () {
         const loaded = textRouteComponent("Lazy");
         const match = makeMatch("/lazy");
-        const boundary = yield* makeRouteActivationBoundary(
+        const boundary = yield* RouteActivationBoundary.make(
           { interruptStaleLoads: true },
           {
             matcher: makeMatcher("/lazy", match),
@@ -269,6 +531,7 @@ describe("RouteActivation", () => {
             resolveForbidden: () => Option.none(),
             runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
             isStale: () => Effect.succeed(false),
+            runWhileCurrent: (_, effect) => effect,
           },
         );
         const component = yield* boundary.loadComponent(
@@ -285,7 +548,7 @@ describe("RouteActivation", () => {
     unsafeEraseR(
       Effect.gen(function* () {
         const match = makeMatch("/lazy");
-        const boundary = yield* makeRouteActivationBoundary(
+        const boundary = yield* RouteActivationBoundary.make(
           { interruptStaleLoads: true },
           {
             matcher: makeMatcher("/lazy", match),
@@ -299,6 +562,7 @@ describe("RouteActivation", () => {
             resolveForbidden: () => Option.none(),
             runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
             isStale: () => Effect.succeed(false),
+            runWhileCurrent: (_, effect) => effect,
           },
         );
         const exit = yield* Effect.exit(
@@ -319,7 +583,7 @@ describe("RouteActivation", () => {
         const callsRef = yield* Ref.make<Array<string>>([]);
         const loader = loaderReturning(null);
         const match = makeMatch("/lazy");
-        const boundary = yield* makeRouteActivationBoundary(
+        const boundary = yield* RouteActivationBoundary.make(
           { interruptStaleLoads: true },
           {
             matcher: makeMatcher("/lazy", match),
@@ -336,6 +600,7 @@ describe("RouteActivation", () => {
             resolveForbidden: () => Option.none(),
             runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
             isStale: () => Effect.succeed(false),
+            runWhileCurrent: (_, effect) => effect,
           },
         );
         yield* boundary.prefetch("/lazy");
@@ -346,11 +611,11 @@ describe("RouteActivation", () => {
     ),
   );
 
-  it.effect("suppresses stale lazy load results", () =>
+  it.effect("interrupts stale lazy load results", () =>
     unsafeEraseR(
       Effect.gen(function* () {
         const match = makeMatch("/lazy");
-        const boundary = yield* makeRouteActivationBoundary(
+        const boundary = yield* RouteActivationBoundary.make(
           { interruptStaleLoads: true },
           {
             matcher: makeMatcher("/lazy", match),
@@ -364,6 +629,7 @@ describe("RouteActivation", () => {
             resolveForbidden: () => Option.none(),
             runMiddleware: () => Effect.succeed(MiddlewareResult.Continue()),
             isStale: () => Effect.succeed(true),
+            runWhileCurrent: (_, effect) => effect,
           },
         );
         const exit = yield* Effect.exit(
@@ -372,8 +638,48 @@ describe("RouteActivation", () => {
 
         assert.isTrue(Exit.isFailure(exit));
         if (Exit.isFailure(exit)) {
-          assert.include(Cause.pretty(exit.cause), "LazyRouteLoadError");
+          assert.isTrue(Cause.hasInterrupts(exit.cause));
         }
+      }),
+    ),
+  );
+
+  it.effect("interrupts and finalizes a lazy load when its activation is superseded", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const activation = yield* RouteActivation.make();
+        const loadStarted = yield* Deferred.make<void>();
+        const blocked = yield* Deferred.make<void>();
+        const finalized = yield* Deferred.make<void>();
+        yield* activation.activate(request("nav-1", "/lazy"));
+        const boundary = yield* makeBoundary({
+          loadComponent: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(loadStarted, undefined);
+              yield* Deferred.await(blocked);
+              return textRouteComponent("stale");
+            }).pipe(Effect.ensuring(Deferred.succeed(finalized, undefined).pipe(Effect.asVoid))),
+          isStale: (activationId) =>
+            Effect.map(
+              activation.currentActivationId,
+              Option.match({
+                onNone: () => true,
+                onSome: (currentId) => currentId !== activationId,
+              }),
+            ),
+          runWhileCurrent: activation.runWhileCurrent,
+        });
+        const fiber = yield* Effect.forkScoped(
+          Effect.exit(boundary.loadComponent(request("nav-1", "/lazy"), loaderReturning(null))),
+        );
+
+        yield* Deferred.await(loadStarted);
+        yield* activation.activate(request("nav-2", "/fast"));
+        const exit = yield* Fiber.join(fiber);
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause));
+        assert.isTrue(yield* Deferred.isDone(finalized));
       }),
     ),
   );
@@ -387,7 +693,7 @@ describe("RouteActivation", () => {
         const intent = yield* boundary.resolveErrorBoundary(
           request("nav-1", "/docs"),
           match,
-          "boom",
+          Cause.fail("boom"),
         );
 
         assert.isTrue(Predicate.isTagged(intent, "ErrorBoundary"));
@@ -478,7 +784,7 @@ describe("RouteActivation", () => {
         const intent = yield* boundary.resolveErrorBoundary(
           request("nav-1", "/docs"),
           match,
-          "boom",
+          Cause.fail("boom"),
         );
 
         assert.isTrue(Predicate.isTagged(intent, "NoBoundary"));
@@ -490,7 +796,7 @@ describe("RouteActivation", () => {
     unsafeEraseR(
       traceEventsFor(
         Effect.gen(function* () {
-          const activation = yield* makeRouteActivation(makeMatcher("/fast"));
+          const activation = yield* RouteActivation.make(makeMatcher("/fast"));
           yield* activation.activate(request("nav-1", "/slow")).pipe(Effect.result);
           yield* activation
             .activate(request("nav-2", "/fast"))
@@ -535,7 +841,11 @@ describe("RouteActivation", () => {
             });
             yield* boundary.resolve(request("nav-1", "/lazy"), match);
             yield* boundary.loadComponent(request("nav-1", "/lazy"), loader);
-            yield* boundary.resolveErrorBoundary(request("nav-1", "/lazy"), match, "boom");
+            yield* boundary.resolveErrorBoundary(
+              request("nav-1", "/lazy"),
+              match,
+              Cause.fail("boom"),
+            );
           }),
         );
 
@@ -563,7 +873,7 @@ describe("RouteActivation", () => {
         const events: Array<string> = [];
         const records = yield* traceEventsFor(
           Effect.gen(function* () {
-            const activation = yield* makeRouteActivation();
+            const activation = yield* RouteActivation.make();
             yield* activation.activate(request("nav-1", "/docs"));
             yield* activation.commitAfterDomSwap(
               { activationId: "nav-1", path: "/docs" },
@@ -582,11 +892,131 @@ describe("RouteActivation", () => {
           "scroll.apply",
           "outlet.process.commit",
         ]);
+        assert.deepStrictEqual(records[0]?.payload, {
+          activationId: "nav-1",
+          path: "/docs",
+          query_type: "object",
+          hasScrollIntent: false,
+        });
         assert.deepStrictEqual(records[1]?.payload, {
           activationId: "nav-1",
           path: "/docs",
-          kind: "Auto",
+          result_type: "object",
         });
+      }),
+    ),
+  );
+
+  it.effect("does not inspect query or scroll result Proxies in any Trace mode", () =>
+    unsafeEraseR(
+      Effect.gen(function* () {
+        // Scope: activation telemetry with caller-controlled query and post-swap result Proxies.
+        // Assertion: enabled, filtered, and logger-free Trace preserve zero property traps and identical business state.
+        type TraceMode = "enabled" | "filtered" | "absent";
+        const run = <A, E, R>(
+          mode: TraceMode,
+          effect: Effect.Effect<A, E, R>,
+        ): Effect.Effect<A, E, R> =>
+          mode === "enabled"
+            ? Trace.record(effect, Trace.makeRecorder())
+            : mode === "filtered"
+              ? effect.pipe(Effect.provideService(References.MinimumLogLevel, "Fatal"))
+              : effect.pipe(
+                  Effect.provide(Logger.layer([])),
+                  Effect.provideService(References.MinimumLogLevel, "Trace"),
+                );
+
+        const runCase = Effect.fnUntraced(function* (mode: TraceMode) {
+          let queryTraps = 0;
+          let queryState = "stable";
+          const query = new Proxy(new URLSearchParams("token=secret"), {
+            get: (target, key, receiver) => {
+              queryTraps++;
+              queryState = "mutated";
+              // oxlint-disable-next-line effect/no-unknown-shape-probing -- The hostile Proxy must otherwise preserve target behavior.
+              return Reflect.get(target, key, receiver);
+            },
+            getOwnPropertyDescriptor: (target, key) => {
+              queryTraps++;
+              queryState = "mutated";
+              return Reflect.getOwnPropertyDescriptor(target, key);
+            },
+            ownKeys: (target) => {
+              queryTraps++;
+              queryState = "mutated";
+              return Reflect.ownKeys(target);
+            },
+          });
+          let resultTraps = 0;
+          const resultTarget = { kind: "Auto", state: "stable" };
+          const scrollResult = new Proxy(resultTarget, {
+            get: (target, key, receiver) => {
+              resultTraps++;
+              resultTarget.state = "mutated";
+              // oxlint-disable-next-line effect/no-unknown-shape-probing -- The hostile Proxy must otherwise preserve target behavior.
+              return Reflect.get(target, key, receiver);
+            },
+            getOwnPropertyDescriptor: (target, key) => {
+              resultTraps++;
+              resultTarget.state = "mutated";
+              return Reflect.getOwnPropertyDescriptor(target, key);
+            },
+            ownKeys: (target) => {
+              resultTraps++;
+              resultTarget.state = "mutated";
+              return Reflect.ownKeys(target);
+            },
+          });
+          const activation = yield* RouteActivation.make();
+          let swapCalls = 0;
+          let afterSwapCalls = 0;
+          let outcome = "missing";
+          const operation = Effect.gen(function* () {
+            yield* activation.activate({
+              activationId: `nav-${mode}`,
+              path: "/docs",
+              query,
+              scrollIntent: Option.none(),
+            });
+            const committed = yield* activation.commitAfterDomSwap(
+              { activationId: `nav-${mode}`, path: "/docs" },
+              Effect.sync(() => {
+                swapCalls++;
+              }),
+              Effect.sync(() => {
+                afterSwapCalls++;
+                return scrollResult;
+              }),
+            );
+            outcome = committed._tag;
+          });
+          const exit = yield* run(mode, operation).pipe(Effect.exit);
+
+          return {
+            success: Exit.isSuccess(exit),
+            outcome,
+            swapCalls,
+            afterSwapCalls,
+            queryTraps,
+            queryState,
+            resultTraps,
+            resultState: resultTarget.state,
+          };
+        });
+
+        const expected = {
+          success: true,
+          outcome: "Committed",
+          swapCalls: 1,
+          afterSwapCalls: 1,
+          queryTraps: 0,
+          queryState: "stable",
+          resultTraps: 0,
+          resultState: "stable",
+        };
+        assert.deepStrictEqual(yield* runCase("enabled"), expected);
+        assert.deepStrictEqual(yield* runCase("filtered"), expected);
+        assert.deepStrictEqual(yield* runCase("absent"), expected);
       }),
     ),
   );
@@ -594,7 +1024,7 @@ describe("RouteActivation", () => {
   it.effect("integrates with the canonical matcher for matched routes", () =>
     unsafeEraseR(
       Effect.gen(function* () {
-        const activation = yield* makeRouteActivation(makeMatcher("/known"));
+        const activation = yield* RouteActivation.make(makeMatcher("/known"));
         const outcome = yield* activation.activate(request("nav-1", "/known"));
 
         assert.isTrue(Predicate.isTagged(outcome, "Committed"));

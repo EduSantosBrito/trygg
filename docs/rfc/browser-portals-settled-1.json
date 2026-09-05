@@ -1,0 +1,2105 @@
+{
+  "date": "2026-09-04T22:43:06.055Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 5,
+  "samples": 7,
+  "results": [
+    {
+      "operation": "create1k",
+      "samples": [
+        {
+          "operation": "create1k",
+          "handlerMs": 35.89999997615814,
+          "frameMs": 74,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 33.69999998807907,
+          "frameMs": 79.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 34.19999998807907,
+          "frameMs": 76.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 70.29999995231628,
+          "frameMs": 109.59999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 32.60000002384186,
+          "frameMs": 73,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 33.09999996423721,
+          "frameMs": 70.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "create1k",
+          "handlerMs": 32.10000002384186,
+          "frameMs": 69.69999998807907,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "replace1k",
+      "samples": [
+        {
+          "operation": "replace1k",
+          "handlerMs": 44.90000003576279,
+          "frameMs": 85.5,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 46.5,
+          "frameMs": 85.59999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 45.30000001192093,
+          "frameMs": 84.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 42.80000001192093,
+          "frameMs": 82.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 44.60000002384186,
+          "frameMs": 83.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 43.10000002384186,
+          "frameMs": 81.70000004768372,
+          "rows": 1000
+        },
+        {
+          "operation": "replace1k",
+          "handlerMs": 79.30000001192093,
+          "frameMs": 119.80000001192093,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 4.800000011920929,
+          "frameMs": 20.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.700000047683716,
+          "frameMs": 27.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.899999976158142,
+          "frameMs": 20,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.299999952316284,
+          "frameMs": 26.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.800000011920929,
+          "frameMs": 27.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.800000011920929,
+          "frameMs": 27.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 4.800000011920929,
+          "frameMs": 19.30000001192093,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "select",
+      "samples": [
+        {
+          "operation": "select",
+          "handlerMs": 0.30000001192092896,
+          "frameMs": 0.9000000357627869,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 6.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 1,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 13,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.2999999523162842,
+          "frameMs": 6.799999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 11.199999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "select",
+          "handlerMs": 0.19999998807907104,
+          "frameMs": 14.899999976158142,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "swap",
+      "samples": [
+        {
+          "operation": "swap",
+          "handlerMs": 1.2000000476837158,
+          "frameMs": 10.600000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.2000000476837158,
+          "frameMs": 10.600000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.199999988079071,
+          "frameMs": 16.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.2000000476837158,
+          "frameMs": 8.5,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.199999988079071,
+          "frameMs": 8.699999988079071,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.300000011920929,
+          "frameMs": 17.5,
+          "rows": 1000
+        },
+        {
+          "operation": "swap",
+          "handlerMs": 1.199999988079071,
+          "frameMs": 5.199999988079071,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 35.19999998807907,
+          "frameMs": 43.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 39.39999997615814,
+          "frameMs": 49.5,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 35.700000047683716,
+          "frameMs": 55.200000047683716,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 70.39999997615814,
+          "frameMs": 77.59999996423721,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 35,
+          "frameMs": 49.09999996423721,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 35.60000002384186,
+          "frameMs": 43.19999998807907,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 35.59999996423721,
+          "frameMs": 41.69999998807907,
+          "rows": 999
+        }
+      ]
+    },
+    {
+      "operation": "append1k",
+      "samples": [
+        {
+          "operation": "append1k",
+          "handlerMs": 31.5,
+          "frameMs": 74.60000002384186,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 68.30000001192093,
+          "frameMs": 111.69999998807907,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 31.69999998807907,
+          "frameMs": 85,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 31.30000001192093,
+          "frameMs": 76.60000002384186,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 68,
+          "frameMs": 113.5,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 30.5,
+          "frameMs": 75,
+          "rows": 2000
+        },
+        {
+          "operation": "append1k",
+          "handlerMs": 30.80000001192093,
+          "frameMs": 76.5,
+          "rows": 2000
+        }
+      ]
+    },
+    {
+      "operation": "clear",
+      "samples": [
+        {
+          "operation": "clear",
+          "handlerMs": 12.199999988079071,
+          "frameMs": 13.300000011920929,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.800000011920929,
+          "frameMs": 13,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 12.600000023841858,
+          "frameMs": 13.600000023841858,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 33.19999998807907,
+          "frameMs": 37.69999998807907,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 12,
+          "frameMs": 13.399999976158142,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 11.899999976158142,
+          "frameMs": 13,
+          "rows": 0
+        },
+        {
+          "operation": "clear",
+          "handlerMs": 12.300000011920929,
+          "frameMs": 13.5,
+          "rows": 0
+        }
+      ]
+    },
+    {
+      "operation": "create10k",
+      "samples": [
+        {
+          "operation": "create10k",
+          "handlerMs": 349.19999998807907,
+          "frameMs": 746.7999999523163,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 296.7000000476837,
+          "frameMs": 772.8000000119209,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 319.69999998807907,
+          "frameMs": 711.1000000238419,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 309,
+          "frameMs": 759.0999999642372,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 317.5,
+          "frameMs": 712.6999999880791,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 295.9000000357628,
+          "frameMs": 720.4000000357628,
+          "rows": 10000
+        },
+        {
+          "operation": "create10k",
+          "handlerMs": 389.19999998807907,
+          "frameMs": 796.6999999880791,
+          "rows": 10000
+        }
+      ]
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 66.30000001192093,
+    "firstContentfulPaintMs": 92
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3118,
+      "gzipBytes": 1485
+    },
+    {
+      "file": "chunk-50hw138j.js",
+      "loadedAtStartup": true,
+      "bytes": 71415,
+      "gzipBytes": 22405
+    },
+    {
+      "file": "chunk-fz26nt66.js",
+      "loadedAtStartup": true,
+      "bytes": 286868,
+      "gzipBytes": 81873
+    },
+    {
+      "file": "chunk-fkzrt2kw.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46539
+    },
+    {
+      "file": "chunk-wxat36j2.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 556
+    },
+    {
+      "file": "chunk-ntm0d7gc.js",
+      "loadedAtStartup": true,
+      "bytes": 61394,
+      "gzipBytes": 17748
+    },
+    {
+      "file": "chunk-6rk3qs5f.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 998
+    }
+  ],
+  "memory": {
+    "cycles": 10,
+    "rowsPerCycle": 10000,
+    "forcedGc": true,
+    "settlement": "animationFrameThenTask",
+    "independentMounts": [
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      },
+      {
+        "mounts": 10,
+        "releases": 10,
+        "events": 10,
+        "rowsPerMount": 100,
+        "portalsPerMount": 1
+      }
+    ],
+    "samples": [
+      {
+        "label": "baseline",
+        "usedSize": 8740228,
+        "totalSize": 11309056,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "mounted10k",
+        "usedSize": 77379924,
+        "totalSize": 79904768,
+        "documents": 1,
+        "nodes": 120038,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-1",
+        "usedSize": 8693348,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-2",
+        "usedSize": 8735324,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-3",
+        "usedSize": 8727336,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-4",
+        "usedSize": 8737432,
+        "totalSize": 9736192,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-5",
+        "usedSize": 8729280,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-6",
+        "usedSize": 8741568,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-7",
+        "usedSize": 8741324,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-8",
+        "usedSize": 8741364,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-9",
+        "usedSize": 8742336,
+        "totalSize": 9474048,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "cleared-10",
+        "usedSize": 8742336,
+        "totalSize": 9211904,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-baseline",
+        "usedSize": 9123780,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-1",
+        "usedSize": 9121264,
+        "totalSize": 9736192,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-2",
+        "usedSize": 9132936,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-3",
+        "usedSize": 9118776,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-4",
+        "usedSize": 9153620,
+        "totalSize": 9998336,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-5",
+        "usedSize": 9169056,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-6",
+        "usedSize": 9181700,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-7",
+        "usedSize": 9210836,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-8",
+        "usedSize": 9234024,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-9",
+        "usedSize": 9257004,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-10",
+        "usedSize": 9244424,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-11",
+        "usedSize": 9282452,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-12",
+        "usedSize": 9372956,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-13",
+        "usedSize": 9386768,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-14",
+        "usedSize": 9311840,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-15",
+        "usedSize": 9409312,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-16",
+        "usedSize": 9422840,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-17",
+        "usedSize": 9417968,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-18",
+        "usedSize": 9431812,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-19",
+        "usedSize": 9424220,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-20",
+        "usedSize": 9446148,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-21",
+        "usedSize": 9440332,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-22",
+        "usedSize": 9451688,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-23",
+        "usedSize": 9441912,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-24",
+        "usedSize": 9441996,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-25",
+        "usedSize": 9477132,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-26",
+        "usedSize": 9472204,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-27",
+        "usedSize": 9482940,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-28",
+        "usedSize": 9474576,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-29",
+        "usedSize": 9469472,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-30",
+        "usedSize": 9463864,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-31",
+        "usedSize": 9480220,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-32",
+        "usedSize": 9509840,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-33",
+        "usedSize": 9508380,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-34",
+        "usedSize": 9509972,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-35",
+        "usedSize": 9516328,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-36",
+        "usedSize": 9538912,
+        "totalSize": 10784768,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-37",
+        "usedSize": 9559828,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-38",
+        "usedSize": 9559912,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-39",
+        "usedSize": 9561836,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-40",
+        "usedSize": 9563832,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-41",
+        "usedSize": 9623572,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-42",
+        "usedSize": 9623740,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-43",
+        "usedSize": 9630636,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-44",
+        "usedSize": 9630636,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-45",
+        "usedSize": 9629212,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-46",
+        "usedSize": 9638184,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-47",
+        "usedSize": 9638208,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-48",
+        "usedSize": 9638244,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-49",
+        "usedSize": 9638244,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-50",
+        "usedSize": 9638244,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-51",
+        "usedSize": 9675856,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-52",
+        "usedSize": 9677496,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-53",
+        "usedSize": 9677496,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-54",
+        "usedSize": 9677496,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-55",
+        "usedSize": 9677532,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-56",
+        "usedSize": 9544340,
+        "totalSize": 10260480,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-57",
+        "usedSize": 9682356,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-58",
+        "usedSize": 9693760,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-59",
+        "usedSize": 9683888,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-60",
+        "usedSize": 9693760,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-61",
+        "usedSize": 9683936,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-62",
+        "usedSize": 9699708,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-63",
+        "usedSize": 9688252,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-64",
+        "usedSize": 9699572,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-65",
+        "usedSize": 9689712,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-66",
+        "usedSize": 9699572,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-67",
+        "usedSize": 9689712,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-68",
+        "usedSize": 9699572,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-69",
+        "usedSize": 9688252,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-70",
+        "usedSize": 9699656,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-71",
+        "usedSize": 9689944,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-72",
+        "usedSize": 9685116,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-73",
+        "usedSize": 9684608,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-74",
+        "usedSize": 9684608,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-75",
+        "usedSize": 9684648,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-76",
+        "usedSize": 9686144,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-77",
+        "usedSize": 9686144,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-78",
+        "usedSize": 9686144,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-79",
+        "usedSize": 9686164,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-80",
+        "usedSize": 9691172,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-81",
+        "usedSize": 9688680,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-82",
+        "usedSize": 9690140,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-83",
+        "usedSize": 9690140,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-84",
+        "usedSize": 9690140,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-85",
+        "usedSize": 9690140,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-86",
+        "usedSize": 9690140,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-87",
+        "usedSize": 9688752,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-88",
+        "usedSize": 9690200,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-89",
+        "usedSize": 9690212,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-90",
+        "usedSize": 9690212,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-91",
+        "usedSize": 9690236,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-92",
+        "usedSize": 9690308,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-93",
+        "usedSize": 9688848,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-94",
+        "usedSize": 9690344,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-95",
+        "usedSize": 9690344,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-96",
+        "usedSize": 9690044,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-97",
+        "usedSize": 9690044,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-98",
+        "usedSize": 9690044,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-99",
+        "usedSize": 9690936,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "independent-closed-100",
+        "usedSize": 9692396,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 37,
+        "jsEventListeners": 37
+      },
+      {
+        "label": "pagehide",
+        "usedSize": 9166420,
+        "totalSize": 10522624,
+        "documents": 1,
+        "nodes": 29,
+        "jsEventListeners": 36
+      }
+    ]
+  }
+}

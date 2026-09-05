@@ -4,12 +4,12 @@
 // boundary component storage, and nearest-wins resolution.
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Effect, Predicate, Ref, Result, Schema } from "effect";
+import { Cause, Effect, Exit, Predicate, Ref, Result, Schema } from "effect";
 import { empty } from "../../primitives/element.js";
 import * as Route from "../route.js";
 import type { RouteComponent } from "../types.js";
 
-class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {
+class TestError extends Schema.TaggedError<TestError>()("TestError", {
   message: Schema.String,
 }) {}
 
@@ -164,7 +164,34 @@ describe("runMiddlewareChain", () => {
 
       const result = yield* Route.runMiddlewareChain([m1, m2]);
 
-      assert.strictEqual(result._tag, "Error");
+      assert.isTrue(Predicate.isTagged(result, "Error"));
+      if (Predicate.isTagged(result, "Error")) {
+        assert.isTrue(Cause.hasFails(result.cause));
+        assert.isFalse(Cause.hasDies(result.cause));
+        assert.isFalse(Cause.hasInterrupts(result.cause));
+      }
+    }),
+  );
+
+  scoped("should preserve middleware defects for the route error boundary", () =>
+    Effect.gen(function* () {
+      // oxlint-disable-next-line effect/no-effect-escape-hatch -- Deliberately supplies the middleware Die branch of the Cause matrix.
+      const result = yield* Route.runMiddlewareChain([Effect.die("middleware defect")]);
+
+      assert.isTrue(Predicate.isTagged(result, "Error"));
+      if (Predicate.isTagged(result, "Error")) {
+        assert.isTrue(Cause.hasDies(result.cause));
+        assert.isFalse(Cause.hasInterrupts(result.cause));
+      }
+    }),
+  );
+
+  scoped("should re-emit middleware interruption instead of rendering an error", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(Route.runMiddlewareChain([Effect.interrupt]));
+
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause));
     }),
   );
 

@@ -1,0 +1,65 @@
+{
+  "recordedAt": "2026-09-05T03:50:07.602355+00:00",
+  "bun": "1.4.0",
+  "platform": "Linux",
+  "architecture": "x86_64",
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900KF",
+  "notes": [
+    "Renderer source, core build, and browser fixture remained unchanged during these runs.",
+    "The CPU profile was captured before adding the optional diagnostic branch to benchmark-browser.ts. Its exact old runner hash was not captured. The runner hash below describes the work-count runs.",
+    "BENCHMARK_WORK=1 runs a separate native-method forwarding probe after each case timing sample set. Counts exclude DocumentFragments, implicit engine allocations, and other native APIs.",
+    "CPU profiling used a 100 microsecond sampling interval and non-minified identifiers. It includes handler and subsequent frame time; profile timings are not a speedup comparison."
+  ],
+  "files": [
+    {
+      "file": "scripts/benchmark-browser.ts",
+      "sha256": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30"
+    },
+    {
+      "file": "scripts/benchmarks/browser.ts",
+      "sha256": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+    },
+    {
+      "file": "packages/core/src/primitives/render-keyed-list.ts",
+      "sha256": "f040433ddcd893fec9783d7662ec53a86a41b1947bab8457bce0cf543ab4f7cc"
+    },
+    {
+      "file": "packages/core/src/primitives/render-intrinsic.ts",
+      "sha256": "6e684dc0db725de5ef0d5e197071057b34bc181af3aea0392185963880adf97a"
+    },
+    {
+      "file": "packages/core/src/primitives/renderer.ts",
+      "sha256": "c8603fee1f3accf4a019e2c63b8b4fa234978aa96f43cac427130defca374036"
+    },
+    {
+      "file": "packages/core/src/primitives/signal.ts",
+      "sha256": "4cb2c94316266d4ee29b18b7d14dbf7817c4fee96f2ef987332a85fd55936669"
+    },
+    {
+      "file": "packages/core/dist/index.js",
+      "sha256": "29fd39af6f61ec39644ec674c40c121ba1bd3cc6d0daede74c95e2d8c5bf6199"
+    },
+    {
+      "file": "bun.lock",
+      "sha256": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "docs/rfc/browser-remove-baseline.cpuprofile",
+      "sha256": "3c8169d85fffa6b659067df66033d4dca80e0c86dfafedb2aa0abfec2a912d9a"
+    },
+    {
+      "file": "docs/rfc/browser-remove-profile-baseline.json",
+      "sha256": "c9d5e212c6ac30de3e58e680422e703c771192805d02180d9ac8f54954b70e55"
+    },
+    {
+      "file": "docs/rfc/browser-remove-work-baseline.json",
+      "sha256": "cef1587fd1f43279ec6dadcdd188d664a32f6d87ad83c31a55beec501536a5a5"
+    },
+    {
+      "file": "docs/rfc/browser-work-baseline.json",
+      "sha256": "a3f20040cf160b92a88efe403a47efc811f0626b418b550fda7bfe462d591c57"
+    }
+  ]
+}

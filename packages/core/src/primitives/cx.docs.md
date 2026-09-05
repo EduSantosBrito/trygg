@@ -10,10 +10,7 @@ const Card = Component.gen(function* () {
   const activeClass = yield* Signal.derive(isActive, (on) => (on ? "active" : false));
 
   return (
-    <div
-      className={cx("card", activeClass)}
-      onClick={() => Signal.update(isActive, (on) => !on)}
-    >
+    <div className={cx("card", activeClass)} onClick={() => Signal.update(isActive, (on) => !on)}>
       Toggle
     </div>
   );

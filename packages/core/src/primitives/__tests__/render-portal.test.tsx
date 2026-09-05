@@ -1,8 +1,13 @@
 import { assert, describe } from "@effect/vitest";
-import { Effect, Exit, Scope } from "effect";
+import { Effect, Exit, Scope, Schema } from "effect";
 import { scoped } from "../../testing/effect-vitest.js";
 import { render } from "../../testing/index.js";
+import * as Component from "../component.js";
 import { Element } from "../element.js";
+
+class PortalChildError extends Schema.TaggedError<PortalChildError>()("PortalChildError", {
+  message: Schema.String,
+}) {}
 
 describe("render-portal", () => {
   scoped("renders children into target", () =>
@@ -37,6 +42,45 @@ describe("render-portal", () => {
       yield* Scope.close(scope, Exit.void);
       assert.isNull(document.querySelector("#portal-cleanup"));
       target.remove();
+    }),
+  );
+
+  scoped("should rollback staged children when a later portal child fails", () =>
+    Effect.gen(function* () {
+      // Scope: covers progressive portal construction before ownership is returned.
+      // Assertion: target DOM is unchanged and every acquired child resource is finalized.
+      const target = document.createElement("div");
+      target.innerHTML = '<span data-testid="existing">existing</span>';
+      document.body.appendChild(target);
+      yield* Effect.addFinalizer(() => Effect.sync(() => target.remove()));
+      let finalized = 0;
+
+      const Acquired = Component.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            finalized++;
+          }),
+        );
+        return <span data-testid="portal-acquired">new</span>;
+      });
+      const Failing = Component.gen(function* () {
+        return yield* new PortalChildError({ message: "second child failed" });
+      });
+
+      const before = target.innerHTML;
+      const exit = yield* Effect.exit(
+        render(
+          Element.Portal({
+            target,
+            children: [<Acquired />, <Failing />],
+          }),
+        ),
+      );
+
+      assert.isTrue(Exit.isFailure(exit));
+      assert.strictEqual(target.innerHTML, before);
+      assert.strictEqual(finalized, 1);
+      assert.isNull(target.querySelector('[data-testid="portal-acquired"]'));
     }),
   );
 });

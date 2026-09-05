@@ -5,7 +5,19 @@
  * Testable services used internally by the Outlet. Each has a service key
  * with Layer factories for production and testing.
  */
-import { Cause, Data, Effect, Exit, Fiber, Layer, Option, Ref, Schema, Scope } from "effect";
+import {
+  Cause,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+} from "effect";
 import * as Context from "effect/Context";
 import {
   Element,
@@ -22,9 +34,9 @@ import type { RoutesManifest } from "./routes.js";
 import {
   InvalidRouteComponent,
   type ComponentInput,
+  type DecodedRouteParamsByPattern,
   type RouteComponent,
   type RouteErrorInfo,
-  type RouteParams,
 } from "./types.js";
 import type { ResolvedRoute } from "./matching.js";
 
@@ -44,6 +56,8 @@ export interface RouteRenderIdentity {
   readonly path: string;
   readonly key: string;
   readonly currentKey: Effect.Effect<string>;
+  readonly patterns: ReadonlyArray<string>;
+  readonly paramsByPattern: DecodedRouteParamsByPattern;
 }
 
 export const routeRenderKey = (path: string, query: URLSearchParams): string => {
@@ -55,29 +69,22 @@ export const routeRenderIdentity = (
   path: string,
   query: URLSearchParams,
   currentKey: Effect.Effect<string>,
-): RouteRenderIdentity => ({ path, key: routeRenderKey(path, query), currentKey });
+  patterns: ReadonlyArray<string> = [],
+  paramsByPattern: DecodedRouteParamsByPattern = new Map(),
+): RouteRenderIdentity => ({
+  path,
+  key: routeRenderKey(path, query),
+  currentKey,
+  patterns,
+  paramsByPattern,
+});
 
-class StaleRouteRender extends Schema.TaggedErrorClass<StaleRouteRender>()("StaleRouteRender", {
+class StaleRouteRender extends Schema.TaggedError<StaleRouteRender>()("StaleRouteRender", {
   expectedPath: Schema.String,
 }) {}
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
-
-/**
- * Extract only string-valued entries from a decoded params object.
- * Route params are always strings (URL path segments).
- * @internal
- */
-export const toRouteParams = (decoded: Record<string, unknown>): RouteParams => {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(decoded)) {
-    if (value !== null && value !== undefined) {
-      result[key] = String(value);
-    }
-  }
-  return result;
-};
 
 /**
  * Type guard to check if a RouteComponent is an Effect<Element>.
@@ -176,14 +183,18 @@ const wrapElementWithFiberRefs = (
     case "SignalElement":
       return Element.fromEffect(
         Effect.gen(function* () {
+          const originalOnSwap = element.onSwap;
+          const originalValues = new WeakMap<ElementType, unknown>();
           const wrapSignalValue = (value: unknown) => {
             const child = isElement(value)
               ? wrapElementWithFiberRefs(value, wrapRun, wrapperInputs, shouldDropSignalUpdate)
               : Element.Text({ content: String(value) });
-            return Element.fromEffect(wrapRun(Effect.succeed(child)).pipe(unsafeEraseR), {
+            const wrapped = Element.fromEffect(wrapRun(Effect.succeed(child)).pipe(unsafeEraseR), {
               identity: element.signal,
               inputs: { value, wrapper: wrapperInputs },
             });
+            originalValues.set(wrapped, value);
+            return wrapped;
           };
           const initial = yield* Signal.peek(element.signal);
           const wrappedSignal = yield* Signal.make<ElementType>(wrapSignalValue(initial));
@@ -198,7 +209,14 @@ const wrapElementWithFiberRefs = (
             }),
           );
           yield* Effect.addFinalizer(() => unsubscribe);
-          return Element.SignalElement({ signal: wrappedSignal, onSwap: element.onSwap });
+          const onSwap =
+            originalOnSwap === undefined
+              ? undefined
+              : (committed: unknown) =>
+                  isElement(committed) && originalValues.has(committed)
+                    ? originalOnSwap(originalValues.get(committed))
+                    : Effect.void;
+          return Element.SignalElement({ signal: wrappedSignal, onSwap });
         }).pipe(unsafeEraseR),
         {
           identity: element.signal,
@@ -287,67 +305,7 @@ const wrapElementWithFiberRefs = (
 };
 
 // =============================================================================
-// OutletRenderer Service
-// =============================================================================
-
-/** @since 1.0.0 */
-export interface OutletRendererShape {
-  readonly renderComponent: (
-    component: RouteComponent,
-    params: Record<string, unknown>,
-    query?: Record<string, unknown>,
-    routeIdentity?: RouteRenderIdentity,
-  ) => Effect.Effect<ElementType, unknown, never>;
-  readonly renderLayout: (
-    layout: RouteComponent,
-    child: ElementType,
-    params: Record<string, unknown>,
-    query?: Record<string, unknown>,
-    routeIdentity?: RouteRenderIdentity,
-  ) => Effect.Effect<ElementType, unknown, never>;
-  readonly renderError: (
-    errorComp: RouteComponent,
-    cause: Cause.Cause<unknown>,
-    path: string,
-  ) => Effect.Effect<ElementType, InvalidRouteComponent | Signal.SignalScopeError, never>;
-}
-
-/**
- * OutletRenderer — component rendering with params/query injection.
- * @since 1.0.0
- */
-export class OutletRenderer extends Context.Service<
-  OutletRenderer,
-  {
-    readonly renderComponent: (
-      component: RouteComponent,
-      params: Record<string, unknown>,
-      query?: Record<string, unknown>,
-      routeIdentity?: RouteRenderIdentity,
-    ) => Effect.Effect<ElementType, unknown, never>;
-    readonly renderLayout: (
-      layout: RouteComponent,
-      child: ElementType,
-      params: Record<string, unknown>,
-      query?: Record<string, unknown>,
-      routeIdentity?: RouteRenderIdentity,
-    ) => Effect.Effect<ElementType, unknown, never>;
-    readonly renderError: (
-      errorComp: RouteComponent,
-      cause: Cause.Cause<unknown>,
-      path: string,
-    ) => Effect.Effect<ElementType, InvalidRouteComponent | Signal.SignalScopeError, never>;
-  }
->()("trygg/OutletRenderer") {
-  static readonly Live: Layer.Layer<OutletRenderer> = Layer.succeed(OutletRenderer, {
-    renderComponent: renderComponent,
-    renderLayout: renderLayout,
-    renderError: renderError,
-  });
-}
-
-// =============================================================================
-// BoundaryResolver Service
+// Boundary resolution
 // =============================================================================
 
 /** @since 1.0.0 */
@@ -364,32 +322,19 @@ export interface BoundaryResolverShape {
  * BoundaryResolver — nearest-wins boundary resolution.
  * @since 1.0.0
  */
-export class BoundaryResolver extends Context.Service<
-  BoundaryResolver,
-  {
-    readonly resolveError: (route: ResolvedRoute) => Option.Option<ComponentInput>;
-    readonly resolveErrorRoot: () => Option.Option<ComponentInput>;
-    readonly resolveLoading: (route: ResolvedRoute) => Option.Option<ComponentInput>;
-    readonly resolveNotFound: (route: ResolvedRoute) => Option.Option<ComponentInput>;
-    readonly resolveNotFoundRoot: () => Option.Option<ComponentInput>;
-    readonly resolveForbidden: (route: ResolvedRoute) => Option.Option<ComponentInput>;
-  }
->()("trygg/BoundaryResolver") {
-  static readonly make = (manifest: RoutesManifest): BoundaryResolverShape => ({
+export const BoundaryResolver = {
+  make: (manifest: RoutesManifest): BoundaryResolverShape => ({
     resolveError: (route) => resolveErrorBoundary(route, manifest.error),
     resolveErrorRoot: () => fromNullable(manifest.error),
     resolveLoading: (route) => resolveLoadingBoundary(route),
     resolveNotFound: (route) => resolveNotFoundBoundary(route, manifest.notFound),
     resolveNotFoundRoot: () => fromNullable(manifest.notFound),
     resolveForbidden: (route) => resolveForbiddenBoundary(route, manifest.forbidden),
-  });
-
-  static readonly layer = (manifest: RoutesManifest): Layer.Layer<BoundaryResolver> =>
-    Layer.succeed(BoundaryResolver, BoundaryResolver.make(manifest));
-}
+  }),
+};
 
 // =============================================================================
-// AsyncLoader Service
+// Async loading
 // =============================================================================
 
 /**
@@ -408,7 +353,10 @@ export const AsyncLoadState = Data.taggedEnum<AsyncLoadState>();
 export interface AsyncLoaderShape {
   /** Signal reflecting loading/refreshing/ready state. */
   readonly state: Signal.Signal<AsyncLoadState>;
-  /** Track a load effect with dedup by match key. Returns immediately; updates view signal. */
+  /**
+   * Track a load effect with dedup by match key. A replacement starts only
+   * after the previous load has fully finalized; the load result remains async.
+   */
   readonly track: (
     matchKey: string,
     loadEffect: Effect.Effect<Element, unknown, never>,
@@ -426,20 +374,9 @@ export interface AsyncLoaderShape {
  *
  * @since 1.0.0
  */
-export class AsyncLoader extends Context.Service<
-  AsyncLoader,
-  {
-    readonly state: Signal.Signal<AsyncLoadState>;
-    readonly track: (
-      matchKey: string,
-      loadEffect: Effect.Effect<Element, unknown, never>,
-      trace?: { readonly epoch?: number },
-    ) => Effect.Effect<void>;
-    readonly view: Signal.Signal<Element>;
-  }
->()("trygg/AsyncLoader") {
+export const AsyncLoader = {
   /** Create a live AsyncLoader. Must be called within a Scope. */
-  static readonly make = (
+  make: (
     loadingElement: Element,
     scope: Scope.Scope,
   ): Effect.Effect<AsyncLoaderShape, Signal.SignalScopeError> =>
@@ -460,49 +397,88 @@ export class AsyncLoader extends Context.Service<
       const currentFiberRef = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
         Option.none(),
       );
-      const matchKeyRef = yield* Ref.make<Option.Option<string>>(Option.none());
+      interface LoaderControl {
+        readonly matchKey: Option.Option<string>;
+        readonly generation: number;
+        readonly closed: boolean;
+      }
+      type TrackAdmission =
+        | { readonly kind: "closed" }
+        | { readonly kind: "dedup" }
+        | {
+            readonly kind: "admitted";
+            readonly generation: number;
+            readonly previousMatchKey: Option.Option<string>;
+          };
+      const controlRef = yield* Ref.make<LoaderControl>({
+        matchKey: Option.none(),
+        generation: 0,
+        closed: false,
+      });
+      const transitionLock = Semaphore.makeUnsafe(1);
+
+      yield* Scope.addFinalizer(
+        scope,
+        Effect.gen(function* () {
+          yield* Ref.update(controlRef, (control) => ({
+            ...control,
+            generation: control.generation + 1,
+            closed: true,
+          }));
+          const current = yield* Ref.getAndSet(
+            currentFiberRef,
+            Option.none<Fiber.Fiber<void, never>>(),
+          );
+          if (Option.isSome(current)) {
+            yield* Fiber.interrupt(current.value);
+          }
+        }),
+      );
 
       const track = Effect.fnUntraced(function* (
         matchKey: string,
         loadEffect: Effect.Effect<Element, unknown, never>,
         trace?: { readonly epoch?: number },
       ) {
-        // Dedup: skip if matchKey unchanged
-        const currentKey = yield* Ref.get(matchKeyRef);
-        if (Option.isSome(currentKey) && currentKey.value === matchKey) {
+        const admission = yield* Ref.modify(
+          controlRef,
+          (control): [TrackAdmission, LoaderControl] => {
+            if (control.closed) return [{ kind: "closed" }, control];
+            if (Option.isSome(control.matchKey) && control.matchKey.value === matchKey) {
+              return [{ kind: "dedup" }, control];
+            }
+            const generation = control.generation + 1;
+            return [
+              {
+                kind: "admitted",
+                generation,
+                previousMatchKey: control.matchKey,
+              },
+              { matchKey: Option.some(matchKey), generation, closed: false },
+            ];
+          },
+        );
+
+        if (admission.kind === "closed") return;
+        if (admission.kind === "dedup") {
           yield* Trace.emit("asyncLoader.dedup", () => ({ matchKey, epoch: trace?.epoch }));
           return;
         }
+
         yield* Trace.emit("asyncLoader.track", () => ({
           matchKey,
-          previousMatchKey: Option.getOrUndefined(currentKey),
+          previousMatchKey: Option.getOrUndefined(admission.previousMatchKey),
           epoch: trace?.epoch,
         }));
-        yield* Ref.set(matchKeyRef, Option.some(matchKey));
 
-        // Interrupt previous load fiber
-        const prevFiber = yield* Ref.get(currentFiberRef);
-        yield* Option.match(prevFiber, {
-          onNone: () => Effect.void,
-          onSome: (fiber) =>
-            Effect.gen(function* () {
-              yield* Trace.emit("asyncLoader.interrupt", () => ({
-                fromMatchKey: Option.getOrUndefined(currentKey),
-                toMatchKey: matchKey,
-                epoch: trace?.epoch,
-              }));
-              yield* Effect.sync(() => {
-                fiber.interruptUnsafe();
-              });
-              yield* Trace.emit("effect.fiber.interrupt", () => ({
-                owner: "router.asyncLoader",
-                reason: "new-match",
-              }));
-              yield* Ref.set(currentFiberRef, Option.none());
-            }),
-        });
-
-        // Set loading/refreshing state
+        // Publish loading state at admission so Outlet never mistakes the old
+        // Ready value for this request while its predecessor is finalizing.
+        const latest = yield* Ref.get(controlRef);
+        if (latest.closed || latest.generation !== admission.generation) return;
+        const callerId = yield* Effect.fiberId;
+        const currentBeforeTransition = yield* Ref.get(currentFiberRef);
+        const reentrantCurrentFiber =
+          Option.isSome(currentBeforeTransition) && currentBeforeTransition.value.id === callerId;
         const lastEl = yield* Ref.get(lastElementRef);
         yield* Option.match(lastEl, {
           onNone: () =>
@@ -519,47 +495,91 @@ export class AsyncLoader extends Context.Service<
             ),
         });
 
-        // Fork the load effect
-        yield* Trace.emit("effect.fork.scoped", () => ({
-          owner: "router.asyncLoader",
-          scopeKind: "outlet",
-        }));
-        const fiber = yield* Effect.forkIn(
+        const transition = transitionLock.withPermits(1)(
           Effect.gen(function* () {
-            const exit = yield* Effect.exit(loadEffect);
-            const activeKey = yield* Ref.get(matchKeyRef);
-            if (Option.isNone(activeKey) || activeKey.value !== matchKey) {
-              yield* Trace.emit("asyncLoader.dropStale", () => ({
-                matchKey,
-                activeMatchKey: Option.getOrUndefined(activeKey),
-                epoch: trace?.epoch,
-              }));
+            const beforeInterrupt = yield* Ref.get(controlRef);
+            if (beforeInterrupt.closed || beforeInterrupt.generation !== admission.generation) {
               return;
             }
-            if (Exit.isSuccess(exit)) {
-              yield* Ref.set(lastElementRef, Option.some(exit.value));
-              yield* Trace.emit("asyncLoader.ready", () => ({ matchKey, epoch: trace?.epoch }));
-              yield* Signal.set(state, AsyncLoadState.Ready({ element: exit.value }));
-            } else {
-              yield* Trace.emit("asyncLoader.error", () => ({
-                matchKey,
-                epoch: trace?.epoch,
-                cause: Cause.pretty(exit.cause),
-              }));
-              yield* Signal.set(state, AsyncLoadState.Loading());
-            }
-          }),
-          scope,
-        );
 
-        yield* Ref.set(currentFiberRef, Option.some(fiber));
+            const prevFiber = yield* Ref.get(currentFiberRef);
+            if (Option.isSome(prevFiber)) {
+              yield* Trace.emit("asyncLoader.interrupt", () => ({
+                fromMatchKey: Option.getOrUndefined(admission.previousMatchKey),
+                toMatchKey: matchKey,
+                epoch: trace?.epoch,
+              }));
+              yield* Fiber.interrupt(prevFiber.value);
+              yield* Trace.emit("effect.fiber.interrupt", () => ({
+                owner: "router.asyncLoader",
+                reason: "new-match",
+              }));
+              yield* Ref.set(currentFiberRef, Option.none());
+            }
+
+            const afterInterrupt = yield* Ref.get(controlRef);
+            if (afterInterrupt.closed || afterInterrupt.generation !== admission.generation) {
+              return;
+            }
+
+            yield* Trace.emit("effect.fork.scoped", () => ({
+              owner: "router.asyncLoader",
+              scopeKind: "outlet",
+            }));
+            const start = yield* Deferred.make<void>();
+            const fiber = yield* Effect.forkIn(
+              Effect.gen(function* () {
+                yield* Deferred.await(start);
+                const exit = yield* Effect.exit(loadEffect);
+                const active = yield* Ref.get(controlRef);
+                if (active.closed || active.generation !== admission.generation) {
+                  yield* Trace.emit("asyncLoader.dropStale", () => ({
+                    matchKey,
+                    activeMatchKey: Option.getOrUndefined(active.matchKey),
+                    epoch: trace?.epoch,
+                  }));
+                  return;
+                }
+                if (Exit.isSuccess(exit)) {
+                  yield* Ref.set(lastElementRef, Option.some(exit.value));
+                  yield* Trace.emit("asyncLoader.ready", () => ({
+                    matchKey,
+                    epoch: trace?.epoch,
+                  }));
+                  yield* Signal.set(state, AsyncLoadState.Ready({ element: exit.value }));
+                } else {
+                  yield* Trace.emit("asyncLoader.error", () => ({
+                    matchKey,
+                    epoch: trace?.epoch,
+                    cause_type: Trace.causeValueType(exit.cause),
+                  }));
+                  yield* Signal.set(state, AsyncLoadState.Loading());
+                }
+              }),
+              scope,
+              { startImmediately: true },
+            );
+
+            yield* Ref.set(currentFiberRef, Option.some(fiber));
+            // The start gate installs ownership before a synchronously
+            // reentrant load can call track again.
+            yield* Deferred.succeed(start, undefined).pipe(Effect.asVoid);
+          }),
+        );
+        const transitionFiber = yield* Effect.forkIn(transition, scope);
+        // A load finalizer may trigger another track call. Let that reentrant
+        // call return so the current load can finish; its transition remains
+        // scope-owned and will run after this one releases the serialization gate.
+        if (!reentrantCurrentFiber) {
+          yield* Fiber.join(transitionFiber);
+        }
       });
 
       return { state, view, track } satisfies AsyncLoaderShape;
-    });
+    }),
 
   /** Passthrough AsyncLoader for testing (no async tracking, immediate render). */
-  static readonly test = (fallbackElement: Element): AsyncLoaderShape => {
+  test: (fallbackElement: Element): AsyncLoaderShape => {
     // In test mode, track just resolves the effect synchronously and stores the result.
     // The helper creates an explicit owner scope so tests do not depend on module-lifetime signals.
     let lastElement: Element = fallbackElement;
@@ -582,8 +602,8 @@ export class AsyncLoader extends Context.Service<
           }
         }),
     };
-  };
-}
+  },
+};
 
 // =============================================================================
 // Rendering Implementations
@@ -601,7 +621,10 @@ export function renderComponent(
   routeIdentity?: RouteRenderIdentity,
   routerContext?: Context.Context<never>,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
-  const params = toRouteParams(decodedParams);
+  const activePatterns = routeIdentity?.patterns ?? [];
+  const paramsByPattern =
+    routeIdentity?.paramsByPattern ??
+    new Map(activePatterns.map((pattern) => [pattern, decodedParams]));
   // Gate every wrapped route-subtree component run on staleness. This wraps each
   // component's `run` (initial AND re-render), so when a superseded route child
   // re-renders from its own local signal during a pending navigation, its body
@@ -627,7 +650,7 @@ export function renderComponent(
             )
           : locallyFiberRef(
               CurrentRouteParams,
-              params,
+              paramsByPattern,
               locallyFiberRef(CurrentRouteQuery, decodedQuery, effect),
             ),
     );
@@ -645,7 +668,7 @@ export function renderComponent(
         const capturedContext = yield* Effect.context<unknown>();
         const element = yield* effect;
         const wrapperInputs = {
-          params,
+          params: decodedParams,
           query: decodedQuery,
           routeIdentity,
           wrappedIdentity: component,
@@ -662,7 +685,12 @@ export function renderComponent(
       }).pipe(unsafeEraseR),
       {
         identity: component,
-        inputs: { params, query: decodedQuery, routeIdentity, wrappedIdentity: component },
+        inputs: {
+          params: decodedParams,
+          query: decodedQuery,
+          routeIdentity,
+          wrappedIdentity: component,
+        },
       },
     );
 
@@ -689,11 +717,14 @@ export function renderLayout(
   routeIdentity?: RouteRenderIdentity,
   routerContext?: Context.Context<never>,
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
-  const params = toRouteParams(decodedParams);
+  const activePatterns = routeIdentity?.patterns ?? [];
+  const paramsByPattern =
+    routeIdentity?.paramsByPattern ??
+    new Map(activePatterns.map((pattern) => [pattern, decodedParams]));
   const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     locallyFiberRef(
       CurrentRouteParams,
-      params,
+      paramsByPattern,
       locallyFiberRef(CurrentRouteQuery, decodedQuery, locallyCurrentOutletChild(child, effect)),
     );
 
@@ -711,7 +742,7 @@ export function renderLayout(
         const element = yield* effect;
         const wrapperInputs = {
           child,
-          params,
+          params: decodedParams,
           query: decodedQuery,
           routeIdentity,
           wrappedIdentity: layout,
@@ -728,7 +759,13 @@ export function renderLayout(
       }).pipe(unsafeEraseR),
       {
         identity: layout,
-        inputs: { child, params, query: decodedQuery, routeIdentity, wrappedIdentity: layout },
+        inputs: {
+          child,
+          params: decodedParams,
+          query: decodedQuery,
+          routeIdentity,
+          wrappedIdentity: layout,
+        },
       },
     );
 
@@ -761,12 +798,15 @@ export function renderLayoutReactive(
   decodedParams: Record<string, unknown>,
   decodedQuery: Record<string, unknown> = {},
   routeContextKey?: string,
+  activePatterns: ReadonlyArray<string> = [],
+  paramsByPattern: DecodedRouteParamsByPattern = new Map(
+    activePatterns.map((pattern) => [pattern, decodedParams]),
+  ),
 ): Effect.Effect<ElementType, InvalidRouteComponent, never> {
-  const params = toRouteParams(decodedParams);
   const withLayoutContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     locallyFiberRef(
       CurrentRouteParams,
-      params,
+      paramsByPattern,
       locallyFiberRef(
         CurrentRouteQuery,
         decodedQuery,

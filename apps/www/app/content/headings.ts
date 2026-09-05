@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as Context from "effect/Context";
 import { Signal } from "trygg";
 
@@ -23,14 +23,19 @@ export class DocsHeadings extends Context.Service<
 
 export const DocsHeadingsLive = Layer.effect(
   DocsHeadings,
-  Signal.make<ReadonlyArray<HeadingEntry>>([]).pipe(
-    Effect.map(
-      (entries): DocsHeadingsService => ({
-        entries,
-        set: (nextEntries) => Signal.set(entries, nextEntries),
-      }),
-    ),
-  ),
+  Effect.gen(function* () {
+    // oxlint-disable-next-line effect/no-service-option -- Route providers reuse the root-owned headings state when present.
+    const inherited = yield* Effect.serviceOption(DocsHeadings);
+    if (Option.isSome(inherited)) {
+      return inherited.value;
+    }
+
+    const entries = yield* Signal.make<ReadonlyArray<HeadingEntry>>([]);
+    return {
+      entries,
+      set: (nextEntries) => Signal.set(entries, nextEntries),
+    } satisfies DocsHeadingsService;
+  }).pipe(Effect.annotateLogs({ service: "DocsHeadings" })),
 );
 
 export const setDocsHeadings = (

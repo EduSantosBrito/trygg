@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-05T10:23:39.689Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 0,
+  "samples": 1,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 36.5,
+          "schedulerChecks": 34721,
+          "schedulerYields": 1,
+          "frameMs": 39.60000002384186,
+          "rows": 1000,
+          "taskMs": 42.52
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 46.10000002384186,
+    "firstContentfulPaintMs": 72
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3912,
+      "gzipBytes": 1856
+    },
+    {
+      "file": "chunk-8am9j0aa.js",
+      "loadedAtStartup": true,
+      "bytes": 82284,
+      "gzipBytes": 25543
+    },
+    {
+      "file": "chunk-7v8g0syx.js",
+      "loadedAtStartup": true,
+      "bytes": 287703,
+      "gzipBytes": 82115
+    },
+    {
+      "file": "chunk-20t1ws4y.js",
+      "loadedAtStartup": true,
+      "bytes": 134972,
+      "gzipBytes": 46551
+    },
+    {
+      "file": "chunk-xkeznpxf.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 554
+    },
+    {
+      "file": "chunk-2hss9dnb.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18083
+    },
+    {
+      "file": "chunk-xx7da4bj.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 999
+    }
+  ]
+}

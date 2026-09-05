@@ -59,4 +59,4 @@ The strategy union is open: `RenderStrategyType` is a `Data.TaggedEnum`, and fut
 
 - **Expected a separate chunk but the component is in the main bundle.** The route resolved to Eager — either an explicit `Route.provide(RenderStrategy.Eager)` on the route or inherited from a parent chain. Remove the Eager provide to fall back to the default Lazy split.
 - **A failed navigation shows a blank view instead of an error.** The lazy chunk raised a `RenderLoadError` and the route tree had no error boundary to catch it. Add `.error(SomeFallback)` to the route or an ancestor so the Outlet awaits the loader and renders the failure through that boundary.
-- **The dynamic import never appears in the build output.** The Vite plugin only rewrites a Lazy *leaf* `.component(...)`. Confirm the route is a leaf (it calls `.component`, not `.children`) and is not marked Eager.
+- **The dynamic import never appears in the build output.** The Vite plugin only rewrites a Lazy _leaf_ `.component(...)`. Confirm the route is a leaf (it calls `.component`, not `.children`) and is not marked Eager.

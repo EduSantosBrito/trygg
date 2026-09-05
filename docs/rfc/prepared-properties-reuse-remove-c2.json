@@ -1,0 +1,197 @@
+{
+  "date": "2026-09-05T08:30:40.315Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 10,
+  "samples": 21,
+  "results": [
+    {
+      "operation": "remove",
+      "samples": [
+        {
+          "operation": "remove",
+          "handlerMs": 74.5,
+          "frameMs": 81.89999997615814,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 70.80000001192093,
+          "frameMs": 78.30000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 80.09999996423721,
+          "frameMs": 87.79999995231628,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 76.30000001192093,
+          "frameMs": 84,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 75.60000002384186,
+          "frameMs": 81.90000003576279,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 111.30000001192093,
+          "frameMs": 117.89999997615814,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 72.10000002384186,
+          "frameMs": 78.5,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 72.80000001192093,
+          "frameMs": 80.39999997615814,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 108.09999996423721,
+          "frameMs": 116,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 72.59999996423721,
+          "frameMs": 78.80000001192093,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 72.89999997615814,
+          "frameMs": 80,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 111.5,
+          "frameMs": 119.69999998807907,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71.09999996423721,
+          "frameMs": 77.29999995231628,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71.10000002384186,
+          "frameMs": 78.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 80.40000003576279,
+          "frameMs": 87.10000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 74.90000003576279,
+          "frameMs": 82.69999998807907,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71,
+          "frameMs": 77.90000003576279,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 104.5,
+          "frameMs": 110.79999995231628,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71.30000001192093,
+          "frameMs": 77.60000002384186,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 71.59999996423721,
+          "frameMs": 78,
+          "rows": 999
+        },
+        {
+          "operation": "remove",
+          "handlerMs": 92.69999998807907,
+          "frameMs": 100.80000001192093,
+          "rows": 999
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "remove",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 51.799999952316284,
+    "firstContentfulPaintMs": 76
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3128,
+      "gzipBytes": 1494
+    },
+    {
+      "file": "chunk-4bg8qqg1.js",
+      "loadedAtStartup": true,
+      "bytes": 76937,
+      "gzipBytes": 23936
+    },
+    {
+      "file": "chunk-zxtyv8qs.js",
+      "loadedAtStartup": true,
+      "bytes": 287510,
+      "gzipBytes": 82045
+    },
+    {
+      "file": "chunk-epdxbakc.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46539
+    },
+    {
+      "file": "chunk-mjzbk1f1.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 556
+    },
+    {
+      "file": "chunk-xk91v3ar.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18077
+    },
+    {
+      "file": "chunk-pjx9w2e0.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 997
+    }
+  ]
+}

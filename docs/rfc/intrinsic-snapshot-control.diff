@@ -1,0 +1,37 @@
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ b/packages/core/src/primitives/render-intrinsic.ts
+@@ -133,13 +133,16 @@
+   // Keep partial bindings reachable until the complete property set is handed
+   // to the renderer. Cleanup failures remain in the failed acquisition's Cause.
+   return yield* Effect.gen(function* () {
+-    const eventSnapshot = {
+-      ...renderContext,
+-      services:
+-        context === null ? renderContext.services : Context.merge(renderContext.services, context),
+-    };
+-
+-    for (const [key, value] of Object.entries(props)) {
++    const entries = Object.entries(props);
++    // Capture before evaluating any property Effects, but only event-bearing
++    // nodes need a snapshot of the initial rendering context.
++    const eventSnapshot = entries.some(
++      ([key, value]) => value !== undefined && key.startsWith("on"),
++    )
++      ? makeEventSnapshot(renderContext, context)
++      : undefined;
++
++    for (const [key, value] of entries) {
+       if (value === undefined) continue;
+ 
+       if (key.startsWith("on")) {
+@@ -148,8 +151,9 @@
+         }
+ 
+         const eventName = key.slice(2).toLowerCase();
++        const snapshot = eventSnapshot ?? makeEventSnapshot(renderContext, context);
+         const listener = (event: Event) => {
+-          forkEventHandler(eventSnapshot, () => value(event));
++          forkEventHandler(snapshot, () => value(event));
+         };
+         cleanups.push(Effect.sync(() => node.removeEventListener(eventName, listener)));
+         node.addEventListener(eventName, listener);

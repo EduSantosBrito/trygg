@@ -13,8 +13,8 @@
  *    returns the shared `Effect.void` singleton — the payload thunk is never
  *    evaluated and nothing is allocated.
  * 3. Otherwise it emits via {@link Effect.logWithLevel}. The event name is the
- *    log message; the payload and action id ride along as log annotations
- *    (`trygg.payload`, `trygg.actionId`).
+ *    log message; a private, origin-marked envelope and the action id ride along
+ *    as log annotations (`trygg.trace`, `trygg.actionId`).
  *
  * To observe events, install a {@link Logger} that recognises catalog names:
  * {@link makeRecorder} builds an in-memory recorder for tests, and
@@ -27,24 +27,57 @@
  * @see ./catalog.ts - the event vocabulary
  * @internal
  */
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Predicate, Schema } from "effect";
 import * as Logger from "effect/Logger";
 import * as LogLevel from "effect/LogLevel";
 import * as References from "effect/References";
 import { CATALOG, type TraceEventName, type TraceLevel, type TraceMeta } from "./catalog.js";
+import { copyOwnDataObject, detachJsonObject, detachJsonString } from "./json.js";
+import {
+  decodeTracePayload,
+  type TraceEventPayload,
+  type TracePayloadEventName,
+  traceEventRequiresPayload,
+} from "./payload.js";
+
+export { causeValueType, valueType } from "./payload.js";
+export type { TraceEventPayload, TracePayloadEventName, TraceValueType } from "./payload.js";
 
 export interface TraceRecord {
   readonly name: TraceEventName;
-  readonly payload: Readonly<Record<string, unknown>> | undefined;
+  readonly payload: Schema.JsonObject | undefined;
   readonly actionId: string | undefined;
 }
 
-export type TracePayload = () => Record<string, unknown>;
+type ExactPayload<Actual, Expected> = Expected extends unknown
+  ? Actual extends Expected
+    ? Actual & Readonly<Record<Exclude<keyof Actual, keyof Expected>, never>>
+    : never
+  : never;
 
-/** Log-annotation key under which {@link emit} stashes a built payload. */
-const PAYLOAD_KEY = "trygg.payload";
+export type TracePayload<
+  Name extends TraceEventName,
+  Actual extends TraceEventPayload<Name> = TraceEventPayload<Name>,
+> = () => ExactPayload<Actual, TraceEventPayload<Name>>;
+
+/** Private log annotation proving that a record originated in {@link emit}. */
+const TRACE_KEY = "trygg.trace";
 /** Log-annotation key under which {@link withAction} stamps the current action id. */
 const ACTION_KEY = "trygg.actionId";
+
+type TraceEnvelope = object;
+
+interface TraceRecordReaderState {
+  readonly seen: WeakSet<TraceEnvelope>;
+}
+
+interface TraceEnvelopeEntry {
+  readonly readers: ReadonlySet<TraceRecordReaderState>;
+  readonly record: TraceRecord;
+}
+
+const readerStateByLogger = new WeakMap<object, TraceRecordReaderState>();
+const recordsByEnvelope = new WeakMap<TraceEnvelope, TraceEnvelopeEntry>();
 
 const VOID: Effect.Effect<void> = Effect.void;
 
@@ -63,47 +96,117 @@ const logLevelOf = (name: TraceEventName): LogLevel.Severity => {
   return meta.logLevel ?? LEVEL_TO_LOG[meta.level];
 };
 
+const emitInternal = (
+  name: TraceEventName,
+  payload: (() => unknown) | undefined,
+): Effect.Effect<void> =>
+  Effect.withFiber((fiber) => {
+    const level = logLevelOf(name);
+    if (LogLevel.isGreaterThan(fiber.getRef(References.MinimumLogLevel), level)) return VOID;
+
+    return Effect.sync(() => {
+      const annotations = fiber.getRef(References.CurrentLogAnnotations);
+      const annotatedAction = annotations[ACTION_KEY];
+      const actionId = typeof annotatedAction === "string" ? annotatedAction : undefined;
+      const readers = new Set<TraceRecordReaderState>();
+      for (const logger of fiber.getRef(Logger.CurrentLoggers)) {
+        const state = readerStateByLogger.get(logger);
+        if (state !== undefined) readers.add(state);
+      }
+
+      if (payload === undefined) {
+        if (traceEventRequiresPayload(name)) return undefined;
+        const record = Object.freeze({
+          name,
+          payload: undefined,
+          actionId,
+        }) satisfies TraceRecord;
+        const envelope: TraceEnvelope = Object.freeze({});
+        recordsByEnvelope.set(envelope, { readers, record });
+        return envelope;
+      }
+
+      const original = copyOwnDataObject(payload());
+      if (original === undefined) return undefined;
+      const decoded = decodeTracePayload(name, original);
+      if (Exit.isFailure(decoded) || !Predicate.isObject(decoded.value)) return undefined;
+
+      const record = Object.freeze({
+        name,
+        payload: detachJsonObject(decoded.value),
+        actionId,
+      }) satisfies TraceRecord;
+      const envelope: TraceEnvelope = Object.freeze({});
+      recordsByEnvelope.set(envelope, { readers, record });
+      return envelope;
+    }).pipe(
+      Effect.flatMap((envelope) =>
+        envelope === undefined
+          ? VOID
+          : Effect.annotateLogs(Effect.logWithLevel(level)(name), TRACE_KEY, envelope),
+      ),
+      Effect.catchCause((cause) => (Cause.hasInterrupts(cause) ? Effect.failCause(cause) : VOID)),
+    );
+  });
+
 /**
  * Record one framework step. Below the fiber's minimum log level this is a
  * zero-allocation no-op — neither the payload thunk nor any log work runs.
  */
-export const emit = (name: TraceEventName, payload?: TracePayload): Effect.Effect<void> =>
-  Effect.withFiber((fiber) => {
-    const level = logLevelOf(name);
-    if (LogLevel.isGreaterThan(fiber.getRef(References.MinimumLogLevel), level)) return VOID;
-    const log = Effect.logWithLevel(level)(name);
-    return payload === undefined ? log : Effect.annotateLogs(log, PAYLOAD_KEY, payload());
-  });
+export function emit<Name extends TracePayloadEventName, Payload extends TraceEventPayload<Name>>(
+  name: Name,
+  payload: TracePayload<Name, Payload>,
+): Effect.Effect<void>;
+export function emit<
+  Name extends Exclude<TraceEventName, TracePayloadEventName>,
+  Payload extends TraceEventPayload<Name> = TraceEventPayload<Name>,
+>(name: Name, payload?: TracePayload<Name, Payload>): Effect.Effect<void>;
+export function emit(name: TraceEventName, payload?: () => unknown): Effect.Effect<void> {
+  return emitInternal(name, payload);
+}
+
+/** Typed adapter for generic emit helpers whose event always has a payload. */
+export const emitPayload = <
+  Name extends TracePayloadEventName,
+  Payload extends TraceEventPayload<Name>,
+>(
+  name: Name,
+  payload: TracePayload<Name, Payload>,
+): Effect.Effect<void> => emitInternal(name, payload);
 
 /**
  * Group every event emitted by `effect` under a named action. Emits
  * `contract.action.start` / `contract.action.end` around it and stamps each
- * inner record's `actionId` via a log annotation.
+ * inner record's `actionId` via a log annotation. Oversized IDs are normalized
+ * once before the lifecycle starts so every correlation surface uses one value.
  */
 export const withAction: <A, E, R>(
   actionId: string,
-  action: Record<string, unknown>,
+  facts: Schema.JsonObject,
   effect: Effect.Effect<A, E, R>,
 ) => Effect.Effect<A, E, R> = Effect.fnUntraced(function* <A, E, R>(
   actionId: string,
-  action: Record<string, unknown>,
+  facts: Schema.JsonObject,
   effect: Effect.Effect<A, E, R>,
 ) {
-  yield* emit("contract.action.start", () => ({ actionId, ...action }));
-
-  const exit = yield* Effect.exit(Effect.annotateLogs(effect, ACTION_KEY, actionId));
-
-  if (Exit.isSuccess(exit)) {
-    yield* emit("contract.action.end", () => ({ actionId, status: "completed" }));
-    return exit.value;
-  }
-
-  yield* emit("contract.action.end", () => ({
-    actionId,
-    status: "failed",
-    cause: Cause.pretty(exit.cause),
-  }));
-  return yield* Effect.failCause(exit.cause);
+  const canonicalActionId = detachJsonString(actionId);
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      yield* emit("contract.action.start", () => ({ actionId: canonicalActionId, facts }));
+      return yield* restore(Effect.annotateLogs(effect, ACTION_KEY, canonicalActionId)).pipe(
+        Effect.onExit((exit) =>
+          emit("contract.action.end", () => ({
+            actionId: canonicalActionId,
+            status: Exit.isSuccess(exit)
+              ? "completed"
+              : Cause.hasInterruptsOnly(exit.cause)
+                ? "interrupted"
+                : "failed",
+          })),
+        ),
+      );
+    }),
+  );
 });
 
 // ── Recording ─────────────────────────────────────────────────────────────────
@@ -127,10 +230,7 @@ export interface Recorder {
 }
 
 const isTraceEventName = (value: unknown): value is TraceEventName =>
-  typeof value === "string" && Object.hasOwn(CATALOG, value);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  Predicate.isString(value) && Object.hasOwn(CATALOG, value);
 
 /** The catalog name a log message carries, or `undefined` for non-trace logs. */
 const traceNameOf = (message: unknown): TraceEventName | undefined => {
@@ -138,32 +238,47 @@ const traceNameOf = (message: unknown): TraceEventName | undefined => {
   return isTraceEventName(first) ? first : undefined;
 };
 
+/** `null` is a replay; `undefined` is a non-Trace log. */
+export type TraceReadResult = TraceRecord | null | undefined;
+
+export interface TraceRecordReader {
+  readonly register: <Message, Output>(
+    logger: Logger.Logger<Message, Output>,
+  ) => Logger.Logger<Message, Output>;
+  readonly read: (options: Logger.Options<unknown>) => TraceReadResult;
+}
+
 /**
- * Reconstruct a {@link TraceRecord} from a log's {@link Logger.Options}, or
- * `undefined` when the log is not a catalog event. The payload and action id are
- * read back from the log's annotations. Shared by {@link makeRecorder} and the
- * `Debug` console logger so both interpret the trace stream identically.
+ * Build one identity-checking, replay-deduplicating Trace log reader.
  *
- * @category Recording
- * @since 1.0.0
+ * @internal
  */
-export const recordOf = (options: Logger.Options<unknown>): TraceRecord | undefined => {
-  const name = traceNameOf(options.message);
-  if (name === undefined) return undefined;
-  const annotations = options.fiber.getRef(References.CurrentLogAnnotations);
-  const rawPayload = annotations[PAYLOAD_KEY];
-  const rawAction = annotations[ACTION_KEY];
+export const makeRecordReader = (): TraceRecordReader => {
+  const state: TraceRecordReaderState = { seen: new WeakSet<TraceEnvelope>() };
   return {
-    name,
-    payload: isRecord(rawPayload) ? rawPayload : undefined,
-    actionId: typeof rawAction === "string" ? rawAction : undefined,
+    register: (logger) => {
+      readerStateByLogger.set(logger, state);
+      return logger;
+    },
+    read: (options) => {
+      const name = traceNameOf(options.message);
+      if (name === undefined) return undefined;
+      const annotations = options.fiber.getRef(References.CurrentLogAnnotations);
+      const envelope = annotations[TRACE_KEY];
+      if (!Predicate.isObject(envelope)) return undefined;
+      const entry = recordsByEnvelope.get(envelope);
+      if (entry === undefined || entry.record.name !== name) return undefined;
+      if (!entry.readers.has(state) || state.seen.has(envelope)) return null;
+      state.seen.add(envelope);
+      return entry.record;
+    },
   };
 };
 
 /**
- * Build a {@link Recorder}. Its logger ignores non-trace logs and reconstructs a
- * {@link TraceRecord} for every catalog event, reading the payload/action id back
- * from the log's annotations.
+ * Build a {@link Recorder}. Its logger ignores non-trace logs and resolves each
+ * private envelope identity to the immutable {@link TraceRecord} created by
+ * {@link emit}.
  *
  * @example
  * ```ts
@@ -177,10 +292,13 @@ export const recordOf = (options: Logger.Options<unknown>): TraceRecord | undefi
  */
 export const makeRecorder = (): Recorder => {
   const buffer: Array<TraceRecord> = [];
-  const logger = Logger.make<unknown, void>((options) => {
-    const record = recordOf(options);
-    if (record !== undefined) buffer.push(record);
-  });
+  const reader = makeRecordReader();
+  const logger = reader.register(
+    Logger.make<unknown, void>((options) => {
+      const result = reader.read(options);
+      if (result !== null && result !== undefined) buffer.push(result);
+    }),
+  );
   return {
     logger,
     snapshot: Effect.sync(() => buffer.slice()),

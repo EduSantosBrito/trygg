@@ -18,7 +18,7 @@ const StorageOperation = Schema.Union([
   Schema.Literal("remove"),
 ]);
 
-export class StorageError extends Schema.TaggedErrorClass<StorageError>()("StorageError", {
+export class StorageError extends Schema.TaggedError<StorageError>()("StorageError", {
   operation: StorageOperation,
   key: Schema.String,
   cause: Schema.Unknown,
@@ -109,7 +109,8 @@ export const sessionStorageBrowser: Layer.Layer<SessionStorage> = Layer.succeed(
 
 export const localStorageBrowser: Layer.Layer<LocalStorage> = Layer.succeed(
   LocalStorage,
-  LocalStorage.of(makeStorageBrowserLayer(() => sessionStorage)),
+  // oxlint-disable-next-line effect/no-localstorage -- This adapter is the explicit LocalStorage capability boundary.
+  LocalStorage.of(makeStorageBrowserLayer(() => localStorage)),
 );
 
 // =============================================================================

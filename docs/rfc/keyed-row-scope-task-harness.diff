@@ -1,0 +1,29 @@
+--- uninstrumented/scripts/benchmark-browser.ts
++++ task-duration/scripts/benchmark-browser.ts
+@@ -106,6 +106,12 @@
+       )
+       .map((entry) => new URL(entry.name).pathname.split("/").pop()),
+   );
++  const metrics = await page.context().newCDPSession(page);
++  await metrics.send("Performance.enable");
++  const taskTime = async () => {
++    const result = await metrics.send("Performance.getMetrics");
++    return result.metrics.find((entry: {name: string; value: number}) => entry.name === "TaskDuration")?.value ?? 0;
++  };
+   const results: Array<{ operation: string; samples: Array<Measurement> }> = [];
+   const operationConsoleMessages: Array<{ operation: string; messages: number }> = [];
+   const work: Array<{
+@@ -133,10 +139,12 @@
+         await profile.send("Profiler.start");
+       }
+       const messagesBefore = consoleMessages;
+-      const result = await page.evaluate(
++      const taskStart = await taskTime();
++      const measured = await page.evaluate(
+         (operation) => window.tryggBenchmark.run(operation),
+         test.operation,
+       );
++      const result = { ...measured, taskMs: ((await taskTime()) - taskStart) * 1000 };
+       const emittedMessages = consoleMessages - messagesBefore;
+       operationMessages += emittedMessages;
+       if (emittedMessages !== 0)

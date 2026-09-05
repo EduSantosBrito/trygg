@@ -11,7 +11,7 @@ import * as Context from "effect/Context";
 // Error type
 // =============================================================================
 
-export class HistoryError extends Schema.TaggedErrorClass<HistoryError>()("HistoryError", {
+export class HistoryError extends Schema.TaggedError<HistoryError>()("HistoryError", {
   operation: Schema.String,
   cause: Schema.Unknown,
 }) {}

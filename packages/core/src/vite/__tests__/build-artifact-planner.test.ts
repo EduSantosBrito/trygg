@@ -1,13 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit } from "effect";
 import {
+  BuildArtifactPlanner,
   diagnosticCodes,
   InvalidBuildOutputCombination,
-  makeBuildArtifactPlanner,
   type BuildArtifactPlanInput,
 } from "../build-artifact-planner.js";
 
-const planner = makeBuildArtifactPlanner({ failOnWarnings: false });
+const planner = BuildArtifactPlanner.make({ failOnWarnings: false });
 
 const input = (overrides: Partial<BuildArtifactPlanInput>): BuildArtifactPlanInput => ({
   output: "server",

@@ -131,7 +131,7 @@ const decodeDocsConfigInput = Schema.decodeUnknownEffect(DocsConfigInputSchema);
 const decodePackageJson = Schema.decodeUnknownEffect(PackageJsonSchema);
 const encodeReportPayloadJson = Schema.encodeEffect(Schema.fromJsonString(ReportPayloadSchema));
 
-export class DocsContractConfigError extends Schema.TaggedErrorClass<DocsContractConfigError>()(
+export class DocsContractConfigError extends Schema.TaggedError<DocsContractConfigError>()(
   "DocsContractConfigError",
   { detail: Schema.String },
 ) {
@@ -140,7 +140,7 @@ export class DocsContractConfigError extends Schema.TaggedErrorClass<DocsContrac
   }
 }
 
-export class DocsContractFileError extends Schema.TaggedErrorClass<DocsContractFileError>()(
+export class DocsContractFileError extends Schema.TaggedError<DocsContractFileError>()(
   "DocsContractFileError",
   { detail: Schema.String, path: Schema.String },
 ) {

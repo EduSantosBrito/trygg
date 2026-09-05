@@ -1,0 +1,273 @@
+--- a/packages/core/src/primitives/renderer.ts
++++ b/packages/core/src/primitives/renderer.ts
+@@ -167,6 +167,8 @@
+ 
+ /** @internal Values acquired by a prepared render, retained under its owning scope. */
+ export interface RenderPreparation {
++  /** Partial acquisition must continue through the DOM renderer before later Effects run. */
++  readonly needsDom?: true;
+   readonly propertyValues: ReadonlyMap<string, unknown> | undefined;
+   readonly children: ReadonlyArray<RenderPreparation | undefined>;
+ }
+@@ -215,6 +217,11 @@
+     nextElement: Element,
+     nextContext: Context.Context<unknown> | null,
+   ) => boolean;
++  /** @internal Plan compatible property acquisition without DOM; undefined declines before running Effects. */
++  readonly prepareReconcile?: (
++    nextElement: Element,
++    nextContext: Context.Context<unknown> | null,
++  ) => Effect.Effect<RenderPreparation, unknown, RuntimeRequirements> | undefined;
+   /** @internal Snapshot acquired values before commit so rollback does not rerun user Effects. */
+   readonly preparation?: RenderPreparation | undefined;
+   readonly reconcile?: (
+@@ -223,6 +230,11 @@
+     preparation?: RenderPreparation,
+   ) => Effect.Effect<boolean, unknown, RuntimeRequirements>;
+ }
++
++const canReconcileText = (
++  nextElement: Element,
++  nextContext: Context.Context<unknown> | null,
++): boolean => Predicate.isTagged(resolveReconcileTarget(nextElement, nextContext).element, "Text");
+ 
+ const normalizeContext = (context: Context.Context<unknown> | null): Context.Context<unknown> =>
+   context ?? emptyContext;
+@@ -476,6 +488,7 @@
+         return {
+           node,
+           cleanup: Effect.sync(() => node.remove()),
++          canReconcile: canReconcileText,
+           reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
+             Effect.sync(() => {
+               const resolved = resolveReconcileTarget(nextElement, nextContext);
+--- a/packages/core/src/primitives/render-intrinsic.ts
++++ b/packages/core/src/primitives/render-intrinsic.ts
+@@ -244,6 +244,26 @@
+     return { cleanups, propertyValues: propertyValues ?? preparedValues };
+   }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? cleanupAll(cleanups) : Effect.void)));
+ });
++
++// A static compatibility check reads property values. Do not move accessor
++// execution or host value conversion ahead of parent Effects during preparation.
++const needsHostConversion = (value: unknown): boolean =>
++  (typeof value === "object" && value !== null) || typeof value === "function";
++
++const needsHostPreparation = (element: Element): boolean => {
++  if (Predicate.isTagged(element, "Provide")) return needsHostPreparation(element.child);
++  if (Predicate.isTagged(element, "Intrinsic")) {
++    for (const name in element.props) {
++      const descriptor = Object.getOwnPropertyDescriptor(element.props, name);
++      if (descriptor?.get !== undefined || descriptor?.set !== undefined) return true;
++      const value: unknown = descriptor?.value;
++      if (!name.startsWith("on") && needsHostConversion(value)) return true;
++    }
++    return element.children.some(needsHostPreparation);
++  }
++  if (Predicate.isTagged(element, "Fragment")) return element.children.some(needsHostPreparation);
++  return false;
++};
+ 
+ type IntrinsicElement = Extract<Element, { readonly _tag: "Intrinsic" }>;
+ 
+@@ -1023,6 +1043,69 @@
+               : childResults.map((child) => child.preparation),
+           };
+         },
++        prepareReconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) => {
++          const resolved = resolveReconcileTarget(nextElement, nextContext);
++          const next = resolved.element;
++          if (!Predicate.isTagged(next, "Intrinsic") || next.tag !== tag || next.key !== key)
++            return;
++          const childCount = hasKeyedChildren ? childSlots.length : childResults.length;
++          if (next.children.length !== childCount) return;
++          // Plan the whole compatible subtree before running any property Effect.
++          // Static children already know how to patch; effectful children acquire
++          // their own values in parent-before-child order under the caller's Scope.
++          const childPlans: Array<ReturnType<NonNullable<RenderResult["prepareReconcile"]>>> = [];
++          for (let index = 0; index < childCount; index++) {
++            const slot = childSlots[index];
++            const child = hasKeyedChildren ? slot?.result : childResults[index];
++            const nextChild = next.children[index];
++            if (child === undefined || nextChild === undefined) return;
++            if (hasKeyedChildren && getKey(nextChild) !== slot?.key) return;
++            if (child.canReconcile !== undefined && needsHostPreparation(nextChild)) return;
++            if (child.canReconcile?.(nextChild, resolved.context) === true) {
++              childPlans.push(undefined);
++            } else {
++              const plan = child.prepareReconcile?.(nextChild, resolved.context);
++              if (plan === undefined) return;
++              childPlans.push(plan);
++            }
++          }
++          return Effect.gen(function* () {
++            let propertyValues: Map<string, unknown> | undefined;
++            const props = next.props.mode !== undefined ? omitMode(next.props) : next.props;
++            for (const [name, value] of Object.entries(props)) {
++              if (value === undefined) continue;
++              if (name.startsWith("on")) {
++                if (!isEventHandler(value))
++                  return yield* new InvalidEventHandlerError({ prop: name });
++              } else {
++                let resolvedValue: unknown = value;
++                if (!Signal.isSignal(value) && isEffectProp(value)) {
++                  resolvedValue = yield* value;
++                  propertyValues ??= new Map();
++                  propertyValues.set(name, resolvedValue);
++                }
++                const appliedValue = Signal.isSignal(resolvedValue)
++                  ? yield* Signal.peek(resolvedValue)
++                  : resolvedValue;
++                if (needsHostConversion(appliedValue)) {
++                  return {
++                    propertyValues,
++                    children: [],
++                    needsDom: true,
++                  } satisfies RenderPreparation;
++                }
++              }
++            }
++            const children: Array<RenderPreparation | undefined> = [];
++            for (const plan of childPlans) {
++              const child = plan === undefined ? undefined : yield* plan;
++              children.push(child);
++              if (child?.needsDom)
++                return { propertyValues, children, needsDom: true } satisfies RenderPreparation;
++            }
++            return { propertyValues, children };
++          });
++        },
+         reconcile: Effect.fnUntraced(function* (
+           nextElement: Element,
+           nextContext: Context.Context<unknown> | null,
+--- a/packages/core/src/primitives/render-keyed-list.ts
++++ b/packages/core/src/primitives/render-keyed-list.ts
+@@ -15,6 +15,7 @@
+ import { cleanupAll } from "./render-cleanup.js";
+ 
+ interface RenderOptions {
++  readonly preparation?: RenderPreparation | undefined;
+   readonly errorHandler: ErrorBoundaryHandler | null;
+ }
+ 
+@@ -204,6 +205,7 @@
+     normalizedElement: Element,
+     parentOverride?: Node,
+     renderContext: RenderContext = runtime,
++    preparation?: RenderPreparation,
+   ) {
+     let acquiredResult: RenderResult | undefined;
+     let acquiredStart: Comment | undefined;
+@@ -234,7 +236,13 @@
+         const result =
+           syncResult === null
+             ? yield* restore(
+-                deps.renderElement(normalizedElement, listParent, renderContext, context, options),
++                deps.renderElement(
++                  normalizedElement,
++                  listParent,
++                  renderContext,
++                  context,
++                  preparation === undefined ? options : { ...options, preparation },
++                ),
+               )
+             : Effect.isEffect(syncResult)
+               ? yield* syncResult.pipe(
+@@ -276,8 +284,8 @@
+     );
+   });
+ 
+-  // Prepare a single item with a stable render phase. A compatible static result
+-  // lends its DOM until reconciliation; other cases build a detached candidate.
++  // Prepare a single item with a stable render phase. Compatible results lend
++  // their DOM after property acquisition; other cases build a detached candidate.
+   // The row Effect and its scoped acquisition still execute exactly once.
+   // `Effect.fnUntraced`
+   // (no span) — the Scope-provided inner `Effect.gen` is the only extra Effect
+@@ -307,24 +315,32 @@
+     // `renderPhase.accessed` (and thus the item's subscription set) unchanged.
+     return yield* Effect.gen(function* () {
+       const normalizedElement = yield* runRenderFn(item, index, renderPhase);
+-      if (
+-        previousDom !== undefined &&
+-        previousDom.result.reconcile !== undefined &&
+-        previousDom.result.canReconcile?.(normalizedElement, context) === true
+-      ) {
+-        return {
+-          renderPhase,
+-          element: normalizedElement,
+-          result: previousDom.result,
+-          startMarker: previousDom.startMarker,
+-          endMarker: previousDom.endMarker,
+-          usesExistingDom: true,
+-        };
++      let preparation: RenderPreparation | undefined;
++      if (previousDom !== undefined && previousDom.result.reconcile !== undefined) {
++        const staticCompatible =
++          previousDom.result.canReconcile?.(normalizedElement, context) === true;
++        const plan = staticCompatible
++          ? undefined
++          : previousDom.result.prepareReconcile?.(normalizedElement, context);
++        if (staticCompatible || plan !== undefined) {
++          preparation = plan === undefined ? undefined : yield* plan;
++          if (!preparation?.needsDom)
++            return {
++              renderPhase,
++              element: normalizedElement,
++              result: previousDom.result,
++              startMarker: previousDom.startMarker,
++              endMarker: previousDom.endMarker,
++              usesExistingDom: true,
++              preparation,
++            };
++        }
+       }
+       const { result, startMarker, endMarker } = yield* buildItemDom(
+         normalizedElement,
+         parentOverride,
+         itemRenderContext(itemScope),
++        preparation,
+       );
+       return {
+         renderPhase,
+@@ -333,6 +349,7 @@
+         startMarker,
+         endMarker,
+         usesExistingDom: false,
++        preparation: undefined,
+       };
+     }).pipe(
+       Scope.provide(itemScope),
+@@ -477,6 +494,7 @@
+ 
+     const stagedParent = document.createDocumentFragment();
+     type StagedItem = {
++      readonly preparation?: RenderPreparation | undefined;
+       readonly key: string | number;
+       readonly scope: Scope.Closeable;
+       readonly renderPhase: Signal.RenderPhase;
+@@ -637,6 +655,7 @@
+                 startMarker: rendered.startMarker,
+                 endMarker: rendered.endMarker,
+                 usesExistingDom: rendered.usesExistingDom,
++                preparation: rendered.preparation,
+                 retainResult: rendered.usesExistingDom,
+                 retainScope: false,
+                 resultCleaned: false,
+@@ -932,7 +951,7 @@
+               const matched = yield* reconcile(
+                 staged.element,
+                 context,
+-                staged.result.preparation,
++                staged.preparation ?? staged.result.preparation,
+               ).pipe(Scope.provide(entry.state.scope));
+               // A preflight is a hint, not permission to ignore a later divergence.
+               // Build under the already-owned preparation scope without rerunning user code.
+@@ -941,6 +960,7 @@
+                   staged.element,
+                   stagedParent,
+                   itemRenderContext(staged.scope),
++                  staged.preparation,
+                 ).pipe(Scope.provide(staged.scope));
+                 staged.result = built.result;
+                 staged.startMarker = built.startMarker;

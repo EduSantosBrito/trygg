@@ -38,12 +38,6 @@ export class PlatformConfig extends Context.Service<
 >()("trygg/PlatformConfig") {}
 
 /**
- * Helper to create platform config
- * @since 1.0.0
- */
-export const make = (config: PlatformConfigService): PlatformConfigService => config;
-
-/**
  * Layer constructor for PlatformConfig
  * @since 1.0.0
  */

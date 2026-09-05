@@ -14,8 +14,8 @@ import {
 } from "./storage.js";
 import { Scroll, browser as scrollBrowser } from "./scroll.js";
 import { PlatformEventTarget, browser as eventTargetBrowser } from "./event-target.js";
-import { Observer, browser as observerBrowser } from "./observer.js";
-import { Idle, browser as idleBrowser } from "./idle.js";
+import { Observer, ObserverError, browser as observerBrowser } from "./observer.js";
+import { Idle, IdleError, browser as idleBrowser } from "./idle.js";
 
 export const browser: Layer.Layer<
   | Dom
@@ -26,7 +26,8 @@ export const browser: Layer.Layer<
   | Scroll
   | PlatformEventTarget
   | Observer
-  | Idle
+  | Idle,
+  ObserverError | IdleError
 > = Layer.mergeAll(
   domBrowser,
   locationBrowser,

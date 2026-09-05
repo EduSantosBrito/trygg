@@ -52,7 +52,7 @@ This page is the map, not the manual. Each piece has its own guide:
 
 Two namespaces front the flow most application code touches:
 
-- `Route` groups the fluent route-definition entrypoints: `Route.make(path)`, `Route.index(component)`, and `Route.provide(strategy)`, plus the `Route.current` accessor and the `Route.redirect` / `Route.forbidden` middleware escape hatches.
+- `Route` groups the fluent route-definition entrypoints: `Route.make(path)`, `Route.index(component)`, and `Route.provide(strategy)`, plus the `Route.redirect` / `Route.forbidden` middleware escape hatches. Read active navigation through `Router.currentRoute`.
 - `Routes` exposes `Routes.make()`, the root builder that gathers top-level routes and root boundaries into a Routes manifest.
 
 A Routes collection produces exactly one Routes manifest. You pass that manifest to `Outlet` as `routes={routes.manifest}`; the Outlet matches it against the current route and renders the active Route. The Router service never renders a page itself — it updates the current route, and the Outlet does the matching. Keep that split in mind: navigation and rendering are separate concerns wired through the same manifest.

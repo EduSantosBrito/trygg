@@ -28,10 +28,7 @@ export const Severity = Schema.Union([
 ]);
 export type Severity = Schema.Schema.Type<typeof Severity>;
 
-export const Status = Schema.Union([
-  Schema.Literal("Investigating"),
-  Schema.Literal("Resolved"),
-]);
+export const Status = Schema.Union([Schema.Literal("Investigating"), Schema.Literal("Resolved")]);
 export type Status = Schema.Schema.Type<typeof Status>;
 
 export interface Incident {
@@ -41,10 +38,9 @@ export interface Incident {
   readonly status: Status;
 }
 
-export class IncidentNotFound extends Schema.TaggedErrorClass<IncidentNotFound>()(
-  "IncidentNotFound",
-  { id: Schema.Number },
-) {}
+export class IncidentNotFound extends Schema.TaggedError<IncidentNotFound>()("IncidentNotFound", {
+  id: Schema.Number,
+}) {}
 ```
 
 ## Step 2 — A service owns the data
@@ -75,26 +71,28 @@ const seed: ReadonlyArray<Incident> = [
   { id: 2, title: "Auth service 503", severity: "SEV-1", status: "Resolved" },
 ];
 
-const makeIncidents = (): IncidentService => {
-  const store = new Map<number, Incident>(seed.map((incident) => [incident.id, incident]));
+export namespace Incidents {
+  export const make = (): IncidentService => {
+    const store = new Map<number, Incident>(seed.map((incident) => [incident.id, incident]));
 
-  return {
-    list: Effect.sync(() => [...store.values()]),
-    get: (id) => {
-      const incident = store.get(id);
-      return incident !== undefined
-        ? Effect.succeed(incident)
-        : Effect.fail(new IncidentNotFound({ id }));
-    },
+    return {
+      list: Effect.sync(() => [...store.values()]),
+      get: (id) => {
+        const incident = store.get(id);
+        return incident !== undefined
+          ? Effect.succeed(incident)
+          : Effect.fail(new IncidentNotFound({ id }));
+      },
+    };
   };
-};
 
-export const IncidentsLive = Layer.succeed(Incidents, makeIncidents());
+  export const layer = Layer.sync(Incidents, make);
+}
 ```
 
 ## Step 3 — A resource fetches it
 
-A `Resource` is async data with a cache key. The fetcher reads the `Incidents` service from context — so the resource *requires* `Incidents`, and that requirement will propagate to any component that fetches it. The list resource is static; the detail resource is a factory keyed by id, so each id caches independently.
+A `Resource` is async data with a cache key. The fetcher reads the `Incidents` service from context — so the resource _requires_ `Incidents`, and that requirement will propagate to any component that fetches it. The list resource is static; the detail resource is a factory keyed by id, so each id caches independently.
 
 ```ts
 // app/resources/incidents.ts
@@ -117,7 +115,7 @@ export const incidentResource = Resource.make(
       const incidents = yield* Incidents;
       return yield* incidents.get(params.id);
     }),
-  { key: (params) => Resource.hash("incidents.get", params) },
+  { key: ({ id }) => Resource.hash("incidents.get", id) },
 );
 ```
 
@@ -142,9 +140,15 @@ export default Component.gen(function* () {
     Resource.on("Pending", () => <p>Loading incidents…</p>),
     Resource.on("Success", () => (
       <ul>
-        {Signal.each(incidents, (incident) => <IncidentRow incident={incident} />, {
-          key: (incident: Incident) => incident.id,
-        })}
+        {Signal.each(
+          incidents,
+          (incident) => (
+            <IncidentRow incident={incident} />
+          ),
+          {
+            key: (incident: Incident) => incident.id,
+          },
+        )}
       </ul>
     )),
     Resource.on("Failure", () => (
@@ -273,14 +277,14 @@ export const routes = Routes.make()
 
 ## Step 8 — Provide the service once, at the root
 
-Here is the step that ties it together. The resources require `Incidents`; `Resource.fetch` carries that requirement into every page that fetches. Provide the `IncidentsLive` Layer once on the root layout, and the requirement is satisfied for the whole subtree — so the tree mounts with `R = never`. Forget it and the `mount` boundary is a **type error**, not a runtime surprise.
+Here is the step that ties it together. The resources require `Incidents`; `Resource.fetch` carries that requirement into every page that fetches. Provide `Incidents.layer` once on the root layout, and the requirement is satisfied for the whole subtree — so the tree mounts with `R = never`. Forget it and the `mount` boundary is a **type error**, not a runtime surprise.
 
 ```tsx
 // app/layout.tsx
 import "../styles.css";
 import { Component } from "trygg";
 import * as Router from "trygg/router";
-import { IncidentsLive } from "./services/incidents";
+import { Incidents } from "./services/incidents";
 
 export default Component.gen(function* () {
   return (
@@ -294,7 +298,7 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).pipe(Component.provide(IncidentsLive));
+}).pipe(Component.provide(Incidents.layer));
 ```
 
 `Component.provide` owns the Layer's scope: the service is created when the layout mounts and disposed when it unmounts, so the in-memory store persists across every navigation between the list and detail pages.

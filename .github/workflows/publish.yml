@@ -41,12 +41,14 @@ jobs:
     needs: check
     if: startsWith(github.ref_name, 'trygg@')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -62,6 +64,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#trygg@}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Validate semver
         env:
@@ -73,9 +76,8 @@ jobs:
           fi
 
       - name: Validate version matches package.json
-        env:
-          TAG_VERSION: ${{ steps.tag.outputs.version }}
         run: |
+          TAG_VERSION="${{ steps.tag.outputs.version }}"
           PKG_VERSION=$(jq -r .version packages/core/package.json)
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) != package.json version ($PKG_VERSION)"
@@ -89,17 +91,8 @@ jobs:
         run: bun run build
 
       - name: Publish trygg
-        env:
-          TAG_VERSION: ${{ steps.tag.outputs.version }}
-        run: |
-          if [[ "$TAG_VERSION" == *-* ]]; then
-            PRERELEASE_TAG="${TAG_VERSION#*-}"
-            PRERELEASE_TAG="${PRERELEASE_TAG%%.*}"
-            npm publish --provenance --access public --tag "$PRERELEASE_TAG"
-          else
-            npm publish --provenance --access public
-          fi
-        working-directory: packages/core
+        id: publish
+        run: bun ./scripts/release/cli.ts publish-package --package trygg --package-version "${{ steps.tag.outputs.version }}" --source-sha "${{ steps.tag.outputs.source_sha }}" --cwd packages/core
 
       - name: Create GitHub Release
         uses: actions/github-script@v8
@@ -108,26 +101,41 @@ jobs:
         with:
           script: |
             const version = process.env.TAG_VERSION;
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: context.ref.replace('refs/tags/', ''),
-              name: `trygg v${version}`,
-              draft: false,
-              prerelease: version.includes('-'),
-              generate_release_notes: true
-            });
+            const tagName = context.ref.replace('refs/tags/', '');
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tagName,
+                name: `trygg v${version}`,
+                draft: false,
+                prerelease: version.includes('-'),
+                generate_release_notes: true,
+              });
+            }
 
   publish-create-trygg:
     needs: check
     if: startsWith(github.ref_name, 'create-trygg@')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -142,7 +150,14 @@ jobs:
         id: tag
         run: |
           VERSION="${GITHUB_REF_NAME#create-trygg@}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          TRYGG_DEP=$(grep 'TRYGG_VERSION' packages/cli/src/versions.ts | sed 's/.*"\([^"]*\)".*/\1/')
+          TRYGG_SOURCE_SHA=$(jq -er '.tryggSourceSha | select(type == "string" and length == 40)' packages/cli/package.json)
+          {
+            echo "version=$VERSION"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "trygg_version=${TRYGG_DEP#^}"
+            echo "trygg_source_sha=$TRYGG_SOURCE_SHA"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Validate semver
         env:
@@ -154,46 +169,53 @@ jobs:
           fi
 
       - name: Validate version matches package.json
-        env:
-          TAG_VERSION: ${{ steps.tag.outputs.version }}
         run: |
+          TAG_VERSION="${{ steps.tag.outputs.version }}"
           PKG_VERSION=$(jq -r .version packages/cli/package.json)
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) != package.json version ($PKG_VERSION)"
             exit 1
           fi
 
-      - name: Validate trygg dependency is published
-        run: |
-          TRYGG_DEP=$(grep 'TRYGG_VERSION' packages/cli/src/versions.ts | sed 's/.*"\([^"]*\)".*/\1/')
-          if [ -z "$TRYGG_DEP" ]; then
-            echo "::error::TRYGG_VERSION not found in versions.ts"
-            exit 1
-          fi
-          TRYGG_VERSION="${TRYGG_DEP#^}"
-          if ! npm view "trygg@$TRYGG_VERSION" version > /dev/null 2>&1; then
-            echo "::error::trygg@$TRYGG_VERSION not found on npm. Publish trygg first."
-            exit 1
-          fi
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Verify exact release sync
+        run: |
+          bun ./scripts/release/cli.ts sync --source-sha "${{ steps.tag.outputs.source_sha }}" --trygg-version "${{ steps.tag.outputs.trygg_version }}" --trygg-source-sha "${{ steps.tag.outputs.trygg_source_sha }}"
+          git diff --exit-code -- packages/cli/package.json packages/cli/src/versions.ts apps/www/package.json
 
       - name: Build
         run: bun run build
 
-      - name: Publish create-trygg
-        env:
-          TAG_VERSION: ${{ steps.tag.outputs.version }}
+      - name: Typecheck create-trygg
+        run: bun run --cwd packages/cli typecheck
+
+      - name: Typecheck templates
+        run: bun run typecheck:templates
+
+      - name: Test create-trygg
+        run: bun run --cwd packages/cli test
+
+      - name: Scaffold and build smoke
+        run: bun run --cwd packages/cli test:scaffold-smoke
+
+      - name: Verify published trygg identity
+        run: bun ./scripts/release/cli.ts wait-for-npm --package trygg --package-version "${{ steps.tag.outputs.trygg_version }}" --source-sha "${{ steps.tag.outputs.trygg_source_sha }}"
+
+      - name: Verify create-trygg artifact revision
         run: |
-          if [[ "$TAG_VERSION" == *-* ]]; then
-            PRERELEASE_TAG="${TAG_VERSION#*-}"
-            PRERELEASE_TAG="${PRERELEASE_TAG%%.*}"
-            npm publish --provenance --access public --tag "$PRERELEASE_TAG"
-          else
-            npm publish --provenance --access public
-          fi
-        working-directory: packages/cli
+          test "$(git rev-parse HEAD)" = "${{ steps.tag.outputs.source_sha }}"
+          git diff --exit-code -- packages/cli
+          test -z "$(git status --porcelain --untracked-files=all -- packages/cli)"
+
+      - name: Smoke packed create-trygg artifact
+        id: artifact
+        run: bun ./scripts/release/cli.ts smoke-create-trygg-artifact --source-sha "${{ steps.tag.outputs.source_sha }}" --package-version "${{ steps.tag.outputs.version }}" --trygg-version "${{ steps.tag.outputs.trygg_version }}" --trygg-source-sha "${{ steps.tag.outputs.trygg_source_sha }}" --output-directory "${RUNNER_TEMP}"
+
+      - name: Publish create-trygg
+        id: publish
+        run: bun ./scripts/release/cli.ts publish-package --package create-trygg --package-version "${{ steps.tag.outputs.version }}" --source-sha "${{ steps.tag.outputs.source_sha }}" --cwd packages/cli --artifact "${{ steps.artifact.outputs.package_tarball }}"
 
       - name: Create GitHub Release
         uses: actions/github-script@v8
@@ -202,12 +224,25 @@ jobs:
         with:
           script: |
             const version = process.env.TAG_VERSION;
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: context.ref.replace('refs/tags/', ''),
-              name: `create-trygg v${version}`,
-              draft: false,
-              prerelease: version.includes('-'),
-              generate_release_notes: true
-            });
+            const tagName = context.ref.replace('refs/tags/', '');
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tagName,
+                name: `create-trygg v${version}`,
+                draft: false,
+                prerelease: version.includes('-'),
+                generate_release_notes: true,
+              });
+            }

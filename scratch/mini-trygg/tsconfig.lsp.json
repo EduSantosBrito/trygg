@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "node"]
+  },
+  "include": [
+    "src/lsp.ts",
+    "src/lsp-adapter.ts",
+    "src/lsp-adapter.test.ts",
+    "src/lsp.integration.test.ts",
+    "src/session.ts"
+  ]
+}

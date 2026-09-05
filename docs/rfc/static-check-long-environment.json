@@ -1,0 +1,78 @@
+{
+  "description": "A retains all acquisition/handoff/release fixes and the original acquisition generators. B combines static props and structural compatibility in one preparation walk. The mutation-time eligibility check remains. Longer comparison uses 10 warmups and 21 samples; both variants use the same updated harness.",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2"
+  ],
+  "sourceA": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "d1ee373cb589296ee77c076cc4ae7d6d7775d2cf6284e340adfbc79f71e9011d",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "sourceB": {
+    "packages/core/src/primitives/render-intrinsic.ts": "0690e714a4e2b36a997b96cd9bca28b2d20016fc06a232d4b2b8e9ccca4bf4e1",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "d1ee373cb589296ee77c076cc4ae7d6d7775d2cf6284e340adfbc79f71e9011d",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "runtime": "Bun 1.4.0; Chromium 141.0.7390.122",
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "workProbe": "BENCHMARK_WORK=1, BENCHMARK_WARMUP=10, BENCHMARK_SAMPLES=21; separate native counters after timings.",
+  "builtJavaScriptA": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "448e0dd23056601be4a8806acf79f8722b2cc56b7627df81b0f0c882f3759f0e",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-D9A-HvCw.js": "fc7637e655369a0c71ce58c0454a531205f470d08d312417772207b4e5b9b930",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "3272d71a1393041541129767a8b959f95d1a9cf97cedcf1406512097efd20058",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "builtJavaScriptB": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "2695f6c9cb0090244cb380278b907ae93ab9983af1ea6678cc1662e6883eb68a",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-D6_oII5n.js": "e8aa7d655266ed76c9b83ca08441a0b5effecea5ad81b967d1ef5763e589836c",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "7b8396a053bfd78ee317a1d69cac9808916ec71727bef8a6dbd5dbcf6fa037c1",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "artifacts": {
+    "docs/rfc/static-check-long-a1.json": "6dbfd732770d3d1181619083cadb8691213980dc12dcdb05c52a110df5551853",
+    "docs/rfc/static-check-long-b1.json": "dbd3bd5009fd187dd0b590a4d78a3c1d4582a492cb35dcb4fb57ec367bb86bb3",
+    "docs/rfc/static-check-long-b2.json": "ba7a6e4c45c961d9d2819b85031d76ca7b6c21853931df4504e43a4fa0b23891",
+    "docs/rfc/static-check-long-a2.json": "394fa1fb6be723df1b5057780fda5b64b39e557f8a15ff2dc670064f52acdfa8",
+    "docs/rfc/static-check-control.diff": "b3cbd9497748200cfe7cd0155d48909016814f9e1e88dd5ebfac7c57af2e01ef",
+    "docs/rfc/benchmark-sampling-options.diff": "03db0b1a535943238f369428139940ba078a3f09e7015714b1b925440bbc6e1a"
+  },
+  "decision": "Retain one-pass static preparation validation with full regression coverage. Long runs observe 3.4% lower mean run median for create10k, but do not establish a direct causal speedup or faster removal; short timings were inconclusive. Overall acquisition performance work remains open.",
+  "validationTest": {
+    "packages/core/src/primitives/__tests__/keyed-static-preparation.test.tsx": "ae73aa358be7a89c4d7364af15f7970c60473120be98205fb52423af9a97d91d"
+  }
+}

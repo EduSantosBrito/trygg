@@ -161,18 +161,17 @@ export const cx: (
     const renderScope = yield* Signal.CurrentRenderScope;
     const scope = renderScope ?? (yield* Effect.scope);
 
+    const initialRevisions = Signal.captureRevisions(signals);
     const initial = yield* computeClassesEffect(inputs);
     const output: Signal.Signal<string> = yield* Signal.make(initial);
+    const recompute = Signal.makeVersionedReconciler(signals, output, () =>
+      computeClassesEffect(inputs),
+    );
 
     // Subscribe to each signal — recompute on change
     const unsubscribes: Array<Effect.Effect<void>> = [];
     for (const sig of signals) {
-      const unsubscribe = yield* Signal.subscribe(sig, () =>
-        Effect.gen(function* () {
-          const newValue = yield* computeClassesEffect(inputs);
-          yield* Signal.set(output, newValue);
-        }),
-      );
+      const unsubscribe = yield* Signal.subscribe(sig, recompute);
       unsubscribes.push(unsubscribe);
     }
 
@@ -185,6 +184,8 @@ export const cx: (
         }
       }),
     );
+
+    if (!Signal.revisionsMatch(signals, initialRevisions)) yield* recompute();
 
     return output;
   });

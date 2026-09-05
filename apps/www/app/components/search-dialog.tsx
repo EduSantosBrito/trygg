@@ -101,7 +101,9 @@ export const SearchDialog = Component.gen(function* (Props: ComponentProps<Searc
   // Results list derived from both results and activeIndex
   const resultsList = yield* Signal.deriveAll(resultInputs, (items, ai) =>
     items.length === 0 ? (
-      <p className="search-dialog__empty">No matching docs. Try a broader term or browse the sidebar.</p>
+      <p className="search-dialog__empty">
+        No matching docs. Try a broader term or browse the sidebar.
+      </p>
     ) : (
       <>
         {items.map((item, index) => (

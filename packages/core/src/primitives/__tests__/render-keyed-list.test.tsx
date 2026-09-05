@@ -9,7 +9,7 @@ import { computeLIS, renderKeyedList } from "../render-keyed-list.js";
 import * as Signal from "../signal.js";
 import type { RenderContext, RenderResult } from "../renderer.js";
 import * as SafeUrl from "../../security/safe-url.js";
-import { unsafeEraseR, unsafeWidenContext } from "../../internal/unsafe.js";
+import { unsafeWidenContext } from "../../internal/unsafe.js";
 
 describe("computeLIS", () => {
   scoped("returns input indices for the longest increasing subsequence", () =>
@@ -120,7 +120,7 @@ describe("renderKeyedList", () => {
         safeUrlConfig: SafeUrl.defaultConfig,
       };
 
-      const renderResult = yield* renderKeyedList(
+      const renderResult = yield* renderKeyedList<number, never, never>(
         items,
         (item) => Effect.succeed(Element.Text({ content: String(item) })),
         (item) => Number(item),
@@ -129,8 +129,7 @@ describe("renderKeyedList", () => {
         null,
         { errorHandler: null },
         {
-          provideRenderContext: <A, E2, R2>(effect: Effect.Effect<A, E2, R2>) =>
-            unsafeEraseR(effect),
+          captureRowServices: () => Context.empty(),
           renderElement: (element, target): Effect.Effect<RenderResult> =>
             Effect.sync(() => {
               const node = document.createTextNode(

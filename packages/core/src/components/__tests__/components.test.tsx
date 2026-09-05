@@ -15,10 +15,10 @@ import { render } from "../../testing/index.js";
 import * as Component from "../../primitives/component.js";
 
 // Tagged errors for testing error boundaries
-class TestError extends Schema.TaggedErrorClass<TestError>()("TestError", {
+class TestError extends Schema.TaggedError<TestError>()("TestError", {
   detail: Schema.String,
 }) {}
-class OtherError extends Schema.TaggedErrorClass<OtherError>()("OtherError", {}) {}
+class OtherError extends Schema.TaggedError<OtherError>()("OtherError", {}) {}
 
 const catchAllView = (render_: (cause: Cause.Cause<unknown>) => JSX.Element) =>
   Component.gen(function* (Props: Component.ComponentProps<{ cause: Cause.Cause<unknown> }>) {

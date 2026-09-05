@@ -32,10 +32,12 @@ import {
   Layer,
   Option,
   Ref,
+  Scheduler,
   Schema,
   Scope,
 } from "effect";
 import * as Context from "effect/Context";
+import * as References from "effect/References";
 import { TestClock } from "effect/testing";
 import * as Signal from "../signal.js";
 // Import element.js to initialize _signalElementImpl/_textElementImpl
@@ -45,11 +47,11 @@ import * as Trace from "../../trace/index.js";
 import { unsafeEraseR } from "../../internal/unsafe.js";
 import { render } from "../../testing/index.js";
 
-class ListenerError extends Schema.TaggedErrorClass<ListenerError>()("ListenerError", {
+class ListenerError extends Schema.TaggedError<ListenerError>()("ListenerError", {
   message: Schema.String,
 }) {}
 
-class RenderError extends Schema.TaggedErrorClass<RenderError>()("RenderError", {
+class RenderError extends Schema.TaggedError<RenderError>()("RenderError", {
   message: Schema.String,
 }) {}
 
@@ -487,6 +489,45 @@ describe("Signal.update", () => {
       assert.isFalse(notified);
     }),
   );
+
+  scoped("should preserve every concurrent read-modify-write under scheduler yields", () =>
+    Effect.gen(function* () {
+      // Scope: stresses the update commit boundary with fibers forced to yield frequently.
+      // Assertion: every released updater contributes exactly one increment.
+      const signal = yield* Signal.make(0);
+      const release = yield* Deferred.make<void>();
+      const updateCount = 100;
+      const fiber = yield* Effect.forEach(
+        Array.from({ length: updateCount }),
+        () => Deferred.await(release).pipe(Effect.andThen(Signal.update(signal, (n) => n + 1))),
+        { concurrency: "unbounded", discard: true },
+      ).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 5), Effect.forkChild);
+
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(fiber);
+
+      assert.strictEqual(yield* Signal.peek(signal), updateCount);
+    }),
+  );
+
+  scoped("should release the mutation gate before invoking reentrant listeners", () =>
+    Effect.gen(function* () {
+      // Scope: covers listener reentrancy into the same signal after an atomic commit.
+      // Assertion: the nested update completes instead of deadlocking the mutation gate.
+      const signal = yield* Signal.make(0);
+      yield* Signal.subscribe(signal, () =>
+        Signal.peek(signal).pipe(
+          Effect.flatMap((value) =>
+            value === 1 ? Signal.update(signal, (n) => n + 1) : Effect.void,
+          ),
+        ),
+      ).pipe(Effect.asVoid);
+
+      yield* Signal.set(signal, 1);
+
+      assert.strictEqual(yield* Signal.peek(signal), 2);
+    }),
+  );
 });
 
 // =============================================================================
@@ -666,6 +707,60 @@ describe("Signal.subscribe", () => {
       assert.isTrue(secondListenerCalled);
     }),
   );
+
+  scoped("should preserve listener failure, defect, and interruption classifications", () =>
+    Effect.gen(function* () {
+      // Scope: covers the Cause policy at the listener fanout boundary.
+      // Assertion: typed failures are isolated while defects and interruption remain in Exit.
+      const failed = yield* Signal.make(0);
+      yield* Signal.subscribe(failed, () =>
+        Effect.fail(new ListenerError({ message: "expected" })),
+      ).pipe(Effect.asVoid);
+      const failureExit = yield* Effect.exit(Signal.set(failed, 1));
+
+      const defected = yield* Signal.make(0);
+      yield* Signal.subscribe(defected, () => {
+        // oxlint-disable-next-line effect/no-effect-escape-hatch -- Deliberately supplies the Die branch of the listener Cause matrix.
+        return Effect.die("listener-defect");
+      }).pipe(Effect.asVoid);
+      const defectExit = yield* Effect.exit(Signal.set(defected, 1));
+
+      const interrupted = yield* Signal.make(0);
+      yield* Signal.subscribe(interrupted, () => Effect.interrupt).pipe(Effect.asVoid);
+      const interruptExit = yield* Effect.exit(Signal.set(interrupted, 1));
+
+      assert.isTrue(Exit.isSuccess(failureExit));
+      assert.isTrue(Exit.hasDies(defectExit));
+      assert.isTrue(Exit.hasInterrupts(interruptExit));
+    }),
+  );
+
+  scoped("should leave no listener when subscription races owner disposal", () =>
+    Effect.gen(function* () {
+      // Scope: forces subscribe and disposal to queue behind the same lifecycle gate.
+      // Assertion: either ordering linearizes to a disposed signal with zero retained listeners.
+      for (const closeFirst of [false, true]) {
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        const signal = yield* Signal.make(0).pipe(Scope.provide(owner));
+        yield* signal._gate.take(1);
+        const subscribe = Signal.subscribe(signal, () => Effect.void).pipe(Effect.asVoid);
+        const close = Scope.close(owner, Exit.void);
+        const first = yield* (closeFirst ? close : subscribe).pipe(Effect.forkChild);
+        const second = yield* (closeFirst ? subscribe : close).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        yield* signal._gate.release(1);
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+
+        const unsubscribeUnsafe = Signal.subscribeUnsafe(signal, () => Effect.void);
+        assert.strictEqual(signal._listeners.size, 0);
+        unsubscribeUnsafe();
+        assert.strictEqual(signal._listeners.size, 0);
+      }
+    }),
+  );
 });
 
 // =============================================================================
@@ -761,6 +856,52 @@ describe("Signal.derive", () => {
 
       const updated = yield* Signal.get(quadrupled);
       assert.strictEqual(updated, 20);
+    }),
+  );
+
+  scoped("should evaluate the initial projection once regardless of trace filtering", () =>
+    Effect.gen(function* () {
+      // Scope: guards the projection/telemetry boundary with tracing enabled and filtered.
+      // Assertion: both modes call the projection once and store that exact value.
+      const runCase = Effect.fnUntraced(function* (record: boolean) {
+        const source = yield* Signal.make(2);
+        let calls = 0;
+        const derive = Signal.derive(source, (value) => {
+          calls += 1;
+          if (calls > 1) return assert.fail("projection was evaluated more than once");
+          return value * 3;
+        });
+        const derived = record
+          ? yield* Trace.record(derive, Trace.makeRecorder())
+          : yield* derive.pipe(Effect.provideService(References.MinimumLogLevel, "Fatal"));
+        return { calls, value: yield* Signal.peek(derived) };
+      });
+
+      const filtered = yield* runCase(false);
+      const recorded = yield* runCase(true);
+
+      assert.deepStrictEqual(filtered, { calls: 1, value: 6 });
+      assert.deepStrictEqual(recorded, { calls: 1, value: 6 });
+    }),
+  );
+
+  scoped("should reconcile a source change that occurs before subscription", () =>
+    Effect.gen(function* () {
+      // Scope: forces a source write from the initial projection, before derive subscribes.
+      // Assertion: the returned derived signal already reflects the post-write snapshot.
+      const source = yield* Signal.make(0);
+      const services = yield* Effect.context<never>();
+      let firstProjection = true;
+      const derived = yield* Signal.derive(source, (value) => {
+        if (firstProjection) {
+          firstProjection = false;
+          Effect.runSyncWith(services)(Signal.set(source, 1));
+        }
+        return value;
+      });
+
+      assert.strictEqual(yield* Signal.peek(source), 1);
+      assert.strictEqual(yield* Signal.peek(derived), 1);
     }),
   );
 });
@@ -1207,28 +1348,25 @@ describe("Signal memory management", () => {
     }),
   );
 
-  scoped("should stop all fibers when resource scope closes", () =>
+  scoped("should not invoke a subscription after its owner scope closes", () =>
     Effect.gen(function* () {
+      // Scope: verifies scope finalization removes future listener admission.
+      // Assertion: a post-close signal update invokes the listener zero times.
       const signal = yield* Signal.make(0);
       const scope = yield* Scope.make();
-      let fiberStillRunning = true;
+      let calls = 0;
 
       const unsubscribe = yield* Signal.subscribe(signal, () =>
-        Effect.gen(function* () {
-          yield* TestClock.adjust(1000);
-          fiberStillRunning = true;
+        Effect.sync(() => {
+          calls += 1;
         }),
       );
       yield* Scope.addFinalizer(scope, unsubscribe);
 
       yield* Scope.close(scope, Exit.void);
-
-      yield* TestClock.adjust(10);
-
       yield* Signal.set(signal, 1);
-      yield* TestClock.adjust(20);
 
-      assert.isTrue(fiberStillRunning);
+      assert.strictEqual(calls, 0);
     }),
   );
 });
@@ -1248,6 +1386,24 @@ describe("Signal.suspend", () => {
     assert.isTrue(isText(el), `expected Text, got ${el._tag}`);
     return isText(el) ? el.content : "";
   };
+
+  const awaitText = Effect.fnUntraced(function* (signal: Signal.Signal<Element>, expected: string) {
+    const reached = yield* Deferred.make<void>();
+    const check = Effect.fnUntraced(function* () {
+      const value = yield* Signal.peek(signal);
+      if (isText(value) && value.content === expected) {
+        yield* Deferred.succeed(reached, undefined).pipe(Effect.asVoid);
+      }
+    });
+    const unsubscribe = yield* Signal.subscribe(signal, check);
+
+    return yield* Effect.gen(function* () {
+      // Subscribe before checking so a concurrent transition cannot be missed.
+      yield* check();
+      yield* Deferred.await(reached);
+      return yield* Signal.peek(signal);
+    }).pipe(Effect.ensuring(unsubscribe));
+  });
 
   /**
    * Build a mock component matching SuspendComponentType shape.
@@ -1305,17 +1461,210 @@ describe("Signal.suspend", () => {
 
       const element = suspended({});
       assert.strictEqual(element._tag, "Component");
-      yield* Effect.scoped(unsafeEraseR(element.run()));
-
-      // Let the render fiber run
-      yield* TestClock.adjust(0);
-      yield* Effect.yieldNow;
-
-      const view = yield* Signal.get(suspended._signal);
+      const runScope = yield* Scope.make();
+      const view = yield* unsafeEraseR(element.run()).pipe(Scope.provide(runScope));
       assert.isTrue(isSignalElement(view), `expected SignalElement, got ${view._tag}`);
+      if (!isSignalElement(view)) return;
 
-      const failed = yield* Signal.get(isSignalElement(view) ? view.signal : suspended._signal);
-      assert.strictEqual(textContent(failed), "failed");
+      const failureView = yield* awaitText(view.signal, "failed");
+      assert.strictEqual(textContent(failureView), "failed");
+      yield* Scope.close(runScope, Exit.void);
+    }),
+  );
+
+  scoped("should interrupt suspended work and dispose its view with the ambient scope", () =>
+    Effect.gen(function* () {
+      // Scope: runs suspend outside a renderer component under an explicit owner scope.
+      // Assertion: closing that owner interrupts work and disposes the internal view signal.
+      const started = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const comp = mockComponent(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(started, undefined);
+          return yield* Effect.never;
+        }).pipe(
+          Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid)),
+        ),
+      );
+      const suspended = yield* Signal.suspend(comp).pipe(
+        Signal.on("Pending", text("loading")),
+        Signal.on("Failure", () => text("failed")),
+        Signal.exhaustive,
+      );
+      const element = suspended({});
+      assert.strictEqual(element._tag, "Component");
+      const runScope = yield* Scope.make();
+      const rendered = yield* unsafeEraseR(element.run()).pipe(Scope.provide(runScope));
+      assert.isTrue(isSignalElement(rendered));
+
+      yield* Deferred.await(started);
+      yield* Scope.close(runScope, Exit.void);
+      yield* Deferred.await(interrupted);
+
+      if (isSignalElement(rendered)) {
+        assert.isTrue(yield* Ref.get(rendered.signal._disposed));
+      }
+    }),
+  );
+
+  scoped(
+    "should remove suspend subscriptions and await active cleanup with its ambient owner",
+    () =>
+      Effect.gen(function* () {
+        // Scope: a completed render installs a dependency before its next render blocks.
+        // Assertion: owner close waits for cleanup, removes subscriptions, and disposes the view.
+        const source = yield* Signal.make(0);
+        const started = yield* Deferred.make<void>();
+        const cleanupStarted = yield* Deferred.make<void>();
+        const releaseCleanup = yield* Deferred.make<void>();
+        let renders = 0;
+        let releases = 0;
+        let pendingCalls = 0;
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined));
+        const comp = mockComponent(
+          Effect.gen(function* () {
+            renders++;
+            const value = yield* Signal.get(source);
+            if (value === 0) return text("ready");
+            return yield* Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(
+                Deferred.succeed(cleanupStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseCleanup)),
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      releases++;
+                    }),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+        const suspended = yield* Signal.suspend(comp).pipe(
+          Signal.on("Pending", () => {
+            pendingCalls++;
+            return text("loading");
+          }),
+          Signal.on("Failure", () => text("failed")),
+          Signal.exhaustive,
+        );
+        const element = suspended({});
+        assert.strictEqual(element._tag, "Component");
+        const view = yield* unsafeEraseR(element.run()).pipe(Scope.provide(owner));
+        assert.isTrue(isSignalElement(view));
+        if (!isSignalElement(view)) return;
+        yield* awaitText(view.signal, "ready");
+        // Let the ready worker finish its subscription handshake.
+        yield* Effect.yieldNow;
+        assert.strictEqual(source._listeners.size, 1);
+        yield* Signal.set(source, 1);
+        yield* Deferred.await(started);
+        const pendingBeforeClose = pendingCalls;
+        yield* Effect.gen(function* () {
+          const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild);
+          yield* Deferred.await(cleanupStarted);
+          assert.isUndefined(closing.pollUnsafe());
+          yield* Signal.set(source, 2);
+          assert.strictEqual(renders, 2);
+          assert.strictEqual(pendingCalls, pendingBeforeClose);
+          yield* Deferred.succeed(releaseCleanup, undefined);
+          yield* Fiber.join(closing);
+          assert.strictEqual(releases, 1);
+          assert.strictEqual(source._listeners.size, 0);
+          assert.isTrue(yield* Ref.get(view.signal._disposed));
+          yield* Signal.set(source, 3);
+          assert.strictEqual(renders, 2);
+        }).pipe(Effect.ensuring(Deferred.succeed(releaseCleanup, undefined)));
+      }),
+  );
+
+  scoped("should reject a suspend render started through a closed ambient owner", () =>
+    Effect.gen(function* () {
+      // Scope: a retained suspended component is invoked after its supplied render owner closes.
+      // Assertion: neither Pending nor source code runs and admission exits interrupted.
+      let pendingCalls = 0;
+      let renders = 0;
+      const suspended = yield* Signal.suspend(
+        mockComponent(
+          Effect.sync(() => {
+            renders++;
+            return text("ready");
+          }),
+        ),
+      ).pipe(
+        Signal.on("Pending", () => {
+          pendingCalls++;
+          return text("loading");
+        }),
+        Signal.on("Failure", () => text("failed")),
+        Signal.exhaustive,
+      );
+      const before = pendingCalls;
+      const owner = yield* Scope.make();
+      yield* Scope.close(owner, Exit.void);
+      const element = suspended({});
+      assert.strictEqual(element._tag, "Component");
+      const exit = yield* unsafeEraseR(element.run()).pipe(Scope.provide(owner), Effect.exit);
+      assert.isTrue(Exit.hasInterrupts(exit));
+      assert.strictEqual(pendingCalls, before);
+      assert.strictEqual(renders, 0);
+    }),
+  );
+
+  scoped("should recover typed failures and settle terminal source interruption", () =>
+    Effect.gen(function* () {
+      // Scope: covers typed failure, defect, and explicit source interruption at the suspend boundary.
+      // Assertion: failures recover; interruption renders terminal UI but preserves its interrupted Exit.
+      const runCase = Effect.fnUntraced(function* (
+        effect: Effect.Effect<Element, RenderError>,
+        expectsFallback: boolean,
+      ) {
+        let fallbackCalls = 0;
+        const completed = yield* Deferred.make<Exit.Exit<Element, RenderError>>();
+        const comp = mockComponent(
+          effect.pipe(
+            Effect.onExit((exit) => Deferred.succeed(completed, exit).pipe(Effect.asVoid)),
+          ),
+        );
+        const suspended = yield* Signal.suspend(comp).pipe(
+          Signal.on("Pending", text("loading")),
+          Signal.on("Failure", () => {
+            fallbackCalls += 1;
+            return text("failed");
+          }),
+          Signal.exhaustive,
+        );
+        const element = suspended({});
+        assert.strictEqual(element._tag, "Component");
+        const runScope = yield* Scope.make();
+        const view = yield* unsafeEraseR(element.run()).pipe(Scope.provide(runScope));
+        assert.isTrue(isSignalElement(view), `expected SignalElement, got ${view._tag}`);
+        if (expectsFallback && isSignalElement(view)) {
+          yield* awaitText(view.signal, "failed");
+        }
+        const exit = yield* Deferred.await(completed);
+        yield* Scope.close(runScope, Exit.void);
+        return { exit, fallbackCalls };
+      });
+
+      const failure = yield* runCase(
+        Effect.fail(new RenderError({ message: "expected failure" })),
+        true,
+      );
+      // oxlint-disable-next-line effect/no-effect-escape-hatch -- Deliberately supplies the Die branch of the suspend Cause matrix.
+      const defect = yield* runCase(Effect.die("render-defect"), false);
+      const interruption = yield* runCase(Effect.interrupt, true);
+
+      assert.isTrue(Exit.isFailure(failure.exit));
+      assert.strictEqual(failure.fallbackCalls, 1);
+      assert.isTrue(Exit.hasDies(defect.exit));
+      assert.strictEqual(defect.fallbackCalls, 0);
+      assert.isTrue(Exit.hasInterrupts(interruption.exit));
+      assert.strictEqual(interruption.fallbackCalls, 1);
     }),
   );
 

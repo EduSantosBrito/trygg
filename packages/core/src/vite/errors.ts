@@ -21,7 +21,7 @@ const PluginFileSystemOperation = Schema.Union([
  * @internal
  * @since 1.0.0
  */
-export class PluginFileSystemError extends Schema.TaggedErrorClass<PluginFileSystemError>()(
+export class PluginFileSystemError extends Schema.TaggedError<PluginFileSystemError>()(
   "PluginFileSystemError",
   {
     operation: PluginFileSystemOperation,
@@ -40,11 +40,12 @@ export class PluginFileSystemError extends Schema.TaggedErrorClass<PluginFileSys
  * @internal
  * @since 1.0.0
  */
-export class PluginBootstrapError extends Schema.TaggedErrorClass<PluginBootstrapError>()(
+export class PluginBootstrapError extends Schema.TaggedError<PluginBootstrapError>()(
   "PluginBootstrapError",
   {
-    reason: Schema.Literal("NotReady"),
+    reason: Schema.Literals(["NotReady", "Interrupted", "Defect"]),
     message: Schema.String,
+    cause: Schema.optional(Schema.Unknown),
   },
 ) {
   static notReady(): PluginBootstrapError {
@@ -52,5 +53,36 @@ export class PluginBootstrapError extends Schema.TaggedErrorClass<PluginBootstra
       reason: "NotReady",
       message: "Plugin bootstrap is not ready. Vite must call configResolved before this hook.",
     });
+  }
+
+  static interrupted(cause: unknown): PluginBootstrapError {
+    return new PluginBootstrapError({
+      reason: "Interrupted",
+      message: "Plugin bootstrap was interrupted before readiness was established.",
+      cause,
+    });
+  }
+
+  static defect(cause: unknown): PluginBootstrapError {
+    return new PluginBootstrapError({
+      reason: "Defect",
+      message: "Plugin bootstrap failed before readiness was established.",
+      cause,
+    });
+  }
+}
+
+/**
+ * Route declaration codegen could not preserve the source schema contract.
+ *
+ * @internal
+ * @since 1.0.0
+ */
+export class PluginParseError extends Schema.TaggedError<PluginParseError>()("PluginParseError", {
+  description: Schema.String,
+  input: Schema.Unknown,
+}) {
+  override get message(): string {
+    return this.description;
   }
 }

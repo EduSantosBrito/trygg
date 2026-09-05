@@ -8,7 +8,7 @@
  * - Runtime-effectful operations use Trace.emit for observability
  * - Callers enter through named helpers instead of inline assertions
  */
-import { Context, Data, Effect, Layer, Predicate, Scope } from "effect";
+import { Cause, Context, Data, Effect, Layer, Predicate, Scope } from "effect";
 import * as Match from "effect/Match";
 import * as Trace from "../trace/index.js";
 import type { Component } from "../primitives/component.js";
@@ -218,16 +218,17 @@ export function unsafeAsParams(record: Record<string, unknown>): unknown {
 }
 
 /**
- * Narrow a squashed error value from unknown to E.
+ * Reclassify a Cause that is known to contain a defect or interruption as an
+ * unrecoverable Cause while retaining every original reason.
  *
- * SAFETY: The error was extracted via Cause.squash from a Cause produced by an
- * Effect<A, E, R>. For typed failures (Fail variants), the squashed value is of
- * type E. For defects/interruptions, the surrounding catchAllCause provides a
- * safety net for unrecoverable errors.
+ * SAFETY: The caller has inspected every reason and only calls this helper when
+ * the Cause is not composed exclusively of typed failures. The error phantom is
+ * erased so defects, interruptions, and mixed Causes cannot enter a typed
+ * recovery channel; the runtime Cause value is returned unchanged.
  */
-export function unsafeAsError<E>(error: unknown): E;
-export function unsafeAsError(error: unknown): unknown {
-  return error;
+export function unsafeAsUnrecoverableCause<E>(cause: Cause.Cause<E>): Cause.Cause<never>;
+export function unsafeAsUnrecoverableCause(cause: unknown): unknown {
+  return cause;
 }
 
 // =============================================================================

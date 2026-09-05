@@ -27,7 +27,7 @@ Props read from `ComponentProps<P>` are read once at mount. To make a value reac
 import { Component, type ComponentProps } from "trygg";
 import { Schema } from "effect";
 
-class EmailInvalid extends Schema.TaggedErrorClass<EmailInvalid>()("EmailInvalid", {
+class EmailInvalid extends Schema.TaggedError<EmailInvalid>()("EmailInvalid", {
   email: Schema.String,
 }) {}
 
@@ -56,7 +56,9 @@ class HttpClient extends Context.Service<
 
 class UserRepository extends Context.Service<
   UserRepository,
-  { readonly getUser: (id: string) => Effect.Effect<{ readonly id: string; readonly name: string }> }
+  {
+    readonly getUser: (id: string) => Effect.Effect<{ readonly id: string; readonly name: string }>;
+  }
 >()("app/UserRepository") {}
 
 const HttpClientLive = Layer.succeed(HttpClient, {

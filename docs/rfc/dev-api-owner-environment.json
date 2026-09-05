@@ -1,0 +1,9 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "effect": "4.0.0-rc.112",
+  "sha256": {
+    "scripts/benchmark-dev-api.ts": "53990a63b9ecd2ddd1f559322d68ae147f54117d59d7386d0b67146771060610",
+    "packages/core/src/vite/plugin.ts": "c9bf6a204e8e4325abba1c49bca624ae115ff7084adc5d2792cd0bdd5c76746d",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  }
+}

@@ -30,7 +30,7 @@ const UserNotFoundSchema = Schema.TaggedStruct("UserNotFound", {
   id: Schema.String,
 });
 
-export class UserNotFound extends Schema.TaggedErrorClass<UserNotFound>()("UserNotFound", {
+export class UserNotFound extends Schema.TaggedError<UserNotFound>()("UserNotFound", {
   id: Schema.String,
 }) {}
 

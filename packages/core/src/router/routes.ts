@@ -175,6 +175,24 @@ export const make = (): RoutesCollection =>
     error: undefined,
   });
 
+/**
+ * Owner for root route collection construction.
+ *
+ * @remarks
+ * Keeps collection construction distinct from the individual `Route` builder
+ * while exposing the canonical `Routes.make()` entrypoint.
+ *
+ * @example
+ * ```tsx
+ * const routes = Routes.make().add(Route.make("/").component(HomePage))
+ * ```
+ *
+ * @category Route Collections
+ * @public
+ * @since 1.0.0
+ */
+export const Routes = { make };
+
 // =============================================================================
 // RoutesManifest FiberRef — Implicit manifest for Outlet
 // =============================================================================

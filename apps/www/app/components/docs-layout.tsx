@@ -6,7 +6,7 @@ import { DocsSidebar } from "./docs-sidebar";
 import { Footer } from "./footer";
 import { Header } from "./header";
 import { sidebarGroups } from "../content/sidebar";
-import { DocsHeadings } from "../content/headings";
+import { DocsHeadings, DocsHeadingsLive } from "../content/headings";
 import { currentRouteSnapshot } from "../lib/router-snapshot";
 
 const sidebarLinks = sidebarGroups.flatMap((group) => group.links);
@@ -263,4 +263,4 @@ export const DocsLayout = Component.gen(function* () {
       <Footer />
     </>
   );
-});
+}).pipe(Component.provide(DocsHeadingsLive));

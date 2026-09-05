@@ -1,0 +1,74 @@
+{
+  "description": "A retains all static acquisition/handoff/release fixes. B removes only the outer generator in keyed DOM acquisition; inner generator, native mask, and onExit cleanup remain.",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2"
+  ],
+  "sourceA": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "979ad50fbdb472b4c47cb95a6342169b630ac3cfa0a09ffe19badb5d2296002e",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "sourceB": {
+    "packages/core/src/primitives/render-intrinsic.ts": "50943d74437652d32a8e52f9f5e3b01a9112b41e9941012e69b439506d2817db",
+    "packages/core/src/primitives/render-keyed-list.ts": "138981f16b04c1edb9354538e2c7a1f11bf857c1f3aa2dfbe6ec45be08ecc9c1",
+    "packages/core/src/primitives/renderer.ts": "f30124023a2261e8e3fa1feea9957d1d4ee06575bb74a981f76b951606f5dc1e",
+    "scripts/benchmark-browser.ts": "b709d07d70c9e13d768cadc7039e308f485febd2700d77605aef45f765698a30",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  },
+  "runtime": "Bun 1.4.0; Chromium 141.0.7390.122",
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "workProbe": "BENCHMARK_WORK=1; five warmups and seven timing samples, then separate native counters per case.",
+  "builtJavaScriptA": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "448e0dd23056601be4a8806acf79f8722b2cc56b7627df81b0f0c882f3759f0e",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-D9A-HvCw.js": "fc7637e655369a0c71ce58c0454a531205f470d08d312417772207b4e5b9b930",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "3272d71a1393041541129767a8b959f95d1a9cf97cedcf1406512097efd20058",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "builtJavaScriptB": {
+    "packages/core/dist/api.js": "2349ee1a8c283c9c121cf94bab008aa2ade549e028df70a0013cdaa9603c6462",
+    "packages/core/dist/callback-runtime-GgVwOa2W.js": "2eead64259bbb428e59f253b2524940354cc2d7f78ce649eae5267953487b8c3",
+    "packages/core/dist/chunk-pbuEa-1d.js": "16a983b80655888fa521be8504570aef2fc3713d1a723ff439beddac3a2428c3",
+    "packages/core/dist/component-B35q08Qs.js": "aa88fbaa3af9f7724e77f50c581f00d48eb0f9070344718e5e97154a55037136",
+    "packages/core/dist/config.js": "7c45ec66b7a0a783831476b5a0450db9f58fe7afceedeb66339e664100f678df",
+    "packages/core/dist/cx-DwF_kqhG.js": "b1e8fc5d46176391455f2063ffcb8dc660c9026e702e8fbf93e83f288ae77dfc",
+    "packages/core/dist/dev-platform-bun-DvGxGBvd.js": "2e88e07b621f9404cb60220c1f6385eed5c4a42a419bdc3b5c869b2ebb7f3e5d",
+    "packages/core/dist/index.js": "b090854e7c5e207cdd3bf98b1b5243f7ac8ff0fb470bb122a0e302b042c645a0",
+    "packages/core/dist/jsx-dev-runtime.js": "b3f29fff78e5bfa5bf622b0f3029ee96b363d0eb589617d117d1ee921ddbd0c2",
+    "packages/core/dist/jsx-runtime-C0sNtJzp.js": "08acd969023a571089275f4b940d3efa78b9fba9a12dacef3d5fee8f2fd56c0e",
+    "packages/core/dist/jsx-runtime.js": "a5b694f8c9e463572a31e64619f3891283682f69a5c27e0bbf8694d0ac5ace8b",
+    "packages/core/dist/observer-x3HonyMD.js": "6d5617c796bc417e3de9ef93a2715eb51af588bcbcc4bf4d37e58fbf7c4ee9a2",
+    "packages/core/dist/renderer-CCAi1ug8.js": "90b3db4a5da7c21dd947725a6da3ce90a23492eb99153755a04f4af6aedad73b",
+    "packages/core/dist/router.js": "f8c2260d1a7c11edd2e18371b05c102288cfa564062295f77e1f757844af3343",
+    "packages/core/dist/testing.js": "5a91f44b158f809ae74d10b3596477d070e4dde10c8452c6246529856ab98bd1",
+    "packages/core/dist/trace-D9Ac4bZj.js": "69cb397a164831d37909ef0b68b020dc4940e5c04c5e638aec5b1b285300e106",
+    "packages/core/dist/unsafe-CwZsvzs-.js": "30ae59ea27a9757be3d27306cd0f49e03f75e4a2a34f7125042ea17d2411ba36",
+    "packages/core/dist/vite-plugin.js": "9882126d22bbaeb1c0a7e55a3ff1e4802962496bf42ab0f940564256e69e7c7f"
+  },
+  "artifacts": {
+    "docs/rfc/acquisition-outer-control-a1.json": "76b9d20953d3f3a9941b27745d041d5443ef4bb692b0bedbce29f693ef114fe0",
+    "docs/rfc/acquisition-outer-control-b1.json": "e17b5d55d47761dd8e259d8f1bb650cbc791ec35563c39bb47ec53f481fa409e",
+    "docs/rfc/acquisition-outer-control-b2.json": "93062c2779f5773f818a01528e35dc857f6cde1d48b6b087d79cf4abda877896",
+    "docs/rfc/acquisition-outer-control-a2.json": "971be1e8819d39573ae7dde67e44b4b5be058648a9814369ad0731f37568fee7",
+    "docs/rfc/acquisition-outer-control.diff": "dcb89e568221bb36849d30f49d56e9c40011f5d7c941ee628590cc4892878e8e"
+  },
+  "decision": "Rejected: create10k mean run median rose 3.6%, removal rose 6.2%; retain the original acquisition generator."
+}

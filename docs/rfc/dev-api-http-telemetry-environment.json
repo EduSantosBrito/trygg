@@ -1,0 +1,10 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "effect": "4.0.0-rc.112",
+  "sha256": {
+    "scripts/benchmark-dev-api.ts": "53990a63b9ecd2ddd1f559322d68ae147f54117d59d7386d0b67146771060610",
+    "packages/core/src/vite/plugin.ts": "fec143b40ce293cb2874bda6527ae1f0f6e211c5fef2035b711f78a12c8182e7",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  },
+  "limits": "Two sequential fresh Bun processes; Web conversion, middleware and cleanup, without TCP, concurrent load, or console I/O. No controlled speed comparison."
+}

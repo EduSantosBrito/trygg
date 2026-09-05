@@ -23,7 +23,7 @@ import {
  * Error raised when an invalid component type is used in JSX.
  * @since 1.0.0
  */
-export class InvalidComponentError extends Schema.TaggedErrorClass<InvalidComponentError>()(
+export class InvalidComponentError extends Schema.TaggedError<InvalidComponentError>()(
   "InvalidComponentError",
   {
     reason: Schema.Union([
@@ -39,7 +39,7 @@ export class InvalidComponentError extends Schema.TaggedErrorClass<InvalidCompon
  * Error raised when Component.gen is called incorrectly.
  * @since 1.0.0
  */
-export class ComponentGenError extends Schema.TaggedErrorClass<ComponentGenError>()(
+export class ComponentGenError extends Schema.TaggedError<ComponentGenError>()(
   "ComponentGenError",
   {
     message: Schema.String,
@@ -108,7 +108,8 @@ type ExtractResultContext<Result> = [Result] extends [Effect.Effect<infer A, inf
   : ElementRequirementsOf<Result>;
 type ComponentError<Eff, Result> = ExtractError<Eff> | ExtractResultError<Result>;
 type ComponentContext<Eff, Result> = ExtractContext<Eff> | ExtractResultContext<Result>;
-type ComponentYieldable = Effect.Yieldable.Any;
+// oxlint-disable-next-line effect/no-unknown-runtime-requirements -- This yield constraint is existential, preserves concrete R, and is not an executable root (RFC 5.2, 8.4, 9.2).
+type ComponentYieldable = Effect.Effect<unknown, unknown, unknown>;
 type LegacyGenResume = undefined;
 
 const effectComponentTag = "EffectComponent";
@@ -244,7 +245,7 @@ export const isEffectComponent = (value: unknown): value is Component.Type<unkno
  * Type alias for Effect v4 yieldables used in Effect.gen
  * @internal
  */
-type EffectYieldable<A, E, R> = Effect.Yieldable<Effect.Effect<A, E, R>, A, E, R>;
+type EffectYieldable<A, E, R> = Effect.Effect<A, E, R>;
 
 /**
  * Extract error type from yieldable union
@@ -252,7 +253,7 @@ type EffectYieldable<A, E, R> = Effect.Yieldable<Effect.Effect<A, E, R>, A, E, R
  */
 type ExtractError<Eff> = [Eff] extends [never]
   ? never
-  : [Eff] extends [Effect.Yieldable<infer _Self, infer _A, infer E, infer _R>]
+  : [Eff] extends [Effect.Effect<infer _A, infer E, infer _R>]
     ? E
     : never;
 
@@ -262,7 +263,7 @@ type ExtractError<Eff> = [Eff] extends [never]
  */
 type ExtractContext<Eff> = [Eff] extends [never]
   ? never
-  : [Eff] extends [Effect.Yieldable<infer _Self, infer _A, infer _E, infer R>]
+  : [Eff] extends [Effect.Effect<infer _A, infer _E, infer R>]
     ? R
     : never;
 

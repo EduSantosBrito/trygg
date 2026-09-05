@@ -1,0 +1,23 @@
+--- accepted/render-keyed-list.ts
++++ rejected/render-keyed-list.ts
+@@ -255,8 +255,7 @@
+           return Effect.succeed(finish(syncResult));
+         }),
+       ).pipe(
+-        Effect.onExit((exit) => {
+-          if (Exit.isSuccess(exit)) return Effect.void;
++        Effect.catchCause((cause) => {
+           const cleanups: Array<Effect.Effect<void, unknown>> = [];
+           if (acquiredResult !== undefined)
+             cleanups.push(RenderTransaction.cleanup(acquiredResult));
+@@ -268,7 +267,9 @@
+             const marker = acquiredEnd;
+             cleanups.push(Effect.sync(() => marker.remove()));
+           }
+-          return cleanupAll(cleanups);
++          return Effect.uninterruptible(
++            Effect.failCause(cause).pipe(Effect.onError(() => cleanupAll(cleanups))),
++          );
+         }),
+       );
+     });

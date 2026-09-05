@@ -1,10 +1,14 @@
 import "../styles.css";
-import { Effect } from "effect";
 import { Component, Signal } from "trygg";
 import * as Router from "trygg/router";
-import { ApiClientLive } from "trygg/api";
-import { AppTheme, AppThemeDark } from "./services/theme";
+import { AppServicesLive } from "./services/app";
+import { AppTheme } from "./services/theme";
 import { CommandPalette } from "./components/command-palette";
+import { MutationAccessForm } from "./components/mutation-access-form";
+import {
+  documentShortcutListenerHost,
+  installCommandPaletteShortcut,
+} from "./command-palette-lifecycle";
 
 export default Component.gen(function* () {
   const { mode } = yield* AppTheme;
@@ -15,24 +19,8 @@ export default Component.gen(function* () {
   const closeCmdk = () => Signal.set(cmdkOpen, false);
 
   // Global keyboard shortcut for ⌘K / Ctrl+K
-  yield* Effect.acquireRelease(
-    Effect.sync(() => {
-      const handler = (event: KeyboardEvent) => {
-        if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-          event.preventDefault();
-          Effect.runFork(
-            Effect.gen(function* () {
-              const isOpen = yield* Signal.peek(cmdkOpen);
-              yield* Signal.set(cmdkOpen, !isOpen);
-            }),
-          );
-        }
-      };
-
-      document.addEventListener("keydown", handler);
-      return handler;
-    }),
-    (handler) => Effect.sync(() => document.removeEventListener("keydown", handler)),
+  yield* installCommandPaletteShortcut(documentShortcutListenerHost, () =>
+    Signal.update(cmdkOpen, (isOpen) => !isOpen),
   );
 
   // Reactive active-state signals for nav links
@@ -117,6 +105,7 @@ export default Component.gen(function* () {
             </nav>
 
             <div className="nav-rail__footer">
+              <MutationAccessForm />
               <div className="nav-rail__user">
                 <div className="nav-rail__avatar">
                   <span className="nav-rail__avatar-icon" aria-hidden="true" />
@@ -140,4 +129,4 @@ export default Component.gen(function* () {
       </body>
     </html>
   );
-}).pipe(Component.provide(AppThemeDark), Component.provide(ApiClientLive));
+}).pipe(Component.provide(AppServicesLive));

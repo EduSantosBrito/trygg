@@ -6,6 +6,11 @@ import { Config, Effect, Match } from "effect";
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
 
+export interface PackageManagerProcess {
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+}
+
 /**
  * Detect which package manager invoked the CLI
  * Checks npm_config_user_agent set by package managers
@@ -32,16 +37,24 @@ export const detectPackageManager: Effect.Effect<PackageManager, Config.ConfigEr
 );
 
 /**
- * Get install command for a package manager
+ * Get the executable and arguments used to install dependencies.
  */
-export const getInstallCommand = (pm: PackageManager): string =>
+export const getInstallProcess = (pm: PackageManager): PackageManagerProcess =>
   Match.value(pm).pipe(
-    Match.when("bun", () => "bun install"),
-    Match.when("pnpm", () => "pnpm install"),
-    Match.when("yarn", () => "yarn"),
-    Match.when("npm", () => "npm install"),
+    Match.when("bun", () => ({ executable: "bun", args: ["install"] })),
+    Match.when("pnpm", () => ({ executable: "pnpm", args: ["install"] })),
+    Match.when("yarn", () => ({ executable: "yarn", args: [] })),
+    Match.when("npm", () => ({ executable: "npm", args: ["install"] })),
     Match.exhaustive,
   );
+
+/**
+ * Get a display command for a package manager.
+ */
+export const getInstallCommand = (pm: PackageManager): string => {
+  const process = getInstallProcess(pm);
+  return [process.executable, ...process.args].join(" ");
+};
 
 /**
  * Get run command for a package manager

@@ -1,0 +1,94 @@
+--- control/packages/core/src/primitives/renderer.ts
++++ candidate/packages/core/src/primitives/renderer.ts
+@@ -12,6 +12,7 @@
+  */
+ import { Cause, Effect, Exit, Layer, Option, Predicate, Schema, Scheduler, Scope } from "effect";
+ import * as Context from "effect/Context";
++import * as References from "effect/References";
+ import { Element, type ElementProps, type ElementWithRequirements } from "./element.js";
+ import * as Signal from "./signal.js";
+ import * as Trace from "../trace/index.js";
+@@ -61,6 +62,17 @@
+   // component or keyed-row render path that is currently running this Effect.
+   return Effect.provide(effect, Context.omit(Scope.Scope)(services));
+ };
++
++// Row services are stable for the list owner. Scope and operation annotations
++// belong to the executing worker, rather than this captured service snapshot.
++const captureRowServices = (
++  renderContext: RenderContext,
++  context: Context.Context<unknown> | null,
++): Context.Context<unknown> =>
++  Context.omit(
++    Scope.Scope,
++    References.CurrentLogAnnotations,
++  )(context === null ? renderContext.services : Context.merge(renderContext.services, context));
+ 
+ // Synchronous fast path used by the keyed-list per-row create/replace driver: a
+ // fully-static intrinsic row builds inline (direct DOM, no `Effect.sync` +
+@@ -638,7 +650,7 @@
+         context,
+         options,
+         {
+-          provideRenderContext,
++          captureRowServices,
+           renderElement,
+           renderElementSync,
+           runForkInRenderContext,
+--- control/packages/core/src/primitives/render-keyed-list.ts
++++ candidate/packages/core/src/primitives/render-keyed-list.ts
+@@ -1,5 +1,6 @@
+ import { Cause, Effect, Exit, Fiber, Schema, Scope } from "effect";
+ import * as Context from "effect/Context";
++import * as References from "effect/References";
+ import { Element } from "./element.js";
+ import * as Signal from "./signal.js";
+ import * as Trace from "../trace/index.js";
+@@ -20,11 +21,10 @@
+ }
+ 
+ interface RenderKeyedListDeps<E, R> {
+-  readonly provideRenderContext: <A, E2, R2>(
+-    effect: Effect.Effect<A, E2, R2>,
++  readonly captureRowServices: (
+     renderContext: RenderContext,
+     context: Context.Context<unknown> | null,
+-  ) => Effect.Effect<A, E2, R | R2>;
++  ) => Context.Context<Exclude<NoInfer<R>, Scope.Scope>>;
+   readonly renderElement: (
+     element: Element,
+     parent: Node,
+@@ -109,6 +109,7 @@
+   options: RenderOptions,
+   deps: RenderKeyedListDeps<E, R>,
+ ) {
++  const rowServices = deps.captureRowServices(runtime, context);
+   // Create anchor comment for the list
+   const anchor = document.createComment("keyed-list");
+   parent.appendChild(anchor);
+@@ -198,7 +199,7 @@
+     index: number,
+     renderPhase: Signal.RenderPhase,
+   ) {
+-    const renderEffect = deps.provideRenderContext(renderFn(item, index), runtime, context);
++    const renderEffect = Effect.provide(renderFn(item, index), rowServices);
+     const element = yield* Effect.provideService(
+       renderEffect,
+       Signal.CurrentRenderPhase,
+@@ -1378,7 +1379,15 @@
+     // pure main-thread idle — once op-count crosses MaxOpsBeforeYield. Granular
+     // per-item re-renders fork separately (scheduleItemRerender) and keep cooperative
+     // scheduling, so interactive single-row updates are unaffected.
+-    deps.runForkInRenderContext(updateEffect, forkRuntime, context, {
++    const annotatedUpdate =
++      forkContext === null
++        ? updateEffect
++        : Effect.provideService(
++            updateEffect,
++            References.CurrentLogAnnotations,
++            Context.get(forkContext, References.CurrentLogAnnotations),
++          );
++    deps.runForkInRenderContext(annotatedUpdate, forkRuntime, context, {
+       preventSchedulerYield: true,
+     });
+   }

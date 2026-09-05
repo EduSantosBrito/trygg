@@ -1,0 +1,16 @@
+id = "mini-check"
+name = "Mini Check"
+version = "0.1.0"
+schema_version = 1
+authors = ["Trygg contributors"]
+description = "Scratch Zed client for the mini-check TypeScript language server"
+repository = "https://github.com/EduSantosBrito/trygg"
+
+[language_servers.mini-check]
+name = "Mini Check"
+languages = ["TypeScript", "TSX"]
+code_action_kinds = ["quickfix"]
+
+[language_servers.mini-check.language_ids]
+"TypeScript" = "typescript"
+"TSX" = "typescriptreact"

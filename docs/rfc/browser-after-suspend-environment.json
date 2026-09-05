@@ -1,0 +1,10 @@
+{
+  "scope": "All nine production browser interaction cases after SUSPEND-001; memory probe disabled. This table fixture does not invoke Signal.suspend, so timings are not a suspend benchmark or before/after performance claim.",
+  "bun": "1.4.0",
+  "effect": "4.0.0-rc.112",
+  "sourceSha256": {
+    "packages/core/src/primitives/signal.ts": "4cb2c94316266d4ee29b18b7d14dbf7817c4fee96f2ef987332a85fd55936669",
+    "scripts/benchmark-browser.ts": "b1a7f1ff49fc8d0e82d08db65773b9b2ffef668b578af0484e3289d1ed972521",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db"
+  }
+}

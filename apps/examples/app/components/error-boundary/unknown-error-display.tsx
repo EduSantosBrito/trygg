@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { Component, type ComponentProps } from "trygg";
 import { ErrorTheme } from "../../services/error-boundary";
 
-export class UnknownError extends Schema.TaggedErrorClass<UnknownError>()("UnknownError", {
+export class UnknownError extends Schema.TaggedError<UnknownError>()("UnknownError", {
   cause: Schema.Unknown,
 }) {}
 

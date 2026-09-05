@@ -7,6 +7,7 @@ import { scoped } from "../../testing/effect-vitest.js";
 import { layer as NodeFileSystemLayer } from "@effect/platform-node/NodeFileSystem";
 import {
   Cause,
+  Config,
   Context,
   Deferred,
   Effect,
@@ -15,48 +16,66 @@ import {
   FileSystem,
   Layer,
   Logger,
+  Option,
   Predicate,
   Schema,
   Scope,
+  Stream,
+  Tracer,
 } from "effect";
+import * as Scheduler from "effect/Scheduler";
+import * as References from "effect/References";
+import {
+  HttpEffect,
+  HttpMiddleware,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import type { PlatformError } from "effect/PlatformError";
+import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
+import { systemError, type PlatformError, type SystemErrorTag } from "effect/PlatformError";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as path from "path";
-import { createServer as createViteServer } from "vite";
-import { ApiInitError, DevPlatform, NodeServerPlatform, ServerPlatform } from "../dev-platform.js";
-import { NodeDevPlatformLive } from "../dev-platform-node.js";
+import { createServer as createViteServer, transformWithEsbuild } from "vite";
+import {
+  ApiInitError,
+  DevPlatform,
+  MAX_REQUEST_BODY_BYTES,
+  NodeServerPlatform,
+  ServerPlatform,
+} from "../dev-platform.js";
+import * as NodeDevPlatform from "../dev-platform-node.js";
+import * as BunDevPlatform from "../dev-platform-bun.js";
+import {
+  BuildArtifactPlanner,
+  BuildArtifactOperation,
+  GeneratedArtifactPlanner,
+} from "../build-artifact-planner.js";
 import type { Connect } from "vite";
 import {
   trygg,
-  extractParamNames,
-  generateParamType,
-  parseRoutes,
-  generateRouteTypes,
   transformRoutesForBuild,
   validateApiPlatform,
-  makeClientEntryModuleOwner,
+  ClientEntryModuleOwner,
   renderClientEntryModule,
   renderProductionServerEntryModule,
   renderApiClientModule,
   renderApiClientDeclarations,
   PluginBootstrapError,
+  PluginFileSystemError,
+  PluginParseError,
   PluginValidationError,
-  schemaToType,
-  parseSchemaStruct,
-  resolveRoutePaths,
   PluginFiles,
+  BuildOutput,
   PluginApi,
-  makePluginFilesLayer,
-  makePluginApi,
-  makeViteServer,
-  makeStableHandlerFactoryLoader,
+  ViteServer,
+  HandlerFactoryLoader,
+  transformHtmlForFallback,
   generateHtmlTemplate,
   isTryggMixedDynamicImportWarning,
-  makeBuildOutput,
-  renderCloudflareStaticWorkerEntryModule,
-  type ParsedRoute,
   type ViteServerSource,
 } from "../plugin.js";
 import { transformTryggJsxForRequirements } from "../jsx-requirement-transform.js";
@@ -94,20 +113,79 @@ const makeTempDir: (
 const STATIC_API_WARNING =
   '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".';
 
-const PluginFilesTestLayer = makePluginFilesLayer().pipe(Layer.provideMerge(NodeFileSystemLayer));
+const PluginFilesTestLayer = PluginFiles.layer.pipe(Layer.provideMerge(NodeFileSystemLayer));
+
+const makeFileSystemFailure = (
+  tag: SystemErrorTag,
+  method: string,
+  filePath: string,
+): PlatformError =>
+  systemError({
+    _tag: tag,
+    module: "FileSystem",
+    method,
+    pathOrDescriptor: filePath,
+  });
+
+const makeControlledPluginFilesLayer = (
+  fileSystem: Partial<FileSystem.FileSystem>,
+): Layer.Layer<PluginFiles> =>
+  PluginFiles.layer.pipe(
+    Layer.provide(Layer.succeed(FileSystem.FileSystem, FileSystem.makeNoop(fileSystem))),
+  );
 
 const isAddressInfo = (address: AddressInfo | string | null): address is AddressInfo =>
   typeof address === "object" && address !== null;
 
-class BrowserScriptParseError extends Schema.TaggedErrorClass<BrowserScriptParseError>()(
+const IncomingMessageSchema = Schema.declare((value: unknown): value is IncomingMessage =>
+  Predicate.isObject(value),
+);
+const ServerResponseSchema = Schema.declare((value: unknown): value is ServerResponse =>
+  Predicate.isObject(value),
+);
+const ResponseSchema = Schema.declare((value: unknown): value is Response =>
+  Predicate.isObject(value),
+);
+const decodeIncomingMessage = Schema.decodeUnknownSync(IncomingMessageSchema);
+const decodeServerResponse = Schema.decodeUnknownSync(ServerResponseSchema);
+const decodeResponse = Schema.decodeUnknownSync(ResponseSchema);
+const decodeResponseDefect = Schema.decodeUnknownSync(Schema.Never);
+
+class BrowserScriptParseError extends Schema.TaggedError<BrowserScriptParseError>()(
   "BrowserScriptParseError",
   { cause: Schema.Unknown },
 ) {}
 
-class UnexpectedPluginBootstrapRejection extends Schema.TaggedErrorClass<UnexpectedPluginBootstrapRejection>()(
+class UnexpectedPluginBootstrapRejection extends Schema.TaggedError<UnexpectedPluginBootstrapRejection>()(
   "UnexpectedPluginBootstrapRejection",
   { cause: Schema.Unknown },
 ) {}
+
+class GeneratedBridgeRejection extends Schema.TaggedError<GeneratedBridgeRejection>()(
+  "GeneratedBridgeRejection",
+  { cause: Schema.Unknown },
+) {}
+
+class TestServerListenError extends Schema.TaggedError<TestServerListenError>()(
+  "TestServerListenError",
+  { cause: Schema.Unknown },
+) {}
+
+class ExpectedBuildFailure extends Schema.TaggedError<ExpectedBuildFailure>()(
+  "ExpectedBuildFailure",
+  {},
+) {}
+
+class ExpectedHtmlTransformFailure extends Schema.TaggedError<ExpectedHtmlTransformFailure>()(
+  "ExpectedHtmlTransformFailure",
+  {},
+) {}
+
+const isGeneratedApiRequestError = Schema.is(
+  Schema.TaggedStruct("ApiRequestError", {
+    reason: Schema.String,
+  }),
+);
 
 const logTestCleanupError =
   (operation: string) =>
@@ -116,18 +194,36 @@ const logTestCleanupError =
       `[test] cleanup failed during ${operation}: ${Cause.pretty(Cause.fail(error))}`,
     );
 
+const failPromise = <A>(cause: unknown): Promise<A> =>
+  Promise.resolve(cause).then(decodeResponseDefect);
+
 interface HandlerFactoryBoundaryModule {
   readonly makeApiLayer: (
     mod: Record<string, unknown>,
   ) => Effect.Effect<Layer.Layer<unknown>, unknown>;
-  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => {
-    readonly handler: (request: Request) => Promise<Response>;
-    readonly dispose: () => void;
-  };
-  readonly makeNodeHandler: (apiLive: Layer.Layer<unknown>) => Effect.Effect<unknown, unknown>;
-  readonly fromNodeRequest: (req: IncomingMessage) => Promise<Request>;
-  readonly toNodeResponse: (response: Response, res: ServerResponse) => Promise<void>;
-  readonly getBody: (req: IncomingMessage) => Promise<Uint8Array | undefined>;
+  readonly makeWebHandler: (apiLive: Layer.Layer<unknown>) => Effect.Effect<
+    {
+      readonly handler: (request: Request) => Promise<Response>;
+      readonly dispose: Effect.Effect<void>;
+    },
+    unknown,
+    Scope.Scope
+  >;
+  readonly makeNodeHandler: (apiLive: Layer.Layer<unknown>) => Effect.Effect<
+    {
+      readonly handler: (req: IncomingMessage, res: ServerResponse) => void;
+      readonly dispose: Effect.Effect<void>;
+    },
+    unknown,
+    Scope.Scope
+  >;
+  readonly fromNodeRequest: (req: IncomingMessage, signal?: AbortSignal) => Promise<Request>;
+  readonly toNodeResponse: (
+    response: Response,
+    res: ServerResponse,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  readonly getBody: (req: IncomingMessage, signal?: AbortSignal) => Promise<Uint8Array | undefined>;
 }
 
 interface HttpResult {
@@ -135,6 +231,58 @@ interface HttpResult {
   readonly bridgeHeader: string | undefined;
   readonly body: string;
 }
+
+interface ProcessResult {
+  readonly code: number | string | null | undefined;
+  readonly killed: boolean;
+  readonly signal: string | null | undefined;
+  readonly stderr: string;
+  readonly stdout: string;
+}
+
+const runProcessToExit = (
+  executable: string,
+  entryPath: string,
+  cwd: string,
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<ProcessResult> =>
+  Effect.promise(
+    () =>
+      new Promise((resolve) => {
+        execFile(
+          executable,
+          [entryPath],
+          { cwd, encoding: "utf8", env: environment, timeout: 5_000 },
+          (error, stdout, stderr) => {
+            resolve({
+              code: error?.code,
+              killed: error?.killed ?? false,
+              signal: error?.signal,
+              stderr,
+              stdout,
+            });
+          },
+        );
+      }),
+  );
+
+const runNodeToExit = (
+  entryPath: string,
+  cwd: string,
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<ProcessResult> => runProcessToExit(process.execPath, entryPath, cwd, environment);
+
+const runBunToExit = Effect.fn("PluginTest.runBunToExit")(function* (
+  entryPath: string,
+  cwd: string,
+  environment: NodeJS.ProcessEnv,
+): Effect.fn.Return<ProcessResult, Config.ConfigError> {
+  const executablePath = yield* Config.string("PATH");
+  return yield* runProcessToExit("bun", entryPath, cwd, {
+    ...environment,
+    PATH: executablePath,
+  });
+});
 
 const requestHttp = (options: {
   readonly port: number;
@@ -183,14 +331,16 @@ interface CloudflareStaticWorkerModule {
   };
 }
 
-const CloudflareStaticWorkerModuleSchema = Schema.Struct({
-  default: Schema.Struct({
-    fetch: Schema.declare(
-      (u: unknown): u is CloudflareStaticWorkerModule["default"]["fetch"] =>
-        typeof u === "function",
-    ),
+const decodeCloudflareStaticWorkerModule = Schema.decodeUnknownSync(
+  Schema.Struct({
+    default: Schema.Struct({
+      fetch: Schema.declare(
+        (value: unknown): value is CloudflareStaticWorkerModule["default"]["fetch"] =>
+          typeof value === "function",
+      ),
+    }),
   }),
-});
+);
 
 const DevPlatformLegacyConstructorSchema = Schema.Struct({
   createDevApi: Schema.optional(Schema.Unknown),
@@ -230,6 +380,10 @@ const ConfigResolvedHookSchema = Schema.declare(
 
 const CloseBundleHookSchema = Schema.declare(
   (u: unknown): u is () => Promise<void> => typeof u === "function",
+);
+
+const BuildEndHookSchema = Schema.declare(
+  (u: unknown): u is (error?: Error) => Promise<void> | void => typeof u === "function",
 );
 
 const ResolveIdHookSchema = Schema.declare(
@@ -295,9 +449,6 @@ const BuildConfigSchema = Schema.Struct({
   ),
 });
 
-const decodeCloudflareStaticWorkerModule = Schema.decodeUnknownSync(
-  CloudflareStaticWorkerModuleSchema,
-);
 const decodeDevPlatformLegacyConstructor = Schema.decodeUnknownSync(
   DevPlatformLegacyConstructorSchema,
 );
@@ -308,6 +459,7 @@ const decodeBuildStartHook = Schema.decodeUnknownEffect(BuildStartHookSchema);
 const decodeBuildStartHookSync = Schema.decodeUnknownSync(BuildStartHookSchema);
 const decodeConfigResolvedHook = Schema.decodeUnknownEffect(ConfigResolvedHookSchema);
 const decodeCloseBundleHook = Schema.decodeUnknownEffect(CloseBundleHookSchema);
+const decodeBuildEndHook = Schema.decodeUnknownEffect(BuildEndHookSchema);
 const decodeResolveIdHook = Schema.decodeUnknownEffect(ResolveIdHookSchema);
 const decodeLoadHook = Schema.decodeUnknownEffect(LoadHookSchema);
 const decodeTransformHook = Schema.decodeUnknownEffect(TransformHookSchema);
@@ -317,6 +469,30 @@ const decodeOptimizeDepsConfig = Schema.decodeUnknownSync(OptimizeDepsConfigSche
 const decodeBuildOnwarnConfig = Schema.decodeUnknownSync(BuildOnwarnConfigSchema);
 const decodeConfigEnvironmentHook = Schema.decodeUnknownSync(ConfigEnvironmentHookSchema);
 const decodeBuildConfig = Schema.decodeUnknownSync(BuildConfigSchema);
+
+const loadPlannedCloudflareWorker = Effect.gen(function* () {
+  const validationPlanner = BuildArtifactPlanner.make({ failOnWarnings: false });
+  const artifactPlanner = GeneratedArtifactPlanner.make({ includeCleanupOperations: true });
+  const validation = yield* validationPlanner.validateOutput({
+    output: "static",
+    platform: "cloudflare",
+    hasApi: false,
+    appDir: "app",
+    generatedDir: ".trygg",
+  });
+  const plan = yield* artifactPlanner.planArtifacts(validation);
+  const operation = plan.operations.find(
+    (candidate) =>
+      BuildArtifactOperation.$is("WriteFile")(candidate) &&
+      candidate.path === ".trygg/worker-entry.js",
+  );
+  if (operation === undefined || !BuildArtifactOperation.$is("WriteFile")(operation)) {
+    return assert.fail("Expected the planned Cloudflare Worker WriteFile operation");
+  }
+  const moduleUrl = `data:text/javascript,${encodeURIComponent(operation.contents)}`;
+  const module = yield* Effect.promise(() => import(moduleUrl));
+  return decodeCloudflareStaticWorkerModule(module);
+});
 
 const assertPromiseRejectsWith: (
   promiseFactory: () => Promise<unknown>,
@@ -369,6 +545,198 @@ describe("Vite Plugin", () => {
       assert.strictEqual(plugin.name, "trygg");
       assert.isDefined(plugin.config);
     });
+
+    it("should reject invalid runtime plugin configuration before creating a lifecycle", () => {
+      // Test: should reject invalid runtime plugin configuration before creating a lifecycle
+      // Scope: covers JavaScript callers that bypass the compile-time TryggConfig type.
+      // Assertion: Schema decoding rejects an unsupported platform synchronously.
+      const config: { platform: "node"; output: "server" } = {
+        platform: "node",
+        output: "server",
+      };
+      Reflect.set(config, "platform", "deno");
+
+      assert.throws(() => trygg(config));
+    });
+
+    it.effect("should share one shutdown promise across build failure and close hooks", () =>
+      Effect.gen(function* () {
+        // Test: should share one shutdown promise across build failure and close hooks
+        // Scope: covers concurrent Vite shutdown entrypoints after a failed build.
+        // Assertion: every hook returns the same completion and a repeated close is idempotent.
+        const plugin = trygg();
+        const buildEnd = yield* decodeBuildEndHook(plugin.buildEnd);
+        const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+        const failure = new ExpectedBuildFailure();
+
+        const first = buildEnd(failure);
+        const second = buildEnd(failure);
+        assert.isDefined(first);
+        assert.strictEqual(second, first);
+        if (first !== undefined) yield* Effect.promise(() => first);
+
+        const finalClose = closeBundle();
+        assert.strictEqual(finalClose, first);
+        yield* Effect.promise(() => finalClose);
+      }),
+    );
+
+    for (const middlewareMode of [false, true]) {
+      for (const entrypoint of ["closeBundle", "buildEnd"]) {
+        scoped(
+          `should await blocked API cleanup before runtime disposal in ${middlewareMode ? "middleware" : "normal"} mode through ${entrypoint}`,
+          () =>
+            Effect.gen(function* () {
+              // Scope: real Vite setup acquires an API Layer whose finalizer is controlled via SSR exports.
+              // Assertion: concurrent terminal hooks await one release and dispose the runtime afterwards.
+              const root = yield* makeTempDir({
+                "app/layout.tsx":
+                  "export default function Layout() { return <html><body /></html> }",
+                "app/routes.ts": "export const routes = { manifest: [] }",
+                "app/api.ts": `
+import { Deferred, Effect, Layer } from "effect";
+const started = Deferred.makeUnsafe();
+const gate = Deferred.makeUnsafe();
+let releases = 0;
+export const cleanupStarted = Deferred.await(started);
+export const releaseCleanup = Deferred.succeed(gate, undefined).pipe(Effect.asVoid);
+export const releaseCount = Effect.sync(() => releases);
+export default Layer.effectDiscard(Effect.addFinalizer(() =>
+  Deferred.succeed(started, undefined).pipe(
+    Effect.andThen(Deferred.await(gate)),
+    Effect.andThen(Effect.sync(() => { releases++; })),
+  )
+));`,
+              });
+              const plugin = trygg({ platform: "node", output: "server" });
+              const server = yield* Effect.acquireRelease(
+                Effect.promise(() =>
+                  createViteServer({
+                    configFile: false,
+                    root,
+                    server: { middlewareMode },
+                    plugins: [plugin],
+                  }),
+                ),
+                (viteServer) => Effect.promise(() => viteServer.close()),
+              );
+              const control = yield* Effect.promise(() =>
+                server.ssrLoadModule(path.join(root, "app/api.ts")),
+              ).pipe(
+                Effect.flatMap(
+                  Schema.decodeUnknownEffect(
+                    Schema.Struct({
+                      cleanupStarted: Schema.declare(
+                        (value: unknown): value is Effect.Effect<void> => Effect.isEffect(value),
+                      ),
+                      releaseCleanup: Schema.declare(
+                        (value: unknown): value is Effect.Effect<void> => Effect.isEffect(value),
+                      ),
+                      releaseCount: Schema.declare(
+                        (value: unknown): value is Effect.Effect<number> => Effect.isEffect(value),
+                      ),
+                    }),
+                  ),
+                ),
+              );
+              yield* Effect.addFinalizer(() => control.releaseCleanup);
+              const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+              const buildEnd = yield* decodeBuildEndHook(plugin.buildEnd);
+              const transform = yield* decodeTransformHook(plugin.transform);
+              const first =
+                entrypoint === "closeBundle" ? closeBundle() : buildEnd(new ExpectedBuildFailure());
+              if (first === undefined) return assert.fail("Expected an awaited shutdown");
+              yield* control.cleanupStarted;
+              assert.strictEqual(closeBundle(), first);
+              assert.strictEqual(buildEnd(new ExpectedBuildFailure()), first);
+              assert.strictEqual(yield* control.releaseCount, 0);
+              // Transform uses pluginRuntime.runPromise, so this probes the actual runtime owner.
+              yield* Effect.promise(() =>
+                transform("export const value = 1", path.join(root, "probe.ts")),
+              );
+              yield* control.releaseCleanup;
+              yield* Effect.promise(() => first);
+              assert.strictEqual(yield* control.releaseCount, 1);
+              yield* assertPromiseRejectsWith(
+                () => transform("export const value = 2", path.join(root, "probe.ts")),
+                "ManagedRuntime disposed",
+              );
+              assert.strictEqual(closeBundle(), first);
+              yield* Effect.promise(() => server.close());
+              assert.strictEqual(yield* control.releaseCount, 1);
+            }).pipe(Effect.provide(NodeFileSystemLayer)),
+        );
+      }
+    }
+
+    scoped("should dispose the plugin lifecycle when a middleware-mode Vite server closes", () =>
+      Effect.gen(function* () {
+        // Test: should dispose the plugin lifecycle when a middleware-mode Vite server closes
+        // Scope: covers Vite servers with no httpServer close event.
+        // Assertion: server.close awaits closeBundle shutdown and subsequent close remains idempotent.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            createViteServer({
+              configFile: false,
+              root,
+              server: { middlewareMode: true },
+              plugins: [plugin],
+            }),
+          ),
+          (viteServer) =>
+            Effect.tryPromise(() => viteServer.close()).pipe(
+              Effect.catchTag("UnknownError", logTestCleanupError("middleware server close")),
+            ),
+        );
+
+        assert.isNull(server.httpServer);
+        yield* Effect.promise(() => server.close());
+        const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+        yield* Effect.promise(() => closeBundle());
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should share one terminal promise across concurrent dev shutdown hooks", () =>
+      Effect.gen(function* () {
+        // Test: should share one terminal promise across concurrent dev shutdown hooks
+        // Scope: invokes closeBundle twice and buildEnd while a middleware-mode server is active.
+        // Assertion: all terminal plugin entrypoints return and await the exact same Promise.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg();
+        yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            createViteServer({
+              configFile: false,
+              root,
+              server: { middlewareMode: true },
+              plugins: [plugin],
+            }),
+          ),
+          (server) =>
+            Effect.tryPromise(() => server.close()).pipe(
+              Effect.catchTag("UnknownError", logTestCleanupError("concurrent dev close")),
+            ),
+        );
+        const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+        const buildEnd = yield* decodeBuildEndHook(plugin.buildEnd);
+
+        const first = closeBundle();
+        const second = closeBundle();
+        const third = buildEnd(new ExpectedBuildFailure());
+
+        assert.strictEqual(second, first);
+        assert.strictEqual(third, first);
+        yield* Effect.promise(() => first);
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
 
     scoped("should transform TSX modules through JSX requirement lowering", () =>
       Effect.gen(function* () {
@@ -436,10 +804,11 @@ describe("Vite Plugin", () => {
         const root = yield* makeTempDir({
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "app/routes.ts": `
+import { Schema } from "effect"
 import { Route } from "trygg/router"
 
 Route.make("/users/:id")
-  .params(Schema.Struct({ id: Schema.NumberFromString }))
+  ["params"](Schema.Struct({ id: Schema.NumberFromString }))
   .component(UsersPage)
 
 export const routes = { manifest: [] }
@@ -459,7 +828,7 @@ export const routes = { manifest: [] }
         assert.strictEqual(
           entry,
           renderClientEntryModule(
-            makeClientEntryModuleOwner({
+            ClientEntryModuleOwner.make({
               appDir: path.join(root, "app"),
               generatedDir: path.join(root, ".trygg"),
               routesFilePath: path.join(root, "app", "routes.ts"),
@@ -467,7 +836,91 @@ export const routes = { manifest: [] }
           ),
         );
         assert.include(index, '<script type="module" src="/.trygg/entry.tsx"></script>');
-        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number; }');
+        assert.include(routeTypes, "interface RouteInputMap");
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: string; }');
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should buildStart reject Schema lookalikes in transpile-only routes", () =>
+      Effect.gen(function* () {
+        // Test: should buildStart reject Schema lookalikes in transpile-only routes
+        // Scope: covers the Vite build boundary where esbuild does not run TypeScript checking.
+        // Assertion: route declaration generation rejects with PluginParseError before emitting fallback types.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": `
+import { Route } from "trygg/router"
+
+const FakeSchema = { Type: { id: 1 }, Encoded: { id: "1" } }
+Route.make("/users/:id").params(FakeSchema)
+export const routes = { manifest: [] }
+`,
+        });
+        const plugin = trygg();
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+        const buildEnd = yield* decodeBuildEndHook(plugin.buildEnd);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        const exit = yield* Effect.tryPromise({
+          try: () => buildStart(),
+          catch: (cause) =>
+            cause instanceof PluginParseError
+              ? cause
+              : new UnexpectedPluginBootstrapRejection({ cause }),
+        }).pipe(Effect.exit);
+        yield* Effect.promise(() => Promise.resolve(buildEnd(new ExpectedBuildFailure())));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause);
+          assert.instanceOf(error, PluginParseError);
+          if (error instanceof PluginParseError) {
+            assert.include(error.description, "installed Schema.Struct contract");
+          }
+        }
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should buildStart reject unresolved dynamic route Schema calls", () =>
+      Effect.gen(function* () {
+        // Scope: covers any-typed mutable builder flow at Vite's transpile-only build boundary.
+        // Assertion: production codegen returns PluginParseError rather than raw parameter types.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": `
+import { Schema } from "effect"
+import { Route } from "trygg/router"
+
+const base: any = Route.make("/users/:id")
+base["params"](Schema.Struct({ id: Schema.String }))
+export const routes = { manifest: [] }
+`,
+        });
+        const plugin = trygg();
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+        const buildEnd = yield* decodeBuildEndHook(plugin.buildEnd);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        const exit = yield* Effect.tryPromise({
+          try: () => buildStart(),
+          catch: (cause) =>
+            cause instanceof PluginParseError
+              ? cause
+              : new UnexpectedPluginBootstrapRejection({ cause }),
+        }).pipe(Effect.exit);
+        yield* Effect.promise(() => Promise.resolve(buildEnd(new ExpectedBuildFailure())));
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause);
+          assert.instanceOf(error, PluginParseError);
+          if (error instanceof PluginParseError) {
+            assert.include(error.description, "cannot resolve the immutable builder");
+          }
+        }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -515,7 +968,7 @@ export const routes = { manifest: [] }
             warnings.push(String(message));
           }
         });
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -545,7 +998,7 @@ export const routes = { manifest: [] }
         assert.isTrue(indexExists);
         assert.isFalse(serverEntryExists);
         assert.deepStrictEqual(warnings, [STATIC_API_WARNING]);
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should promote Cloudflare static shell to public dist index", () =>
@@ -563,7 +1016,7 @@ export const routes = { manifest: [] }
         });
         const appDir = path.join(root, "app");
         const generatedDir = path.join(root, ".trygg");
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -583,7 +1036,7 @@ export const routes = { manifest: [] }
 
         assert.strictEqual(publicShell, "<html><body>shell</body></html>");
         assert.isFalse(internalShellExists);
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should build output static without api file not warn", () =>
@@ -606,7 +1059,7 @@ export const routes = { manifest: [] }
             warnings.push(String(message));
           }
         });
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -627,7 +1080,7 @@ export const routes = { manifest: [] }
 
         assert.isTrue(indexExists);
         assert.deepStrictEqual(warnings, []);
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should build Cloudflare static worker entry and no public trygg contract", () =>
@@ -644,7 +1097,7 @@ export const routes = { manifest: [] }
         });
         const appDir = path.join(root, "app");
         const generatedDir = path.join(root, ".trygg");
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -670,7 +1123,7 @@ export const routes = { manifest: [] }
         assert.isFalse(oldSsrEntryExists);
         assert.isTrue(publicIndexExists);
         assert.isFalse(publicTryggExists);
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should not generate Cloudflare worker for Node or Bun static", () =>
@@ -688,7 +1141,7 @@ export const routes = { manifest: [] }
           "bun/app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "bun/app/routes.ts": "export const routes = { manifest: [] }",
         });
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -719,7 +1172,7 @@ export const routes = { manifest: [] }
 
         assert.isFalse(nodeWorkerExists);
         assert.isFalse(bunWorkerExists);
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should reject Cloudflare static API routes", () =>
@@ -735,7 +1188,7 @@ export const routes = { manifest: [] }
           "app/routes.ts": "export const routes = { manifest: [] }",
           "app/api.ts": "export const Api = {}",
         });
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -762,7 +1215,7 @@ export const routes = { manifest: [] }
           }
           assert.include(error.description, 'output: "server"');
         }
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should reject Cloudflare server output", () =>
@@ -777,7 +1230,7 @@ export const routes = { manifest: [] }
           "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
           "app/routes.ts": "export const routes = { manifest: [] }",
         });
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           buildServer: () => Effect.void,
           fileSystem: fs,
           files,
@@ -804,7 +1257,7 @@ export const routes = { manifest: [] }
           }
           assert.include(error.description, "Cloudflare server output is not supported");
         }
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should build output write server entry and invoke server build", () =>
@@ -823,7 +1276,7 @@ export const routes = { manifest: [] }
         const appDir = path.join(root, "app");
         const generatedDir = path.join(root, ".trygg");
         const builtEntries: Array<string> = [];
-        const buildOutput = makeBuildOutput({
+        const buildOutput = BuildOutput.make({
           fileSystem: fs,
           files,
           serverPlatform,
@@ -846,8 +1299,8 @@ export const routes = { manifest: [] }
 
         assert.deepStrictEqual(builtEntries, [serverEntryPath]);
         assert.include(serverEntry, 'import ApiLive from "../app/api.js"');
-        assert.include(serverEntry, "HttpRouter.serve(ApiLive");
-      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform))),
+        assert.include(serverEntry, "HttpRouter.serve(withHttpTelemetry(ApiLive)");
+      }).pipe(Effect.provide(Layer.mergeAll(PluginFilesTestLayer, NodeServerPlatform.layer))),
     );
 
     scoped("should closeBundle build production server without deleting client files", () =>
@@ -881,6 +1334,284 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    for (const runtime of ["node", "bun"]) {
+      scoped(`should project HTTP telemetry in the generated ${runtime} production server`, () =>
+        Effect.gen(function* () {
+          // Scope: a generated server, real platform listener, and application-provided tracer.
+          // Assertion: transport data and distributed ancestry survive; exported attributes/Exit omit secrets.
+          const isBun = runtime === "bun";
+          const entry = renderProductionServerEntryModule({
+            hasApi: true,
+            platform: {
+              imports: isBun
+                ? 'import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"\nimport * as BunRuntime from "./runtime.js"'
+                : 'import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"\nimport * as NodeRuntime from "./runtime.js"\nimport { createServer } from "node:http"',
+              serverLayer: isBun
+                ? 'makeBunServerLayer({ port: 0, hostname: "127.0.0.1" })'
+                : 'NodeHttpServer.layer(() => createServer(), { port: 0, host: "127.0.0.1" })',
+              runtime: isBun ? "BunRuntime" : "NodeRuntime",
+            },
+          });
+          const compiled = yield* Effect.promise(() => transformWithEsbuild(entry, "server.ts"));
+          const root = yield* makeTempDir({
+            "dist/server.js": compiled.code,
+            "dist/client/.trygg/index.html": "<html><body>ready</body></html>",
+            "control.js": `
+import { Deferred, Effect, Tracer } from "effect";
+export const address = Deferred.makeUnsafe();
+export const ended = Deferred.makeUnsafe();
+export const attributes = [];
+class CapturingSpan extends Tracer.NativeSpan {
+  attribute(key, value) { attributes.push([key, value]); super.attribute(key, value); }
+  end(time, exit) {
+    super.end(time, exit);
+    if (this.kind === "server") Deferred.doneUnsafe(ended, Effect.succeed({
+      exit, traceId: this.traceId, sampled: this.sampled,
+    }));
+  }
+}
+export const tracer = Tracer.make({ span: (options) => new CapturingSpan(options) });
+`,
+            "app/api.js": `
+import { Deferred, Effect, Layer, Tracer } from "effect";
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { address, tracer } from "../control.js";
+export default Layer.mergeAll(
+  Layer.succeed(Tracer.Tracer, tracer),
+  Layer.effectDiscard(Effect.gen(function* () {
+    const server = yield* HttpServer.HttpServer;
+    yield* Deferred.succeed(address, server.address);
+  })),
+  HttpRouter.add("GET", "/api/telemetry", Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    return HttpServerResponse.text(JSON.stringify({ url: request.url, header: request.headers["x-private"] }), {
+      status: 201, headers: { "x-private-response": "response-sentinel-789" },
+    });
+  })),
+  HttpRouter.add("GET", "/api/failure", Effect.fail("failure-sentinel")),
+);
+`,
+            "dist/runtime.js": `
+import assert from "node:assert/strict";
+import { Deferred, Effect, Fiber } from "effect";
+import { address, ended, attributes } from "../control.js";
+export const runMain = (main) => {
+  Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+    const server = yield* Effect.forkScoped(main);
+    const bound = yield* Deferred.await(address);
+    assert.equal(bound._tag, "TcpAddress");
+    const response = yield* Effect.tryPromise(() => fetch(
+      "http://127.0.0.1:" + bound.port + "/api/telemetry?token=query-sentinel-123", {
+        headers: { "x-private": "header-sentinel-456", traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01" },
+      },
+    ));
+    assert.equal(response.status, 201);
+    assert.equal(response.headers.get("x-private-response"), "response-sentinel-789");
+    const body = yield* Effect.tryPromise(() => response.text());
+    assert.ok(body.includes("query-sentinel-123"));
+    assert.ok(body.includes("header-sentinel-456"));
+    const terminal = yield* Deferred.await(ended);
+    assert.equal(terminal.traceId, "0123456789abcdef0123456789abcdef");
+    assert.equal(terminal.exit._tag, "Success");
+    const facts = new Map(attributes);
+    assert.equal(facts.get("http.request.method"), "GET");
+    assert.equal(facts.get("url.path"), "/api/telemetry");
+    assert.equal(facts.get("http.response.status_code"), 201);
+    assert.ok(!JSON.stringify({ attributes, terminal }).includes("sentinel"));
+    const failed = yield* Effect.tryPromise(() => fetch("http://127.0.0.1:" + bound.port + "/api/failure"));
+    assert.equal(failed.status, 500);
+    yield* Effect.tryPromise(() => failed.text());
+    yield* Fiber.interrupt(server);
+  }))).then(
+    () => console.log("HTTP_TELEMETRY_PROBE_PASSED"),
+    (error) => { console.error(error); process.exitCode = 1; },
+  );
+};
+`,
+          });
+          const run = isBun ? runBunToExit : runNodeToExit;
+          const result = yield* run(path.join(root, "dist/server.js"), root, {
+            HOST: "127.0.0.1",
+            PORT: "4173",
+          });
+          // execFile supplies no error/code when the process exits successfully.
+          assert.isUndefined(result.code, `${result.stdout}\n${result.stderr}`);
+          assert.isFalse(result.killed);
+          assert.isUndefined(result.signal);
+          assert.include(result.stdout, "HTTP_TELEMETRY_PROBE_PASSED");
+          assert.lengthOf(result.stdout.match(/Sent HTTP response/g) ?? [], 1);
+          assert.include(result.stdout, "HttpRequestFailure");
+          assert.notInclude(`${result.stdout}\n${result.stderr}`, "failure-sentinel");
+        }).pipe(Effect.provide(NodeFileSystemLayer)),
+      );
+    }
+
+    for (const runtime of ["node", "bun"]) {
+      scoped(
+        `should fail generated ${runtime} server startup with project-owned errors before readiness`,
+        () =>
+          Effect.gen(function* () {
+            // Test: should fail generated server startup with project-owned errors before readiness
+            // Scope: executes the bundled Node artifact for invalid env, missing shell, and bind failure.
+            // Assertion: each process exits with the owning error tag and never emits the listening event.
+            const fs = yield* FileSystem.FileSystem;
+            const root = yield* makeTempDir({
+              "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+              "app/routes.ts": "export const routes = { manifest: [] }",
+            });
+            const plugin = trygg({
+              platform: runtime === "node" ? "node" : "bun",
+              output: "server",
+            });
+            const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+            const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+            const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+
+            yield* Effect.promise(() => configResolved({ root, command: "build" }));
+            yield* Effect.promise(() => buildStart());
+            yield* Effect.promise(() => closeBundle());
+
+            const entryPath = path.join(root, "dist", "server.js");
+            const baseEnvironment: NodeJS.ProcessEnv = { HOST: "127.0.0.1" };
+            const run = runtime === "node" ? runNodeToExit : runBunToExit;
+            for (const environment of [
+              ...["0", "65536", "1.5", "NaN", ""].map((PORT) => ({ ...baseEnvironment, PORT })),
+              { HOST: "", PORT: "4173" },
+            ]) {
+              const result = yield* run(entryPath, root, environment);
+              assert.strictEqual(result.code, 1);
+              assert.isFalse(result.killed);
+              assert.isNull(result.signal);
+              const output = `${result.stdout}\n${result.stderr}`;
+              assert.include(output, "ServerConfigError");
+              assert.notInclude(output, "Server listening on http://");
+            }
+            for (const PORT of ["1", "4173", "65535"]) {
+              const result = yield* run(entryPath, root, { ...baseEnvironment, PORT });
+              const output = `${result.stdout}\n${result.stderr}`;
+              assert.strictEqual(result.code, 1);
+              assert.isFalse(result.killed);
+              assert.isNull(result.signal);
+              // Inclusive port bounds pass configuration and reach the missing-shell boundary.
+              assert.include(output, "ServerFileSystemError");
+              assert.notInclude(output, "ServerConfigError");
+              assert.notInclude(output, "Server listening on http://");
+            }
+
+            const occupiedServer = yield* Effect.acquireRelease(
+              Effect.gen(function* () {
+                const server = createHttpServer();
+                yield* Effect.promise(
+                  () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+                );
+                return server;
+              }),
+              (server) =>
+                Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+            );
+            const occupiedAddress = occupiedServer.address();
+            if (!isAddressInfo(occupiedAddress)) {
+              return assert.fail("Expected occupied test server to listen on a TCP port");
+            }
+            const shellPath = path.join(root, "dist", "client", ".trygg", "index.html");
+            yield* fs.makeDirectory(path.dirname(shellPath), { recursive: true });
+            yield* fs.writeFileString(shellPath, "<html><body>ready</body></html>");
+            const occupiedPort = yield* run(entryPath, root, {
+              ...baseEnvironment,
+              PORT: String(occupiedAddress.port),
+            });
+
+            const output = `${occupiedPort.stdout}\n${occupiedPort.stderr}`;
+            assert.strictEqual(occupiedPort.code, 1);
+            assert.isFalse(occupiedPort.killed);
+            assert.isNull(occupiedPort.signal);
+            assert.include(output, "ServerStartupError");
+            assert.notInclude(output, "Server listening on http://");
+          }).pipe(Effect.provide(NodeFileSystemLayer)),
+      );
+    }
+
+    scoped("should contain a bundled Bun occupied-port failure without leaking its socket", () =>
+      Effect.gen(function* () {
+        // Test: should contain a bundled Bun occupied-port failure without leaking its socket
+        // Scope: executes the real dist/server.js while another process owns its loopback port.
+        // Assertion: Bun exits 1 with ServerStartupError, never logs readiness, and the port rebinds.
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const plugin = trygg({ platform: "bun", output: "server" });
+        const configResolved = yield* decodeConfigResolvedHook(plugin.configResolved);
+        const buildStart = yield* decodeBuildStartHook(plugin.buildStart);
+        const closeBundle = yield* decodeCloseBundleHook(plugin.closeBundle);
+
+        yield* Effect.promise(() => configResolved({ root, command: "build" }));
+        yield* Effect.promise(() => buildStart());
+        yield* Effect.promise(() => closeBundle());
+
+        const entryPath = path.join(root, "dist", "server.js");
+        const shellPath = path.join(root, "dist", "client", ".trygg", "index.html");
+        yield* fs.makeDirectory(path.dirname(shellPath), { recursive: true });
+        yield* fs.writeFileString(shellPath, "<html><body>ready</body></html>");
+
+        const attempt = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const occupiedServer = yield* Effect.acquireRelease(
+              Effect.gen(function* () {
+                const server = createHttpServer();
+                yield* Effect.promise(
+                  () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+                );
+                return server;
+              }),
+              (server) =>
+                Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+            );
+            const address = occupiedServer.address();
+            if (!isAddressInfo(address)) {
+              return assert.fail("Expected occupied Bun test server to listen on a TCP port");
+            }
+            const result = yield* runBunToExit(entryPath, root, {
+              HOST: "127.0.0.1",
+              PORT: String(address.port),
+            });
+            return { port: address.port, result };
+          }),
+        );
+
+        const output = `${attempt.result.stdout}\n${attempt.result.stderr}`;
+        assert.strictEqual(attempt.result.code, 1);
+        assert.isFalse(attempt.result.killed);
+        assert.isNull(attempt.result.signal);
+        assert.include(
+          output,
+          "ServerStartupError: The configured server address is already in use.",
+        );
+        assert.include(output, '{"code":"EADDRINUSE","syscall":"listen"}');
+        assert.notInclude(output, "Failed to start server. Is port");
+        assert.notInclude(output, "Server listening on http://");
+
+        const reboundServer = yield* Effect.acquireRelease(
+          Effect.tryPromise({
+            try: () =>
+              new Promise<ReturnType<typeof createHttpServer>>((resolve, reject) => {
+                const server = createHttpServer();
+                server.once("error", reject);
+                server.listen(attempt.port, "127.0.0.1", () => {
+                  server.removeListener("error", reject);
+                  resolve(server);
+                });
+              }),
+            catch: (cause) => new TestServerListenError({ cause }),
+          }),
+          (server) =>
+            Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+        );
+        assert.isTrue(reboundServer.listening);
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped(
       "should build production server entry with default import for default-only api module",
       () =>
@@ -908,10 +1639,88 @@ export const routes = { manifest: [] }
           const apiTypesExists = yield* fs.exists(path.join(root, ".trygg", "api.d.ts"));
 
           assert.include(serverEntry, 'import ApiLive from "../app/api.js"');
-          assert.include(serverEntry, "HttpRouter.serve(ApiLive");
+          assert.include(serverEntry, "HttpRouter.serve(withHttpTelemetry(ApiLive)");
           assert.isFalse(apiTypesExists);
         }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
+
+    for (const runtime of ["node", "bun"]) {
+      for (const failureCase of [
+        {
+          phase: "import",
+          api: 'throw new Error("fixture-import-failure"); export default {};',
+          expected: "fixture-import-failure",
+          releases: 0,
+        },
+        {
+          phase: "composition",
+          api: "export default {};",
+          expected: "must have a default export that is a composed Layer",
+          releases: 0,
+        },
+        {
+          phase: "acquisition",
+          api: `import { Effect, Layer } from "effect";
+export default Layer.effectDiscard(Effect.gen(function* () {
+  yield* Effect.addFinalizer(() => Effect.sync(() => console.log("FIXTURE_PARTIAL_RELEASE")));
+  return yield* Effect.fail("fixture-acquisition-failure");
+}));`,
+          expected: "fixture-acquisition-failure",
+          releases: 1,
+        },
+      ]) {
+        scoped(
+          `should reject ${runtime} configureServer readiness after actual API ${failureCase.phase} failure`,
+          () =>
+            Effect.gen(function* () {
+              // Scope: a fresh runtime process runs Vite, the published plugin and generated handler factory.
+              // Assertion: startup rejects the actual API failure, releases partial acquisition once,
+              // and its complete output contains no API readiness announcement.
+              const root = yield* makeTempDir({
+                "app/layout.tsx":
+                  "export default function Layout() { return <html><body /></html> }",
+                "app/routes.ts": "export const routes = { manifest: [] }",
+                "app/api.ts": failureCase.api,
+                "run.mjs": `import { createServer } from "vite";
+import { trygg } from "trygg/vite-plugin";
+let server;
+let rejected = false;
+try {
+  await createServer({
+    configFile: false,
+    root: process.cwd(),
+    server: { middlewareMode: true },
+    plugins: [
+      { name: "capture-owner", enforce: "pre", configureServer(value) { server = value; } },
+      trygg({ platform: "${runtime}", output: "server" }),
+    ],
+  });
+} catch (error) {
+  rejected = true;
+  console.log("FIXTURE_STARTUP_FAILED", String(error));
+} finally {
+  await server?.close();
+}
+process.exitCode = rejected ? 0 : 1;
+`,
+              });
+              const run = runtime === "node" ? runNodeToExit : runBunToExit;
+              const executablePath = yield* Config.string("PATH");
+              const result = yield* run(path.join(root, "run.mjs"), root, { PATH: executablePath });
+              const output = `${result.stdout}\n${result.stderr}`;
+              assert.isUndefined(result.code, output);
+              assert.isFalse(result.killed);
+              assert.include(output, "FIXTURE_STARTUP_FAILED");
+              assert.include(output, failureCase.expected);
+              assert.notInclude(output, "API handlers loaded");
+              assert.strictEqual(
+                output.split("FIXTURE_PARTIAL_RELEASE").length - 1,
+                failureCase.releases,
+              );
+            }).pipe(Effect.provide(NodeFileSystemLayer)),
+        );
+      }
+    }
 
     scoped("should configureServer generate dev entry and serve SPA shell through Vite", () =>
       Effect.gen(function* () {
@@ -958,6 +1767,60 @@ export const routes = { manifest: [] }
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
+    scoped("should keep the replacement Vite server live across restart and terminal close", () =>
+      Effect.gen(function* () {
+        // Test: should keep the replacement Vite server live across restart and terminal close
+        // Scope: covers Vite's create-replacement, close-old, and final-close lifecycle ordering.
+        // Assertion: requests return 200 before and after restart, then the final close completes.
+        const root = yield* makeTempDir({
+          "app/layout.tsx": "export default function Layout() { return <html><body /></html> }",
+          "app/routes.ts": "export const routes = { manifest: [] }",
+        });
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            createViteServer({
+              root,
+              configFile: false,
+              server: { host: "127.0.0.1", port: 0 },
+              plugins: [trygg()],
+            }),
+          ),
+          (viteServer) =>
+            Effect.tryPromise(() => viteServer.close()).pipe(
+              Effect.catchTag("UnknownError", logTestCleanupError("restarted dev server close")),
+            ),
+        );
+        yield* Effect.promise(() => server.listen(0));
+
+        const initialAddress = server.httpServer?.address() ?? null;
+        if (!isAddressInfo(initialAddress)) {
+          return assert.fail("Expected initial Vite server to listen on a TCP port");
+        }
+        const initial = yield* requestHttp({
+          headers: { accept: "text/html" },
+          path: "/before-restart",
+          port: initialAddress.port,
+        });
+
+        yield* Effect.promise(() => server.restart());
+        const replacementAddress = server.httpServer?.address() ?? null;
+        if (!isAddressInfo(replacementAddress)) {
+          return assert.fail("Expected replacement Vite server to listen on a TCP port");
+        }
+        const replacement = yield* requestHttp({
+          headers: { accept: "text/html" },
+          path: "/after-restart",
+          port: replacementAddress.port,
+        });
+
+        assert.strictEqual(initial.status, 200);
+        assert.strictEqual(replacement.status, 200);
+
+        yield* Effect.promise(() => server.close());
+        assert.isFalse(server.httpServer?.listening ?? false);
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
     scoped("should mount API middleware through ViteServer adapter", () =>
       Effect.gen(function* () {
         // Test: should mount API middleware through ViteServer adapter
@@ -977,7 +1840,7 @@ export const routes = { manifest: [] }
           transformIndexHtml: (_url, html) => Promise.resolve(html),
         };
 
-        yield* makeViteServer(source).mountApiMiddleware(middleware);
+        yield* ViteServer.make(source).mountApiMiddleware(middleware);
 
         assert.strictEqual(mounted.length, 1);
         assert.strictEqual(mounted[0], middleware);
@@ -1003,7 +1866,7 @@ export const routes = { manifest: [] }
             Promise.resolve(`${html}\n<!-- transformed:${url} -->`),
         };
 
-        yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
+        yield* ViteServer.make(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
         const middleware = mounted[0];
         if (middleware === undefined) {
           return assert.fail("Expected HTML fallback middleware to mount");
@@ -1059,7 +1922,7 @@ export const routes = { manifest: [] }
           transformIndexHtml: (_url, html) => Promise.resolve(html),
         };
 
-        yield* makeViteServer(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
+        yield* ViteServer.make(source).mountHtmlFallbackMiddleware(generateHtmlTemplate());
         const middleware = mounted[0];
         if (middleware === undefined) {
           return assert.fail("Expected HTML fallback middleware to mount");
@@ -1106,41 +1969,314 @@ export const routes = { manifest: [] }
       }),
     );
 
-    scoped("should close API scope when Vite server closes", () =>
+    scoped("should call next only for a typed HTML transform failure before response commit", () =>
       Effect.gen(function* () {
-        // Test: should close API scope when Vite server closes
-        // Scope: covers cleanup ownership at the Vite server adapter boundary.
-        // Assertion: triggering the registered Vite close handler runs API scope finalizers.
-        const closeHandlers: Array<() => void> = [];
-        const cleaned = yield* Deferred.make<void>();
+        // Test: should call next only for a typed HTML transform failure before response commit
+        // Scope: covers the expected transform rejection before status or headers are mutated.
+        // Assertion: next runs once and no terminal Cause is reported.
+        let middleware: Connect.NextHandleFunction | undefined;
+        const reported = yield* Deferred.make<Cause.Cause<unknown>>();
         const source: ViteServerSource = {
           ssrLoadModule: () => Promise.resolve({}),
           watcher: { on: () => undefined },
-          httpServer: {
+          middlewares: {
+            use: (handler) => {
+              middleware = handler;
+            },
+          },
+          transformIndexHtml: () => failPromise(new ExpectedHtmlTransformFailure()),
+        };
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        yield* Scope.provide(
+          ViteServer.make(source, (cause) =>
+            Deferred.succeed(reported, cause).pipe(Effect.asVoid),
+          ).mountHtmlFallbackMiddleware(generateHtmlTemplate()),
+          owner,
+        );
+        if (middleware === undefined) {
+          return assert.fail("Expected HTML fallback middleware to mount");
+        }
+        let resolveNext: (() => void) | undefined;
+        const nextCalled = new Promise<void>((resolve) => {
+          resolveNext = resolve;
+        });
+        let nextCount = 0;
+
+        middleware(
+          decodeIncomingMessage({ method: "GET", url: "/dashboard" }),
+          decodeServerResponse({}),
+          () => {
+            nextCount += 1;
+            resolveNext?.();
+          },
+        );
+        yield* Effect.promise(() => nextCalled);
+
+        assert.strictEqual(nextCount, 1);
+        assert.isFalse(yield* Deferred.isDone(reported));
+      }),
+    );
+
+    scoped("should preserve and report a response defect without calling next", () =>
+      Effect.gen(function* () {
+        // Test: should preserve and report a response defect without calling next
+        // Scope: covers failure after transform succeeds and response commit begins.
+        // Assertion: the reporter observes a Die Cause and downstream middleware is not entered.
+        let middleware: Connect.NextHandleFunction | undefined;
+        const reported = yield* Deferred.make<Cause.Cause<unknown>>();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          middlewares: {
+            use: (handler) => {
+              middleware = handler;
+            },
+          },
+          transformIndexHtml: (_url, html) => Promise.resolve(html),
+        };
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        yield* Scope.provide(
+          ViteServer.make(source, (cause) =>
+            Deferred.succeed(reported, cause).pipe(Effect.asVoid),
+          ).mountHtmlFallbackMiddleware(generateHtmlTemplate()),
+          owner,
+        );
+        if (middleware === undefined) {
+          return assert.fail("Expected HTML fallback middleware to mount");
+        }
+        let nextCount = 0;
+
+        middleware(
+          decodeIncomingMessage({ method: "GET", url: "/dashboard" }),
+          decodeServerResponse({
+            statusCode: 0,
+            setHeader: () => decodeResponseDefect("response defect"),
+          }),
+          () => {
+            nextCount += 1;
+          },
+        );
+        const cause = yield* Deferred.await(reported);
+
+        assert.isTrue(Cause.hasDies(cause));
+        assert.strictEqual(nextCount, 0);
+      }),
+    );
+
+    scoped("should preserve fallback interruption without calling next", () =>
+      Effect.gen(function* () {
+        // Test: should preserve fallback interruption without calling next
+        // Scope: covers server shutdown while Vite HTML transformation is pending.
+        // Assertion: scope close awaits the callback, reports interruption, and never delegates.
+        let middleware: Connect.NextHandleFunction | undefined;
+        let startTransform: (() => void) | undefined;
+        const transformStarted = new Promise<void>((resolve) => {
+          startTransform = resolve;
+        });
+        const reported = yield* Deferred.make<Cause.Cause<unknown>>();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: { on: () => undefined },
+          middlewares: {
+            use: (handler) => {
+              middleware = handler;
+            },
+          },
+          transformIndexHtml: () => {
+            startTransform?.();
+            return new Promise<string>(() => undefined);
+          },
+        };
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        yield* Scope.provide(
+          ViteServer.make(source, (cause) =>
+            Deferred.succeed(reported, cause).pipe(Effect.asVoid),
+          ).mountHtmlFallbackMiddleware(generateHtmlTemplate()),
+          owner,
+        );
+        if (middleware === undefined) {
+          return assert.fail("Expected HTML fallback middleware to mount");
+        }
+        let nextCount = 0;
+
+        middleware(
+          decodeIncomingMessage({ method: "GET", url: "/dashboard" }),
+          decodeServerResponse({}),
+          () => {
+            nextCount += 1;
+          },
+        );
+        yield* Effect.promise(() => transformStarted);
+        yield* Scope.close(owner, Exit.void);
+        const cause = yield* Deferred.await(reported);
+
+        assert.isTrue(Cause.hasInterrupts(cause));
+        assert.strictEqual(nextCount, 0);
+      }),
+    );
+
+    scoped("should recover only all-Fail transform Causes at the HTML fallback boundary", () =>
+      Effect.gen(function* () {
+        // Test: should recover only all-Fail transform Causes at the HTML fallback boundary
+        // Scope: compares two expected transform failures with fail+die, fail+interrupt, and wrong-policy failure.
+        // Assertion: only the all-expected Cause calls next; every other Cause is reemitted with all reasons intact.
+        const first = new PluginFileSystemError({
+          operation: "transform",
+          path: "/index.html",
+          cause: "first transform failure",
+        });
+        const second = new PluginFileSystemError({
+          operation: "transform",
+          path: "/index.html",
+          cause: "second transform failure",
+        });
+        const wrongPolicy = new PluginFileSystemError({
+          operation: "read",
+          path: "/index.html",
+          cause: "read failure",
+        });
+        let nextCalls = 0;
+
+        const recovered = yield* transformHtmlForFallback(
+          Effect.failCause(Cause.combine(Cause.fail(first), Cause.fail(second))),
+          () => {
+            nextCalls += 1;
+          },
+        );
+        assert.isTrue(Option.isNone(recovered));
+        assert.strictEqual(nextCalls, 1);
+
+        const unrecoverable = [
+          Cause.combine(Cause.fail(first), Cause.die("transform defect")),
+          Cause.combine(Cause.fail(first), Cause.interrupt(91)),
+          Cause.fail(wrongPolicy),
+        ];
+        for (const expectedCause of unrecoverable) {
+          const exit = yield* transformHtmlForFallback(Effect.failCause(expectedCause), () => {
+            nextCalls += 1;
+          }).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.deepStrictEqual(
+              exit.cause.reasons.map((reason) => reason._tag),
+              expectedCause.reasons.map((reason) => reason._tag),
+            );
+          }
+        }
+        assert.strictEqual(nextCalls, 1);
+      }),
+    );
+
+    scoped("should own watcher callbacks and remove admission on scope close", () =>
+      Effect.gen(function* () {
+        // Test: should own watcher callbacks and remove admission on scope close
+        // Scope: covers native watcher callbacks whose Promise results are ignored by EventEmitter.
+        // Assertion: callback failure is reported once and the listener is detached at shutdown.
+        let changeHandler: ((file: string) => void) | undefined;
+        let removed = 0;
+        let reports = 0;
+        const watcherCause = Cause.combine(Cause.fail("watch failed"), Cause.die("watch defect"));
+        const reported = yield* Deferred.make<Cause.Cause<string>>();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: {
             on: (_event, handler) => {
-              closeHandlers.push(handler);
+              changeHandler = handler;
+            },
+            off: () => {
+              removed += 1;
             },
           },
           middlewares: { use: () => undefined },
           transformIndexHtml: (_url, html) => Promise.resolve(html),
         };
-        const scope = yield* Scope.make();
-        let closeRuns = 0;
-        const context = yield* Effect.context<never>();
-        const runPromise = (effect: Effect.Effect<void>) => {
-          closeRuns += 1;
-          return Effect.runPromiseWith(context)(effect);
-        };
-        yield* Scope.addFinalizer(scope, Deferred.succeed(cleaned, undefined).pipe(Effect.asVoid));
+        const owner = yield* Scope.make();
+        yield* Scope.provide(
+          ViteServer.make(source).onFileChange(
+            () => Effect.failCause(watcherCause),
+            (cause) =>
+              Effect.sync(() => {
+                reports += 1;
+              }).pipe(Effect.andThen(Deferred.succeed(reported, cause)), Effect.asVoid),
+          ),
+          owner,
+        );
+        if (changeHandler === undefined) {
+          return assert.fail("Expected watcher change listener to be installed");
+        }
+        changeHandler("app/api.ts");
+        const observedCause = yield* Deferred.await(reported);
+        yield* Scope.close(owner, Exit.void);
 
-        yield* makeViteServer(source, runPromise).closeApiScopeOnServerClose(scope);
-        for (const handler of closeHandlers) {
-          handler();
+        assert.strictEqual(reports, 1);
+        assert.strictEqual(removed, 1);
+        assert.deepStrictEqual(
+          observedCause.reasons.map((reason) => reason._tag),
+          ["Fail", "Die"],
+        );
+      }),
+    );
+
+    scoped("should interrupt and await active watcher work during scope close", () =>
+      Effect.gen(function* () {
+        // Test: should interrupt and await active watcher work during scope close
+        // Scope: covers shutdown while a native file-change callback is still running.
+        // Assertion: the callback exits interrupted, reports once, and listener removal is complete on return.
+        let changeHandler: ((file: string) => void) | undefined;
+        let removed = 0;
+        let reports = 0;
+        const started = yield* Deferred.make<void>();
+        const completed = yield* Deferred.make<Exit.Exit<void, never>>();
+        const source: ViteServerSource = {
+          ssrLoadModule: () => Promise.resolve({}),
+          watcher: {
+            on: (_event, handler) => {
+              changeHandler = handler;
+            },
+            off: () => {
+              removed += 1;
+            },
+          },
+          middlewares: { use: () => undefined },
+          transformIndexHtml: (_url, html) => Promise.resolve(html),
+        };
+        const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void),
+        );
+        yield* Scope.provide(
+          ViteServer.make(source).onFileChange(
+            () =>
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.onExit((exit) => Deferred.succeed(completed, exit).pipe(Effect.asVoid)),
+              ),
+            () =>
+              Effect.sync(() => {
+                reports += 1;
+              }),
+          ),
+          owner,
+        );
+        if (changeHandler === undefined) {
+          return assert.fail("Expected watcher change listener to be installed");
         }
 
-        assert.strictEqual(closeHandlers.length, 1);
-        assert.strictEqual(closeRuns, 1);
-        yield* Deferred.await(cleaned);
+        changeHandler("app/api.ts");
+        yield* Deferred.await(started);
+        yield* Scope.close(owner, Exit.void);
+        const exit = yield* Deferred.await(completed);
+
+        assert.isTrue(Exit.isFailure(exit));
+        if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause));
+        assert.strictEqual(reports, 1);
+        assert.strictEqual(removed, 1);
       }),
     );
 
@@ -1150,7 +2286,7 @@ export const routes = { manifest: [] }
         // Scope: covers the file-change boundary between the Vite watcher and active API handle.
         // Assertion: an api.ts change runs exactly one reload and unrelated files do not reload.
         let reloads = 0;
-        const api = makePluginApi({
+        const api = PluginApi.make({
           middleware: (_req, _res, next) => next(),
           reload: Effect.sync(() => {
             reloads += 1;
@@ -1169,16 +2305,48 @@ export const routes = { manifest: [] }
       Effect.gen(function* () {
         // Test: should keep dev middleware alive when PluginApi reload fails
         // Scope: covers reload failure isolation at the dev watcher boundary.
-        // Assertion: a typed reload failure is logged and does not fail the surrounding effect.
-        const api = makePluginApi({
+        // Assertion: every typed reload failure is logged and the all-Fail Cause is recovered.
+        const first = new ApiInitError({ message: "first reload failure" });
+        const second = new ApiInitError({ message: "second reload failure" });
+        const api = PluginApi.make({
           middleware: (_req, _res, next) => next(),
-          reload: Effect.fail(new ApiInitError({ message: "reload failed" })),
+          reload: Effect.failCause(Cause.combine(Cause.fail(first), Cause.fail(second))),
           dispose: Effect.void,
         });
 
         const exit = yield* Effect.exit(api.reloadChangedFile(path.join("app", "api.ts")));
 
         assert.isTrue(Exit.isSuccess(exit));
+      }),
+    );
+
+    scoped("should preserve mixed reload Causes at the PluginApi watcher facade", () =>
+      Effect.gen(function* () {
+        // Test: should preserve mixed reload Causes at the PluginApi watcher facade
+        // Scope: covers fail+die and fail+interrupt reload termination before watcher recovery.
+        // Assertion: neither mixed Cause is logged as an ordinary typed failure or converted to success.
+        const error = new ApiInitError({ message: "reload failed" });
+        const causes = [
+          Cause.combine(Cause.fail(error), Cause.die("reload defect")),
+          Cause.combine(Cause.fail(error), Cause.interrupt(92)),
+        ];
+
+        for (const expectedCause of causes) {
+          const api = PluginApi.make({
+            middleware: (_req, _res, next) => next(),
+            reload: Effect.failCause(expectedCause),
+            dispose: Effect.void,
+          });
+          const exit = yield* api.reloadChangedFile(path.join("app", "api.ts")).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.deepStrictEqual(
+              exit.cause.reasons.map((reason) => reason._tag),
+              expectedCause.reasons.map((reason) => reason._tag),
+            );
+          }
+        }
       }),
     );
 
@@ -1212,6 +2380,405 @@ export const routes = { manifest: [] }
         assert.notInclude(code, "createNodeHandler");
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
+
+    for (const platform of [
+      { name: "Node", layer: NodeDevPlatform.layer },
+      { name: "Bun", layer: BunDevPlatform.layer },
+    ]) {
+      for (const phase of ["handler", "stream"]) {
+        for (const action of ["reload", "disconnect"]) {
+          scoped(
+            `should await an active generated ${platform.name} ${phase} during ${action} before releasing its API layer`,
+            () =>
+              Effect.gen(function* () {
+                // Scope: the real SSR-generated factory serves HTTP while its adapter replaces the API.
+                // Assertion: the replacement serves immediately, but old services outlive request cleanup.
+                const factory = yield* loadHandlerFactoryModule;
+                const platformService = yield* DevPlatform;
+                const requestStarted = yield* Deferred.make<void>();
+                const cleanupStarted = yield* Deferred.make<void>();
+                const cleanupFinished = yield* Deferred.make<void>();
+                const releaseCleanup = yield* Deferred.make<void>();
+                const events: Array<string> = [];
+                const errors: Array<unknown> = [];
+                let generation = 0;
+                const apiScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+                  Scope.close(scope, Exit.void),
+                );
+                // Unblock the request before the API owner closes, including on assertion failure.
+                yield* Effect.addFinalizer(() => Deferred.succeed(releaseCleanup, undefined));
+                const handle = yield* platformService
+                  .makeApi({
+                    handlerFactory: factory,
+                    onError: (error) =>
+                      Effect.sync(() => {
+                        errors.push(error);
+                      }),
+                    loadApiModule: () =>
+                      Effect.sync(() => {
+                        const current = ++generation;
+                        const services = Layer.effectDiscard(
+                          Effect.addFinalizer(() =>
+                            Effect.sync(() => {
+                              events.push(`release:${current}`);
+                            }),
+                          ),
+                        );
+                        const pending = HttpRouter.add(
+                          "GET",
+                          "/api/pending",
+                          Effect.gen(function* () {
+                            yield* Effect.addFinalizer(() =>
+                              Deferred.succeed(cleanupStarted, undefined).pipe(
+                                Effect.andThen(Deferred.await(releaseCleanup)),
+                                Effect.andThen(
+                                  Effect.sync(() => {
+                                    events.push(`request-release:${current}`);
+                                  }),
+                                ),
+                                Effect.andThen(Deferred.succeed(cleanupFinished, undefined)),
+                              ),
+                            );
+                            if (phase === "stream") {
+                              return HttpServerResponse.stream(
+                                Stream.fromEffect(Deferred.succeed(requestStarted, undefined)).pipe(
+                                  Stream.flatMap(() => Stream.never),
+                                ),
+                              );
+                            }
+                            yield* Deferred.succeed(requestStarted, undefined);
+                            return yield* Effect.never;
+                          }),
+                        );
+                        return {
+                          default: Layer.mergeAll(
+                            services,
+                            pending,
+                            HttpRouter.add(
+                              "GET",
+                              "/api/version",
+                              HttpServerResponse.text(String(current)),
+                            ),
+                          ),
+                        };
+                      }),
+                  })
+                  .pipe(Scope.provide(apiScope));
+                const server = yield* Effect.acquireRelease(
+                  Effect.sync(() =>
+                    createHttpServer((req, res) => handle.middleware(req, res, () => res.end())),
+                  ),
+                  (httpServer) =>
+                    Effect.promise(
+                      () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
+                    ),
+                );
+                yield* Effect.promise(
+                  () => new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)),
+                );
+                const address = server.address();
+                if (!isAddressInfo(address)) return assert.fail("Expected a TCP server");
+                const client = yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    const request = httpRequest(
+                      { hostname: "127.0.0.1", port: address.port, path: "/api/pending" },
+                      (response) => response.resume(),
+                    );
+                    request.on("error", () => undefined);
+                    request.end();
+                    return request;
+                  }),
+                  (request) =>
+                    Effect.sync(() => {
+                      request.destroy();
+                    }),
+                );
+                yield* Deferred.await(requestStarted);
+                const operation = yield* (
+                  action === "reload"
+                    ? handle.reload
+                    : Effect.sync(() => {
+                        client.destroy();
+                      })
+                ).pipe(Effect.forkChild);
+                yield* Deferred.await(cleanupStarted);
+                const response = yield* requestHttp({ port: address.port, path: "/api/version" });
+                assert.strictEqual(response.body, action === "reload" ? "2" : "1");
+                assert.deepStrictEqual(events, []);
+                if (action === "reload") assert.isUndefined(operation.pollUnsafe());
+                yield* Deferred.succeed(releaseCleanup, undefined);
+                yield* Deferred.await(cleanupFinished);
+                yield* Fiber.join(operation);
+                assert.deepStrictEqual(
+                  events,
+                  action === "reload" ? ["request-release:1", "release:1"] : ["request-release:1"],
+                );
+                yield* Scope.close(apiScope, Exit.void);
+                assert.deepStrictEqual(
+                  events,
+                  action === "reload"
+                    ? ["request-release:1", "release:1", "release:2"]
+                    : ["request-release:1", "release:1"],
+                );
+                assert.deepStrictEqual(errors, []);
+              }).pipe(Effect.provide(Layer.merge(NodeFileSystemLayer, platform.layer))),
+          );
+        }
+      }
+    }
+
+    scoped("should preserve HTTP logging controls and scoped application loggers", () =>
+      Effect.gen(function* () {
+        // Scope: the automatic logger's private disable control and application logger overrides.
+        // Assertion: only enabled HTTP responses log; application records retain their own sinks and values.
+        const factory = yield* loadHandlerFactoryModule;
+        for (const disabled of [false, true]) {
+          const application: Array<unknown> = [];
+          const subtree: Array<unknown> = [];
+          const responses: Array<unknown> = [];
+          const rootLogger = Logger.make((options) => {
+            const annotations = options.fiber.getRef(References.CurrentLogAnnotations);
+            if (Object.hasOwn(annotations, "http.status")) responses.push(options.message);
+            else application.push(options.message);
+          });
+          const subtreeLogger = Logger.make((options) => {
+            subtree.push(options.message);
+          });
+          const route = Effect.gen(function* () {
+            const current = yield* Logger.CurrentLoggers;
+            assert.isTrue(current.has(rootLogger));
+            yield* Effect.log("application-owned-value");
+            yield* Effect.log("subtree-owned-value").pipe(
+              Effect.provide(Logger.layer([subtreeLogger])),
+            );
+            return HttpServerResponse.text("ok");
+          });
+          const layer = yield* factory.makeApiLayer({
+            default: Layer.merge(
+              Logger.layer([rootLogger]),
+              HttpRouter.add(
+                "GET",
+                "/api/logger",
+                disabled ? HttpMiddleware.withLoggerDisabled(route) : route,
+              ),
+            ),
+          });
+          const handler = yield* factory.makeWebHandler(layer);
+          const response = yield* Effect.promise(() =>
+            handler.handler(new Request("http://localhost/api/logger")),
+          );
+          assert.strictEqual(response.status, 200);
+          yield* Effect.promise(() => response.text());
+          yield* handler.dispose;
+          assert.deepStrictEqual(application, [["application-owned-value"]]);
+          assert.deepStrictEqual(subtree, [["subtree-owned-value"]]);
+          assert.deepStrictEqual(responses, disabled ? [] : [["Sent HTTP response"]]);
+        }
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    for (const outcome of ["success", "failure", "defect", "interruption", "mixed"]) {
+      for (const sampled of [true, false]) {
+        scoped(
+          `should exclude request secrets before generated HTTP spans reach the tracer (${outcome}, sampled=${sampled})`,
+          () =>
+            Effect.gen(function* () {
+              // Scope: the generated factory uses Effect's automatic HTTP server tracer.
+              // Assertion: business inputs survive, while attributes delivered to the tracer omit secrets.
+              const factory = yield* loadHandlerFactoryModule;
+              const attributes: Array<readonly [string, unknown]> = [];
+              const spans: Array<Tracer.NativeSpan> = [];
+              const logs: Array<{
+                readonly message: unknown;
+                readonly cause: Cause.Cause<unknown>;
+                readonly annotations: Readonly<Record<string, unknown>>;
+              }> = [];
+              const logger = Logger.make((options) => {
+                const annotations = options.fiber.getRef(References.CurrentLogAnnotations);
+                if (Object.hasOwn(annotations, "http.status")) {
+                  logs.push({ message: options.message, cause: options.cause, annotations });
+                }
+              });
+              const ended = yield* Deferred.make<Exit.Exit<unknown, unknown>>();
+              const handled = yield* Deferred.make<Exit.Exit<unknown, unknown>>();
+              const failure =
+                outcome === "failure"
+                  ? Cause.fail("failure-sentinel")
+                  : outcome === "defect"
+                    ? Cause.die("defect-sentinel")
+                    : outcome === "interruption"
+                      ? Cause.interrupt(42)
+                      : Cause.combine(
+                          Cause.combine(
+                            Cause.fail("failure-sentinel"),
+                            Cause.die("defect-sentinel"),
+                          ),
+                          Cause.interrupt(42),
+                        );
+              const tracer = Tracer.make({
+                span: (options) => {
+                  class CapturingSpan extends Tracer.NativeSpan {
+                    override attribute(key: string, value: unknown): void {
+                      attributes.push([key, value]);
+                      super.attribute(key, value);
+                    }
+                    override end(time: bigint, exit: Exit.Exit<unknown, unknown>): void {
+                      super.end(time, exit);
+                      // The tracer callback is synchronous; signal the test without starting a runtime.
+                      if (this.kind === "server") Deferred.doneUnsafe(ended, Effect.succeed(exit));
+                    }
+                  }
+                  const span = new CapturingSpan(options);
+                  spans.push(span);
+                  return span;
+                },
+              });
+              const layer = yield* factory.makeApiLayer({
+                default: Layer.mergeAll(
+                  Layer.succeed(Tracer.Tracer, tracer),
+                  Logger.layer([logger]),
+                  HttpRouter.add(
+                    "GET",
+                    "/api/telemetry",
+                    Effect.gen(function* () {
+                      const request = yield* HttpServerRequest.HttpServerRequest;
+                      const activeLoggers = yield* Logger.CurrentLoggers;
+                      assert.isTrue(activeLoggers.has(logger));
+                      assert.include(request.url, "query-sentinel-123");
+                      assert.strictEqual(request.headers["x-private"], "header-sentinel-456");
+                      if (outcome !== "success") return yield* Effect.failCause(failure);
+                      return HttpServerResponse.text("ok", {
+                        status: 201,
+                        headers: { "x-private-response": "response-sentinel-789" },
+                      });
+                    }).pipe(Effect.onExit((exit) => Deferred.succeed(handled, exit))),
+                  ),
+                ),
+              });
+              const handler = yield* factory.makeWebHandler(layer);
+              const response = yield* Effect.promise(() =>
+                handler.handler(
+                  new Request("http://localhost/api/telemetry?token=query-sentinel-123", {
+                    headers: {
+                      "x-private": "header-sentinel-456",
+                      traceparent: `00-0123456789abcdef0123456789abcdef-0123456789abcdef-${sampled ? "01" : "00"}`,
+                    },
+                  }),
+                ),
+              );
+              const status = outcome === "success" ? 201 : outcome === "interruption" ? 503 : 500;
+              assert.strictEqual(response.status, status);
+              if (outcome === "success")
+                assert.strictEqual(
+                  response.headers.get("x-private-response"),
+                  "response-sentinel-789",
+                );
+              yield* Effect.promise(() => response.text());
+              yield* handler.dispose;
+              const terminal = yield* Deferred.await(ended);
+              const server = spans.filter((span) => span.kind === "server");
+              assert.lengthOf(server, 1);
+              assert.strictEqual(server[0]?.traceId, "0123456789abcdef0123456789abcdef");
+              assert.strictEqual(server[0]?.status._tag, "Ended");
+              assert.strictEqual(server[0]?.sampled, sampled);
+              if (sampled)
+                assert.includeDeepMembers(attributes, [
+                  ["http.request.method", "GET"],
+                  ["url.path", "/api/telemetry"],
+                  ["http.response.status_code", status],
+                ]);
+              assert.notInclude(JSON.stringify(attributes), "sentinel");
+              assert.notInclude(JSON.stringify(terminal), "sentinel");
+              assert.lengthOf(logs, 1);
+              assert.notInclude(JSON.stringify(logs), "sentinel");
+              assert.strictEqual(logs[0]?.annotations["http.status"], status);
+              const original = yield* Deferred.await(handled);
+              assert.strictEqual(Exit.isSuccess(terminal), outcome === "success");
+              if (outcome !== "success") {
+                assert.isTrue(Exit.isFailure(original));
+                if (Exit.isFailure(original)) assert.deepStrictEqual(original.cause, failure);
+                assert.strictEqual(Exit.hasFails(terminal), Cause.hasFails(failure));
+                assert.strictEqual(Exit.hasDies(terminal), Cause.hasDies(failure));
+                // Effect's HTTP response conversion retains pure interrupts, but strips
+                // interrupt reasons from mixed failures before handing them to its tracer.
+                assert.strictEqual(Exit.hasInterrupts(terminal), outcome === "interruption");
+              }
+            }).pipe(Effect.provide(NodeFileSystemLayer)),
+        );
+      }
+    }
+
+    for (const shape of ["direct", "replaced", "HEAD"]) {
+      scoped(
+        `should close an unconsumed generated ${shape} response before releasing its API services`,
+        () =>
+          Effect.gen(function* () {
+            // Scope: the Web response has been produced, but the bridge has not acquired its reader.
+            // Assertion: disposal still closes the request Scope before its API Layer services.
+            const factory = yield* loadHandlerFactoryModule;
+            const events: Array<string> = [];
+            const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+              Scope.close(scope, Exit.void),
+            );
+            const layer = yield* factory.makeApiLayer({
+              default: Layer.merge(
+                Layer.effectDiscard(
+                  Effect.addFinalizer(() =>
+                    Effect.sync(() => {
+                      events.push("service");
+                    }),
+                  ),
+                ),
+                HttpRouter.add(
+                  "GET",
+                  "/api/stream",
+                  Effect.gen(function* () {
+                    yield* Effect.addFinalizer(() =>
+                      Effect.sync(() => {
+                        events.push("request");
+                      }),
+                    );
+                    const streamed = HttpServerResponse.stream(Stream.never, {
+                      status: 201,
+                      contentLength: 7,
+                      headers: { "x-response": "preserved" },
+                    });
+                    if (shape === "replaced") {
+                      yield* HttpEffect.appendPreResponseHandler(() => Effect.succeed(streamed));
+                      return HttpServerResponse.text("replace");
+                    }
+                    return streamed;
+                  }),
+                ),
+              ),
+            });
+            const handler = yield* factory.makeWebHandler(layer).pipe(Scope.provide(owner));
+            const response = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                handler.handler(
+                  new Request("http://localhost/api/stream", {
+                    method: shape === "HEAD" ? "HEAD" : "GET",
+                  }),
+                ),
+              ),
+              (response) =>
+                Effect.tryPromise(async () => {
+                  await response.body?.cancel();
+                }).pipe(
+                  Effect.catchTag("UnknownError", logTestCleanupError("already canceled response")),
+                ),
+            );
+            if (shape === "HEAD") assert.isNull(response.body);
+            else assert.isNotNull(response.body);
+            assert.strictEqual(response.status, 201);
+            assert.strictEqual(response.headers.get("x-response"), "preserved");
+            assert.strictEqual(response.headers.get("content-length"), "7");
+            yield* handler.dispose;
+            yield* Scope.close(owner, Exit.void);
+            assert.deepStrictEqual(events, ["request", "service"]);
+          }).pipe(Effect.provide(NodeFileSystemLayer)),
+      );
+    }
 
     scoped("should bridge node request and response at handler factory boundary", () =>
       Effect.gen(function* () {
@@ -1296,6 +2863,164 @@ export const routes = { manifest: [] }
           response.body,
           `POST http://127.0.0.1:${address.port}/api/widgets?debug=1 payload`,
         );
+      }).pipe(Effect.provide(NodeFileSystemLayer)),
+    );
+
+    scoped("should bound and cancel generated Node bridge work without losing cookies", () =>
+      Effect.gen(function* () {
+        // Test: should bound and cancel generated Node bridge work without losing cookies
+        // Scope: exercises the actual SSR-loaded Node bridge used by production dev handlers.
+        // Assertion: overflow/abort clean listeners, disconnect cancels the reader, and cookies stay distinct.
+        const mod = yield* loadHandlerFactoryModule;
+
+        const overflowRequest = new EventEmitter();
+        let resumeCount = 0;
+        Object.assign(overflowRequest, {
+          complete: false,
+          headers: { host: "localhost" },
+          method: "POST",
+          pause: () => overflowRequest,
+          resume: () => {
+            resumeCount += 1;
+            return overflowRequest;
+          },
+          url: "/api/upload",
+        });
+        const overflowPromise = mod.getBody(decodeIncomingMessage(overflowRequest));
+        overflowRequest.emit("data", Buffer.alloc(MAX_REQUEST_BODY_BYTES));
+        overflowRequest.emit("data", Buffer.alloc(1));
+        const overflowExit = yield* Effect.tryPromise({
+          try: () => overflowPromise,
+          catch: (cause) => new GeneratedBridgeRejection({ cause }),
+        }).pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(overflowExit));
+        if (Exit.isFailure(overflowExit)) {
+          const rejection = Cause.squash(overflowExit.cause);
+          assert.instanceOf(rejection, GeneratedBridgeRejection);
+          if (rejection instanceof GeneratedBridgeRejection) {
+            assert.isTrue(isGeneratedApiRequestError(rejection.cause));
+            if (isGeneratedApiRequestError(rejection.cause)) {
+              assert.strictEqual(rejection.cause.reason, "BodyTooLarge");
+            }
+          }
+        }
+        assert.strictEqual(resumeCount, 1);
+        for (const event of ["data", "end", "error", "aborted", "close"]) {
+          assert.strictEqual(overflowRequest.listenerCount(event), 0);
+        }
+
+        const abortedRequest = new EventEmitter();
+        Object.assign(abortedRequest, {
+          complete: false,
+          headers: { host: "localhost" },
+          method: "POST",
+          pause: () => abortedRequest,
+          resume: () => abortedRequest,
+          url: "/api/upload",
+        });
+        const controller = new AbortController();
+        const abortedPromise = mod.getBody(
+          decodeIncomingMessage(abortedRequest),
+          controller.signal,
+        );
+        controller.abort();
+        const abortedExit = yield* Effect.tryPromise({
+          try: () => abortedPromise,
+          catch: (cause) => new GeneratedBridgeRejection({ cause }),
+        }).pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(abortedExit));
+        if (Exit.isFailure(abortedExit)) {
+          const rejection = Cause.squash(abortedExit.cause);
+          assert.instanceOf(rejection, GeneratedBridgeRejection);
+          if (rejection instanceof GeneratedBridgeRejection) {
+            assert.isTrue(isGeneratedApiRequestError(rejection.cause));
+            if (isGeneratedApiRequestError(rejection.cause)) {
+              assert.strictEqual(rejection.cause.reason, "Aborted");
+            }
+          }
+        }
+        for (const event of ["data", "end", "error", "aborted", "close"]) {
+          assert.strictEqual(abortedRequest.listenerCount(event), 0);
+        }
+
+        const responseEmitter = new EventEmitter();
+        const responseHeaders = new Map<string, unknown>();
+        Object.assign(responseEmitter, {
+          statusCode: 200,
+          writableEnded: false,
+          end: () => {
+            Reflect.set(responseEmitter, "writableEnded", true);
+            return responseEmitter;
+          },
+          setHeader: (name: string, value: unknown) => {
+            responseHeaders.set(name.toLowerCase(), value);
+            return responseEmitter;
+          },
+          write: (_chunk: Uint8Array, callback: (error?: Error | null) => void) => {
+            callback();
+            return true;
+          },
+        });
+        const cookieLines = [
+          "session=one; Path=/; HttpOnly",
+          "refresh=two; Expires=Wed, 21 Oct 2026 07:28:00 GMT; Path=/api",
+        ];
+        yield* Effect.promise(() =>
+          mod.toNodeResponse(
+            decodeResponse({
+              body: null,
+              headers: {
+                forEach: () => undefined,
+                getSetCookie: () => cookieLines,
+              },
+              status: 204,
+            }),
+            decodeServerResponse(responseEmitter),
+          ),
+        );
+        assert.deepStrictEqual(responseHeaders.get("set-cookie"), cookieLines);
+
+        let cancelCount = 0;
+        const stream = new ReadableStream<Uint8Array>({
+          cancel() {
+            cancelCount += 1;
+          },
+        });
+        const streamResponse = new EventEmitter();
+        Object.assign(streamResponse, {
+          statusCode: 200,
+          writableEnded: false,
+          end: () => streamResponse,
+          setHeader: () => streamResponse,
+          write: (_chunk: Uint8Array, callback: (error?: Error | null) => void) => {
+            callback();
+            return true;
+          },
+        });
+        const writing = mod.toNodeResponse(
+          decodeResponse({
+            body: stream,
+            headers: { forEach: () => undefined, getSetCookie: () => [] },
+            status: 200,
+          }),
+          decodeServerResponse(streamResponse),
+        );
+        while (streamResponse.listenerCount("close") === 0) {
+          yield* Effect.yieldNow;
+        }
+        streamResponse.emit("close");
+        const writeExit = yield* Effect.tryPromise({
+          try: () => writing,
+          catch: (cause) => new GeneratedBridgeRejection({ cause }),
+        }).pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(writeExit));
+        assert.strictEqual(cancelCount, 1);
+        assert.strictEqual(streamResponse.listenerCount("close"), 0);
+        const reader = stream.getReader();
+        reader.releaseLock();
       }).pipe(Effect.provide(NodeFileSystemLayer)),
     );
 
@@ -1582,6 +3307,7 @@ export const routes = { manifest: [] }
         const fs = yield* FileSystem.FileSystem;
         const root = yield* makeTempDir({
           "app/routes.ts": `
+import { Schema } from "effect"
 import { Route } from "trygg/router"
 
 Route.make("/users/:id")
@@ -1595,7 +3321,8 @@ Route.make("/users/:id")
         yield* files.writeGeneratedRouteTypes(paths);
 
         const routeTypes = yield* fs.readFileString(path.join(root, ".trygg", "routes.d.ts"));
-        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number }');
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: number; }');
+        assert.include(routeTypes, 'readonly "/users/:id": { readonly id: string; }');
       }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
 
@@ -1674,6 +3401,122 @@ Route.make("/users/:id")
         assert.isFalse(missing);
       }).pipe(Effect.provide(PluginFilesTestLayer)),
     );
+
+    it.effect("should recover only NotFound from filesystem existence checks", () =>
+      Effect.gen(function* () {
+        // Test: should recover only NotFound from filesystem existence checks
+        // Scope: covers exists failures before route/API path decisions are made.
+        // Assertion: NotFound means absent; PermissionDenied and TimedOut remain typed failures.
+        const paths = { appDir: "/workspace/app", generatedDir: "/workspace/.trygg" };
+        const run = (tag: SystemErrorTag) =>
+          Effect.gen(function* () {
+            const files = yield* PluginFiles;
+            return yield* files.routesFilePath(paths);
+          }).pipe(
+            Effect.provide(
+              makeControlledPluginFilesLayer({
+                exists: (filePath) => Effect.fail(makeFileSystemFailure(tag, "exists", filePath)),
+              }),
+            ),
+            Effect.exit,
+          );
+
+        const notFound = yield* run("NotFound");
+        const permission = yield* run("PermissionDenied");
+        const transient = yield* run("TimedOut");
+
+        assert.isTrue(Exit.isSuccess(notFound));
+        if (Exit.isSuccess(notFound)) assert.isUndefined(notFound.value);
+        for (const exit of [permission, transient]) {
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            const error = Cause.squash(exit.cause);
+            assert.instanceOf(error, PluginFileSystemError);
+            if (error instanceof PluginFileSystemError) {
+              assert.strictEqual(error.operation, "exists");
+            }
+          }
+        }
+      }),
+    );
+
+    it.effect("should recover only NotFound from filesystem stat checks", () =>
+      Effect.gen(function* () {
+        // Test: should recover only NotFound from filesystem stat checks
+        // Scope: covers the file-kind check after app/api.ts existence succeeds.
+        // Assertion: a stat race may mean absent, while permission/transient failures propagate.
+        const paths = { appDir: "/workspace/app", generatedDir: "/workspace/.trygg" };
+        const run = (tag: SystemErrorTag) =>
+          Effect.gen(function* () {
+            const files = yield* PluginFiles;
+            return yield* files.appApiExists(paths);
+          }).pipe(
+            Effect.provide(
+              makeControlledPluginFilesLayer({
+                exists: () => Effect.succeed(true),
+                stat: (filePath) => Effect.fail(makeFileSystemFailure(tag, "stat", filePath)),
+              }),
+            ),
+            Effect.exit,
+          );
+
+        const notFound = yield* run("NotFound");
+        const permission = yield* run("PermissionDenied");
+        const transient = yield* run("TimedOut");
+
+        assert.isTrue(Exit.isSuccess(notFound));
+        if (Exit.isSuccess(notFound)) assert.isFalse(notFound.value);
+        for (const exit of [permission, transient]) {
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            const error = Cause.squash(exit.cause);
+            assert.instanceOf(error, PluginFileSystemError);
+            if (error instanceof PluginFileSystemError) {
+              assert.strictEqual(error.operation, "stat");
+            }
+          }
+        }
+      }),
+    );
+
+    it.effect("should recover only NotFound from route source reads", () =>
+      Effect.gen(function* () {
+        // Test: should recover only NotFound from route source reads
+        // Scope: covers the race between finding app/routes.ts and reading its contents.
+        // Assertion: disappearance is benign; permission/transient failures remain read errors.
+        const paths = { appDir: "/workspace/app", generatedDir: "/workspace/.trygg" };
+        const run = (tag: SystemErrorTag) =>
+          Effect.gen(function* () {
+            const files = yield* PluginFiles;
+            yield* files.writeGeneratedRouteTypes(paths);
+          }).pipe(
+            Effect.provide(
+              makeControlledPluginFilesLayer({
+                exists: () => Effect.succeed(true),
+                readFileString: (filePath) =>
+                  Effect.fail(makeFileSystemFailure(tag, "readFileString", filePath)),
+              }),
+            ),
+            Effect.exit,
+          );
+
+        const notFound = yield* run("NotFound");
+        const permission = yield* run("PermissionDenied");
+        const transient = yield* run("TimedOut");
+
+        assert.isTrue(Exit.isSuccess(notFound));
+        for (const exit of [permission, transient]) {
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            const error = Cause.squash(exit.cause);
+            assert.instanceOf(error, PluginFileSystemError);
+            if (error instanceof PluginFileSystemError) {
+              assert.strictEqual(error.operation, "read");
+            }
+          }
+        }
+      }),
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1684,7 +3527,7 @@ Route.make("/users/:id")
       // Test: should render client entry module from semantic owner paths
       // Scope: covers owner-oriented entry module output without Vite or filesystem effects.
       // Assertion: output keeps the existing imports and mount semantics unchanged.
-      const owner = makeClientEntryModuleOwner({
+      const owner = ClientEntryModuleOwner.make({
         appDir: "/workspace/app",
         generatedDir: "/workspace/.trygg",
         routesFilePath: "/workspace/app/routes.ts",
@@ -1736,247 +3579,263 @@ mountDocument(<App />, { manifest: routes.manifest })
       });
 
       assert.include(output, 'import ApiLive from "../app/api.js"');
-      assert.include(output, "const ServerLive = HttpRouter.serve(ApiLive, {");
+      assert.include(output, "const makeServerLive = (ProductionMiddleware, PORT, HOST)");
+      assert.include(output, "return HttpRouter.serve(withHttpTelemetry(ApiLive), {");
       assert.include(
         output,
         "Layer.provide(NodeHttpServer.layer(() => createServer(), { port: PORT, host: HOST }))",
       );
       assert.include(output, "NodeRuntime.runMain(");
+      assert.include(output, "class ServerStartupError");
+      assert.isBelow(
+        output.indexOf("yield* Layer.build(ServerLive)"),
+        output.indexOf("Server listening on http://"),
+      );
     });
 
-    it("should render Cloudflare worker root fallback through ASSETS", async () => {
-      // Test: should render Cloudflare worker root fallback through ASSETS
-      // Scope: covers generated Worker request behavior without Cloudflare runtime internals.
-      // Assertion: / asks ASSETS and returns the served shell directly.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            const url = new URL(request.url);
-            requestedPaths.push(url.pathname);
-            if (url.pathname === "/") {
-              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
-            }
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker root fallback through ASSETS", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker root fallback through ASSETS
+        // Scope: covers generated Worker request behavior without Cloudflare runtime internals.
+        // Assertion: / asks ASSETS and returns the served shell directly.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                const url = new URL(request.url);
+                requestedPaths.push(url.pathname);
+                if (url.pathname === "/") {
+                  return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+                }
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/", { headers: { Accept: "text/html" } }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/", { headers: { Accept: "text/html" } }),
+            env,
+          );
 
-      assert.strictEqual(response.status, 200);
-      assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/"]);
-    });
+          assert.strictEqual(response.status, 200);
+          assert.strictEqual(await response.text(), "<html>shell</html>");
+          assert.deepStrictEqual(requestedPaths, ["/"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker deep route fallback through ASSETS", async () => {
-      // Test: should render Cloudflare worker deep route fallback through ASSETS
-      // Scope: covers client route refresh behavior after an asset miss.
-      // Assertion: document-like deep routes fall back to the public SPA shell.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            const url = new URL(request.url);
-            requestedPaths.push(url.pathname);
-            if (url.pathname === "/") {
-              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
-            }
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker deep route fallback through ASSETS", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker deep route fallback through ASSETS
+        // Scope: covers client route refresh behavior after an asset miss.
+        // Assertion: document-like deep routes fall back to the public SPA shell.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                const url = new URL(request.url);
+                requestedPaths.push(url.pathname);
+                if (url.pathname === "/") {
+                  return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+                }
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/changelog/example", {
-          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
-        }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/changelog/example", {
+              headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+            }),
+            env,
+          );
 
-      assert.strictEqual(response.status, 200);
-      assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/"]);
-    });
+          assert.strictEqual(response.status, 200);
+          assert.strictEqual(await response.text(), "<html>shell</html>");
+          assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker preserving successful ASSETS responses", async () => {
-      // Test: should render Cloudflare worker preserving successful ASSETS responses
-      // Scope: covers the assets-first contract.
-      // Assertion: successful ASSETS responses return unchanged and skip shell fallback.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const assetResponse = new Response("asset", { status: 201, headers: { "X-Asset": "yes" } });
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            requestedPaths.push(new URL(request.url).pathname);
-            return Promise.resolve(assetResponse);
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker preserving successful ASSETS responses", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker preserving successful ASSETS responses
+        // Scope: covers the assets-first contract.
+        // Assertion: successful ASSETS responses return unchanged and skip shell fallback.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const assetResponse = new Response("asset", {
+            status: 201,
+            headers: { "X-Asset": "yes" },
+          });
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Promise.resolve(assetResponse);
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
+            env,
+          );
 
-      assert.strictEqual(response, assetResponse);
-      assert.strictEqual(response.status, 201);
-      assert.strictEqual(response.headers.get("X-Asset"), "yes");
-      assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
-    });
+          assert.strictEqual(response, assetResponse);
+          assert.strictEqual(response.status, 201);
+          assert.strictEqual(response.headers.get("X-Asset"), "yes");
+          assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker preserving asset 404s", async () => {
-      // Test: should render Cloudflare worker preserving asset 404s
-      // Scope: covers generated asset-like miss behavior.
-      // Assertion: missing generated assets are not hidden behind the SPA shell.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            requestedPaths.push(new URL(request.url).pathname);
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker preserving asset 404s", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker preserving asset 404s
+        // Scope: covers generated asset-like miss behavior.
+        // Assertion: missing generated assets are not hidden behind the SPA shell.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/assets/app.js", { headers: { Accept: "text/html" } }),
+            env,
+          );
 
-      assert.strictEqual(response.status, 404);
-      assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
-    });
+          assert.strictEqual(response.status, 404);
+          assert.deepStrictEqual(requestedPaths, ["/assets/app.js"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker preserving non-document and non-GET 404s", async () => {
-      // Test: should render Cloudflare worker preserving non-document and non-GET 404s
-      // Scope: covers request semantic gating for SPA fallback.
-      // Assertion: script destinations and POST requests do not receive the SPA shell.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            requestedPaths.push(new URL(request.url).pathname);
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker preserving non-document and non-GET 404s", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker preserving non-document and non-GET 404s
+        // Scope: covers request semantic gating for SPA fallback.
+        // Assertion: script destinations and POST requests do not receive the SPA shell.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const scriptResponse = await worker.default.fetch(
-        new Request("https://example.com/changelog/example", {
-          headers: { Accept: "application/javascript" },
-        }),
-        env,
-      );
-      const postResponse = await worker.default.fetch(
-        new Request("https://example.com/changelog/example", {
-          method: "POST",
-          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
-        }),
-        env,
-      );
+          const scriptResponse = await worker.default.fetch(
+            new Request("https://example.com/changelog/example", {
+              headers: { Accept: "application/javascript" },
+            }),
+            env,
+          );
+          const postResponse = await worker.default.fetch(
+            new Request("https://example.com/changelog/example", {
+              method: "POST",
+              headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+            }),
+            env,
+          );
 
-      assert.strictEqual(scriptResponse.status, 404);
-      assert.strictEqual(postResponse.status, 404);
-      assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/changelog/example"]);
-    });
+          assert.strictEqual(scriptResponse.status, 404);
+          assert.strictEqual(postResponse.status, 404);
+          assert.deepStrictEqual(requestedPaths, ["/changelog/example", "/changelog/example"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker allowing /assets as an app route", async () => {
-      // Test: should render Cloudflare worker allowing /assets as an app route
-      // Scope: prevents generated asset routing from reserving user route space.
-      // Assertion: extensionless /assets document requests fall back to the SPA shell.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            const url = new URL(request.url);
-            requestedPaths.push(url.pathname);
-            if (url.pathname === "/") {
-              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
-            }
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker allowing /assets as an app route", () =>
+      Effect.gen(function* () {
+        // Test: should render Cloudflare worker allowing /assets as an app route
+        // Scope: prevents generated asset routing from reserving user route space.
+        // Assertion: extensionless /assets document requests fall back to the SPA shell.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                const url = new URL(request.url);
+                requestedPaths.push(url.pathname);
+                if (url.pathname === "/") {
+                  return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+                }
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/assets", {
-          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
-        }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/assets", {
+              headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+            }),
+            env,
+          );
 
-      assert.strictEqual(response.status, 200);
-      assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.deepStrictEqual(requestedPaths, ["/assets", "/"]);
-    });
+          assert.strictEqual(response.status, 200);
+          assert.strictEqual(await response.text(), "<html>shell</html>");
+          assert.deepStrictEqual(requestedPaths, ["/assets", "/"]);
+        });
+      }),
+    );
 
-    it("should render Cloudflare worker SPA fallback that never requests /index.html", async () => {
-      // Regression: with CF assets html_handling="auto-trailing-slash", a request
-      // for /index.html receives a 307 to /, which the worker would propagate as
-      // a top-level redirect and break every non-root document path. The fallback
-      // must target /, which CF resolves to the index shell without redirecting.
-      const source = renderCloudflareStaticWorkerEntryModule();
-      const moduleUrl = `data:text/javascript,${encodeURIComponent(source)}`;
-      const rawModule = await import(moduleUrl);
-      const worker = decodeCloudflareStaticWorkerModule(rawModule);
-      const requestedPaths: Array<string> = [];
-      const env = {
-        ASSETS: {
-          fetch: (request: Request) => {
-            const url = new URL(request.url);
-            requestedPaths.push(url.pathname);
-            if (url.pathname === "/index.html") {
-              return Promise.resolve(
-                new Response(null, { status: 307, headers: { Location: "/" } }),
-              );
-            }
-            if (url.pathname === "/") {
-              return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
-            }
-            return Promise.resolve(new Response("missing", { status: 404 }));
-          },
-        },
-      };
+    it.effect("should render Cloudflare worker SPA fallback that never requests /index.html", () =>
+      Effect.gen(function* () {
+        // Regression: with CF assets html_handling="auto-trailing-slash", a request
+        // for /index.html receives a 307 to /, which the worker would propagate as
+        // a top-level redirect and break every non-root document path. The fallback
+        // must target /, which CF resolves to the index shell without redirecting.
+        const worker = yield* loadPlannedCloudflareWorker;
+        yield* Effect.promise(async () => {
+          const requestedPaths: Array<string> = [];
+          const env = {
+            ASSETS: {
+              fetch: (request: Request) => {
+                const url = new URL(request.url);
+                requestedPaths.push(url.pathname);
+                if (url.pathname === "/index.html") {
+                  return Promise.resolve(
+                    new Response(null, { status: 307, headers: { Location: "/" } }),
+                  );
+                }
+                if (url.pathname === "/") {
+                  return Promise.resolve(new Response("<html>shell</html>", { status: 200 }));
+                }
+                return Promise.resolve(new Response("missing", { status: 404 }));
+              },
+            },
+          };
 
-      const response = await worker.default.fetch(
-        new Request("https://example.com/docs", {
-          headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
-        }),
-        env,
-      );
+          const response = await worker.default.fetch(
+            new Request("https://example.com/docs", {
+              headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" },
+            }),
+            env,
+          );
 
-      assert.strictEqual(response.status, 200);
-      assert.strictEqual(await response.text(), "<html>shell</html>");
-      assert.notInclude(requestedPaths, "/index.html");
-    });
+          assert.strictEqual(response.status, 200);
+          assert.strictEqual(await response.text(), "<html>shell</html>");
+          assert.notInclude(requestedPaths, "/index.html");
+        });
+      }),
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2082,55 +3941,6 @@ mountDocument(<App />, { manifest: routes.manifest })
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: Param extraction
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("extractParamNames", () => {
-    it.effect("should return empty array for static route", () =>
-      Effect.gen(function* () {
-        const params = yield* extractParamNames("/users/profile");
-        assert.deepStrictEqual([...params], []);
-      }),
-    );
-
-    it.effect("should extract single param", () =>
-      Effect.gen(function* () {
-        const params = yield* extractParamNames("/users/:id");
-        assert.deepStrictEqual([...params], ["id"]);
-      }),
-    );
-
-    it.effect("should extract multiple params", () =>
-      Effect.gen(function* () {
-        const params = yield* extractParamNames("/users/:userId/posts/:postId");
-        assert.deepStrictEqual([...params], ["userId", "postId"]);
-      }),
-    );
-  });
-
-  describe("generateParamType", () => {
-    it.effect("should return empty object for static route", () =>
-      Effect.gen(function* () {
-        const type = yield* generateParamType("/users/profile");
-        assert.strictEqual(type, "{}");
-      }),
-    );
-
-    it.effect("should generate type for single param", () =>
-      Effect.gen(function* () {
-        const type = yield* generateParamType("/users/:id");
-        assert.strictEqual(type, "{ readonly id: string }");
-      }),
-    );
-
-    it.effect("should generate type for multiple params", () =>
-      Effect.gen(function* () {
-        const type = yield* generateParamType("/users/:userId/posts/:postId");
-        assert.strictEqual(type, "{ readonly userId: string; readonly postId: string }");
-      }),
-    );
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
   // Scope: API platform guard
   // ─────────────────────────────────────────────────────────────────────────────
   describe("validateApiPlatform", () => {
@@ -2197,7 +4007,7 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         assert.isFunction(devPlatform.makeApi);
         assert.isUndefined(legacyConstructors.createDevApi);
-      }).pipe(Effect.provide(NodeDevPlatformLive)),
+      }).pipe(Effect.provide(NodeDevPlatform.layer)),
     );
 
     scoped("should makeApi handle API middleware requests on Node", () =>
@@ -2225,10 +4035,11 @@ mountDocument(<App />, { manifest: routes.manifest })
                   },
                   dispose: Effect.void,
                 }),
-              makeWebHandler: () => ({
-                handler: () => Promise.resolve(new Response(null, { status: 204 })),
-                dispose: () => undefined,
-              }),
+              makeWebHandler: () =>
+                Effect.succeed({
+                  handler: () => Promise.resolve(new Response(null, { status: 204 })),
+                  dispose: Effect.void,
+                }),
             },
           }),
           scope,
@@ -2270,7 +4081,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         );
 
         assert.strictEqual(status, 204);
-      }).pipe(Effect.provide(NodeDevPlatformLive)),
+      }).pipe(Effect.provide(NodeDevPlatform.layer)),
     );
   });
 
@@ -2281,10 +4092,11 @@ mountDocument(<App />, { manifest: routes.manifest })
     const apiLayer = Layer.succeedContext(Context.makeUnsafe<unknown>(new Map()));
     const handlerFactory = {
       makeApiLayer: () => Effect.succeed(apiLayer),
-      makeWebHandler: () => ({
-        handler: () => Promise.resolve(new Response(null, { status: 204 })),
-        dispose: () => undefined,
-      }),
+      makeWebHandler: () =>
+        Effect.succeed({
+          handler: () => Promise.resolve(new Response(null, { status: 204 })),
+          dispose: Effect.void,
+        }),
     };
 
     scoped("should loadInitial expose absent state when api file is missing", () =>
@@ -2336,7 +4148,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         // Assertion: factory loading happens once, while initial load plus reloads run user API work.
         let factoryLoads = 0;
         let apiLoads = 0;
-        const stableHandlerFactory = makeStableHandlerFactoryLoader(
+        const stableHandlerFactory = HandlerFactoryLoader.make(
           Effect.sync(() => {
             factoryLoads += 1;
             return handlerFactory;
@@ -2380,7 +4192,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         const loadStarted = yield* Deferred.make<void, never>();
         const releaseLoad = yield* Deferred.make<void, never>();
         let factoryLoads = 0;
-        const stableHandlerFactory = makeStableHandlerFactoryLoader(
+        const stableHandlerFactory = HandlerFactoryLoader.make(
           Effect.gen(function* () {
             factoryLoads += 1;
             yield* Deferred.succeed(loadStarted, undefined).pipe(Effect.asVoid);
@@ -2511,6 +4323,82 @@ mountDocument(<App />, { manifest: routes.manifest })
       }),
     );
 
+    scoped("should preserve mixed coalesced reload Causes for every waiter", () =>
+      Effect.gen(function* () {
+        // Test: should preserve mixed coalesced reload Causes for every waiter
+        // Scope: covers overlapping reload callers for fail+die and fail+interrupt owner exits.
+        // Assertion: both waiters see every reason, Failed is not published, and a later reload starts fresh.
+        const error = new ApiInitError({ message: "mixed reload failure" });
+        const causes = [
+          Cause.combine(Cause.fail(error), Cause.die("coalesced reload defect")),
+          Cause.combine(Cause.fail(error), Cause.interrupt(93)),
+        ];
+
+        for (const expectedCause of causes) {
+          const started = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const seen: Array<PluginApi.InitialState["_tag"]> = [];
+          let runs = 0;
+          const state = yield* PluginApi.loadInitial({
+            apiPath: "/app/api.ts",
+            hasApi: Effect.succeed(true),
+            loadHandlerFactory: Effect.succeed(handlerFactory),
+            makeApi: () =>
+              Effect.succeed({
+                middleware: (_req, _res, next) => next(),
+                reload: Effect.gen(function* () {
+                  runs += 1;
+                  if (runs === 1) {
+                    yield* Deferred.succeed(started, undefined).pipe(Effect.asVoid);
+                    yield* Deferred.await(release);
+                  }
+                  return yield* Effect.failCause(expectedCause);
+                }),
+                dispose: Effect.void,
+              }),
+            observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+          });
+          if (!PluginApi.InitialState.$is("Ready")(state)) {
+            return assert.fail("Expected ready API state");
+          }
+
+          const first = yield* state.handle.reload.pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          const second = yield* state.handle.reload.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* Deferred.succeed(release, undefined).pipe(Effect.asVoid);
+          const [firstExit, secondExit] = yield* Effect.all([
+            Fiber.await(first),
+            Fiber.await(second),
+          ]);
+
+          assert.strictEqual(runs, 1);
+          for (const exit of [firstExit, secondExit]) {
+            assert.isTrue(Exit.isFailure(exit));
+            if (Exit.isFailure(exit)) {
+              assert.deepStrictEqual(
+                exit.cause.reasons.map((reason) => reason._tag),
+                expectedCause.reasons.map((reason) => reason._tag),
+              );
+            }
+          }
+          assert.notInclude(seen, "Failed");
+
+          const laterExit = yield* state.handle.reload.pipe(Effect.exit);
+          assert.strictEqual(runs, 2);
+          assert.isTrue(Exit.isFailure(laterExit));
+          if (Exit.isFailure(laterExit)) {
+            assert.deepStrictEqual(
+              laterExit.cause.reasons.map((reason) => reason._tag),
+              expectedCause.reasons.map((reason) => reason._tag),
+            );
+          }
+          yield* PluginApi.closeInitial(state);
+        }
+      }),
+    );
+
     scoped("should keep middleware available while reload is active", () =>
       Effect.gen(function* () {
         // Test: should keep middleware available while reload is active
@@ -2538,7 +4426,7 @@ mountDocument(<App />, { manifest: routes.manifest })
         if (!PluginApi.InitialState.$is("Ready")(state)) {
           return assert.fail("Expected ready API state");
         }
-        const api = makePluginApi(state.handle);
+        const api = PluginApi.make(state.handle);
         const reload = yield* api
           .reloadChangedFile(path.join("app", "api.ts"))
           .pipe(Effect.forkChild);
@@ -2609,6 +4497,81 @@ mountDocument(<App />, { manifest: routes.manifest })
         assert.deepStrictEqual(seen, ["Loading", "Failed"]);
         assert.strictEqual(state._tag, "Failed");
         assert.strictEqual(finalized, 1);
+      }),
+    );
+
+    scoped("should recover a combined all-typed initial load Cause as Failed", () =>
+      Effect.gen(function* () {
+        // Test: should recover a combined all-typed initial load Cause as Failed
+        // Scope: covers the initial-load policy when every Cause reason is an expected API failure.
+        // Assertion: Failed publishes the first typed error and partial resources close exactly once.
+        const first = new ApiInitError({ message: "first initialization failure" });
+        const second = new ApiInitError({ message: "second initialization failure" });
+        const seen: Array<PluginApi.InitialState["_tag"]> = [];
+        let finalized = 0;
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  finalized += 1;
+                }),
+              );
+              return yield* Effect.failCause(Cause.combine(Cause.fail(first), Cause.fail(second)));
+            }),
+          observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+        });
+
+        assert.deepStrictEqual(seen, ["Loading", "Failed"]);
+        assert.isTrue(PluginApi.InitialState.$is("Failed")(state));
+        if (PluginApi.InitialState.$is("Failed")(state)) assert.strictEqual(state.error, first);
+        assert.strictEqual(finalized, 1);
+      }),
+    );
+
+    scoped("should close initial resources and reemit mixed initialization Causes", () =>
+      Effect.gen(function* () {
+        // Test: should close initial resources and reemit mixed initialization Causes
+        // Scope: covers fail+die and fail+interrupt during makeApi after partial acquisition.
+        // Assertion: resources close once, no Failed state is published, and every Cause reason survives.
+        const error = new ApiInitError({ message: "initialization failed" });
+        const causes = [
+          Cause.combine(Cause.fail(error), Cause.die("initialization defect")),
+          Cause.combine(Cause.fail(error), Cause.interrupt(94)),
+        ];
+
+        for (const expectedCause of causes) {
+          const seen: Array<PluginApi.InitialState["_tag"]> = [];
+          let finalized = 0;
+          const exit = yield* PluginApi.loadInitial({
+            apiPath: "/app/api.ts",
+            hasApi: Effect.succeed(true),
+            loadHandlerFactory: Effect.succeed(handlerFactory),
+            makeApi: () =>
+              Effect.gen(function* () {
+                yield* Effect.addFinalizer(() =>
+                  Effect.sync(() => {
+                    finalized += 1;
+                  }),
+                );
+                return yield* Effect.failCause(expectedCause);
+              }),
+            observe: (nextState) => Effect.sync(() => seen.push(nextState._tag)),
+          }).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.deepStrictEqual(
+              exit.cause.reasons.map((reason) => reason._tag),
+              expectedCause.reasons.map((reason) => reason._tag),
+            );
+          }
+          assert.deepStrictEqual(seen, ["Loading"]);
+          assert.strictEqual(finalized, 1);
+        }
       }),
     );
 
@@ -2753,14 +4716,16 @@ mountDocument(<App />, { manifest: routes.manifest })
       }),
     );
 
-    scoped("should reset reload coalescing state when active reload is interrupted", () =>
+    scoped("should interrupt and await a recursive follow-up reload during shutdown", () =>
       Effect.gen(function* () {
-        // Test: should reset reload coalescing state when active reload is interrupted
-        // Scope: covers cleanup of the synchronized reload state under fiber interruption.
-        // Assertion: a reload after interruption starts a fresh pass instead of awaiting stale state.
+        // Test: should interrupt and await a recursive follow-up reload during shutdown
+        // Scope: closes the API owner while the coalesced second pass is active.
+        // Assertion: the recursive pass is interruptible, cleanup is awaited, and all waiters settle.
         const firstStarted = yield* Deferred.make<void, never>();
         const secondStarted = yield* Deferred.make<void, never>();
-        const blockFirst = yield* Deferred.make<void, never>();
+        const releaseFirst = yield* Deferred.make<void, never>();
+        const cleanupStarted = yield* Deferred.make<void, never>();
+        const releaseCleanup = yield* Deferred.make<void, never>();
         let runs = 0;
 
         const state = yield* PluginApi.loadInitial({
@@ -2774,10 +4739,17 @@ mountDocument(<App />, { manifest: routes.manifest })
                 runs += 1;
                 if (runs === 1) {
                   yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.asVoid);
-                  yield* Deferred.await(blockFirst);
+                  yield* Deferred.await(releaseFirst);
                 }
                 if (runs === 2) {
                   yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.asVoid);
+                  return yield* Effect.never.pipe(
+                    Effect.ensuring(
+                      Deferred.succeed(cleanupStarted, undefined).pipe(
+                        Effect.andThen(Deferred.await(releaseCleanup)),
+                      ),
+                    ),
+                  );
                 }
               }),
               dispose: Effect.void,
@@ -2790,316 +4762,144 @@ mountDocument(<App />, { manifest: routes.manifest })
 
         const first = yield* ready.handle.reload.pipe(Effect.forkChild);
         yield* Deferred.await(firstStarted);
-        yield* Fiber.interrupt(first);
-
-        const second = yield* ready.handle.reload.pipe(Effect.forkChild);
+        const followUp = yield* ready.handle.reload.pipe(
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* Deferred.succeed(releaseFirst, undefined).pipe(Effect.asVoid);
         yield* Deferred.await(secondStarted);
-        yield* Fiber.join(second);
+        const closing = yield* PluginApi.closeInitial(ready).pipe(Effect.forkChild);
+        yield* Deferred.await(cleanupStarted);
+
+        assert.isUndefined(closing.pollUnsafe());
+
+        yield* Deferred.succeed(releaseCleanup, undefined).pipe(Effect.asVoid);
+        yield* Fiber.join(closing);
+        const firstExit = yield* Fiber.await(first);
+        const followUpExit = yield* Fiber.await(followUp);
 
         assert.strictEqual(runs, 2);
-      }),
-    );
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: Schema type mapping
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("schemaToType", () => {
-    it("should map Schema.NumberFromString to number", () => {
-      assert.strictEqual(schemaToType("Schema.NumberFromString"), "number");
-    });
-
-    it("should map Schema.String to string", () => {
-      assert.strictEqual(schemaToType("Schema.String"), "string");
-    });
-
-    it("should map Schema.Number to number", () => {
-      assert.strictEqual(schemaToType("Schema.Number"), "number");
-    });
-
-    it("should map Schema.Boolean to boolean", () => {
-      assert.strictEqual(schemaToType("Schema.Boolean"), "boolean");
-    });
-
-    it("should map Schema.Literal to union type", () => {
-      assert.strictEqual(schemaToType('Schema.Literal("asc", "desc")'), '"asc" | "desc"');
-    });
-
-    it("should map Schema.optional to T | undefined", () => {
-      assert.strictEqual(
-        schemaToType("Schema.optional(Schema.NumberFromString)"),
-        "number | undefined",
-      );
-    });
-
-    it("should map Schema.optional(Schema.Literal) to union | undefined", () => {
-      assert.strictEqual(
-        schemaToType('Schema.optional(Schema.Literal("asc", "desc"))'),
-        '"asc" | "desc" | undefined',
-      );
-    });
-
-    it("should fall back to string for unknown schema types", () => {
-      assert.strictEqual(schemaToType("Schema.CustomThing"), "string");
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: parseSchemaStruct
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("parseSchemaStruct", () => {
-    it("should parse single field", () => {
-      const result = parseSchemaStruct("id: Schema.NumberFromString");
-      assert.strictEqual(result.length, 1);
-      assert.strictEqual(result[0]?.name, "id");
-      assert.strictEqual(result[0]?.type, "number");
-      assert.isFalse(result[0]?.optional);
-    });
-
-    it("should parse multiple fields", () => {
-      const result = parseSchemaStruct(
-        "year: Schema.NumberFromString, month: Schema.NumberFromString, slug: Schema.String",
-      );
-      assert.strictEqual(result.length, 3);
-      assert.strictEqual(result[0]?.name, "year");
-      assert.strictEqual(result[0]?.type, "number");
-      assert.strictEqual(result[1]?.name, "month");
-      assert.strictEqual(result[2]?.name, "slug");
-      assert.strictEqual(result[2]?.type, "string");
-    });
-
-    it("should handle optional fields", () => {
-      const result = parseSchemaStruct(
-        "q: Schema.String, page: Schema.optional(Schema.NumberFromString)",
-      );
-      assert.strictEqual(result.length, 2);
-      assert.strictEqual(result[0]?.name, "q");
-      assert.isFalse(result[0]?.optional);
-      assert.strictEqual(result[1]?.name, "page");
-      assert.strictEqual(result[1]?.type, "number | undefined");
-      assert.isTrue(result[1]?.optional);
-    });
-
-    it("should return empty array for empty struct", () => {
-      assert.strictEqual(parseSchemaStruct("").length, 0);
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: parseRoutes
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("parseRoutes", () => {
-    it.effect("should extract route paths from Route.make", () =>
-      Effect.gen(function* () {
-        const source = `
-          Route.make("/users")
-            .component(UsersList)
-          Route.make("/about")
-            .component(About)
-        `;
-        const routes = yield* parseRoutes(source);
-        assert.strictEqual(routes.length, 2);
-        assert.strictEqual(routes[0]?.path, "/users");
-        assert.strictEqual(routes[1]?.path, "/about");
+        assert.isTrue(Exit.isFailure(firstExit));
+        assert.isTrue(Exit.isFailure(followUpExit));
+        if (Exit.isFailure(firstExit)) assert.isTrue(Cause.hasInterrupts(firstExit.cause));
+        if (Exit.isFailure(followUpExit)) assert.isTrue(Cause.hasInterrupts(followUpExit.cause));
       }),
     );
 
-    it.effect("should extract params schema", () =>
+    scoped("should not orphan a reload claim interrupted immediately before owner execution", () =>
       Effect.gen(function* () {
-        const source = `
-          Route.make("/users/:id")
-            .params(Schema.Struct({ id: Schema.NumberFromString }))
-            .component(UserProfile)
-        `;
-        const routes = yield* parseRoutes(source);
-        assert.strictEqual(routes.length, 1);
-        assert.strictEqual(routes[0]?.params.length, 1);
-        assert.strictEqual(routes[0]?.params[0]?.name, "id");
-        assert.strictEqual(routes[0]?.params[0]?.type, "number");
-      }),
-    );
-
-    it.effect("should extract query schema", () =>
-      Effect.gen(function* () {
-        const source = `
-          Route.make("/search")
-            .query(Schema.Struct({ q: Schema.String, page: Schema.optional(Schema.NumberFromString) }))
-            .component(SearchPage)
-        `;
-        const routes = yield* parseRoutes(source);
-        assert.strictEqual(routes.length, 1);
-        assert.strictEqual(routes[0]?.query.length, 2);
-        assert.strictEqual(routes[0]?.query[0]?.name, "q");
-        assert.strictEqual(routes[0]?.query[0]?.type, "string");
-        assert.strictEqual(routes[0]?.query[1]?.name, "page");
-        assert.isTrue(routes[0]?.query[1]?.optional);
-      }),
-    );
-
-    it.effect("should extract Route.index as index route", () =>
-      Effect.gen(function* () {
-        const source = `
-          Route.index(SettingsIndex)
-        `;
-        const routes = yield* parseRoutes(source);
-        assert.strictEqual(routes.length, 1);
-        assert.isTrue(routes[0]?.isIndex);
-      }),
-    );
-
-    it.effect("should handle routes with no params", () =>
-      Effect.gen(function* () {
-        const source = `
-          Route.make("/about")
-            .component(AboutPage)
-        `;
-        const routes = yield* parseRoutes(source);
-        assert.strictEqual(routes[0]?.params.length, 0);
-        assert.strictEqual(routes[0]?.query.length, 0);
-      }),
-    );
-
-    it.effect("should handle empty source", () =>
-      Effect.gen(function* () {
-        const routes = yield* parseRoutes("");
-        assert.strictEqual(routes.length, 0);
-      }),
-    );
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: resolveRoutePaths
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("resolveRoutePaths", () => {
-    it("should resolve top-level routes as absolute", () => {
-      const routes: ReadonlyArray<ParsedRoute> = [
-        { path: "/users", params: [], query: [], children: [], isIndex: false },
-        { path: "/about", params: [], query: [], children: [], isIndex: false },
-      ];
-      const resolved = resolveRoutePaths(routes);
-      assert.strictEqual(resolved.length, 2);
-      assert.strictEqual(resolved[0]?.path, "/users");
-      assert.strictEqual(resolved[1]?.path, "/about");
-    });
-
-    it("should resolve children against parent path", () => {
-      const routes: ReadonlyArray<ParsedRoute> = [
-        {
-          path: "/settings",
-          params: [],
-          query: [],
-          isIndex: false,
-          children: [
-            { path: "/profile", params: [], query: [], children: [], isIndex: false },
-            { path: "/security", params: [], query: [], children: [], isIndex: false },
-          ],
-        },
-      ];
-      const resolved = resolveRoutePaths(routes);
-      assert.strictEqual(resolved.length, 3);
-      assert.strictEqual(resolved[0]?.path, "/settings");
-      assert.strictEqual(resolved[1]?.path, "/settings/profile");
-      assert.strictEqual(resolved[2]?.path, "/settings/security");
-    });
-
-    it("should resolve index routes to parent path", () => {
-      const routes: ReadonlyArray<ParsedRoute> = [
-        {
-          path: "/settings",
-          params: [],
-          query: [],
-          isIndex: false,
-          children: [
-            { path: "", params: [], query: [], children: [], isIndex: true },
-            { path: "/profile", params: [], query: [], children: [], isIndex: false },
-          ],
-        },
-      ];
-      const resolved = resolveRoutePaths(routes);
-      assert.strictEqual(resolved.length, 3);
-      assert.strictEqual(resolved[1]?.path, "/settings");
-    });
-
-    it("should resolve deeply nested routes", () => {
-      const routes: ReadonlyArray<ParsedRoute> = [
-        {
-          path: "/a",
-          params: [],
-          query: [],
-          isIndex: false,
-          children: [
-            {
-              path: "/b",
-              params: [],
-              query: [],
-              isIndex: false,
-              children: [{ path: "/c", params: [], query: [], children: [], isIndex: false }],
-            },
-          ],
-        },
-      ];
-      const resolved = resolveRoutePaths(routes);
-      assert.strictEqual(resolved[2]?.path, "/a/b/c");
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scope: generateRouteTypes
-  // ─────────────────────────────────────────────────────────────────────────────
-  describe("generateRouteTypes", () => {
-    it.effect("should generate RouteMap from parsed routes", () =>
-      Effect.gen(function* () {
-        const routes: ReadonlyArray<ParsedRoute> = [
-          { path: "/", params: [], query: [], children: [], isIndex: false },
-          {
-            path: "/users/:id",
-            params: [{ name: "id", type: "number", optional: false }],
-            query: [],
-            children: [],
-            isIndex: false,
+        // Test: should not orphan a reload claim interrupted immediately before owner execution
+        // Scope: uses a controlled scheduler at the Idle-to-Running owner handoff.
+        // Assertion: the interrupted claim settles and a later caller starts a fresh reload owner.
+        const baselineScheduler = new Scheduler.MixedScheduler();
+        let baselineOperations = 0;
+        let ownerStartOperation = 0;
+        const countingScheduler: Scheduler.Scheduler = {
+          executionMode: baselineScheduler.executionMode,
+          makeDispatcher: () => baselineScheduler.makeDispatcher(),
+          shouldYield: (fiber) => {
+            baselineOperations += 1;
+            return baselineScheduler.shouldYield(fiber);
           },
-        ];
-        const output = yield* generateRouteTypes(routes);
-        assert.isTrue(output.includes('readonly "/": {}'));
-        assert.isTrue(output.includes('readonly "/users/:id": { readonly id: number }'));
-      }),
-    );
+        };
+        const baselineState = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.sync(() => {
+                ownerStartOperation = baselineOperations;
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (!PluginApi.InitialState.$is("Ready")(baselineState)) {
+          return assert.fail("Expected baseline ready API state");
+        }
+        yield* baselineState.handle.reload.pipe(
+          Effect.provideService(Scheduler.Scheduler, countingScheduler),
+        );
+        yield* PluginApi.closeInitial(baselineState);
 
-    it.effect("should extract NumberFromString as number in RouteMap", () =>
-      Effect.gen(function* () {
-        const routes: ReadonlyArray<ParsedRoute> = [
-          {
-            path: "/users/:id",
-            params: [{ name: "id", type: "number", optional: false }],
-            query: [],
-            children: [],
-            isIndex: false,
+        assert.isAbove(ownerStartOperation, 0);
+
+        const controlledScheduler = new Scheduler.MixedScheduler();
+        let operations = 0;
+        let reloadCalls = 0;
+        const interruptingScheduler: Scheduler.Scheduler = {
+          executionMode: controlledScheduler.executionMode,
+          makeDispatcher: () => controlledScheduler.makeDispatcher(),
+          shouldYield: (fiber) => {
+            operations += 1;
+            if (operations === ownerStartOperation - 1) fiber.interruptUnsafe();
+            return controlledScheduler.shouldYield(fiber);
           },
-        ];
-        const output = yield* generateRouteTypes(routes);
-        assert.isTrue(output.includes("readonly id: number"));
+        };
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.sync(() => {
+                reloadCalls += 1;
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
+        }
+
+        const interruptedExit = yield* state.handle.reload.pipe(
+          Effect.provideService(Scheduler.Scheduler, interruptingScheduler),
+          Effect.exit,
+        );
+        assert.isTrue(Exit.isFailure(interruptedExit));
+        if (Exit.isFailure(interruptedExit)) {
+          assert.isTrue(Cause.hasInterruptsOnly(interruptedExit.cause));
+        }
+
+        yield* state.handle.reload;
+        assert.strictEqual(reloadCalls, 1);
+        yield* PluginApi.closeInitial(state);
       }),
     );
 
-    it.effect("should handle routes with no params as empty object", () =>
+    scoped("should settle a reload submitted after its API owner has closed", () =>
       Effect.gen(function* () {
-        const routes: ReadonlyArray<ParsedRoute> = [
-          { path: "/about", params: [], query: [], children: [], isIndex: false },
-        ];
-        const output = yield* generateRouteTypes(routes);
-        assert.isTrue(output.includes('readonly "/about": {}'));
-      }),
-    );
+        // Test: should settle a reload submitted after its API owner has closed
+        // Scope: submits work after forkIn can only return an already-interrupted owner fiber.
+        // Assertion: the call exits interrupted without running the reload body or leaving Running orphaned.
+        let reloadCalls = 0;
+        const state = yield* PluginApi.loadInitial({
+          apiPath: "/app/api.ts",
+          hasApi: Effect.succeed(true),
+          loadHandlerFactory: Effect.succeed(handlerFactory),
+          makeApi: () =>
+            Effect.succeed({
+              middleware: (_req, _res, next) => next(),
+              reload: Effect.sync(() => {
+                reloadCalls += 1;
+              }),
+              dispose: Effect.void,
+            }),
+        });
+        if (!PluginApi.InitialState.$is("Ready")(state)) {
+          return assert.fail("Expected ready API state");
+        }
+        yield* PluginApi.closeInitial(state);
 
-    it.effect("should generate module augmentation format", () =>
-      Effect.gen(function* () {
-        const routes: ReadonlyArray<ParsedRoute> = [
-          { path: "/", params: [], query: [], children: [], isIndex: false },
-        ];
-        const output = yield* generateRouteTypes(routes);
-        assert.isTrue(output.includes('declare module "trygg/router"'));
-        assert.isTrue(output.includes("interface RouteMap"));
-        assert.isTrue(output.includes("export {}"));
+        const firstExit = yield* state.handle.reload.pipe(Effect.exit);
+        const secondExit = yield* state.handle.reload.pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(firstExit));
+        assert.isTrue(Exit.isFailure(secondExit));
+        if (Exit.isFailure(firstExit)) assert.isTrue(Cause.hasInterruptsOnly(firstExit.cause));
+        if (Exit.isFailure(secondExit)) assert.isTrue(Cause.hasInterruptsOnly(secondExit.cause));
+        assert.strictEqual(reloadCalls, 0);
       }),
     );
   });

@@ -10,7 +10,7 @@ import { SessionStorage, LocalStorage, sessionStorageTest, localStorageTest } fr
 import { Scroll, test as scrollTest } from "./scroll.js";
 import { PlatformEventTarget, test as eventTargetTest } from "./event-target.js";
 import { Observer, TestObserver, test as observerTest } from "./observer.js";
-import { Idle, test as idleTest } from "./idle.js";
+import { Idle, TestIdle, test as idleTest } from "./idle.js";
 
 export const test = (
   initialPath: string = "/",
@@ -25,6 +25,7 @@ export const test = (
   | Observer
   | TestObserver
   | Idle
+  | TestIdle
 > =>
   Layer.mergeAll(
     domTest,

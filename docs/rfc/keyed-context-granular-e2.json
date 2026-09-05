@@ -1,0 +1,257 @@
+{
+  "date": "2026-09-05T11:31:49.859Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 20,
+  "samples": 31,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 9.100000023841858,
+          "frameMs": 24.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.30000001192093,
+          "frameMs": 37,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.600000023841858,
+          "frameMs": 26.200000047683716,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.39999997615814,
+          "frameMs": 37.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 11.5,
+          "frameMs": 29.899999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.09999996423721,
+          "frameMs": 37,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.600000023841858,
+          "frameMs": 26.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.5,
+          "frameMs": 37.39999997615814,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 26.599999964237213,
+          "frameMs": 29,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.90000003576279,
+          "frameMs": 37.90000003576279,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.30000001192093,
+          "frameMs": 27.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 36,
+          "frameMs": 39.10000002384186,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 11.400000035762787,
+          "frameMs": 27.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 39.299999952316284,
+          "frameMs": 42.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 28.099999964237213,
+          "frameMs": 31.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 19.5,
+          "frameMs": 35.69999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 27.19999998807907,
+          "frameMs": 30.099999964237213,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 51.10000002384186,
+          "frameMs": 53.90000003576279,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.5,
+          "frameMs": 27.200000047683716,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 38.30000001192093,
+          "frameMs": 41.40000003576279,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.799999952316284,
+          "frameMs": 24.399999976158142,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 18.80000001192093,
+          "frameMs": 34.5,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 25.100000023841858,
+          "frameMs": 28.100000023841858,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 33.89999997615814,
+          "frameMs": 37.09999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.800000011920929,
+          "frameMs": 25.19999998807907,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 18.69999998807907,
+          "frameMs": 34.09999996423721,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.699999988079071,
+          "frameMs": 24,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34,
+          "frameMs": 36.799999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.30000001192093,
+          "frameMs": 27.30000001192093,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 25.5,
+          "frameMs": 28.299999952316284,
+          "rows": 1000
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.80000001192093,
+          "frameMs": 26.600000023841858,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 50.90000003576279,
+    "firstContentfulPaintMs": 80
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3684,
+      "gzipBytes": 1738
+    },
+    {
+      "file": "chunk-bqvnmvfc.js",
+      "loadedAtStartup": true,
+      "bytes": 82617,
+      "gzipBytes": 25675
+    },
+    {
+      "file": "chunk-95v482jn.js",
+      "loadedAtStartup": true,
+      "bytes": 287703,
+      "gzipBytes": 82115
+    },
+    {
+      "file": "chunk-64af96nn.js",
+      "loadedAtStartup": true,
+      "bytes": 134971,
+      "gzipBytes": 46538
+    },
+    {
+      "file": "chunk-726qgv1j.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 553
+    },
+    {
+      "file": "chunk-hb4f52ha.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18083
+    },
+    {
+      "file": "chunk-wc80dgfm.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 998
+    }
+  ]
+}

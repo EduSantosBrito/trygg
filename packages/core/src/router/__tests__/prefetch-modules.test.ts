@@ -10,7 +10,7 @@ import { Effect, Ref } from "effect";
 import { empty } from "../../primitives/element.js";
 import * as Route from "../route.js";
 import * as Routes from "../routes.js";
-import { createMatcher, type RouteMatcherShape } from "../matching.js";
+import { RouteMatcher, type RouteMatcherShape } from "../matching.js";
 import { buildPrefetchResolver } from "../outlet.js";
 import type { ComponentLoader, RouteComponent } from "../types.js";
 
@@ -29,14 +29,10 @@ const trackedLoader =
   };
 
 /** Build a RouteMatcherShape from a Routes manifest */
-const buildMatcher = (manifest: Routes.RoutesManifest) =>
-  Effect.map(
-    createMatcher(manifest),
-    (m): RouteMatcherShape => ({
-      match: (p) => Effect.succeed(m.match(p)),
-      routes: Effect.succeed(m.routes),
-    }),
-  );
+const buildMatcher = (
+  manifest: Routes.RoutesManifest,
+): Effect.Effect<RouteMatcherShape, import("../path-pattern.js").InvalidRoutePathPattern> =>
+  RouteMatcher.make(manifest);
 
 /** Build prefetch function from manifest using production code */
 const buildPrefetch = (manifest: Routes.RoutesManifest) =>

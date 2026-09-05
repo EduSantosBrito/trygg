@@ -8,11 +8,8 @@ import { unsafeBuildProviderContext } from "../internal/unsafe.js";
 import { Element as ElementService } from "./element.js";
 import * as Signal from "./signal.js";
 import type { RenderContext, RenderResult } from "./renderer.js";
-import {
-  RenderTransactionOutcome,
-  type RenderTransactionOutcome as RenderTransactionOutcomeType,
-  sharedRenderTransaction,
-} from "./render-transaction.js";
+import * as RenderTransaction from "./render-transaction.js";
+import { cleanupAll, reportUnhandledRenderCause } from "./render-cleanup.js";
 
 type RuntimeRequirements = unknown;
 
@@ -47,7 +44,7 @@ export interface RenderComponentDeps {
 
 type ComponentElement = Extract<Element, { readonly _tag: "Component" }>;
 
-export class ComponentAnchorError extends Schema.TaggedErrorClass<ComponentAnchorError>()(
+export class ComponentAnchorError extends Schema.TaggedError<ComponentAnchorError>()(
   "ComponentAnchorError",
   { message: Schema.String },
 ) {}
@@ -112,9 +109,8 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   let currentInputs = inputs;
   let currentContext = context;
   let providerContext: Context.Context<unknown> | null = null;
-  const renderTransaction = sharedRenderTransaction;
-
   const componentScope = yield* Scope.fork(yield* Effect.scope);
+  const componentRuntime: RenderContext = { ...runtime, scope: componentScope };
   const providerScope = provider === null ? null : yield* Scope.fork(componentScope);
   const providerId = provider === null ? null : Ids.nextProviderId();
   const mergeProviderContext = (parentContext: Context.Context<unknown> | null) =>
@@ -146,8 +142,16 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
           component: provider.displayName,
           reason: "failure",
           duration_ms: performance.now() - acquireStart,
-          cause: Cause.pretty(cause),
+          cause_type: Trace.causeValueType(cause),
         })),
+      ),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? cleanupAll([
+              Scope.close(componentScope, Exit.asVoid(exit)),
+              Effect.sync(() => anchor.remove()),
+            ])
+          : Effect.void,
       ),
     );
     currentContext = mergeProviderContext(currentContext);
@@ -163,26 +167,18 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   }
 
   const renderPhase = yield* Signal.makeRenderPhase;
-  const rendererScope = yield* Effect.scope;
   let subscriptionCleanups: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
-
-  const closeCurrentRenderScope: Effect.Effect<void, unknown, RuntimeRequirements> = Effect.gen(
-    function* () {
-      if (currentRenderScope !== null) {
-        const scope = currentRenderScope;
-        currentRenderScope = null;
-        yield* Scope.close(scope, Exit.void);
-      }
-    },
-  );
 
   const cleanupCurrent: Effect.Effect<void, unknown, RuntimeRequirements> = Effect.gen(
     function* () {
-      if (currentResult !== null) {
-        yield* renderTransaction.cleanup(currentResult);
-        currentResult = null;
-      }
-      yield* closeCurrentRenderScope;
+      const result = currentResult;
+      const scope = currentRenderScope;
+      currentResult = null;
+      currentRenderScope = null;
+      const cleanups: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
+      if (result !== null) cleanups.push(RenderTransaction.cleanup(result));
+      if (scope !== null) cleanups.push(Scope.close(scope, Exit.void));
+      yield* cleanupAll(cleanups);
     },
   );
 
@@ -191,7 +187,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
     unknown,
     RuntimeRequirements
   > = Effect.fnUntraced(function* () {
-    const effectWithContext = deps.provideRenderContext(currentRun(), runtime, currentContext);
+    const effectWithContext = deps.provideRenderContext(
+      currentRun(),
+      componentRuntime,
+      currentContext,
+    );
     const renderScope = yield* Scope.fork(componentScope);
     const element = yield* Effect.provideService(
       Effect.provideService(
@@ -207,9 +207,11 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
       "component",
     ).pipe(
       Scope.provide(componentScope),
-      Effect.onError(() => Scope.close(renderScope, Exit.void)),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(renderScope, Exit.asVoid(exit)) : Effect.void,
+      ),
     );
-    yield* Trace.emit("component.render", () => ({ component: currentRun.name }));
+    yield* Trace.emit("component.render", () => ({ component_type: Trace.valueType(currentRun) }));
     return { element, scope: renderScope };
   });
 
@@ -221,8 +223,8 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
       });
     }
     const result = yield* deps
-      .renderElement(childElement, actualParent, runtime, currentContext, options)
-      .pipe(Effect.provideService(Signal.CurrentRenderPhase, null));
+      .renderElement(childElement, actualParent, componentRuntime, currentContext, options)
+      .pipe(Scope.provide(componentScope), Effect.provideService(Signal.CurrentRenderPhase, null));
 
     const tryInsert = (parentNode: Node | null): Effect.Effect<boolean> =>
       parentNode === null
@@ -254,7 +256,9 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   });
 
   const onRerenderFailure = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
-    yield* Trace.emit("component.rerender.error", () => ({ reason: Cause.pretty(cause) }));
+    yield* Trace.emit("component.rerender.error", () => ({
+      cause_type: Trace.causeValueType(cause),
+    }));
 
     if (options.errorHandler !== null) {
       options.errorHandler(cause);
@@ -264,7 +268,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
     pendingRerender = false;
   });
 
-  type RerenderFailureMode = "preserve" | "defect";
+  type RerenderFailureMode = "preserve" | "propagate";
 
   const rerenderEffectBody = Effect.fnUntraced(function* () {
     if (isUnmounted) {
@@ -284,33 +288,47 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
     yield* Signal.resetRenderPhase(renderPhase);
 
     const nextRender = yield* runComponentEffect();
-    const nextElement = yield* ElementService.fromUnknown(nextRender.element);
-    const reconcileOutcome: Option.Option<RenderTransactionOutcomeType> =
-      currentResult === null
-        ? Option.none()
-        : Option.some(
-            yield* renderTransaction.reconcile({
-              previous: currentResult,
-              nextElement,
-              nextContext: currentContext,
-              context: runtime,
-            }),
-          );
+    const prepared = yield* Effect.gen(function* () {
+      const nextElement = yield* ElementService.fromUnknown(nextRender.element);
+      const reconcileOutcome: Option.Option<RenderTransaction.RenderTransactionOutcome> =
+        currentResult === null
+          ? Option.none()
+          : Option.some(
+              yield* RenderTransaction.reconcile({
+                previous: currentResult,
+                nextElement,
+                nextContext: currentContext,
+                context: componentRuntime,
+              }),
+            );
+      return { nextElement, reconcileOutcome };
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(nextRender.scope, Exit.asVoid(exit)) : Effect.void,
+      ),
+    );
+    const { nextElement, reconcileOutcome } = prepared;
 
     if (
       Option.isSome(reconcileOutcome) &&
-      RenderTransactionOutcome.$is("Reconciled")(reconcileOutcome.value)
+      RenderTransaction.RenderTransactionOutcome.$is("Reconciled")(reconcileOutcome.value)
     ) {
-      yield* closeCurrentRenderScope;
+      const previousScope = currentRenderScope;
       currentRenderScope = nextRender.scope;
+      if (previousScope !== null) {
+        const closeExit = yield* Effect.exit(Scope.close(previousScope, Exit.void));
+        if (Exit.isFailure(closeExit)) reportUnhandledRenderCause(closeExit.cause);
+      }
     } else {
       const actualParent = anchor.parentNode;
       if (actualParent === null) {
-        yield* Scope.close(nextRender.scope, Exit.void);
-        return yield* new ComponentAnchorError({
+        const error = new ComponentAnchorError({
           message:
             "Component anchor has no parent - component may have been unmounted during rerender",
         });
+        return yield* Effect.fail(error).pipe(
+          Effect.onExit((exit) => Scope.close(nextRender.scope, Exit.asVoid(exit))),
+        );
       }
       // Render the replacement subtree off-DOM into a fragment so the
       // user never sees the new tree mid-construction next to the old
@@ -319,28 +337,54 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
       // flashes under CPU throttling.
       const tempFragment = document.createDocumentFragment();
       const previousResult = currentResult;
-      const outcome = yield* renderTransaction.replace({
+      const previousScope = currentRenderScope;
+      let committed = false;
+      const outcome = yield* RenderTransaction.replace({
         parent: actualParent,
         previous: previousResult === null ? Option.none() : Option.some(previousResult),
         renderNext: deps
-          .renderElement(nextElement, tempFragment, runtime, currentContext, options)
+          .renderElement(nextElement, tempFragment, componentRuntime, currentContext, options)
           .pipe(
+            Scope.provide(componentScope),
             Effect.provideService(Signal.CurrentRenderPhase, null),
-            Effect.onError(() => Scope.close(nextRender.scope, Exit.void)),
           ),
-        context: runtime,
-      });
+        context: componentRuntime,
+        onCommit: (result) => {
+          currentRenderScope = nextRender.scope;
+          currentResult = result;
+          committed = true;
+        },
+        releaseStagedScope: (exit) => Scope.close(nextRender.scope, exit),
+      }).pipe(
+        Effect.onExit((exit) =>
+          Exit.isFailure(exit) && committed && previousScope !== null
+            ? Scope.close(previousScope, Exit.asVoid(exit))
+            : Effect.void,
+        ),
+      );
 
-      if (RenderTransactionOutcome.$is("FailedBeforeCommit")(outcome)) {
-        yield* Scope.close(nextRender.scope, Exit.void);
-        return yield* Effect.fail(outcome.cause);
+      if (RenderTransaction.RenderTransactionOutcome.$is("FailedBeforeCommit")(outcome)) {
+        return yield* Effect.failCause(outcome.cause);
       }
 
-      if (currentRenderScope !== null) {
-        yield* Scope.close(currentRenderScope, Exit.void);
+      let cleanupCause =
+        RenderTransaction.RenderTransactionOutcome.$is("Committed")(outcome) &&
+        Option.isSome(outcome.cleanupCause)
+          ? outcome.cleanupCause
+          : Option.none<Cause.Cause<unknown>>();
+      if (previousScope !== null) {
+        const closeExit = yield* Effect.exit(Scope.close(previousScope, Exit.void));
+        if (Exit.isFailure(closeExit)) {
+          cleanupCause = Option.some(
+            Option.isSome(cleanupCause)
+              ? Cause.combine(cleanupCause.value, closeExit.cause)
+              : closeExit.cause,
+          );
+        }
       }
-      currentRenderScope = nextRender.scope;
-      currentResult = outcome.result;
+      if (Option.isSome(cleanupCause)) {
+        reportUnhandledRenderCause(cleanupCause.value);
+      }
     }
 
     const rerenderDuration = performance.now() - rerenderStart;
@@ -362,7 +406,12 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   const rerenderEffect = (failureMode: RerenderFailureMode) =>
     rerenderEffectBody().pipe(
       Effect.catchCause((cause) => {
-        if (failureMode !== "defect" || options.errorHandler !== null) {
+        if (Cause.hasDies(cause) || Cause.hasInterrupts(cause)) {
+          isRerendering = false;
+          pendingRerender = false;
+          return Effect.failCause(cause);
+        }
+        if (failureMode !== "propagate" || options.errorHandler !== null) {
           return onRerenderFailure(cause);
         }
         if (isTransientRenderFailure(cause)) {
@@ -374,33 +423,24 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
           return Effect.gen(function* () {
             isRerendering = false;
             pendingRerender = false;
-            yield* Trace.emit("component.superseded", () => ({ reason: Cause.pretty(cause) }));
+            yield* Trace.emit("component.superseded", () => ({
+              cause_type: Trace.causeValueType(cause),
+            }));
             return yield* Effect.failCause(cause);
           });
         }
-        // Genuine defect without an error boundary: tear down and elevate to a
-        // defect so the failure surfaces (and the caller can REPLACE to recover)
-        // even when the original cause was a typed failure raised mid-render.
-        // `failCause(Cause.die(...))` is the explicit defect constructor — same
-        // result as `Effect.die`, but the typed-failure-collapse lint is for
-        // accidental collapses; elevation here is the deliberate contract.
-        return Effect.ensuring(
-          Effect.failCause(Cause.die(Cause.squash(cause))),
-          Effect.gen(function* () {
-            isRerendering = false;
-            pendingRerender = false;
-            yield* cleanupCurrent.pipe(Effect.catchCause(() => Effect.void));
-          }),
-        );
+        isRerendering = false;
+        pendingRerender = false;
+        return Effect.failCause(cause);
       }),
-      Scope.provide(rendererScope),
+      Scope.provide(componentScope),
     );
 
   let scheduleRerender: () => void;
 
   const doRerender = (): void => {
     renderCount++;
-    deps.runForkInRenderContext(rerenderEffect("preserve"), runtime, currentContext);
+    deps.runForkInRenderContext(rerenderEffect("preserve"), componentRuntime, currentContext);
   };
 
   scheduleRerender = () => {
@@ -435,11 +475,33 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
   });
 
   const renderStart = performance.now();
-  const initialRender = yield* runComponentEffect();
-  const initialElement = yield* ElementService.fromUnknown(initialRender.element);
-  const initialResult = yield* renderAndPosition(initialElement).pipe(
-    Effect.onError(() => Scope.close(initialRender.scope, Exit.void)),
+  let acquiredInitialScope: Scope.Closeable | null = null;
+  let acquiredInitialResult: RenderResult | null = null;
+  const initialState = yield* Effect.gen(function* () {
+    const initialRender = yield* runComponentEffect();
+    acquiredInitialScope = initialRender.scope;
+    const initialElement = yield* ElementService.fromUnknown(initialRender.element);
+    const initialResult = yield* renderAndPosition(initialElement);
+    acquiredInitialResult = initialResult;
+    return { initialRender, initialResult };
+  }).pipe(
+    Effect.onExit((exit) => {
+      if (Exit.isSuccess(exit)) return Effect.void;
+      const rollback: Array<Effect.Effect<void, unknown, RuntimeRequirements>> = [];
+      if (acquiredInitialResult !== null) {
+        rollback.push(RenderTransaction.cleanup(acquiredInitialResult));
+      }
+      if (acquiredInitialScope !== null) {
+        rollback.push(Scope.close(acquiredInitialScope, Exit.asVoid(exit)));
+      }
+      rollback.push(
+        Scope.close(componentScope, Exit.asVoid(exit)),
+        Effect.sync(() => anchor.remove()),
+      );
+      return cleanupAll(rollback);
+    }),
   );
+  const { initialRender, initialResult } = initialState;
   currentRenderScope = initialRender.scope;
   currentResult = initialResult;
   const renderDuration = performance.now() - renderStart;
@@ -458,25 +520,28 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
     node: anchor,
     cleanup: Effect.gen(function* () {
       isUnmounted = true;
-      for (const cleanup of subscriptionCleanups) {
-        yield* cleanup;
-      }
+      const cleanups = subscriptionCleanups;
       subscriptionCleanups = [];
-      yield* cleanupCurrent;
       const providerFinalizeStart = providerId === null ? null : performance.now();
-      yield* Scope.close(componentScope, Exit.void);
-      if (provider !== null && providerId !== null && providerFinalizeStart !== null) {
-        const durationMs = performance.now() - providerFinalizeStart;
-        yield* Metrics.recordProviderFinalization;
-        yield* Metrics.recordProviderFinalizationDuration(durationMs);
-        yield* Trace.emit("provider.finalize", () => ({
-          provider_id: providerId,
-          component: provider.displayName,
-          reason: "unmount",
-          duration_ms: durationMs,
-        }));
-      }
-      anchor.remove();
+      yield* cleanupAll([
+        ...cleanups,
+        cleanupCurrent,
+        Scope.close(componentScope, Exit.void),
+        Effect.gen(function* () {
+          if (provider !== null && providerId !== null && providerFinalizeStart !== null) {
+            const durationMs = performance.now() - providerFinalizeStart;
+            yield* Metrics.recordProviderFinalization;
+            yield* Metrics.recordProviderFinalizationDuration(durationMs);
+            yield* Trace.emit("provider.finalize", () => ({
+              provider_id: providerId,
+              component: provider.displayName,
+              reason: "unmount",
+              duration_ms: durationMs,
+            }));
+          }
+        }),
+        Effect.sync(() => anchor.remove()),
+      ]);
     }),
     reconcile: (nextElement: Element, nextContext: Context.Context<unknown> | null) =>
       Effect.gen(function* () {
@@ -555,7 +620,7 @@ export const renderComponent = Effect.fn("renderComponent")(function* (
 
         isRerendering = true;
         renderCount++;
-        yield* rerenderEffect("defect");
+        yield* rerenderEffect("propagate");
         return true;
       }),
   };

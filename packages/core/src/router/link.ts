@@ -43,6 +43,7 @@
  * @module trygg/router/link
  */
 import { Cause, Duration, Effect, Fiber } from "effect";
+import { unsafeAsUnrecoverableCause } from "../internal/unsafe.js";
 import * as Signal from "../primitives/signal.js";
 import {
   Element,
@@ -54,7 +55,7 @@ import {
 import * as Trace from "../trace/index.js";
 import { get as getRouter } from "./service.js";
 import { buildPath } from "./utils.js";
-import type { HasKeys, RouteParamsFor, RoutePath } from "./types.js";
+import type { HasKeys, RouteParamsInputFor, RoutePath, RouteQueryInputFor } from "./types.js";
 import { buildPathWithParams } from "./types.js";
 
 // F-001: Prefetch constants from framework research
@@ -93,7 +94,7 @@ interface BaseLinkProps<Path extends RoutePath> {
   /** Target path pattern - autocompletes from your routes */
   readonly to: Path;
   /** Query parameters */
-  readonly query?: Record<string, string>;
+  readonly query?: RouteQueryInputFor<Path>;
   /** Replace history instead of push */
   readonly replace?: boolean;
   /** Link content */
@@ -137,10 +138,10 @@ interface BaseLinkProps<Path extends RoutePath> {
  * @since 1.0.0
  */
 export type LinkProps<Path extends RoutePath = RoutePath> =
-  HasKeys<RouteParamsFor<Path>> extends true
+  HasKeys<RouteParamsInputFor<Path>> extends true
     ? BaseLinkProps<Path> & {
         /** Route params to substitute into path (required for this route) */
-        readonly params: RouteParamsFor<Path>;
+        readonly params: RouteParamsInputFor<Path>;
       }
     : BaseLinkProps<Path> & {
         /** Route params - not needed for static paths */
@@ -323,11 +324,13 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
         .navigate(resolvedPath, Object.keys(options).length > 0 ? options : undefined)
         .pipe(
           Effect.catchCause((cause) =>
-            Trace.emit("effect.error.ignored", () => ({
-              owner: "router.link",
-              operation: "navigate",
-              cause: Cause.pretty(cause),
-            })),
+            cause.reasons.length > 0 && cause.reasons.every(Cause.isFailReason)
+              ? Trace.emit("effect.error.ignored", () => ({
+                  owner: "router.link",
+                  operation: "navigate",
+                  cause_type: Trace.causeValueType(cause),
+                }))
+              : Effect.failCause(unsafeAsUnrecoverableCause(cause)),
           ),
         );
     });
@@ -336,7 +339,9 @@ function LinkImpl<Path extends RoutePath>(props: LinkProps<Path>): Element {
     if (prefetch === "render") {
       if (prefetchScope !== null) {
         yield* Effect.forkIn(
-          Effect.yieldNow.pipe(Effect.flatMap(() => triggerPrefetch("render"))),
+          router.outletCoordination.awaitOutletReady.pipe(
+            Effect.flatMap(() => triggerPrefetch("render")),
+          ),
           prefetchScope,
         );
       } else {

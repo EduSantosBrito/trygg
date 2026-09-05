@@ -8,7 +8,7 @@ import {
   type CommandSection,
   type PackageManager,
 } from "../content/getting-started";
-import { setDocsHeadings, type HeadingEntry } from "../content/headings";
+import { DocsHeadingsLive, setDocsHeadings, type HeadingEntry } from "../content/headings";
 import gettingStartedSource from "../examples/getting-started.tsx?raw";
 
 const SectionShell = Component.gen(function* (
@@ -242,4 +242,4 @@ export default Component.gen(function* () {
       </article>
     </>
   );
-});
+}).pipe(Component.provide(DocsHeadingsLive));

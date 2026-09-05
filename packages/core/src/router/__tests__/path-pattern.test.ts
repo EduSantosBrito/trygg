@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 import {
   compileRoutePathPattern,
   compareCompiledRoutePathPatterns,
@@ -15,23 +15,41 @@ const compile = (pattern: string) => compileRoutePathPattern(pattern);
 describe("RoutePathPattern", () => {
   it.effect("classifies static, param, wildcard, and required catch-all segments", () =>
     Effect.gen(function* () {
-      const pattern = yield* compile("/docs/:section/:path*/files/:filepath+");
+      const params = yield* compile("/docs/:section/:page");
+      const wildcard = yield* compile("/docs/:path*");
+      const catchAll = yield* compile("/files/:filepath+");
 
-      assert.deepStrictEqual(pattern.segments, [
+      assert.deepStrictEqual(params.segments, [
         RoutePathSegment.Static({ value: "docs" }),
         RoutePathSegment.Param({ name: "section" }),
+        RoutePathSegment.Param({ name: "page" }),
+      ]);
+      assert.deepStrictEqual(wildcard.segments, [
+        RoutePathSegment.Static({ value: "docs" }),
         RoutePathSegment.Wildcard({ name: "path" }),
+      ]);
+      assert.deepStrictEqual(catchAll.segments, [
         RoutePathSegment.Static({ value: "files" }),
         RoutePathSegment.CatchAllRequired({ name: "filepath" }),
       ]);
-      assert.deepStrictEqual(pattern.paramNames, ["section", "path", "filepath"]);
+      assert.deepStrictEqual(params.paramNames, ["section", "page"]);
+    }),
+  );
+
+  it.effect("rejects non-terminal wildcard and required catch-all segments", () =>
+    Effect.gen(function* () {
+      const wildcard = yield* Effect.result(compile("/docs/:path*/edit"));
+      const catchAll = yield* Effect.result(compile("/files/:path+/edit"));
+
+      assert.isTrue(Result.isFailure(wildcard));
+      assert.isTrue(Result.isFailure(catchAll));
     }),
   );
 
   it.effect("matches static and param paths", () =>
     Effect.gen(function* () {
       const pattern = yield* compile("/users/:id");
-      const match = matchCompiledRoutePathPattern(pattern, "/users/123");
+      const match = yield* matchCompiledRoutePathPattern(pattern, "/users/123");
 
       assert.isTrue(Option.isSome(match));
       if (Option.isSome(match)) {
@@ -43,8 +61,8 @@ describe("RoutePathPattern", () => {
   it.effect("matches wildcard with zero or more segments", () =>
     Effect.gen(function* () {
       const pattern = yield* compile("/docs/:path*");
-      const rootMatch = matchCompiledRoutePathPattern(pattern, "/docs");
-      const nestedMatch = matchCompiledRoutePathPattern(pattern, "/docs/api/users");
+      const rootMatch = yield* matchCompiledRoutePathPattern(pattern, "/docs");
+      const nestedMatch = yield* matchCompiledRoutePathPattern(pattern, "/docs/api/users");
 
       assert.isTrue(Option.isSome(rootMatch));
       assert.isTrue(Option.isSome(nestedMatch));
@@ -59,9 +77,10 @@ describe("RoutePathPattern", () => {
     Effect.gen(function* () {
       const pattern = yield* compile("/files/:filepath+");
 
-      assert.isTrue(Option.isNone(matchCompiledRoutePathPattern(pattern, "/files")));
+      const empty = yield* matchCompiledRoutePathPattern(pattern, "/files");
+      assert.isTrue(Option.isNone(empty));
 
-      const match = matchCompiledRoutePathPattern(pattern, "/files/a/b.txt");
+      const match = yield* matchCompiledRoutePathPattern(pattern, "/files/a/b.txt");
       assert.isTrue(Option.isSome(match));
       if (Option.isSome(match)) assert.strictEqual(match.value.params.filepath, "a/b.txt");
     }),
@@ -76,9 +95,9 @@ describe("RoutePathPattern", () => {
       assert.deepStrictEqual(root.segments, []);
       assert.deepStrictEqual(alsoRoot.segments, []);
       assert.strictEqual(users.pattern, "/users");
-      assert.isTrue(Option.isSome(matchCompiledRoutePathPattern(root, "/")));
-      assert.isTrue(Option.isNone(matchCompiledRoutePathPattern(root, "/users")));
-      assert.isTrue(Option.isSome(matchCompiledRoutePathPattern(users, "/users/")));
+      assert.isTrue(Option.isSome(yield* matchCompiledRoutePathPattern(root, "/")));
+      assert.isTrue(Option.isNone(yield* matchCompiledRoutePathPattern(root, "/users")));
+      assert.isTrue(Option.isSome(yield* matchCompiledRoutePathPattern(users, "/users/")));
     }),
   );
 
@@ -117,6 +136,54 @@ describe("RoutePathPattern", () => {
     }),
   );
 
+  it.effect("round-trips reserved, percent, slash, and Unicode param values", () =>
+    Effect.gen(function* () {
+      const pattern = yield* compile("/users/:id");
+      const values = ["/", "a/b", "x?role=admin", "x#panel", "100%", "olá 世界", "../admin"];
+
+      for (const value of values) {
+        const path = yield* interpolateCompiledRoutePathPattern(pattern, { id: value });
+        const match = yield* matchCompiledRoutePathPattern(pattern, path);
+
+        assert.isTrue(Option.isSome(match));
+        if (Option.isSome(match)) assert.strictEqual(match.value.params.id, value);
+      }
+    }),
+  );
+
+  it.effect("preserves structural slashes while round-tripping catch-all segments", () =>
+    Effect.gen(function* () {
+      const pattern = yield* compile("/docs/:path+");
+      const value = "api/a?b/東京/100%";
+      const path = yield* interpolateCompiledRoutePathPattern(pattern, { path: value });
+      const match = yield* matchCompiledRoutePathPattern(pattern, path);
+
+      assert.strictEqual(path, "/docs/api/a%3Fb/%E6%9D%B1%E4%BA%AC/100%25");
+      assert.isTrue(Option.isSome(match));
+      if (Option.isSome(match)) assert.strictEqual(match.value.params.path, value);
+    }),
+  );
+
+  it.effect("rejects dot segments and reports malformed pathname encoding", () =>
+    Effect.gen(function* () {
+      const pattern = yield* compile("/users/:id");
+      const dot = yield* Effect.result(interpolateCompiledRoutePathPattern(pattern, { id: "." }));
+      const dotDot = yield* Effect.result(
+        interpolateCompiledRoutePathPattern(pattern, { id: ".." }),
+      );
+      const malformed = yield* Effect.result(
+        matchCompiledRoutePathPattern(pattern, "/users/%E0%A4%A"),
+      );
+
+      assert.isTrue(Result.isFailure(dot));
+      assert.isTrue(Result.isFailure(dotDot));
+      assert.isTrue(Result.isFailure(malformed));
+      if (Result.isFailure(malformed)) {
+        assert.strictEqual(malformed.failure._tag, "InvalidRoutePathEncoding");
+      }
+    }),
+  );
+
   it.effect("fails interpolation on missing params and can reject unused params", () =>
     Effect.gen(function* () {
       const pattern = yield* compile("/users/:id");
@@ -134,10 +201,10 @@ describe("RoutePathPattern", () => {
     }),
   );
 
-  it.effect("exposes interpolation through the service", () =>
+  it.effect("creates configured interpolation operations", () =>
     Effect.gen(function* () {
-      const patterns = yield* RoutePathPattern;
-      const interpolation = yield* RoutePathInterpolation;
+      const patterns = RoutePathPattern.make({ normalizeTrailingSlash: true });
+      const interpolation = RoutePathInterpolation.make({ rejectUnusedParams: false });
       const pattern = yield* patterns.compile("/users/:id");
       const names = yield* interpolation.paramNames(pattern);
       const id = yield* interpolation.paramOption({ id: 42 }, "id");
@@ -146,19 +213,12 @@ describe("RoutePathPattern", () => {
       assert.deepStrictEqual(names, ["id"]);
       assert.isTrue(Option.isSome(id));
       assert.strictEqual(path, "/users/42");
-    }).pipe(
-      Effect.provide(
-        Layer.merge(
-          RoutePathPattern.layer({ normalizeTrailingSlash: true }),
-          RoutePathInterpolation.layer({ rejectUnusedParams: false }),
-        ),
-      ),
-    ),
+    }),
   );
 
-  it.effect("exposes compile, compare, and match through the service", () =>
+  it.effect("creates configured compile, compare, and match operations", () =>
     Effect.gen(function* () {
-      const service = yield* RoutePathPattern;
+      const service = RoutePathPattern.make({ normalizeTrailingSlash: true });
       const staticPattern = yield* service.compile("/users/settings");
       const paramPattern = yield* service.compile("/users/:id");
       const order = yield* service.compare(staticPattern, paramPattern);
@@ -166,6 +226,6 @@ describe("RoutePathPattern", () => {
 
       assert.isBelow(order, 0);
       assert.isTrue(Option.isSome(match));
-    }).pipe(Effect.provide(RoutePathPattern.layer({ normalizeTrailingSlash: true }))),
+    }),
   );
 });

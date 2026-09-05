@@ -1,6 +1,7 @@
 import { Effect, Predicate } from "effect";
 import { Component, Resource, Signal, type ComponentProps } from "trygg";
 import * as Router from "trygg/router";
+import { subscribeCommandPaletteOpen } from "../command-palette-lifecycle";
 import { incidentsResource, type Incident } from "../resources/incidents";
 
 // ---------------------------------------------------------------------------
@@ -108,7 +109,7 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
   );
 
   // Subscribe to open state and sync with dialog
-  const unsubscribeOpen = yield* Signal.subscribe(open, () =>
+  yield* subscribeCommandPaletteOpen(open, () =>
     Effect.gen(function* () {
       const node = document.getElementById(DIALOG_ID);
       if (!(node instanceof HTMLDialogElement)) {
@@ -130,7 +131,6 @@ export const CommandPalette = Component.gen(function* (Props: ComponentProps<Com
       }
     }),
   );
-  yield* Effect.addFinalizer(() => unsubscribeOpen);
 
   // Event handlers
   const onQueryInput = Effect.fnUntraced(function* (event: Event) {

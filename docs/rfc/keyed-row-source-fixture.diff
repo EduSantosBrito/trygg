@@ -1,0 +1,23 @@
+--- workspace/scripts/benchmarks/browser.ts
++++ source-list/scripts/benchmarks/browser.ts
+@@ -1,4 +1,5 @@
+ import { Effect, Layer, Scope } from "effect";
++import { jsx } from "../../packages/core/dist/jsx-runtime.js";
+ import * as References from "effect/References";
+ import { Component, Element, Signal, intrinsic, mount } from "../../packages/core/dist/index.js";
+ 
+@@ -159,12 +160,12 @@
+       Effect.gen(function* () {
+         const active = yield* isSelected(row.id);
+         const className = yield* Signal.derive(active, (value) => (value ? "danger" : ""));
+-        return intrinsic("tr", { "data-id": String(row.id), className }, [
++        return jsx("tr", { "data-id": Effect.succeed(String(row.id)), className, children: [
+           intrinsic("td", {}, [Element.Text({ content: String(row.id) })]),
+           intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: row.label })])]),
+           intrinsic("td", {}, [intrinsic("a", {}, [Element.Text({ content: "remove" })])]),
+           intrinsic("td", {}, []),
+-        ]);
++        ] });
+       }),
+     { key: (row) => row.id },
+   );

@@ -9,8 +9,7 @@
  * @since 1.0.0
  * @module trygg/router/path-pattern
  */
-import { Data, Effect, Layer, Match, Option, Schema } from "effect";
-import * as Context from "effect/Context";
+import { Data, Effect, Match, Option, Schema } from "effect";
 
 /** A compiled route path segment. */
 export type RoutePathSegment = Data.TaggedEnum<{
@@ -37,7 +36,7 @@ export interface RoutePathPatternMatch {
 }
 
 /** Domain failure for invalid route path-pattern syntax. */
-export class InvalidRoutePathPattern extends Schema.TaggedErrorClass<InvalidRoutePathPattern>()(
+export class InvalidRoutePathPattern extends Schema.TaggedError<InvalidRoutePathPattern>()(
   "InvalidRoutePathPattern",
   {
     pattern: Schema.String,
@@ -45,7 +44,17 @@ export class InvalidRoutePathPattern extends Schema.TaggedErrorClass<InvalidRout
   },
 ) {}
 
-/** Route path-pattern service config. */
+/** Domain failure for malformed percent encoding in a route pathname. */
+export class InvalidRoutePathEncoding extends Schema.TaggedError<InvalidRoutePathEncoding>()(
+  "InvalidRoutePathEncoding",
+  {
+    pathname: Schema.String,
+    segment: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
+/** Route path-pattern configuration. */
 export const RoutePathPatternConfigInput = Schema.Struct({
   normalizeTrailingSlash: Schema.Boolean,
 });
@@ -105,15 +114,30 @@ export const compileRoutePathPattern: (
   const normalized = normalizePattern(pattern, config);
   const segments: Array<RoutePathSegment> = [];
   const paramNames: Array<string> = [];
+  const parts = splitPath(normalized, config);
 
-  for (const part of splitPath(normalized, config)) {
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    if (part === undefined) continue;
     if (part.startsWith(":")) {
       if (part.endsWith("*")) {
         const name = yield* parseParamName(normalized, part.slice(1, -1));
+        if (index !== parts.length - 1) {
+          return yield* new InvalidRoutePathPattern({
+            pattern: normalized,
+            reason: "wildcard params must be the final path segment",
+          });
+        }
         segments.push(RoutePathSegment.Wildcard({ name }));
         paramNames.push(name);
       } else if (part.endsWith("+")) {
         const name = yield* parseParamName(normalized, part.slice(1, -1));
+        if (index !== parts.length - 1) {
+          return yield* new InvalidRoutePathPattern({
+            pattern: normalized,
+            reason: "required catch-all params must be the final path segment",
+          });
+        }
         segments.push(RoutePathSegment.CatchAllRequired({ name }));
         paramNames.push(name);
       } else {
@@ -145,13 +169,48 @@ export const compareCompiledRoutePathPatterns = (
   return right.score - left.score;
 };
 
-/** Match a compiled route path pattern against a pathname. */
-export const matchCompiledRoutePathPattern = (
-  pattern: CompiledRoutePathPattern,
+/**
+ * Decode a pathname once before testing compiled route candidates.
+ * @remarks Retains malformed encoding and dot-segment failures at the URI boundary.
+ * @internal
+ */
+export const decodePathname = (
   pathname: string,
   config: RoutePathPatternConfig = { normalizeTrailingSlash: true },
+): Effect.Effect<ReadonlyArray<string>, InvalidRoutePathEncoding> =>
+  Effect.forEach(splitPath(pathname, config), (segment) =>
+    Effect.try({
+      try: () => decodeURIComponent(segment),
+      catch: () =>
+        new InvalidRoutePathEncoding({
+          pathname,
+          segment,
+          reason: "path segment contains malformed percent encoding",
+        }),
+    }).pipe(
+      Effect.flatMap((decoded) =>
+        decoded === "." || decoded === ".."
+          ? Effect.fail(
+              new InvalidRoutePathEncoding({
+                pathname,
+                segment,
+                reason: "dot path segments are not allowed",
+              }),
+            )
+          : Effect.succeed(decoded),
+      ),
+    ),
+  );
+
+/**
+ * Match a compiled route against previously decoded pathname segments.
+ * @remarks Callers must obtain segments from decodePathname, including its validation.
+ * @internal
+ */
+export const matchDecoded = (
+  pattern: CompiledRoutePathPattern,
+  pathParts: ReadonlyArray<string>,
 ): Option.Option<RoutePathPatternMatch> => {
-  const pathParts = splitPath(pathname, config);
   const params: Record<string, string> = {};
 
   if (pattern.segments.length === 0 && pathParts.length === 0) {
@@ -191,10 +250,25 @@ export const matchCompiledRoutePathPattern = (
   return pathIndex === pathParts.length ? Option.some({ pattern, params }) : Option.none();
 };
 
+/** Match a compiled pattern while preserving malformed URI failures. */
+export const matchCompiledRoutePathPattern: (
+  pattern: CompiledRoutePathPattern,
+  pathname: string,
+  config?: RoutePathPatternConfig,
+) => Effect.Effect<Option.Option<RoutePathPatternMatch>, InvalidRoutePathEncoding> = Effect.fn(
+  "RoutePathPattern.matchCompiledRoutePathPattern",
+)(function* (
+  pattern: CompiledRoutePathPattern,
+  pathname: string,
+  config: RoutePathPatternConfig = { normalizeTrailingSlash: true },
+) {
+  return matchDecoded(pattern, yield* decodePathname(pathname, config));
+});
+
 export type PathParamValue = string | number;
 export type PathParamInput = Readonly<Record<string, PathParamValue>>;
 
-export class MissingRoutePathParam extends Schema.TaggedErrorClass<MissingRoutePathParam>()(
+export class MissingRoutePathParam extends Schema.TaggedError<MissingRoutePathParam>()(
   "MissingRoutePathParam",
   {
     pattern: Schema.String,
@@ -202,7 +276,7 @@ export class MissingRoutePathParam extends Schema.TaggedErrorClass<MissingRouteP
   },
 ) {}
 
-export class UnusedRoutePathParam extends Schema.TaggedErrorClass<UnusedRoutePathParam>()(
+export class UnusedRoutePathParam extends Schema.TaggedError<UnusedRoutePathParam>()(
   "UnusedRoutePathParam",
   {
     pattern: Schema.String,
@@ -210,7 +284,7 @@ export class UnusedRoutePathParam extends Schema.TaggedErrorClass<UnusedRoutePat
   },
 ) {}
 
-export class InvalidRoutePathParamValue extends Schema.TaggedErrorClass<InvalidRoutePathParamValue>()(
+export class InvalidRoutePathParamValue extends Schema.TaggedError<InvalidRoutePathParamValue>()(
   "InvalidRoutePathParamValue",
   {
     pattern: Schema.String,
@@ -260,6 +334,36 @@ const validateParamValue = (
   );
 };
 
+const invalidParamValue = (
+  pattern: CompiledRoutePathPattern,
+  param: string,
+  value: unknown,
+  reason: string,
+): InvalidRoutePathParamValue =>
+  new InvalidRoutePathParamValue({
+    pattern: pattern.pattern,
+    param,
+    value,
+    reason,
+  });
+
+const encodeParamSegment = (
+  pattern: CompiledRoutePathPattern,
+  param: string,
+  value: PathParamValue,
+  segment: string,
+): Effect.Effect<string, InvalidRoutePathParamValue> => {
+  if (segment === "." || segment === "..") {
+    return Effect.fail(
+      invalidParamValue(pattern, param, value, "dot path segments are not allowed"),
+    );
+  }
+  return Effect.try({
+    try: () => encodeURIComponent(segment),
+    catch: () => invalidParamValue(pattern, param, value, "path param cannot be URI encoded"),
+  });
+};
+
 export const interpolateCompiledRoutePathPattern: (
   pattern: CompiledRoutePathPattern,
   params: PathParamInput,
@@ -299,89 +403,69 @@ export const interpolateCompiledRoutePathPattern: (
     if (!RoutePathSegment.$is("Wildcard")(segment) && text === "") {
       return yield* new MissingRoutePathParam({ pattern: pattern.pattern, param: segment.name });
     }
-    if (text !== "") {
-      parts.push(...text.split("/").filter(Boolean));
+    if (text === "") continue;
+
+    if (RoutePathSegment.$is("Param")(segment)) {
+      parts.push(yield* encodeParamSegment(pattern, segment.name, value, text));
+      continue;
     }
+
+    const catchAllParts = text.split("/");
+    if (catchAllParts.some((part) => part === "")) {
+      return yield* invalidParamValue(
+        pattern,
+        segment.name,
+        value,
+        "catch-all params must contain non-empty path segments",
+      );
+    }
+    parts.push(
+      ...(yield* Effect.forEach(catchAllParts, (part) =>
+        encodeParamSegment(pattern, segment.name, value, part),
+      )),
+    );
   }
 
   return `/${parts.join("/")}`;
 });
 
-/** RoutePathPattern service. */
-export class RoutePathPattern extends Context.Service<
-  RoutePathPattern,
-  {
-    readonly normalizeTrailingSlash: boolean;
-    readonly compile: (
-      pattern: string,
-    ) => Effect.Effect<CompiledRoutePathPattern, InvalidRoutePathPattern>;
-    readonly compare: (
-      left: CompiledRoutePathPattern,
-      right: CompiledRoutePathPattern,
-    ) => Effect.Effect<number>;
-    readonly match: (
-      pattern: CompiledRoutePathPattern,
-      pathname: string,
-    ) => Effect.Effect<Option.Option<RoutePathPatternMatch>>;
-  }
->()("trygg/RoutePathPattern") {
-  static readonly layer = (configInput: RoutePathPatternConfig): Layer.Layer<RoutePathPattern> =>
-    Layer.succeed(RoutePathPattern, makeRoutePathPattern(configInput));
-}
-
-export class RoutePathInterpolation extends Context.Service<
-  RoutePathInterpolation,
-  {
-    readonly rejectUnusedParams: boolean;
-    readonly paramNames: (
-      pattern: CompiledRoutePathPattern,
-    ) => Effect.Effect<ReadonlyArray<string>>;
-    readonly interpolate: (
-      pattern: CompiledRoutePathPattern,
-      params: PathParamInput,
-    ) => Effect.Effect<string, RoutePathInterpolationError>;
-    readonly paramOption: (
-      params: PathParamInput,
-      key: string,
-    ) => Effect.Effect<Option.Option<PathParamValue>>;
-  }
->()("trygg/RoutePathInterpolation") {
-  static readonly layer = (
-    configInput: RoutePathInterpolationConfig,
-  ): Layer.Layer<RoutePathInterpolation> =>
-    Layer.succeed(RoutePathInterpolation, makeRoutePathInterpolation(configInput));
-}
-
-const makeRoutePathPattern = (input: RoutePathPatternConfig): typeof RoutePathPattern.Service => {
+const makeRoutePathPattern = (input: RoutePathPatternConfig) => {
   const config = RoutePathPatternConfigInput.make(input);
-  return RoutePathPattern.of({
+  return {
     ...config,
-    compile: Effect.fn("RoutePathPattern.compile")((pattern) =>
+    compile: Effect.fn("RoutePathPattern.compile")((pattern: string) =>
       compileRoutePathPattern(pattern, config),
     ),
-    compare: Effect.fn("RoutePathPattern.compare")((left, right) =>
-      Effect.succeed(compareCompiledRoutePathPatterns(left, right)),
+    compare: Effect.fn("RoutePathPattern.compare")(
+      (left: CompiledRoutePathPattern, right: CompiledRoutePathPattern) =>
+        Effect.succeed(compareCompiledRoutePathPatterns(left, right)),
     ),
-    match: Effect.fn("RoutePathPattern.match")((pattern, pathname) =>
-      Effect.succeed(matchCompiledRoutePathPattern(pattern, pathname, config)),
+    match: Effect.fn("RoutePathPattern.match")(
+      (pattern: CompiledRoutePathPattern, pathname: string) =>
+        matchCompiledRoutePathPattern(pattern, pathname, config),
     ),
-  });
+  };
 };
 
-const makeRoutePathInterpolation = (
-  input: RoutePathInterpolationConfig,
-): typeof RoutePathInterpolation.Service => {
+const makeRoutePathInterpolation = (input: RoutePathInterpolationConfig) => {
   const config = RoutePathInterpolationConfigInput.make(input);
-  return RoutePathInterpolation.of({
+  return {
     ...config,
-    paramNames: Effect.fn("RoutePathInterpolation.paramNames")((pattern) =>
-      Effect.succeed(pattern.paramNames),
+    paramNames: Effect.fn("RoutePathInterpolation.paramNames")(
+      (pattern: CompiledRoutePathPattern) => Effect.succeed(pattern.paramNames),
     ),
-    interpolate: Effect.fn("RoutePathInterpolation.interpolate")((pattern, params) =>
-      interpolateCompiledRoutePathPattern(pattern, params, config),
+    interpolate: Effect.fn("RoutePathInterpolation.interpolate")(
+      (pattern: CompiledRoutePathPattern, params: PathParamInput) =>
+        interpolateCompiledRoutePathPattern(pattern, params, config),
     ),
-    paramOption: Effect.fn("RoutePathInterpolation.paramOption")((params, key) =>
-      Effect.succeed(getPathParamOption(params, key)),
+    paramOption: Effect.fn("RoutePathInterpolation.paramOption")(
+      (params: PathParamInput, key: string) => Effect.succeed(getPathParamOption(params, key)),
     ),
-  });
+  };
 };
+
+/** Configured route path-pattern operations. */
+export const RoutePathPattern = { make: makeRoutePathPattern };
+
+/** Configured route path interpolation operations. */
+export const RoutePathInterpolation = { make: makeRoutePathInterpolation };

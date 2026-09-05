@@ -1,0 +1,89 @@
+{
+  "date": "2026-09-05T11:40:10.915Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 0,
+  "samples": 1,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 37.89999997615814,
+          "frameMs": 41,
+          "rows": 1000
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 48.10000002384186,
+    "firstContentfulPaintMs": 76
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3684,
+      "gzipBytes": 1738
+    },
+    {
+      "file": "chunk-bqvnmvfc.js",
+      "loadedAtStartup": true,
+      "bytes": 82617,
+      "gzipBytes": 25675
+    },
+    {
+      "file": "chunk-95v482jn.js",
+      "loadedAtStartup": true,
+      "bytes": 287703,
+      "gzipBytes": 82115
+    },
+    {
+      "file": "chunk-64af96nn.js",
+      "loadedAtStartup": true,
+      "bytes": 134971,
+      "gzipBytes": 46538
+    },
+    {
+      "file": "chunk-726qgv1j.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 553
+    },
+    {
+      "file": "chunk-hb4f52ha.js",
+      "loadedAtStartup": true,
+      "bytes": 62543,
+      "gzipBytes": 18083
+    },
+    {
+      "file": "chunk-wc80dgfm.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 998
+    }
+  ],
+  "work": [
+    {
+      "operation": "update",
+      "rows": 1000,
+      "elements": 0,
+      "textNodes": 0,
+      "comments": 0,
+      "maps": 1303,
+      "sets": 600,
+      "tags": {}
+    }
+  ]
+}

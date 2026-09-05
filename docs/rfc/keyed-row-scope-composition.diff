@@ -1,0 +1,173 @@
+--- before/packages/core/src/primitives/render-keyed-list.ts
++++ after/packages/core/src/primitives/render-keyed-list.ts
+@@ -300,12 +300,60 @@
+     );
+   });
+ 
++  // Prepare within the caller's item Scope. Source updates and granular row
++  // workers each own their failure cleanup and keep one Scope.provide boundary.
++  const prepareItem = Effect.fnUntraced(function* (
++    item: T,
++    index: number,
++    renderPhase: Signal.RenderPhase,
++    itemScope: Scope.Closeable,
++    parentOverride?: Node,
++    previousDom?: BuiltItemDom,
++  ) {
++    const normalizedElement = yield* runRenderFn(item, index, renderPhase);
++    let preparation: RenderPreparation | undefined;
++    if (previousDom !== undefined && previousDom.result.reconcile !== undefined) {
++      const staticCompatible =
++        previousDom.result.canReconcile?.(normalizedElement, context) === true;
++      const plan = staticCompatible
++        ? undefined
++        : previousDom.result.prepareReconcile?.(normalizedElement, context);
++      if (staticCompatible || plan !== undefined) {
++        preparation = plan === undefined ? undefined : yield* plan;
++        if (!preparation?.needsDom)
++          return {
++            renderPhase,
++            element: normalizedElement,
++            result: previousDom.result,
++            startMarker: previousDom.startMarker,
++            endMarker: previousDom.endMarker,
++            usesExistingDom: true,
++            preparation,
++          };
++      }
++    }
++    const { result, startMarker, endMarker } = yield* buildItemDom(
++      normalizedElement,
++      parentOverride,
++      itemRenderContext(itemScope),
++      preparation,
++    );
++    return {
++      renderPhase,
++      element: normalizedElement,
++      result,
++      startMarker,
++      endMarker,
++      usesExistingDom: false,
++      preparation: undefined,
++    };
++  });
++
+   // Prepare a single item with a stable render phase. Compatible results lend
+   // their DOM after property acquisition; other cases build a detached candidate.
+   // The row Effect and its scoped acquisition still execute exactly once.
+-  // `Effect.fnUntraced`
+-  // (no span) — the Scope-provided inner `Effect.gen` is the only extra Effect
+-  // boundary the run loop drives per row.
++  // Scope installation and failed acquisition belong to this source-update
++  // caller; granular workers provide their own combined preparation boundary.
+   const renderItem = Effect.fnUntraced(function* (
+     item: T,
+     index: number,
+@@ -329,48 +377,17 @@
+     // only the user render and restores the prior context before `buildItemDom`
+     // runs, so `renderElement` observes the default (null) phase — keeping
+     // `renderPhase.accessed` (and thus the item's subscription set) unchanged.
+-    return yield* Effect.gen(function* () {
+-      const normalizedElement = yield* runRenderFn(item, index, renderPhase);
+-      let preparation: RenderPreparation | undefined;
+-      if (previousDom !== undefined && previousDom.result.reconcile !== undefined) {
+-        const staticCompatible =
+-          previousDom.result.canReconcile?.(normalizedElement, context) === true;
+-        const plan = staticCompatible
+-          ? undefined
+-          : previousDom.result.prepareReconcile?.(normalizedElement, context);
+-        if (staticCompatible || plan !== undefined) {
+-          preparation = plan === undefined ? undefined : yield* plan;
+-          if (!preparation?.needsDom)
+-            return {
+-              renderPhase,
+-              element: normalizedElement,
+-              result: previousDom.result,
+-              startMarker: previousDom.startMarker,
+-              endMarker: previousDom.endMarker,
+-              usesExistingDom: true,
+-              preparation,
+-            };
+-        }
+-      }
+-      const { result, startMarker, endMarker } = yield* buildItemDom(
+-        normalizedElement,
+-        parentOverride,
+-        itemRenderContext(itemScope),
+-        preparation,
+-      );
+-      return {
+-        renderPhase,
+-        element: normalizedElement,
+-        result,
+-        startMarker,
+-        endMarker,
+-        usesExistingDom: false,
+-        preparation: undefined,
+-      };
+-    }).pipe(
++    return yield* prepareItem(
++      item,
++      index,
++      renderPhase,
++      itemScope,
++      parentOverride,
++      previousDom,
++    ).pipe(
+       Scope.provide(itemScope),
+       // Close the forked item scope if the render fails (the only failure-prone
+-      // work — `runRenderFn` + `buildItemDom` — lives inside the gen above; the
++      // work — `runRenderFn` + `buildItemDom` — lives inside prepareItem; the
+       // preceding phase setup is synchronous/infallible). Preserve the render
+       // Exit so exit-sensitive finalizers can distinguish fail/die/interrupt.
+       Effect.onExit((exit) =>
+@@ -769,27 +786,28 @@
+                       yield* Effect.gen(function* () {
+                         oldPreparation = oldResult.preparation;
+                         const reconcile = oldResult.reconcile;
+-                        // Share preparation with source-list updates. Keep every
+-                        // constructed candidate owned before touching the live row.
+-                        const rendered = yield* renderItem(
+-                          currentState.item,
+-                          currentState.currentIndex,
+-                          stagingPhase,
+-                          stagingScope,
+-                          stagedParent,
+-                          {
+-                            result: oldResult,
+-                            startMarker: oldStartMarker,
+-                            endMarker: oldEndMarker,
+-                          },
+-                        );
+-                        nextElement = rendered.element;
+-                        if (!rendered.usesExistingDom) {
+-                          newResult = rendered.result;
+-                          newStartMarker = rendered.startMarker;
+-                          newEndMarker = rendered.endMarker;
+-                        }
+                         const outcome = yield* Effect.gen(function* () {
++                          yield* Signal.resetRenderPhase(stagingPhase);
++                          // Preparation and publication share this Scope; the
++                          // worker's onExit owns rollback and failed acquisition.
++                          const rendered = yield* prepareItem(
++                            currentState.item,
++                            currentState.currentIndex,
++                            stagingPhase,
++                            stagingScope,
++                            stagedParent,
++                            {
++                              result: oldResult,
++                              startMarker: oldStartMarker,
++                              endMarker: oldEndMarker,
++                            },
++                          );
++                          nextElement = rendered.element;
++                          if (!rendered.usesExistingDom) {
++                            newResult = rendered.result;
++                            newStartMarker = rendered.startMarker;
++                            newEndMarker = rendered.endMarker;
++                          }
+                           if (reconcile !== undefined) {
+                             attemptedReconcile = true;
+                             const patched = yield* reconcile(

@@ -8,8 +8,7 @@
  * @since 1.0.0
  * @module trygg/vite/build-artifact-planner
  */
-import { Data, Effect, Layer, Match, Schema } from "effect";
-import * as Context from "effect/Context";
+import { Data, Effect, Match, Schema } from "effect";
 import type { Output, Platform } from "../config.js";
 
 const generatedPath = (generatedDir: string, fileName: string): string =>
@@ -27,24 +26,75 @@ const generateHtmlTemplate = (): string => `<!DOCTYPE html>
 </html>`;
 
 const renderCloudflareStaticWorkerEntryModule = (): string =>
-  `export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-
-    if (pathname.includes(".") && !pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(request);
-    }
-
-    const assetResponse = await env.ASSETS.fetch(request);
-    if (assetResponse.status !== 404) {
-      return assetResponse;
-    }
-
-    return env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
-  },
-};
-`;
+  [
+    `const acceptsHtml = (request) =>`,
+    `  (request.headers.get("Accept") ?? "")`,
+    `    .split(",")`,
+    `    .some((range) => {`,
+    `      const [mediaType, ...parameters] = range.trim().toLowerCase().split(";");`,
+    `      if (mediaType !== "text/html" && mediaType !== "application/xhtml+xml") {`,
+    `        return false;`,
+    `      }`,
+    `      const quality = parameters`,
+    `        .map((parameter) => parameter.trim())`,
+    `        .find((parameter) => parameter.startsWith("q="));`,
+    `      return quality === undefined || Number(quality.slice(2)) > 0;`,
+    `    });`,
+    ``,
+    `const isDocumentRequest = (request) => {`,
+    `  if (request.method !== "GET" && request.method !== "HEAD") {`,
+    `    return false;`,
+    `  }`,
+    ``,
+    `  const destination = request.headers.get("Sec-Fetch-Dest");`,
+    `  if (destination !== null && destination !== "" && destination !== "document") {`,
+    `    return false;`,
+    `  }`,
+    `  return acceptsHtml(request);`,
+    `};`,
+    ``,
+    `const classifyPathname = (pathname) => {`,
+    `  try {`,
+    `    const segments = pathname.split("/").map(decodeURIComponent);`,
+    `    if (segments.some((segment) => segment.includes("/") || segment.includes("\\\\"))) {`,
+    `      return undefined;`,
+    `    }`,
+    `    return {`,
+    `      decoded: segments.join("/"),`,
+    `      fileLike: (segments.at(-1) ?? "").includes("."),`,
+    `    };`,
+    `  } catch {`,
+    `    return undefined;`,
+    `  }`,
+    `};`,
+    ``,
+    `const isApiPath = (pathname) => pathname === "/api" || pathname.startsWith("/api/");`,
+    ``,
+    `export default {`,
+    `  async fetch(request, env) {`,
+    `    const assetResponse = await env.ASSETS.fetch(request);`,
+    `    if (assetResponse.status !== 404) {`,
+    `      return assetResponse;`,
+    `    }`,
+    ``,
+    `    const url = new URL(request.url);`,
+    `    const pathname = classifyPathname(url.pathname);`,
+    `    if (`,
+    `      pathname === undefined ||`,
+    `      isApiPath(pathname.decoded) ||`,
+    `      !isDocumentRequest(request) ||`,
+    `      pathname.fileLike`,
+    `    ) {`,
+    `      return assetResponse;`,
+    `    }`,
+    ``,
+    `    const shell = new URL(request.url);`,
+    `    shell.pathname = "/";`,
+    `    shell.search = "";`,
+    `    return env.ASSETS.fetch(new Request(shell, request));`,
+    `  },`,
+    `};`,
+  ].join("\n");
 
 export type BuildOutputMode = Output;
 export type BuildPlatform = Platform;
@@ -70,7 +120,7 @@ export interface BuildOutputValidationPlan {
   readonly mayProceed: boolean;
 }
 
-export class InvalidBuildOutputCombination extends Schema.TaggedErrorClass<InvalidBuildOutputCombination>()(
+export class InvalidBuildOutputCombination extends Schema.TaggedError<InvalidBuildOutputCombination>()(
   "InvalidBuildOutputCombination",
   {
     input: Schema.Struct({
@@ -106,69 +156,55 @@ export const diagnosticCodes = {
   cloudflareStaticApiUnsupported: "TRYGG_BUILD_CLOUDFLARE_STATIC_API_UNSUPPORTED",
 };
 
-export const makeBuildArtifactPlanner = (
-  configInput: BuildArtifactPlannerConfig,
-): BuildArtifactPlannerShape => {
-  const config = BuildArtifactPlannerConfigInput.make(configInput);
+export const BuildArtifactPlanner = {
+  make: (configInput: BuildArtifactPlannerConfig): BuildArtifactPlannerShape => {
+    const config = BuildArtifactPlannerConfigInput.make(configInput);
 
-  return {
-    validateOutput: Effect.fn("BuildArtifactPlanner.validateOutput")(function* (input) {
-      const diagnostics: Array<BuildPlanDiagnostic> = [];
+    return {
+      validateOutput: Effect.fn("BuildArtifactPlanner.validateOutput")(function* (input) {
+        const diagnostics: Array<BuildPlanDiagnostic> = [];
 
-      if (input.output === "server" && input.platform === "cloudflare") {
-        diagnostics.push(
-          BuildPlanDiagnostic.Error({
-            code: diagnosticCodes.cloudflareServerUnsupported,
-            message:
-              'Cloudflare server output is not supported yet. Use platform: "node" or platform: "bun" for output: "server".',
-          }),
+        if (input.output === "server" && input.platform === "cloudflare") {
+          diagnostics.push(
+            BuildPlanDiagnostic.Error({
+              code: diagnosticCodes.cloudflareServerUnsupported,
+              message:
+                'Cloudflare server output is not supported yet. Use platform: "node" or platform: "bun" for output: "server".',
+            }),
+          );
+        }
+
+        if (input.hasApi && input.output === "static" && input.platform === "cloudflare") {
+          diagnostics.push(
+            BuildPlanDiagnostic.Error({
+              code: diagnosticCodes.cloudflareStaticApiUnsupported,
+              message:
+                'app/api.ts is not supported with platform: "cloudflare" and output: "static". Use output: "server" for API routes.',
+            }),
+          );
+        } else if (input.hasApi && input.output === "static") {
+          diagnostics.push(
+            BuildPlanDiagnostic.Warning({
+              code: diagnosticCodes.staticApiWarning,
+              message:
+                '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
+            }),
+          );
+        }
+
+        const blocking = diagnostics.find(
+          (diagnostic): diagnostic is BuildPlanDiagnostic =>
+            BuildPlanDiagnostic.$is("Error")(diagnostic) || config.failOnWarnings,
         );
-      }
+        if (blocking !== undefined) {
+          return yield* new InvalidBuildOutputCombination({ input, diagnostic: blocking });
+        }
 
-      if (input.hasApi && input.output === "static" && input.platform === "cloudflare") {
-        diagnostics.push(
-          BuildPlanDiagnostic.Error({
-            code: diagnosticCodes.cloudflareStaticApiUnsupported,
-            message:
-              'app/api.ts is not supported with platform: "cloudflare" and output: "static". Use output: "server" for API routes.',
-          }),
-        );
-      } else if (input.hasApi && input.output === "static") {
-        diagnostics.push(
-          BuildPlanDiagnostic.Warning({
-            code: diagnosticCodes.staticApiWarning,
-            message:
-              '⚠ API routes in app/api.ts will not be included in static build.\n  Deploy your API separately or use output: "server".',
-          }),
-        );
-      }
-
-      const blocking = diagnostics.find(
-        (diagnostic): diagnostic is BuildPlanDiagnostic =>
-          BuildPlanDiagnostic.$is("Error")(diagnostic) || config.failOnWarnings,
-      );
-      if (blocking !== undefined) {
-        return yield* new InvalidBuildOutputCombination({ input, diagnostic: blocking });
-      }
-
-      return { input, diagnostics, mayProceed: true };
-    }),
-  };
+        return { input, diagnostics, mayProceed: true };
+      }),
+    };
+  },
 };
-
-export class BuildArtifactPlanner extends Context.Service<
-  BuildArtifactPlanner,
-  {
-    readonly validateOutput: (
-      input: BuildArtifactPlanInput,
-    ) => Effect.Effect<BuildOutputValidationPlan, InvalidBuildOutputCombination>;
-  }
->()("trygg/BuildArtifactPlanner") {
-  static readonly layer = (
-    configInput: BuildArtifactPlannerConfig,
-  ): Layer.Layer<BuildArtifactPlanner> =>
-    Layer.succeed(BuildArtifactPlanner, makeBuildArtifactPlanner(configInput));
-}
 
 export type BuildArtifactOperation = Data.TaggedEnum<{
   readonly WriteFile: { readonly path: string; readonly contents: string };
@@ -184,7 +220,7 @@ export interface GeneratedArtifactPlan {
   readonly diagnostics: ReadonlyArray<BuildPlanDiagnostic>;
 }
 
-export class BuildArtifactPlanningError extends Schema.TaggedErrorClass<BuildArtifactPlanningError>()(
+export class BuildArtifactPlanningError extends Schema.TaggedError<BuildArtifactPlanningError>()(
   "BuildArtifactPlanningError",
   {
     operation: Schema.String,
@@ -207,72 +243,58 @@ export interface GeneratedArtifactPlannerShape {
   ) => Effect.Effect<ReadonlyArray<string>>;
 }
 
-export const makeGeneratedArtifactPlanner = (
-  configInput: GeneratedArtifactPlannerConfig,
-): GeneratedArtifactPlannerShape => {
-  const config = GeneratedArtifactPlannerConfigInput.make(configInput);
+export const GeneratedArtifactPlanner = {
+  make: (configInput: GeneratedArtifactPlannerConfig): GeneratedArtifactPlannerShape => {
+    const config = GeneratedArtifactPlannerConfigInput.make(configInput);
 
-  return {
-    planArtifacts: Effect.fn("GeneratedArtifactPlanner.planArtifacts")(function* (validation) {
-      const { generatedDir, output, platform } = validation.input;
-      const workerPath = generatedPath(generatedDir, "worker-entry.js");
-      const operations: Array<BuildArtifactOperation> = [
-        BuildArtifactOperation.WriteFile({
-          path: generatedPath(generatedDir, "index.html"),
-          contents: generateHtmlTemplate(),
-        }),
-      ];
-
-      if (output === "static" && platform === "cloudflare") {
-        operations.push(
+    return {
+      planArtifacts: Effect.fn("GeneratedArtifactPlanner.planArtifacts")(function* (validation) {
+        const { generatedDir, output, platform } = validation.input;
+        const workerPath = generatedPath(generatedDir, "worker-entry.js");
+        const operations: Array<BuildArtifactOperation> = [
           BuildArtifactOperation.WriteFile({
-            path: workerPath,
-            contents: renderCloudflareStaticWorkerEntryModule(),
+            path: generatedPath(generatedDir, "index.html"),
+            contents: generateHtmlTemplate(),
           }),
-        );
-      } else if (config.includeCleanupOperations) {
-        operations.push(BuildArtifactOperation.RemoveFile({ path: workerPath }));
-      }
+        ];
 
-      if (output === "server") {
-        operations.push(
-          BuildArtifactOperation.RunNestedBuild({
-            name: "production-server",
-            configFile: generatedPath(generatedDir, "server-entry.ts"),
-          }),
-        );
-      }
+        if (output === "static" && platform === "cloudflare") {
+          operations.push(
+            BuildArtifactOperation.WriteFile({
+              path: workerPath,
+              contents: renderCloudflareStaticWorkerEntryModule(),
+            }),
+          );
+        } else if (config.includeCleanupOperations) {
+          operations.push(BuildArtifactOperation.RemoveFile({ path: workerPath }));
+        }
 
-      return { validation, operations, diagnostics: validation.diagnostics };
-    }),
-    renderOperationSummary: Effect.fn("GeneratedArtifactPlanner.renderOperationSummary")(
-      function* (plan) {
-        return plan.operations.map((operation) =>
-          Match.value(operation).pipe(
-            Match.tag("WriteFile", ({ path }) => `write ${path}`),
-            Match.tag("RemoveFile", ({ path }) => `remove ${path}`),
-            Match.tag("RunNestedBuild", ({ name, configFile }) => `run ${name} from ${configFile}`),
-            Match.exhaustive,
-          ),
-        );
-      },
-    ),
-  };
+        if (output === "server") {
+          operations.push(
+            BuildArtifactOperation.RunNestedBuild({
+              name: "production-server",
+              configFile: generatedPath(generatedDir, "server-entry.ts"),
+            }),
+          );
+        }
+
+        return { validation, operations, diagnostics: validation.diagnostics };
+      }),
+      renderOperationSummary: Effect.fn("GeneratedArtifactPlanner.renderOperationSummary")(
+        function* (plan) {
+          return plan.operations.map((operation) =>
+            Match.value(operation).pipe(
+              Match.tag("WriteFile", ({ path }) => `write ${path}`),
+              Match.tag("RemoveFile", ({ path }) => `remove ${path}`),
+              Match.tag(
+                "RunNestedBuild",
+                ({ name, configFile }) => `run ${name} from ${configFile}`,
+              ),
+              Match.exhaustive,
+            ),
+          );
+        },
+      ),
+    };
+  },
 };
-
-export class GeneratedArtifactPlanner extends Context.Service<
-  GeneratedArtifactPlanner,
-  {
-    readonly planArtifacts: (
-      validation: BuildOutputValidationPlan,
-    ) => Effect.Effect<GeneratedArtifactPlan, BuildArtifactPlanningError>;
-    readonly renderOperationSummary: (
-      plan: GeneratedArtifactPlan,
-    ) => Effect.Effect<ReadonlyArray<string>>;
-  }
->()("trygg/GeneratedArtifactPlanner") {
-  static readonly layer = (
-    configInput: GeneratedArtifactPlannerConfig,
-  ): Layer.Layer<GeneratedArtifactPlanner> =>
-    Layer.succeed(GeneratedArtifactPlanner, makeGeneratedArtifactPlanner(configInput));
-}

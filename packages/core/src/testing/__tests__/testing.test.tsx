@@ -4,7 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../effect-vitest.js";
-import { Cause, Effect, Exit, Fiber, Option, Predicate, Schema, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Predicate, Schema, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import {
   click,
@@ -16,10 +16,11 @@ import {
   waitFor,
   WaitForTimeoutError,
 } from "../index.js";
+import * as Component from "../../primitives/component.js";
 import * as Signal from "../../primitives/signal.js";
 import { Renderer } from "../../primitives/renderer.js";
 
-class TestWaitForError extends Schema.TaggedErrorClass<TestWaitForError>()("TestWaitForError", {
+class TestWaitForError extends Schema.TaggedError<TestWaitForError>()("TestWaitForError", {
   reason: Schema.String,
 }) {}
 
@@ -40,6 +41,24 @@ const requireTextAreaElement = (element: HTMLElement, testId: string): HTMLTextA
 };
 
 describe("Testing Utilities", () => {
+  it.effect.each([
+    { name: "typed failure", cause: Cause.fail(new TestWaitForError({ reason: "mount failed" })) },
+    { name: "defect", cause: Cause.die("mount defect") },
+    { name: "interruption", cause: Cause.interrupt(71) },
+  ])("should remove its container immediately when mount ends with $name", ({ cause }) =>
+    Effect.gen(function* () {
+      // Scope: failed acquisition must not retain a test container until the caller's owner closes.
+      // Assertion: the render failure leaves the same published containers as before acquisition.
+      const before = Array.from(document.body.children);
+      const Page = Component.gen(function* () {
+        return yield* Effect.failCause(cause);
+      });
+      const exit = yield* render(<Page />).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.deepStrictEqual(Array.from(document.body.children), before);
+    }).pipe(Effect.scoped),
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Scope: TestRenderResult interface
   // ─────────────────────────────────────────────────────────────────────────────
@@ -821,6 +840,79 @@ describe("Testing Utilities", () => {
   // Scope: type utility
   // ─────────────────────────────────────────────────────────────────────────────
   describe("type", () => {
+    scoped("should leave deliberately blocked Renderer work controlled by its Deferred", () =>
+      Effect.gen(function* () {
+        // Scope: a real input handler starts but waits for an external completion gate.
+        // Assertion: type returns without pretending that blocked work completed; releasing it updates the DOM.
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const completed = yield* Deferred.make<void>();
+        const value = yield* Signal.make("initial");
+        const Form = Component.gen(function* () {
+          return (
+            <div>
+              <input
+                data-testid="input"
+                onInput={() =>
+                  Effect.gen(function* () {
+                    yield* Deferred.succeed(started, undefined);
+                    yield* Deferred.await(release);
+                    yield* Signal.set(value, "completed");
+                    yield* Deferred.succeed(completed, undefined);
+                  })
+                }
+              />
+              <span data-testid="value">{value}</span>
+            </div>
+          );
+        });
+        const result = yield* render(<Form />);
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
+        yield* type(input, "pending");
+        yield* Deferred.await(started);
+        assert.strictEqual((yield* result.getByTestId("value")).textContent, "initial");
+        yield* Deferred.succeed(release, undefined);
+        yield* Deferred.await(completed);
+        assert.strictEqual((yield* result.getByTestId("value")).textContent, "completed");
+      }),
+    );
+
+    scoped("should settle Renderer Effect handlers before returning", () =>
+      Effect.gen(function* () {
+        // Scope: exercises type through a real component handler that explicitly yields to the scheduler.
+        const value = yield* Signal.make("initial");
+        const Form = Component.gen(function* () {
+          const renderedValue = yield* Signal.get(value);
+
+          return (
+            <div>
+              <input
+                type="text"
+                data-testid="input"
+                onInput={(event) =>
+                  Effect.gen(function* () {
+                    yield* Effect.yieldNow;
+                    const target = event.target;
+                    if (target instanceof HTMLInputElement) {
+                      yield* Signal.set(value, target.value);
+                    }
+                  })
+                }
+              />
+              <span data-testid="value">{renderedValue}</span>
+            </div>
+          );
+        });
+        const result = yield* render(<Form />);
+        const input = requireInputElement(yield* result.getByTestId("input"), "input");
+
+        yield* type(input, "settled");
+
+        // Assertion: the handler and its reactive DOM update finish before type completes.
+        assert.strictEqual((yield* result.getByTestId("value")).textContent, "settled");
+      }),
+    );
+
     scoped("should set input value", () =>
       Effect.gen(function* () {
         const result = yield* render(

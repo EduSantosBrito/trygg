@@ -1,0 +1,16 @@
+{
+  "platform": "Linux-6.12.55-x86_64-with-glibc2.40",
+  "scope": "All nine ordinary successful browser interaction cases after RENDER-ROLLBACK-001. Memory probe disabled. The workload does not inject render or rollback failures, so these observations are not a rollback benchmark or a controlled before/after speed claim.",
+  "bun": "1.4.0",
+  "effect": "4.0.0-rc.112",
+  "sourceSha256": {
+    "scripts/benchmark-browser.ts": "b1a7f1ff49fc8d0e82d08db65773b9b2ffef668b578af0484e3289d1ed972521",
+    "scripts/benchmarks/browser.ts": "b247af1204d02e16d2b5ab25bde5cd4629c7298bf5238db613b1a6858c4c65db",
+    "packages/core/src/primitives/render-transaction.ts": "a5ab4bcf4bb3164cf6fa5e01aa9c657e340bdf800a682217e3a351c093246048",
+    "packages/core/src/primitives/render-cleanup.ts": "3b5ab17e4da60f549ffbca77f7f44910e1f5484c9a3abef268b2ebfc36ccb807",
+    "packages/core/src/primitives/render-intrinsic.ts": "6e684dc0db725de5ef0d5e197071057b34bc181af3aea0392185963880adf97a",
+    "packages/core/src/primitives/renderer.ts": "c8603fee1f3accf4a019e2c63b8b4fa234978aa96f43cac427130defca374036",
+    "packages/core/src/primitives/signal.ts": "4cb2c94316266d4ee29b18b7d14dbf7817c4fee96f2ef987332a85fd55936669",
+    "bun.lock": "2de0bc3be45803336aa9a6bc897b9955b55e90ae96fb63ca6ef2aac0f842304d"
+  }
+}

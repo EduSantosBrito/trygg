@@ -67,7 +67,8 @@ export const sidebarGroups: readonly SidebarGroup[] = [
       {
         label: "Elements",
         href: "/docs/elements",
-        description: "Construct, inspect, and transform the tree JSX compiles to, for codegen and tooling.",
+        description:
+          "Construct, inspect, and transform the tree JSX compiles to, for codegen and tooling.",
         primaryExport: "Element",
       },
       {
@@ -162,12 +163,14 @@ export const sidebarGroups: readonly SidebarGroup[] = [
       {
         label: "Prefetching",
         href: "/docs/router/prefetch",
-        description: "Warm a route's component and data before the click so navigation feels instant.",
+        description:
+          "Warm a route's component and data before the click so navigation feels instant.",
       },
       {
         label: "Render strategies",
         href: "/docs/router/render-strategy",
-        description: "Choose when a route's component loads and renders: eager, lazy, or on intent.",
+        description:
+          "Choose when a route's component loads and renders: eager, lazy, or on intent.",
       },
       {
         label: "Scroll restoration",
@@ -182,7 +185,8 @@ export const sidebarGroups: readonly SidebarGroup[] = [
       {
         label: "Route types",
         href: "/docs/router/types",
-        description: "The type vocabulary that makes wrong paths and missing params compile errors.",
+        description:
+          "The type vocabulary that makes wrong paths and missing params compile errors.",
       },
     ],
   },
@@ -212,7 +216,8 @@ export const sidebarGroups: readonly SidebarGroup[] = [
       {
         label: "Deployment",
         href: "/docs/deployment",
-        description: "Choose a platform and output mode, build, and run the production server or static assets.",
+        description:
+          "Choose a platform and output mode, build, and run the production server or static assets.",
       },
     ],
   },

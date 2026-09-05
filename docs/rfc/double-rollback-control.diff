@@ -1,0 +1,217 @@
+--- A/render-intrinsic.ts
++++ B/render-intrinsic.ts
+@@ -244,6 +244,8 @@
+   readonly node: globalThis.Element;
+   element: IntrinsicElement;
+   props: ElementProps;
++  /** Union of possibly applied properties after a failed native patch. */
++  incompleteProps: ElementProps | undefined;
+   listeners: Array<StaticEventBinding>;
+   /** Synchronous unsubscribes for this node's signal-attribute bindings. */
+   unsubscribes: Array<() => void>;
+@@ -444,7 +446,16 @@
+     }
+   }
+ 
+-  return { node, element, props, listeners, unsubscribes, children, subtreeHasUnsubscribes };
++  return {
++    node,
++    element,
++    props,
++    incompleteProps: undefined,
++    listeners,
++    unsubscribes,
++    children,
++    subtreeHasUnsubscribes,
++  };
+ };
+ 
+ /**
+@@ -502,81 +513,99 @@
+   if (nextElement.tag !== built.element.tag) return false;
+   if (nextElement.key !== built.element.key) return false;
+ 
+-  // `flagDirty` tracks whether the teardown-skip flag (`subtreeHasUnsubscribes`)
+-  // could have changed during this reconcile. It only changes when this node's
+-  // own unsubscribes are re-derived (the props-changed branch below) or when a
+-  // child reconcile flips the child's flag. In the common keyed-list reconcile
+-  // (update10th: text-only change; swap: no change) neither happens, so the
+-  // recompute at the end is skipped entirely — the flag is invariant.
+-  let flagDirty = false;
+-
+-  const nextProps =
+-    nextElement.props.mode !== undefined ? omitMode(nextElement.props) : nextElement.props;
+-  if (!shallowPropsEqual(built.props, nextProps)) {
+-    // Record the attempted props before native writes. If a later write throws,
+-    // rollback must reapply the old snapshot instead of mistaking partial DOM
+-    // mutation for an unchanged model.
+-    const previousProps = built.props;
+-    built.props = nextProps;
+-    for (const { eventName, listener } of built.listeners) {
+-      built.node.removeEventListener(eventName, listener);
+-    }
+-    built.listeners = [];
+-    for (const unsubscribe of built.unsubscribes) unsubscribe();
+-    built.unsubscribes = [];
+-    clearRemovedProps(built.node, previousProps, nextProps);
+-    applyStaticProps(
+-      built.node,
+-      nextProps,
+-      built.listeners,
+-      built.unsubscribes,
+-      renderContext,
+-      context,
+-    );
+-    flagDirty = true; // own unsubscribes may have been added/removed
+-  }
+-
+-  const nextChildren = nextElement.children;
+-  if (nextChildren.length !== built.children.length) return false;
+-  for (let index = 0; index < nextChildren.length; index++) {
+-    const nextChild = nextChildren[index];
+-    const childBuilt = built.children[index];
+-    if (nextChild === undefined || childBuilt === undefined) return false;
+-
+-    if (Predicate.isTagged(nextChild, "Text")) {
+-      if (childBuilt.kind !== "text") return false;
+-      if (childBuilt.node.data !== nextChild.content) childBuilt.node.data = nextChild.content;
+-    } else if (Predicate.isTagged(nextChild, "Intrinsic")) {
+-      if (childBuilt.kind !== "element") return false;
+-      if (nextChild.key !== null) return false;
+-      const childFlagBefore = childBuilt.built.subtreeHasUnsubscribes;
+-      if (!reconcileStaticBuilt(childBuilt.built, nextChild, renderContext, context)) return false;
+-      if (childBuilt.built.subtreeHasUnsubscribes !== childFlagBefore) flagDirty = true;
+-    } else {
+-      return false;
+-    }
+-  }
+-
+-  // Re-derive the teardown-skip flag only when something above could have
+-  // changed it. A stale `false` would skip a live unsubscribe (leak); a stale
+-  // `true` only costs a redundant teardown walk — but since we recompute exactly
+-  // when an input changed, the value stays exact. Skipping this scan on the
+-  // unchanged path is the hot-path win (update10th / swap touch nothing here).
+-  if (flagDirty) {
+-    let subtreeHasUnsubscribes = built.unsubscribes.length > 0;
+-    if (!subtreeHasUnsubscribes) {
+-      for (const child of built.children) {
+-        if (child.kind === "element" && child.built.subtreeHasUnsubscribes) {
+-          subtreeHasUnsubscribes = true;
+-          break;
++  let completed = false;
++  // oxlint-disable-next-line effect/no-try-catch -- Native bookkeeping only; finally preserves the defect for the enclosing Effect.sync boundary without catching or translating it.
++  try {
++    // `flagDirty` tracks whether the teardown-skip flag (`subtreeHasUnsubscribes`)
++    // could have changed during this reconcile. It only changes when this node's
++    // own unsubscribes are re-derived (the props-changed branch below) or when a
++    // child reconcile flips the child's flag. In the common keyed-list reconcile
++    // (update10th: text-only change; swap: no change) neither happens, so the
++    // recompute at the end is skipped entirely — the flag is invariant.
++    let flagDirty = false;
++
++    const nextProps =
++      nextElement.props.mode !== undefined ? omitMode(nextElement.props) : nextElement.props;
++    if (built.incompleteProps !== undefined || !shallowPropsEqual(built.props, nextProps)) {
++      const previousProps = built.incompleteProps ?? built.props;
++      let applied = false;
++      // oxlint-disable-next-line effect/no-try-catch -- Record partial native writes synchronously; the enclosing Effect.sync retains the original Cause.
++      try {
++        for (const { eventName, listener } of built.listeners) {
++          built.node.removeEventListener(eventName, listener);
+         }
+-      }
+-    }
+-    built.subtreeHasUnsubscribes = subtreeHasUnsubscribes;
+-  }
+-
+-  built.element = nextElement;
+-  return true;
++        built.listeners = [];
++        for (const unsubscribe of built.unsubscribes) unsubscribe();
++        built.unsubscribes = [];
++        clearRemovedProps(built.node, previousProps, nextProps);
++        applyStaticProps(
++          built.node,
++          nextProps,
++          built.listeners,
++          built.unsubscribes,
++          renderContext,
++          context,
++        );
++        built.props = nextProps;
++        built.incompleteProps = undefined;
++        applied = true;
++      } finally {
++        // Native failures propagate to the enclosing Effect.sync Cause boundary.
++        // Keep every possibly applied key until a complete patch succeeds, even
++        // when rollback also fails. Allocate this union only on the failure path.
++        if (!applied) built.incompleteProps = { ...previousProps, ...nextProps };
++      }
++      flagDirty = true;
++    }
++
++    const nextChildren = nextElement.children;
++    if (nextChildren.length !== built.children.length) return false;
++    for (let index = 0; index < nextChildren.length; index++) {
++      const nextChild = nextChildren[index];
++      const childBuilt = built.children[index];
++      if (nextChild === undefined || childBuilt === undefined) return false;
++
++      if (Predicate.isTagged(nextChild, "Text")) {
++        if (childBuilt.kind !== "text") return false;
++        if (childBuilt.node.data !== nextChild.content) childBuilt.node.data = nextChild.content;
++      } else if (Predicate.isTagged(nextChild, "Intrinsic")) {
++        if (childBuilt.kind !== "element") return false;
++        if (nextChild.key !== null) return false;
++        const childFlagBefore = childBuilt.built.subtreeHasUnsubscribes;
++        if (!reconcileStaticBuilt(childBuilt.built, nextChild, renderContext, context))
++          return false;
++        if (childBuilt.built.subtreeHasUnsubscribes !== childFlagBefore) flagDirty = true;
++      } else {
++        return false;
++      }
++    }
++
++    // Re-derive the teardown-skip flag only when something above could have
++    // changed it. A stale `false` would skip a live unsubscribe (leak); a stale
++    // `true` only costs a redundant teardown walk — but since we recompute exactly
++    // when an input changed, the value stays exact. Skipping this scan on the
++    // unchanged path is the hot-path win (update10th / swap touch nothing here).
++    if (flagDirty) {
++      let subtreeHasUnsubscribes = built.unsubscribes.length > 0;
++      if (!subtreeHasUnsubscribes) {
++        for (const child of built.children) {
++          if (child.kind === "element" && child.built.subtreeHasUnsubscribes) {
++            subtreeHasUnsubscribes = true;
++            break;
++          }
++        }
++      }
++      built.subtreeHasUnsubscribes = subtreeHasUnsubscribes;
++    }
++
++    built.element = nextElement;
++    completed = true;
++    return true;
++  } finally {
++    // A descendant may acquire subscriptions before its native write fails.
++    // Keep every ancestor traversable for cleanup if reconciliation aborts.
++    if (!completed) built.subtreeHasUnsubscribes = true;
++  }
+ };
+ 
+ /**
+--- A/render-keyed-list.ts
++++ B/render-keyed-list.ts
+@@ -230,7 +230,10 @@
+     return { result, startMarker, endMarker };
+   });
+ 
+-  // Helper to render a single item with a stable render phase. `Effect.fnUntraced`
++  // Prepare a single item with a stable render phase. A compatible static result
++  // lends its DOM until reconciliation; other cases build a detached candidate.
++  // The row Effect and its scoped acquisition still execute exactly once.
++  // `Effect.fnUntraced`
+   // (no span) — the Scope-provided inner `Effect.gen` is the only extra Effect
+   // boundary the run loop drives per row.
+   const renderItem = Effect.fnUntraced(function* (

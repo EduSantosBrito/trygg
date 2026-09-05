@@ -1,0 +1,302 @@
+--- control/packages/core/src/primitives/render-keyed-list.ts
++++ candidate/packages/core/src/primitives/render-keyed-list.ts
+@@ -1,4 +1,4 @@
+-import { Cause, Effect, Exit, Schema, Scope } from "effect";
++import { Cause, Effect, Exit, Fiber, Schema, Scope } from "effect";
+ import * as Context from "effect/Context";
+ import { Element } from "./element.js";
+ import * as Signal from "./signal.js";
+@@ -127,6 +127,7 @@
+     currentIndex: number;
+     /** Whether a re-render is in progress */
+     isRerendering: boolean;
++    rerenderFiber: Fiber.Fiber<unknown, unknown> | null;
+     /** Whether another re-render is pending */
+     pendingRerender: boolean;
+     /** Map from signal debugId to unsubscribe Effect */
+@@ -158,12 +159,27 @@
+   let isUnmounted = false;
+   let isUpdating = false;
+   let pendingUpdate = false;
++  const pendingRerenderKeys = new Set<string | number>();
+ 
+   const handleUpdateCause = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
+     if (Cause.hasDies(cause) || Cause.hasInterrupts(cause) || options.errorHandler === null) {
+       return yield* Effect.failCause(cause);
+     }
+     options.errorHandler(cause);
++  });
++
++  const stopRerender = Effect.fnUntraced(function* (state: ItemState) {
++    const fiber = state.rerenderFiber;
++    if (fiber === null) return;
++    yield* Fiber.interrupt(fiber);
++    const exit = yield* Fiber.await(fiber);
++    // Supersession owns interruption, but does not erase failed finalization.
++    if (
++      Exit.isFailure(exit) &&
++      exit.cause.reasons.some((reason) => !Cause.isInterruptReason(reason))
++    ) {
++      return yield* Effect.failCause(exit.cause);
++    }
+   });
+ 
+   const itemRenderContext = (scope: Scope.Scope): RenderContext => ({ ...listContext, scope });
+@@ -580,6 +596,10 @@
+           const key = keyOrder[i];
+           if (key !== undefined) {
+             oldKeyToIndex.set(key, i);
++            if (!newKeySet.has(key)) {
++              const state = itemStates.get(key);
++              if (state !== undefined && state.rerenderFiber !== null) yield* stopRerender(state);
++            }
+           }
+         }
+ 
+@@ -635,6 +655,7 @@
+             const needsMove = !stableOldIndices.has(oldIndex);
+             let staged: StagedItem | null = null;
+             if (needsRerender) {
++              if (existingState.rerenderFiber !== null) yield* stopRerender(existingState);
+               const stagingScope = Scope.forkUnsafe(existingState.scope);
+               const stagingPhase = Signal.makeRenderPhaseUnsafe();
+               stagingPhase.signals.push(...existingState.renderPhase.signals);
+@@ -699,6 +720,13 @@
+                 const state = itemStates.get(key);
+                 if (state === undefined) return null;
+ 
++                // The source update owns publication until its preparations and
++                // cleanup finish. Resume dependencies against committed inputs.
++                if (isUpdating) {
++                  state.pendingRerender = true;
++                  pendingRerenderKeys.add(key);
++                  return null;
++                }
+                 // Coalesce rapid signal changes - mark pending if already rerendering
+                 if (state.isRerendering) {
+                   state.pendingRerender = true;
+@@ -713,19 +741,18 @@
+                 deps.runForkInRenderContext(
+                   Effect.scoped(
+                     Effect.gen(function* () {
+-                      // Re-render with the same phase (preserves signals). First
+-                      // try an in-place reconcile: re-run the render fn for the new
+-                      // value and ask the existing result to patch its own DOM
+-                      // (changed text/props on the SAME nodes). On success we touch
+-                      // only what changed — no new subtree, no teardown, node identity
+-                      // preserved (the update-row hot path: 100 immutable-row updates
+-                      // become 100 text-data writes instead of 100 subtree rebuilds).
+-                      // On structural divergence the reconcile returns false and we
+-                      // fall back to building a fresh subtree from the SAME already-
+-                      // rendered element (the render fn runs exactly once) and swap.
++                      const rerenderFiber = yield* Effect.withFiber(Effect.succeed);
++                      currentState.rerenderFiber = rerenderFiber;
++                      // Preserve row Signals while preparing the next element and
++                      // property values once. Compatible rows patch their retained
++                      // nodes; structural replacement consumes the same preparation.
++                      // Keep the committed snapshot for rollback until publication.
+                       const oldStartMarker = currentState.startMarker;
+                       const oldEndMarker = currentState.endMarker;
+                       const oldResult = currentState.result;
++                      const oldElement = currentState.element;
++                      let oldPreparation: RenderPreparation | undefined;
++                      let attemptedReconcile = false;
+                       const stagingScope = Scope.forkUnsafe(currentState.scope);
+                       const stagingPhase = Signal.makeRenderPhaseUnsafe();
+                       stagingPhase.signals.push(...currentState.renderPhase.signals);
+@@ -740,34 +767,50 @@
+                       let committed = false;
+ 
+                       yield* Effect.gen(function* () {
++                        oldPreparation = oldResult.preparation;
+                         const reconcile = oldResult.reconcile;
+-                        // Run the render fn once under the item's own scope, then
+-                        // either reconcile in place or build a replacement subtree.
++                        // Share preparation with source-list updates. Keep every
++                        // constructed candidate owned before touching the live row.
++                        const rendered = yield* renderItem(
++                          currentState.item,
++                          currentState.currentIndex,
++                          stagingPhase,
++                          stagingScope,
++                          stagedParent,
++                          {
++                            result: oldResult,
++                            startMarker: oldStartMarker,
++                            endMarker: oldEndMarker,
++                          },
++                        );
++                        nextElement = rendered.element;
++                        if (!rendered.usesExistingDom) {
++                          newResult = rendered.result;
++                          newStartMarker = rendered.startMarker;
++                          newEndMarker = rendered.endMarker;
++                        }
+                         const outcome = yield* Effect.gen(function* () {
+-                          yield* Signal.resetRenderPhase(stagingPhase);
+-                          const normalizedElement = yield* runRenderFn(
+-                            currentState.item,
+-                            currentState.currentIndex,
+-                            stagingPhase,
+-                          );
+-                          nextElement = normalizedElement;
+                           if (reconcile !== undefined) {
+-                            const patched = yield* reconcile(normalizedElement, context);
++                            attemptedReconcile = true;
++                            const patched = yield* reconcile(
++                              rendered.element,
++                              context,
++                              rendered.preparation ?? rendered.result.preparation,
++                            );
+                             if (patched) return rerenderReconciled;
+                           }
++                          if (!rendered.usesExistingDom) return rerenderReplaced(rendered);
+                           const built = yield* buildItemDom(
+-                            normalizedElement,
++                            rendered.element,
+                             stagedParent,
+                             itemRenderContext(stagingScope),
++                            rendered.preparation,
+                           );
++                          newResult = built.result;
++                          newStartMarker = built.startMarker;
++                          newEndMarker = built.endMarker;
+                           return rerenderReplaced(built);
+                         }).pipe(Scope.provide(stagingScope));
+-
+-                        if (outcome.kind === "replaced") {
+-                          newResult = outcome.built.result;
+-                          newStartMarker = outcome.built.startMarker;
+-                          newEndMarker = outcome.built.endMarker;
+-                        }
+ 
+                         yield* Effect.uninterruptible(
+                           Effect.gen(function* () {
+@@ -815,40 +858,70 @@
+                                 Effect.sync(() => oldEndMarker.remove()),
+                               );
+                             }
++                            if (outcome.kind === "reconciled" && newResult !== null) {
++                              postCommit.push(
++                                RenderTransaction.cleanup(newResult),
++                                Effect.sync(() => newStartMarker?.remove()),
++                                Effect.sync(() => newEndMarker?.remove()),
++                              );
++                            }
+                             yield* cleanupAll(postCommit);
+                           }),
+                         );
+                       }).pipe(
+-                        Effect.catchCause((cause) =>
+-                          Effect.gen(function* () {
++                        Effect.onExit((exit) => {
++                          if (Exit.isSuccess(exit)) return Effect.void;
++                          return Effect.gen(function* () {
+                             if (committed) {
+                               yield* Trace.emit("keyedList.item.rerender.error", () => ({
+                                 key,
+-                                cause_type: Trace.causeValueType(cause),
++                                cause_type: Trace.causeValueType(exit.cause),
+                               }));
+-                              return yield* Effect.failCause(cause);
++                              return;
+                             }
+-
++                            // Finalization also runs for interruption. Restore
++                            // old bindings before releasing staged acquisitions.
++                            const rollback = Effect.gen(function* () {
++                              if (!attemptedReconcile || oldResult.reconcile === undefined) return;
++                              const restored = yield* oldResult
++                                .reconcile(oldElement, context, oldPreparation)
++                                .pipe(Scope.provide(currentState.scope));
++                              if (!restored)
++                                return yield* Effect.failCause(
++                                  Cause.die(new KeyedListRollbackError({ key })),
++                                );
++                            });
+                             const cleanupExit = yield* Effect.exit(
+                               cleanupAll([
++                                rollback,
+                                 newResult !== null
+                                   ? RenderTransaction.cleanup(newResult)
+                                   : Effect.void,
+                                 Effect.sync(() => newStartMarker?.remove()),
+                                 Effect.sync(() => newEndMarker?.remove()),
+-                                Scope.close(stagingScope, Exit.failCause(cause)),
++                                Scope.close(stagingScope, Exit.asVoid(exit)),
+                               ]),
+                             );
+                             currentState.isRerendering = false;
+                             currentState.pendingRerender = false;
+                             const reportedCause = Exit.isFailure(cleanupExit)
+-                              ? Cause.combine(cause, cleanupExit.cause)
+-                              : cause;
++                              ? Cause.combine(exit.cause, cleanupExit.cause)
++                              : exit.cause;
+                             yield* Trace.emit("keyedList.item.rerender.error", () => ({
+                               key,
+                               cause_type: Trace.causeValueType(reportedCause),
+                             }));
+-                            yield* handleUpdateCause(reportedCause);
++                            if (Exit.isFailure(cleanupExit))
++                              return yield* Effect.failCause(cleanupExit.cause);
++                          });
++                        }),
++                        Effect.catchCause((cause) =>
++                          committed ? Effect.failCause(cause) : handleUpdateCause(cause),
++                        ),
++                        Effect.ensuring(
++                          Effect.sync(() => {
++                            if (currentState.rerenderFiber === rerenderFiber)
++                              currentState.rerenderFiber = null;
+                           }),
+                         ),
+                       );
+@@ -869,6 +942,7 @@
+               item,
+               currentIndex: i,
+               isRerendering: false,
++              rerenderFiber: null,
+               pendingRerender: false,
+               subscriptions: new Map(),
+               scope: itemScope,
+@@ -1237,12 +1311,26 @@
+       ),
+     ).pipe(
+       Effect.ensuring(
+-        Effect.sync(() => {
++        Effect.suspend(() => {
+           isUpdating = false;
+           if (pendingUpdate && !isUnmounted) {
+             pendingUpdate = false;
+             updateList();
++            return Effect.void;
+           }
++          if (isUnmounted || pendingRerenderKeys.size === 0) return Effect.void;
++          return Effect.gen(function* () {
++            for (const key of pendingRerenderKeys) {
++              // A resumed row may synchronously start another source update.
++              if (isUpdating || isUnmounted) break;
++              pendingRerenderKeys.delete(key);
++              const state = itemStates.get(key);
++              if (state !== undefined && state.pendingRerender && !state.isRerendering) {
++                state.pendingRerender = false;
++                yield* state.scheduleRerender();
++              }
++            }
++          });
+         }),
+       ),
+     );
+@@ -1299,7 +1387,10 @@
+         );
+       }
+       cleanups.push(
+-        Effect.sync(() => itemStates.clear()),
++        Effect.sync(() => {
++          itemStates.clear();
++          pendingRerenderKeys.clear();
++        }),
+         Scope.close(listScope, Exit.void),
+         Effect.sync(() => anchor.remove()),
+       );

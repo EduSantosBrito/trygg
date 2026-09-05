@@ -1,0 +1,288 @@
+{
+  "date": "2026-09-05T10:21:36.145Z",
+  "browser": "141.0.7390.122",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "warmup": 20,
+  "samples": 31,
+  "results": [
+    {
+      "operation": "update",
+      "samples": [
+        {
+          "operation": "update",
+          "handlerMs": 36.39999997615814,
+          "frameMs": 39.5,
+          "rows": 1000,
+          "taskMs": 46.60000000000019
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.5,
+          "frameMs": 27.30000001192093,
+          "rows": 1000,
+          "taskMs": 28.687999999999825
+        },
+        {
+          "operation": "update",
+          "handlerMs": 49.10000002384186,
+          "frameMs": 52.60000002384186,
+          "rows": 1000,
+          "taskMs": 59.623000000000204
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.19999998807907,
+          "frameMs": 26.69999998807907,
+          "rows": 1000,
+          "taskMs": 27.84999999999993
+        },
+        {
+          "operation": "update",
+          "handlerMs": 37.80000001192093,
+          "frameMs": 41.19999998807907,
+          "rows": 1000,
+          "taskMs": 48.59300000000033
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.5,
+          "frameMs": 27.400000035762787,
+          "rows": 1000,
+          "taskMs": 28.548999999999936
+        },
+        {
+          "operation": "update",
+          "handlerMs": 18.5,
+          "frameMs": 34.09999996423721,
+          "rows": 1000,
+          "taskMs": 41.233000000000075
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.099999964237213,
+          "frameMs": 26.799999952316284,
+          "rows": 1000,
+          "taskMs": 28.01300000000051
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.899999976158142,
+          "frameMs": 23.69999998807907,
+          "rows": 1000,
+          "taskMs": 26.519000000000403
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.80000001192093,
+          "frameMs": 26.600000023841858,
+          "rows": 1000,
+          "taskMs": 29.630000000000045
+        },
+        {
+          "operation": "update",
+          "handlerMs": 23.599999964237213,
+          "frameMs": 26.099999964237213,
+          "rows": 1000,
+          "taskMs": 27.091999999999672
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.900000035762787,
+          "frameMs": 23.30000001192093,
+          "rows": 1000,
+          "taskMs": 24.414000000000158
+        },
+        {
+          "operation": "update",
+          "handlerMs": 41.90000003576279,
+          "frameMs": 44.60000002384186,
+          "rows": 1000,
+          "taskMs": 51.736000000000004
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24,
+          "frameMs": 27.399999976158142,
+          "rows": 1000,
+          "taskMs": 28.747000000000078
+        },
+        {
+          "operation": "update",
+          "handlerMs": 35.10000002384186,
+          "frameMs": 38.10000002384186,
+          "rows": 1000,
+          "taskMs": 45.44700000000024
+        },
+        {
+          "operation": "update",
+          "handlerMs": 26.19999998807907,
+          "frameMs": 29.19999998807907,
+          "rows": 1000,
+          "taskMs": 30.63299999999991
+        },
+        {
+          "operation": "update",
+          "handlerMs": 35.80000001192093,
+          "frameMs": 38.69999998807907,
+          "rows": 1000,
+          "taskMs": 45.94900000000024
+        },
+        {
+          "operation": "update",
+          "handlerMs": 10.899999976158142,
+          "frameMs": 26.899999976158142,
+          "rows": 1000,
+          "taskMs": 28.847999999999985
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.799999952316284,
+          "frameMs": 23.69999998807907,
+          "rows": 1000,
+          "taskMs": 26.42399999999956
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.900000035762787,
+          "frameMs": 23.30000001192093,
+          "rows": 1000,
+          "taskMs": 25.22100000000016
+        },
+        {
+          "operation": "update",
+          "handlerMs": 9.199999988079071,
+          "frameMs": 27.69999998807907,
+          "rows": 1000,
+          "taskMs": 27.9979999999993
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.899999976158142,
+          "frameMs": 27.19999998807907,
+          "rows": 1000,
+          "taskMs": 24.14000000000005
+        },
+        {
+          "operation": "update",
+          "handlerMs": 20.600000023841858,
+          "frameMs": 36.19999998807907,
+          "rows": 1000,
+          "taskMs": 43.27300000000012
+        },
+        {
+          "operation": "update",
+          "handlerMs": 9,
+          "frameMs": 26.5,
+          "rows": 1000,
+          "taskMs": 25.66399999999991
+        },
+        {
+          "operation": "update",
+          "handlerMs": 34.40000003576279,
+          "frameMs": 37.19999998807907,
+          "rows": 1000,
+          "taskMs": 44.02299999999926
+        },
+        {
+          "operation": "update",
+          "handlerMs": 8.899999976158142,
+          "frameMs": 23.69999998807907,
+          "rows": 1000,
+          "taskMs": 25.135999999999825
+        },
+        {
+          "operation": "update",
+          "handlerMs": 43.39999997615814,
+          "frameMs": 46.299999952316284,
+          "rows": 1000,
+          "taskMs": 53.23100000000025
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.5,
+          "frameMs": 28,
+          "rows": 1000,
+          "taskMs": 29.123999999999484
+        },
+        {
+          "operation": "update",
+          "handlerMs": 48.90000003576279,
+          "frameMs": 52.30000001192093,
+          "rows": 1000,
+          "taskMs": 59.68899999999877
+        },
+        {
+          "operation": "update",
+          "handlerMs": 24.19999998807907,
+          "frameMs": 27.099999964237213,
+          "rows": 1000,
+          "taskMs": 28.43299999999971
+        },
+        {
+          "operation": "update",
+          "handlerMs": 43.89999997615814,
+          "frameMs": 46.80000001192093,
+          "rows": 1000,
+          "taskMs": 53.72500000000002
+        }
+      ]
+    }
+  ],
+  "operationConsoleMessages": [
+    {
+      "operation": "update",
+      "messages": 0
+    }
+  ],
+  "startup": {
+    "domContentLoadedMs": 45.5,
+    "firstContentfulPaintMs": 72
+  },
+  "bundleSizes": [
+    {
+      "file": "browser.js",
+      "loadedAtStartup": true,
+      "bytes": 3684,
+      "gzipBytes": 1736
+    },
+    {
+      "file": "chunk-2spj9jcz.js",
+      "loadedAtStartup": true,
+      "bytes": 82284,
+      "gzipBytes": 25539
+    },
+    {
+      "file": "chunk-tqnwm4eg.js",
+      "loadedAtStartup": true,
+      "bytes": 287703,
+      "gzipBytes": 82110
+    },
+    {
+      "file": "chunk-sxw003ty.js",
+      "loadedAtStartup": true,
+      "bytes": 134963,
+      "gzipBytes": 46533
+    },
+    {
+      "file": "chunk-yb4wf5jt.js",
+      "loadedAtStartup": true,
+      "bytes": 925,
+      "gzipBytes": 558
+    },
+    {
+      "file": "chunk-ywpzpezq.js",
+      "loadedAtStartup": true,
+      "bytes": 62537,
+      "gzipBytes": 18077
+    },
+    {
+      "file": "chunk-6y8jbnta.js",
+      "loadedAtStartup": false,
+      "bytes": 2102,
+      "gzipBytes": 999
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-05T02:12:19.184Z",
+  "bun": "1.4.0",
+  "mode": "navigation",
+  "samples": [
+    {
+      "claims": 1000,
+      "heapBytes": 7546467,
+      "strings": 5843,
+      "objects": 64136
+    },
+    {
+      "claims": 11000,
+      "heapBytes": 7693208,
+      "strings": 6561,
+      "objects": 64882
+    },
+    {
+      "claims": 31000,
+      "heapBytes": 7703627,
+      "strings": 6561,
+      "objects": 64883
+    },
+    {
+      "claims": 61000,
+      "heapBytes": 7715897,
+      "strings": 6561,
+      "objects": 64887
+    },
+    {
+      "claims": 101000,
+      "heapBytes": 7709045,
+      "strings": 6561,
+      "objects": 64882
+    }
+  ]
+}

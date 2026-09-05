@@ -3,16 +3,15 @@
  *
  * @remarks
  * Owner module for route resolution and matching. This module owns the matcher
- * service, the helpers that flatten nested route trees, and the boundary,
+ * factory, the helpers that flatten nested route trees, and the boundary,
  * middleware, and decode utilities built on top of resolved matches.
  *
  * @see ./matching.docs.md - Source-owned topic guide
  * @since 1.0.0
  * @module trygg/router/matching
  */
-import { Effect, Layer, Option, Predicate, Ref, Schema } from "effect";
+import { Effect, Option, Predicate, Schema } from "effect";
 import type { Layer as LayerType } from "effect/Layer";
-import * as Context from "effect/Context";
 import { unsafeEraseR } from "../internal/unsafe.js";
 import type { RouteDefinition } from "./route.js";
 import {
@@ -25,22 +24,22 @@ import {
 import type { RoutesManifest } from "./routes.js";
 import type { RenderStrategy } from "./render-strategy.js";
 import type { ScrollStrategy } from "./scroll-strategy.js";
-import type { ComponentInput, RouteParams } from "./types.js";
+import type { ComponentInput, DecodedRouteParamsByPattern, RouteParams } from "./types.js";
 import {
   compileRoutePathPattern,
   compareCompiledRoutePathPatterns,
-  matchCompiledRoutePathPattern,
   type CompiledRoutePathPattern,
+  type InvalidRoutePathEncoding,
   type InvalidRoutePathPattern,
 } from "./path-pattern.js";
+import * as RoutePathPattern from "./path-pattern.js";
 
 const decodeUnknownEffect = Schema.decodeUnknownEffect;
 
 const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
   value === null || value === undefined ? Option.none() : Option.some(value);
 
-const isSchemaTop = (value: unknown): value is Schema.Top =>
-  typeof value === "object" && value !== null && Predicate.hasProperty(value, "ast");
+const isSchemaTop = (value: unknown): value is Schema.Top => Predicate.hasProperty(value, "ast");
 
 const toUnknownRecord = (value: unknown): Record<string, unknown> => {
   if (typeof value !== "object" || value === null) {
@@ -105,76 +104,54 @@ export interface RouteMatch {
  * RouteMatcher service interface.
  *
  * @remarks
- * `RouteMatcherShape` is the service contract implemented by the production
- * trie matcher and the simpler test matcher.
+ * `RouteMatcherShape` is the canonical effectful matching contract shared by
+ * direct callers, the Outlet, and the injectable service.
  *
  * @internal
  * @since 1.0.0
  */
 export interface RouteMatcherShape {
   /** Find matching route for a path */
-  readonly match: (path: string) => Effect.Effect<Option.Option<RouteMatch>>;
+  readonly match: (
+    path: string,
+  ) => Effect.Effect<Option.Option<RouteMatch>, InvalidRoutePathEncoding>;
   /** All resolved routes */
   readonly routes: Effect.Effect<ReadonlyArray<ResolvedRoute>>;
 }
 
 /**
- * RouteMatcher — route matching logic as a testable service.
- *
- * - `RouteMatcher.make(manifest)`: resolves a manifest, then linear-scan matching (production)
- * - `RouteMatcher.test(routes)`: linear-scan matching over pre-resolved routes (testing)
+ * RouteMatcher — configured route matching operations.
  *
  * @remarks
- * Use `RouteMatcher` when you want matching as an injectable service instead of
- * constructing sync matchers directly.
+ * Construct a matcher directly from a route manifest or a pre-resolved route
+ * array. The owner keeps configuration and compiled matcher identity explicit
+ * without introducing an unused Context service.
+ *
+ * - `RouteMatcher.make(manifest)`: resolves a manifest, then creates a linear-scan matcher
+ * - `RouteMatcher.fromResolved(routes)`: linear-scan matching over pre-resolved routes
  *
  * @example
  * ```ts
- * const matcher = yield* RouteMatcher
+ * const matcher = yield* RouteMatcher.make(manifest)
  * ```
  *
  * @category Route Matching
  * @public
  * @since 1.0.0
  */
-export class RouteMatcher extends Context.Service<
-  RouteMatcher,
-  {
-    readonly match: (path: string) => Effect.Effect<Option.Option<RouteMatch>>;
-    readonly routes: Effect.Effect<ReadonlyArray<ResolvedRoute>>;
-  }
->()("trygg/RouteMatcher") {
-  /** Create a RouteMatcher Layer from a RoutesManifest using linear-scan matching. */
-  static readonly make = (
-    manifest: RoutesManifest,
-  ): LayerType<RouteMatcher, InvalidRoutePathPattern> =>
-    Layer.effect(
-      RouteMatcher,
-      Effect.gen(function* () {
-        const resolved = yield* resolveRoutes(manifest);
-        const matcher = yield* makeLinearMatcher(resolved);
-        return {
-          match: matcher.match,
-          routes: Effect.succeed(resolved),
-        };
-      }).pipe(Effect.annotateLogs({ service: "RouteMatcher", constructor: "make" })),
-    );
+export const RouteMatcher = {
+  /** Resolve a manifest and create its canonical matcher. */
+  make: (manifest: RoutesManifest): Effect.Effect<RouteMatcherShape, InvalidRoutePathPattern> =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveRoutes(manifest);
+      return yield* RouteMatcher.fromResolved(resolved);
+    }),
 
-  /** Create a RouteMatcher Layer from resolved routes using linear scan (for testing). */
-  static readonly test = (
+  /** Create a matcher over already-resolved routes. */
+  fromResolved: (
     routes: ReadonlyArray<ResolvedRoute>,
-  ): LayerType<RouteMatcher, InvalidRoutePathPattern> =>
-    Layer.effect(
-      RouteMatcher,
-      Effect.gen(function* () {
-        const matcher = yield* makeLinearMatcher(routes);
-        return {
-          match: matcher.match,
-          routes: Effect.succeed(routes),
-        };
-      }).pipe(Effect.annotateLogs({ service: "RouteMatcher", constructor: "test" })),
-    );
-}
+  ): Effect.Effect<RouteMatcherShape, InvalidRoutePathPattern> => makeService(routes),
+};
 
 // =============================================================================
 // Path Resolution
@@ -182,7 +159,7 @@ export class RouteMatcher extends Context.Service<
 
 /**
  * Resolve the route tree into a flat list of resolved routes
- * with absolute paths. Uses Ref for collection and Effect.forEach for traversal.
+ * with absolute paths in depth-first declaration order.
  *
  * @remarks
  * `resolveRoutes` is the normalization step that turns nested route builders
@@ -200,50 +177,46 @@ export class RouteMatcher extends Context.Service<
 export const resolveRoutes: (
   manifest: RoutesManifest,
 ) => Effect.Effect<ReadonlyArray<ResolvedRoute>> = Effect.fn("RouteMatching.resolveRoutes")(
-  function* (manifest: RoutesManifest) {
-    const resultRef = yield* Ref.make<ReadonlyArray<ResolvedRoute>>([]);
-    yield* Effect.forEach(manifest.routes, (route) => resolveRoute(route, "", [], resultRef), {
-      concurrency: "unbounded",
-    });
-    return yield* Ref.get(resultRef);
-  },
+  (manifest: RoutesManifest) =>
+    Effect.sync(() => {
+      const result: Array<ResolvedRoute> = [];
+      const stack: Array<{
+        readonly definitions: ReadonlyArray<RouteDefinition>;
+        readonly parentPath: string;
+        readonly ancestors: ReadonlyArray<ResolvedRoute>;
+        index: number;
+      }> = [{ definitions: manifest.routes, parentPath: "", ancestors: [], index: 0 }];
+
+      // This traversal owns only synchronous, execution-local data. An explicit
+      // stack preserves declaration order without child fibers or recursive calls.
+      while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        if (frame === undefined) break;
+        const definition = frame.definitions[frame.index++];
+        if (definition === undefined) {
+          stack.pop();
+          continue;
+        }
+        const resolved: ResolvedRoute = {
+          path: resolvePath(definition.path, frame.parentPath),
+          definition,
+          ancestors: frame.ancestors,
+        };
+        if (definition.component !== undefined || definition.path === IndexMarker) {
+          result.push(resolved);
+        }
+        if (definition.children.length > 0) {
+          stack.push({
+            definitions: definition.children,
+            parentPath: resolved.path,
+            ancestors: [...frame.ancestors, resolved],
+            index: 0,
+          });
+        }
+      }
+      return result;
+    }),
 );
-
-/**
- * Recursively resolve a route and its children.
- * @internal
- */
-const resolveRoute: (
-  definition: RouteDefinition,
-  parentPath: string,
-  ancestors: ReadonlyArray<ResolvedRoute>,
-  resultRef: Ref.Ref<ReadonlyArray<ResolvedRoute>>,
-) => Effect.Effect<void> = Effect.fn("RouteMatching.resolveRoute")(function* (
-  definition: RouteDefinition,
-  parentPath: string,
-  ancestors: ReadonlyArray<ResolvedRoute>,
-  resultRef: Ref.Ref<ReadonlyArray<ResolvedRoute>>,
-) {
-  const resolvedPath = resolvePath(definition.path, parentPath);
-
-  const resolved: ResolvedRoute = {
-    path: resolvedPath,
-    definition,
-    ancestors,
-  };
-
-  // Only add to flat list if this route has a component (leaf) or is an index route
-  if (definition.component !== undefined || definition.path === IndexMarker) {
-    yield* Ref.update(resultRef, (arr) => [...arr, resolved]);
-  }
-
-  // Recursively resolve children
-  yield* Effect.forEach(
-    definition.children,
-    (child) => resolveRoute(child, resolvedPath, [...ancestors, resolved], resultRef),
-    { concurrency: "unbounded" },
-  );
-});
 
 /**
  * Resolve a route path against its parent path.
@@ -282,30 +255,33 @@ const sortCompiledRoutesForMatching = (
 ): ReadonlyArray<CompiledRouteMatcherEntry> =>
   [...routes].sort((left, right) => compareCompiledRoutePathPatterns(left.pattern, right.pattern));
 
-const linearMatchCompiled = (
+const matchCompiledRoutes: (
   routes: ReadonlyArray<CompiledRouteMatcherEntry>,
   path: string,
-): Option.Option<RouteMatch> => {
+) => Effect.Effect<Option.Option<RouteMatch>, InvalidRoutePathEncoding> = Effect.fn(
+  "RouteMatching.matchCompiledRoutes",
+)(function* (routes: ReadonlyArray<CompiledRouteMatcherEntry>, path: string) {
+  if (routes.length === 0) return Option.none();
+  const parts = yield* RoutePathPattern.decodePathname(path);
   for (const route of routes) {
-    const match = matchCompiledRoutePathPattern(route.pattern, path);
+    const match = RoutePathPattern.matchDecoded(route.pattern, parts);
     if (Option.isSome(match)) {
       return Option.some({ route: route.route, params: match.value.params });
     }
   }
 
   return Option.none();
-};
+});
 
-const makeLinearMatcher = (
+/** Build the canonical effectful matcher over an already-resolved route list. */
+const makeService = (
   routes: ReadonlyArray<ResolvedRoute>,
-): Effect.Effect<
-  { readonly match: (path: string) => Effect.Effect<Option.Option<RouteMatch>> },
-  InvalidRoutePathPattern
-> =>
+): Effect.Effect<RouteMatcherShape, InvalidRoutePathPattern> =>
   Effect.map(compileRoutesForMatching(routes), (compiled) => {
     const sorted = sortCompiledRoutesForMatching(compiled);
     return {
-      match: (path: string) => Effect.succeed(linearMatchCompiled(sorted, path)),
+      match: (path: string) => matchCompiledRoutes(sorted, path),
+      routes: Effect.succeed(routes),
     };
   });
 
@@ -354,7 +330,7 @@ export const collectRouteMiddleware = (
  */
 export const runRouteMiddleware = (
   route: ResolvedRoute,
-): Effect.Effect<MiddlewareResult, never, never> => {
+): Effect.Effect<MiddlewareResult, unknown, never> => {
   const chain = collectRouteMiddleware(route);
   return runMiddlewareChain(chain);
 };
@@ -579,6 +555,32 @@ export const decodeRouteParams = (
   );
 };
 
+/** Decode each route's own params and publish cumulative values by active pattern. */
+export const decodeActiveRouteParams: (
+  match: RouteMatch,
+) => Effect.Effect<DecodedRouteParamsByPattern, ParamsDecodeError | InvalidRoutePathPattern> =
+  Effect.fnUntraced(function* (match: RouteMatch) {
+    const decoded = new Map<string, Record<string, unknown>>();
+    const inherited: Record<string, unknown> = {};
+    const activeRoutes = [...match.route.ancestors, match.route];
+
+    for (const route of activeRoutes) {
+      const ownParamNames =
+        route.definition.path === IndexMarker
+          ? []
+          : (yield* compileRoutePathPattern(route.definition.path)).paramNames;
+      const rawParams: RouteParams = {};
+      for (const name of ownParamNames) {
+        const value = match.params[name];
+        if (value !== undefined) rawParams[name] = value;
+      }
+      Object.assign(inherited, yield* decodeRouteParams(route, rawParams));
+      decoded.set(route.path, { ...inherited });
+    }
+
+    return decoded;
+  });
+
 /**
  * Decode query params using the route's query schema.
  * If no schema is defined, returns empty object.
@@ -612,53 +614,3 @@ export const decodeRouteQuery = (
     ),
   );
 };
-
-// =============================================================================
-// Sync Matcher (Test Utility)
-// =============================================================================
-
-/**
- * Synchronous matcher interface for tests.
- *
- * @remarks
- * `SyncMatcher` is the light-weight matcher shape returned by `createMatcher`
- * for unit tests that do not need the service-based `RouteMatcher`.
- *
- * @internal
- * @since 1.0.0
- */
-export interface SyncMatcher {
-  readonly match: (path: string) => Option.Option<RouteMatch>;
-  readonly routes: ReadonlyArray<ResolvedRoute>;
-}
-
-/**
- * Create a matcher from a manifest.
- * Resolves the route tree and builds a sync match function.
- * Intended for unit tests that don't need the RouteMatcher service Layer.
- *
- * @remarks
- * `createMatcher` is the direct test helper for router matching when spinning up
- * the full service layer would be unnecessary.
- *
- * @example
- * ```ts
- * const matcher = yield* createMatcher(routes.manifest)
- * ```
- *
- * @category Route Matching
- * @public
- * @since 1.0.0
- */
-export const createMatcher: (
-  manifest: RoutesManifest,
-) => Effect.Effect<SyncMatcher, InvalidRoutePathPattern> = Effect.fn("RouteMatching.createMatcher")(
-  function* (manifest: RoutesManifest) {
-    const resolved = yield* resolveRoutes(manifest);
-    const compiled = sortCompiledRoutesForMatching(yield* compileRoutesForMatching(resolved));
-    return {
-      match: (path) => linearMatchCompiled(compiled, path),
-      routes: resolved,
-    };
-  },
-);

@@ -9,7 +9,12 @@ Trygg's internal flight recorder. `trace` records every meaningful framework ste
 ```ts
 import * as Trace from "../trace/index.js";
 
-yield * Trace.emit("router.navigate.request", () => ({ url }));
+yield *
+  Trace.emit("router.navigate.request", () => ({
+    fromPath: "/account",
+    toPath: "/settings",
+    replace: false,
+  }));
 ```
 
 Tests assert the ordered sequence with a scoped recorder:
@@ -30,7 +35,12 @@ For human-facing console logging in an app, use the `debug` toolkit (see [debug.
 
 - **No-op and zero-allocation below the fiber's minimum log level.** `emit` returns the shared `Effect.void` singleton before evaluating the payload thunk when the catalog event is below `References.MinimumLogLevel`.
 - **Order, not wall-clock.** Records carry no timestamp by design. The recorder is about _sequence_, which keeps it allocation-light and deterministic for tests.
-- **Closed vocabulary.** Event names are the keys of `CATALOG` ([catalog.ts](./catalog.ts)). `TraceEventName` is derived from those keys, so every `emit` call site is typo-checked at compile time. Adding a name to the catalog is the only step needed to make it emittable.
+- **Closed vocabulary.** Event names are the keys of `CATALOG` ([catalog.ts](./catalog.ts)). `TraceEventName` is derived from those keys, so every `emit` call site is typo-checked at compile time. Events with facts also declare their schema in `payload.ts`.
+- **Typed facts and unforgeable origin.** Payload schemas relate each event name to its required facts and reject missing, excess, accessor-backed, or incorrectly typed fields. Each emission carries an otherwise empty envelope whose exact object identity indexes a module-private `WeakMap` and the exact recorder/Debug reader set present at emission. Copied annotations cannot forge an event, mutate its decoded record, replay it twice to one reader, or inject it into a reader installed later.
+- **Best-effort instrumentation.** Payload construction, validation, detachment, and logger defects are contained so observability cannot change a successful framework operation. Fiber interruption is never swallowed.
+- **Opaque application values.** Signal values, Resource results/errors, route queries, post-swap results, component thunks, failure values, and other application-owned objects never enter a payload. Call sites record only `null` or the primitive `typeof` classification (`value_type`, `query_type`, `result_type`, `component_type`, `error_type`, or `cause_type`), which does not invoke Proxy traps, getters, or serialization hooks.
+- **Schema before lossy JSON.** Enabled framework-owned payload containers first receive a bounded, descriptor-only snapshot. The snapshot may traverse through the 64-entry validation budget so Schema sees deep original values before the detached JSON applies its 8-level cutoff. Runtime Schema decoding checks selected data properties with excess-property errors before JSON conversion, so a wrong number, function, accessor, or extra field cannot become a valid marker string. Optional `undefined` remains `undefined` through validation and is omitted from the detached object. Oversized exact event shapes are rejected; an open `Schema.JsonObject` such as action facts retains a validated bounded prefix plus the truncation marker instead of losing the action start.
+- **Bounded detached history.** Detachment has a global 64-entry budget, at most 8 container levels, and a 2,048-character string prefix. Wide objects enumerate own keys once, fetch descriptors only for the budget-selected prefix, and reserve the stable truncation marker inside that prefix; descriptor work does not scale with object width. Oversized arrays are represented as `["[Truncated:Entries]"]` without walking their holes; deep values use `"[Truncated:Depth]"`; long strings append `"[Truncated:String]"`; truncated objects add `"$trygg_truncated": "[Truncated:Entries]"`. Arrays within budget preserve own indexed slots and use `"[Undefined]"` for holes or explicit `undefined`. The stable fallback markers are `"[Accessor]"`, `"[Function]"`, `"[Symbol]"`, `"[Circular]"`, and `"[Unserializable]"`; BigInt uses its decimal spelling plus `n`, and non-finite numbers use their string spelling. Detachment never invokes `toJSON` or getters. Inherited properties, non-enumerable object fields, and symbol-keyed properties are omitted, and every accepted payload is deeply frozen before logging.
 
 ## Enabling
 
@@ -38,14 +48,14 @@ Trace rides on Effect's logging pipeline. A record reaches observers when the ru
 
 ## Recording
 
-- `Trace.emit(name, payload?)` — record one step. `name: TraceEventName`; `payload?: () => Record<string, unknown>`.
-- `Trace.withAction(actionId, action, effect)` — group every event emitted by `effect` under a named action: emits `contract.action.start` / `contract.action.end` around it and stamps each record's `actionId`.
+- `Trace.emit(name, payload?)` — record one step. Payload presence and shape are selected by `name` through `TraceEventPayload<Name>`.
+- `Trace.withAction(actionId, facts, effect)` — group every event emitted by `effect` under a named action. The action ID is normalized once with the same 2,048-character prefix and `"[Truncated:String]"` marker used by payload strings; lifecycle payloads, inner records, and reports reuse that canonical value. The start payload keeps caller facts under `facts`; every start has one terminal status (`completed`, `failed`, or `interrupted`). Only an interrupt-only `Cause` is `interrupted`; Fail/Die mixed with Interrupt is `failed`. The wrapped effect's original `Exit` is preserved and its raw `Cause` is never serialized.
 - `Trace.makeRecorder()` — build an in-memory recorder with a logger plus synchronous `records()` / `clear()` helpers.
 - `Trace.record(effect, recorder)` — run `effect` with the recorder as the only logger and `MinimumLogLevel` lowered to `Trace`, keeping concurrent tests hermetic.
 
 ## Reporting
 
-- `toJSON(records, options?)` — a stable, serializable `TimelineEntry[]` (order, name, family, level, summary, optional actionId/payload).
+- `toJSON(records, options?)` — a frozen, JSON-safe `TimelineEntry[]` (order, name, family, level, summary, optional actionId/payload). It reuses each record's already detached and frozen payload instead of traversing live input again.
 - `toMarkdown(records, options?)` — a compact ordered Markdown timeline annotated with each event's family, level, and one-line catalog summary.
 
 ## Analyzers
@@ -62,6 +72,22 @@ Every catalog event carries a `level` describing how load-bearing it is:
 - `semantic` — defines framework correctness; ordering is asserted by tests via `Trace.record` + `recorder.records()`.
 - `cost` — work/perf boundary (renders, signal reads/writes).
 - `diagnostic` — warnings, ignored errors, deduped/stale conditions.
+
+### List publication and internal reconciliation
+
+`keyedList.reorder` is the semantic publication event for a structural list
+update. It reports `total_items`, `moves`, `stable_nodes`, and counts of
+`inserted`, `removed`, `reconciled`, and `replaced` rows. The additional counts
+are optional when decoding older records; the current list owner emits them on
+every publication. Publication means the new order and ownership are committed;
+a later cleanup failure still has its own failure record.
+
+Internal intrinsic children contribute one `render.child.reconcile` cost record
+with `reconciled: boolean`. They do not start independent successful
+`signalElement.swap.*` lifecycles. Failure facts still use
+`signalElement.swap.failBeforeCommit` and retain the same typed failure, defect,
+and interruption behavior. Top-level replacement/reconciliation operation events
+and their ordering remain available.
 
 ## Event families
 
@@ -100,7 +126,8 @@ The invariants below are load-bearing across families; the analyzers enforce a s
 
 ## Types
 
-- `TraceRecord` — `{ name: TraceEventName; payload: Readonly<Record<string, unknown>> | undefined; actionId: string | undefined }`.
+- `TraceRecord` — `{ name: TraceEventName; payload: Schema.JsonObject | undefined; actionId: string | undefined }`.
+- `TraceEventPayload<Name>` — the schema-derived payload facts associated with one catalog event.
 - `Recorder` — in-memory recorder contract for tests.
 - `TraceEventName` — the closed union of catalog keys.
 - `TraceLevel` — `"semantic" | "cost" | "diagnostic"`.

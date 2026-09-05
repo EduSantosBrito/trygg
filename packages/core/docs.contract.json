@@ -16,6 +16,11 @@
   "sidecarHeadings": ["When to use", "Behavior", "Related exports"],
   "categories": [
     {
+      "name": "Profiling",
+      "ownerModule": "src/profiling.ts",
+      "requiresSidecar": true
+    },
+    {
       "name": "Security",
       "ownerModule": "src/security/safe-url.ts",
       "requiresSidecar": true
@@ -73,11 +78,6 @@
     {
       "name": "JSX Development",
       "ownerModule": "src/jsx-dev-runtime.ts",
-      "requiresSidecar": true
-    },
-    {
-      "name": "Routing",
-      "ownerModule": "src/router/index.ts",
       "requiresSidecar": true
     },
     {
@@ -162,6 +162,16 @@
     }
   ],
   "migratedOwners": [
+    {
+      "topic": "Profiling",
+      "category": "Profiling",
+      "entrypoint": "./profiling",
+      "module": "src/profiling.ts",
+      "primaryExport": "layer",
+      "primaryKind": "named",
+      "namedExports": ["Session", "ProfilingOptions", "ProfilingSnapshot", "ProfilingConfigError"],
+      "sidecar": "src/profiling.docs.md"
+    },
     {
       "topic": "SafeUrl",
       "category": "Security",
@@ -310,26 +320,14 @@
       "sidecar": "src/jsx-dev-runtime.docs.md"
     },
     {
-      "topic": "Router",
-      "category": "Routing",
-      "entrypoint": "./router",
-      "module": "src/router/index.ts",
-      "primaryExport": "Route",
-      "primaryKind": "named",
-      "namedExports": ["Route", "Routes"],
-      "sidecar": "src/router/router.docs.md"
-    },
-    {
       "topic": "Route Builder",
       "category": "Route Builders",
       "entrypoint": "./router",
       "module": "src/router/route.ts",
-      "primaryExport": "make",
+      "primaryExport": "Route",
       "primaryKind": "named",
+      "memberExports": ["make", "index", "provide"],
       "namedExports": [
-        "make",
-        "index",
-        "provide",
         "isRouteBuilder",
         "CurrentRouteQuery",
         "routeRedirect",
@@ -347,9 +345,10 @@
       "category": "Route Collections",
       "entrypoint": "./router",
       "module": "src/router/routes.ts",
-      "primaryExport": "make",
+      "primaryExport": "Routes",
       "primaryKind": "named",
-      "namedExports": ["make", "RoutesCollection", "RoutesManifest", "CurrentRoutesManifest"],
+      "memberExports": ["make"],
+      "namedExports": ["RoutesCollection", "RoutesManifest", "CurrentRoutesManifest"],
       "sidecar": "src/router/routes.docs.md"
     },
     {
@@ -422,9 +421,7 @@
         "resolveRenderStrategy",
         "resolveScrollStrategy",
         "decodeRouteParams",
-        "decodeRouteQuery",
-        "SyncMatcher",
-        "createMatcher"
+        "decodeRouteQuery"
       ],
       "sidecar": "src/router/matching.docs.md"
     },
@@ -457,14 +454,22 @@
       "primaryKind": "named",
       "namedExports": [
         "NavigationError",
+        "RouteParamsPatternMismatch",
         "InvalidRouteComponent",
         "RouteMap",
+        "RouteInputMap",
+        "RouteQueryMap",
+        "RouteQueryInputMap",
         "RouteComponent",
         "ComponentLoader",
         "ComponentInput",
         "RoutePath",
         "ExtractRouteParams",
         "RouteParamsFor",
+        "RouteParamsInputFor",
+        "RouteQueryFor",
+        "RouteQueryInput",
+        "RouteQueryInputFor",
         "TypeSafeLinkProps",
         "buildPathWithParams",
         "RouteParams",
@@ -549,15 +554,6 @@
         "PluginValidationErrors",
         "PluginFileSystemError",
         "PluginParseError",
-        "extractParamNames",
-        "generateParamType",
-        "ParsedRoute",
-        "ParsedParam",
-        "schemaToType",
-        "parseSchemaStruct",
-        "parseRoutes",
-        "resolveRoutePaths",
-        "generateRouteTypes",
         "transformRoutesForBuild",
         "validateApiPlatform",
         "generateEntryModule",

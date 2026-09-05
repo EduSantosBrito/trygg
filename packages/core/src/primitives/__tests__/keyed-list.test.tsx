@@ -1020,7 +1020,7 @@ describe("KeyedList with SignalElement swap", () => {
 
   effect("renders ErrorBoundary fallback when keyed list item rerender fails", () =>
     Effect.gen(function* () {
-      class ItemError extends Schema.TaggedErrorClass<ItemError>()("ItemError", {
+      class ItemError extends Schema.TaggedError<ItemError>()("ItemError", {
         reason: Schema.Literal("fail"),
       }) {}
 

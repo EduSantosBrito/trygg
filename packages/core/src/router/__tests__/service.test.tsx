@@ -16,7 +16,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import { scoped } from "../../testing/effect-vitest.js";
-import { Cause, Effect, Exit, Option, Ref, Schema } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import * as Router from "../service.js";
 import type { RouteErrorInfo } from "../types.js";
@@ -30,7 +30,7 @@ import * as Route from "../route.js";
 import * as Routes from "../routes.js";
 
 // Tagged error for testing route errors
-class TestRouteError extends Schema.TaggedErrorClass<TestRouteError>()("TestRouteError", {
+class TestRouteError extends Schema.TaggedError<TestRouteError>()("TestRouteError", {
   detail: Schema.String,
 }) {}
 
@@ -104,6 +104,44 @@ describe("Router.query", () => {
       assert.strictEqual(count, 0);
     }).pipe(Effect.provide(Router.testLayer("/dashboard?tab=main"))),
   );
+
+  scoped("should project the matching query while query notifications are gated", () =>
+    Effect.gen(function* () {
+      const router = yield* Router.Router;
+      const gateHeld = yield* Deferred.make<void>();
+      const releaseGate = yield* Deferred.make<void>();
+      const observed = yield* Deferred.make<{ readonly path: string; readonly query: string }>();
+      const unsubscribe = yield* Signal.subscribe(router.current, () =>
+        Effect.gen(function* () {
+          const current = yield* Signal.peek(router.current);
+          const query = yield* Signal.peek(router.query);
+          yield* Deferred.succeed(observed, {
+            path: current.path,
+            query: query.toString(),
+          }).pipe(Effect.asVoid);
+        }),
+      );
+      const gateFiber = yield* Effect.forkScoped(
+        router.query._gate.withPermits(1)(
+          Deferred.succeed(gateHeld, undefined).pipe(
+            Effect.flatMap(() => Deferred.await(releaseGate)),
+          ),
+        ),
+      );
+      yield* Deferred.await(gateHeld);
+
+      const navigation = yield* Effect.forkScoped(router.navigate("/next?tab=new"));
+      assert.deepStrictEqual(yield* Deferred.await(observed), {
+        path: "/next",
+        query: "tab=new",
+      });
+
+      yield* Deferred.succeed(releaseGate, undefined).pipe(Effect.asVoid);
+      yield* Fiber.join(navigation);
+      yield* Fiber.join(gateFiber);
+      yield* unsubscribe;
+    }).pipe(Effect.provide(Router.testLayer("/before?tab=old"))),
+  );
 });
 
 // =============================================================================
@@ -112,35 +150,111 @@ describe("Router.query", () => {
 // Scope: Reading route parameters from path
 
 describe("Router.params", () => {
-  scoped("should return extracted route parameters", () =>
+  scoped("should fail when no active route render owns the requested pattern", () =>
     Effect.gen(function* () {
-      const params = yield* Router.params("/users/:id");
+      const exit = yield* Effect.exit(Router.params("/users/:id"));
 
-      assert.isDefined(params);
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        assert.include(Cause.pretty(exit.cause), "RouteParamsPatternMismatch");
+      }
     }).pipe(Effect.provide(Router.testLayer("/users/123"))),
   );
 
-  scoped("should handle multiple route parameters", () =>
+  scoped("should not infer active params from the router pathname alone", () =>
     Effect.gen(function* () {
-      const params = yield* Router.params("/org/:orgId/user/:userId");
+      const exit = yield* Effect.exit(Router.params("/org/:orgId/user/:userId"));
 
-      assert.isDefined(params);
+      assert.isTrue(Exit.isFailure(exit));
     }).pipe(Effect.provide(Router.testLayer("/org/1/user/2"))),
   );
 
-  scoped("should be accessible inside routed Component.gen pages", () =>
+  scoped("should expose schema-decoded values inside routed Component.gen pages", () =>
     Effect.gen(function* () {
       const Page = Component.gen(function* () {
         const params = yield* Router.params("/users/:id");
-        return <div data-testid="route-params">{params.id ?? "missing"}</div>;
+        return (
+          <div data-testid="route-params">
+            {params.id === undefined ? "missing" : `${typeof params.id}:${params.id}`}
+          </div>
+        );
       });
 
+      const manifest = Routes.make().add(
+        Route.make("/users/:id")
+          .params(Schema.Struct({ id: Schema.NumberFromString }))
+          .component(Page),
+      ).manifest;
+      const { getByTestId } = yield* render(<Outlet routes={manifest} />).pipe(
+        Effect.provide(Router.testLayer("/users/123")),
+      );
+
+      assert.strictEqual((yield* getByTestId("route-params")).textContent, "number:123");
+    }),
+  );
+
+  scoped("should reject params requested for a pattern outside the active match chain", () =>
+    Effect.gen(function* () {
+      const Page = Component.gen(function* () {
+        const result = yield* Router.params("/posts/:slug").pipe(Effect.result);
+        return (
+          <div data-testid="route-params-mismatch">
+            {Result.isFailure(result)
+              ? `${result.failure._tag}:${result.failure.activePatterns.join(",")}`
+              : "unexpected-success"}
+          </div>
+        );
+      });
       const manifest = Routes.make().add(Route.make("/users/:id").component(Page)).manifest;
       const { getByTestId } = yield* render(<Outlet routes={manifest} />).pipe(
         Effect.provide(Router.testLayer("/users/123")),
       );
 
-      assert.strictEqual((yield* getByTestId("route-params")).textContent, "123");
+      assert.strictEqual(
+        (yield* getByTestId("route-params-mismatch")).textContent,
+        "RouteParamsPatternMismatch:/users/:id",
+      );
+    }),
+  );
+
+  scoped("should preserve separately decoded ancestor and leaf params", () =>
+    Effect.gen(function* () {
+      const OrgLayout = Component.gen(function* () {
+        const org = yield* Router.params("/org/:orgId");
+        return (
+          <section data-testid="org-layout" data-org={org.orgId}>
+            <Outlet />
+          </section>
+        );
+      });
+      const UserPage = Component.gen(function* () {
+        const org = yield* Router.params("/org/:orgId");
+        const user = yield* Router.params("/org/:orgId/user/:userId");
+        return (
+          <div data-testid="nested-route-params">
+            {`${typeof org.orgId}:${org.orgId}|${typeof user.orgId}:${user.orgId}|${typeof user.userId}:${user.userId}`}
+          </div>
+        );
+      });
+      const manifest = Routes.make().add(
+        Route.make("/org/:orgId")
+          .params(Schema.Struct({ orgId: Schema.NumberFromString }))
+          .layout(OrgLayout)
+          .children(
+            Route.make("/user/:userId")
+              .params(Schema.Struct({ userId: Schema.NumberFromString }))
+              .component(UserPage),
+          ),
+      ).manifest;
+      const { getByTestId } = yield* render(<Outlet routes={manifest} />).pipe(
+        Effect.provide(Router.testLayer("/org/12/user/34")),
+      );
+
+      assert.strictEqual((yield* getByTestId("org-layout")).getAttribute("data-org"), "12");
+      assert.strictEqual(
+        (yield* getByTestId("nested-route-params")).textContent,
+        "number:12|number:12|number:34",
+      );
     }),
   );
 });

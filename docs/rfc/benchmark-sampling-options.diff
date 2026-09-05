@@ -1,0 +1,53 @@
+--- before/scripts/benchmark-browser.ts
++++ after/scripts/benchmark-browser.ts
+@@ -16,6 +16,12 @@
+   { operation: "clear", setup: "create1k", count: 0 },
+   { operation: "create10k", setup: "clear", count: 10_000 },
+ ];
++const warmupCount = Number(process.env.BENCHMARK_WARMUP ?? "5");
++const sampleCount = Number(process.env.BENCHMARK_SAMPLES ?? "7");
++if (!Number.isInteger(warmupCount) || warmupCount < 0 || warmupCount > 100)
++  throw new Error("BENCHMARK_WARMUP must be an integer between 0 and 100");
++if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 101 || sampleCount % 2 === 0)
++  throw new Error("BENCHMARK_SAMPLES must be an odd integer between 1 and 101");
+ for (const name of ["BENCHMARK_CASE", "BENCHMARK_PROFILE"]) {
+   const value = process.env[name];
+   if (value !== undefined && !cases.some((test) => test.operation === value))
+@@ -111,10 +117,10 @@
+     if (process.env.BENCHMARK_CASE !== undefined && process.env.BENCHMARK_CASE !== test.operation)
+       continue;
+     const samples: Array<Measurement> = [];
+-    for (let index = 0; index < 12; index++) {
++    for (let index = 0; index < warmupCount + sampleCount; index++) {
+       await page.evaluate((operation) => window.tryggBenchmark.run(operation), test.setup);
+       const profile =
+-        process.env.BENCHMARK_PROFILE === test.operation && index === 5
++        process.env.BENCHMARK_PROFILE === test.operation && index === warmupCount
+           ? await page.context().newCDPSession(page)
+           : undefined;
+       if (profile !== undefined) {
+@@ -136,11 +142,11 @@
+       }
+       if (result.rows !== test.count)
+         throw new Error(`${test.operation}: ${result.rows} rows, expected ${test.count}`);
+-      if (index >= 5) samples.push(result);
++      if (index >= warmupCount) samples.push(result);
+     }
+     results.push({ operation: test.operation, samples });
+     const sorted = samples.map((sample) => sample.handlerMs).sort((a, b) => a - b);
+-    console.log(`${test.operation}: handler median ${sorted[3]?.toFixed(2)} ms`);
++    console.log(`${test.operation}: handler median ${sorted[Math.floor(sampleCount / 2)]?.toFixed(2)} ms`);
+     if (process.env.BENCHMARK_WORK === "1") {
+       await page.evaluate((operation) => window.tryggBenchmark.run(operation), test.setup);
+       work.push(
+@@ -216,8 +222,8 @@
+     date: new Date().toISOString(),
+     browser: browser.version(),
+     viewport: { width: 1280, height: 800 },
+-    warmup: 5,
+-    samples: 7,
++    warmup: warmupCount,
++    samples: sampleCount,
+     results,
+     startup,
+     bundleSizes,

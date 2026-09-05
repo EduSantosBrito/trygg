@@ -1,0 +1,115 @@
+{
+  "date": "2026-09-05T13:01:31.769829+00:00",
+  "tests": {
+    "core": 1714,
+    "cli": 87,
+    "site": 104,
+    "total": 1905,
+    "addedSincePause": 11
+  },
+  "checks": [
+    {
+      "command": "bun run build",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-context-compose-build.log",
+      "logSha256": "a942e36f11238737f53dd7bbb3339b077ce5bad43898c76a6198e6cfd6ef13d1"
+    },
+    {
+      "command": "bun run test",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-tests2.log",
+      "logSha256": "436983c18169b913d000019b4b5e3762d1660dce604b538473abb32f397e5ac3"
+    },
+    {
+      "command": "bun run typecheck",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-types.log",
+      "logSha256": "35c083d12eb155a129c9ba5f2ce9aee4171bb206daa85fc0954ca804635ae6bd"
+    },
+    {
+      "command": "bun run effect:check",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-effect.log",
+      "logSha256": "9352e472f5e647d28dfcf0b71d645123e9c5a208bf79e6a9fa5537112be63723"
+    },
+    {
+      "command": "bun run --cwd packages/core docs:check",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-docs.log",
+      "logSha256": "8730c0d166e0ca910699347a63264fc43987899bec517a0844ed9286337bcf64"
+    },
+    {
+      "command": "bun run --cwd apps/examples build",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-examples.log",
+      "logSha256": "16b2bf7cc241f4d4bf568268cb19f5ac762b4d1c00dfe68611c49dc888221a92"
+    },
+    {
+      "command": "bun run www:build",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-site.log",
+      "logSha256": "a8574dfbb39796403a1765a34f1db3f325ec3d73315a3a7a0e7ef4ce93e202d9"
+    },
+    {
+      "command": "bun run lint",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-lint2.log",
+      "logSha256": "645aa3bf3d33660690856cf1dce242a2645970266bf7f287e6428fb8b02be14e"
+    },
+    {
+      "command": "bun run format",
+      "exitCode": 1,
+      "log": "/tmp/opencode/trygg-granular-final-format.log",
+      "logSha256": "dc0a36f2a972ff085c819233a01345054920ea43cc6dbf11937786f398841965"
+    },
+    {
+      "command": "bunx oxfmt packages apps !**/dist/** !**/.trygg/** !packages/core/trygg-test-Qmdoqz/** !packages/core/trygg-test-UEnGw2/** !packages/core/trygg-test-yZUgiU/** --check",
+      "exitCode": 0,
+      "log": "/tmp/opencode/trygg-granular-final-format-scoped.log",
+      "logSha256": "c816f6a9064d0c43d80197f7d721aa174fb43e3a87fb3822b0ec13d1fb1fa6c9"
+    },
+    {
+      "command": "bun run check",
+      "exitCode": 1,
+      "log": "/tmp/opencode/trygg-granular-final-check.log",
+      "logSha256": "b75aa2712075170d55a4d81ba2e12d2f8c0bd43ad77c18c3b755960f41cc47f6"
+    }
+  ],
+  "aggregateCheck": "blocked by pre-existing untracked scaffold formatting; remaining gates run separately",
+  "existingFormattingFiles": [
+    "packages/core/trygg-test-Qmdoqz/app/layout.tsx",
+    "packages/core/trygg-test-Qmdoqz/app/routes.ts",
+    "packages/core/trygg-test-UEnGw2/app/layout.tsx",
+    "packages/core/trygg-test-UEnGw2/app/routes.ts",
+    "packages/core/trygg-test-yZUgiU/app/api.ts",
+    "packages/core/trygg-test-yZUgiU/app/layout.tsx",
+    "packages/core/trygg-test-yZUgiU/app/routes.ts"
+  ],
+  "changedSourceHashes": {
+    "packages/core/src/primitives/render-keyed-list.ts": "1ca6c63d67b71c3efdb7829d81016d4fe271a411e3cc548258739f2cb0514f6c",
+    "packages/core/src/primitives/__tests__/keyed-row-context.test.tsx": "bd89449fddfeb31251f9045f09057dd6d521137a965bffcd09245351b10d6090",
+    "scripts/benchmark-browser.ts": "5fccb4fe73bd8825ff7ed3cf1417669b77dcf5fc251e79b025ed989399d9dc3e",
+    "scripts/benchmarks/browser.ts": "403ae1789ac2edca4b189601427f3b324842b4161598ce6910ffca60604901e9",
+    "scripts/benchmarks/README.md": "1c522a16c47184cdf4f1e9b2a33456a49710819c5791148610d27fd0cd9f13a7"
+  },
+  "measuredSourceAndBuiltArtifactsMatchFinal": true,
+  "historicalABuiltArtifactsMatch": true,
+  "historicalEBuiltArtifactsMatch": true,
+  "diffCheckExitCode": 0,
+  "productionDiffFromE": "--- checkpoint-e/render-keyed-list.ts\n+++ final-h/render-keyed-list.ts\n@@ -1,6 +1,5 @@\n import { Cause, Effect, Exit, Fiber, Schema, Scope } from \"effect\";\n import * as Context from \"effect/Context\";\n-import * as References from \"effect/References\";\n import { Element } from \"./element.js\";\n import * as Signal from \"./signal.js\";\n import * as Trace from \"../trace/index.js\";\n@@ -129,8 +128,8 @@\n     /** Whether a re-render is in progress */\n     isRerendering: boolean;\n     rerenderFiber: Fiber.Fiber<unknown, unknown> | null;\n-    /** Whether another re-render is pending */\n-    pendingRerender: boolean;\n+    /** Latest dependency notification; retained only until resumed or retired. */\n+    pendingRerenderContext: Context.Context<unknown> | null;\n     /** Map from signal debugId to unsubscribe Effect */\n     subscriptions: Map<string, Effect.Effect<void>>;\n     /** Scope that owns render-function signals and child component scopes for this keyed item */\n@@ -160,6 +159,7 @@\n   let isUnmounted = false;\n   let isUpdating = false;\n   let pendingUpdate = false;\n+  let pendingUpdateContext: Context.Context<unknown> | null = null;\n   const pendingRerenderKeys = new Set<string | number>();\n \n   const handleUpdateCause = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {\n@@ -185,6 +185,20 @@\n \n   const itemRenderContext = (scope: Scope.Scope): RenderContext => ({ ...listContext, scope });\n \n+  const resumeItemRerender = (state: ItemState): Effect.Effect<void> =>\n+    Effect.suspend(() => {\n+      if (isUnmounted) {\n+        state.pendingRerenderContext = null;\n+        return Effect.void;\n+      }\n+      if (isUpdating || state.isRerendering) return Effect.void;\n+      const nextContext = state.pendingRerenderContext;\n+      state.pendingRerenderContext = null;\n+      return nextContext === null\n+        ? Effect.void\n+        : Effect.provide(state.scheduleRerender(), nextContext);\n+    });\n+\n   // Runs the user render function for `item` under `renderPhase` and returns the\n   // normalized element WITHOUT building DOM or providing a scope. Shared by the\n   // create/replace path (`renderItem`) and the in-place reconcile fast-path\n@@ -534,6 +548,7 @@\n \n     if (isUpdating) {\n       pendingUpdate = true;\n+      pendingUpdateContext = forkContext;\n       return;\n     }\n \n@@ -746,6 +761,7 @@\n             // signal notification chain. Actual re-render forks via Runtime.runFork.\n             // Batching via isRerendering/pendingRerender coalesces rapid updates.\n             const scheduleItemRerender: () => Effect.Effect<void> = Effect.fnUntraced(function* () {\n+              const forkContext = unsafeWidenContext(yield* Effect.context<never>());\n               const currentState = yield* Effect.sync(() => {\n                 if (isUnmounted) return null;\n                 const state = itemStates.get(key);\n@@ -754,13 +770,13 @@\n                 // The source update owns publication until its preparations and\n                 // cleanup finish. Resume dependencies against committed inputs.\n                 if (isUpdating) {\n-                  state.pendingRerender = true;\n+                  state.pendingRerenderContext = forkContext;\n                   pendingRerenderKeys.add(key);\n                   return null;\n                 }\n                 // Coalesce rapid signal changes - mark pending if already rerendering\n                 if (state.isRerendering) {\n-                  state.pendingRerender = true;\n+                  state.pendingRerenderContext = forkContext;\n                   return null;\n                 }\n                 state.isRerendering = true;\n@@ -860,9 +876,6 @@\n                             currentState.renderPhase = stagingPhase;\n                             if (nextElement !== null) currentState.element = nextElement;\n \n-                            const needsAnotherRender = currentState.pendingRerender;\n-                            currentState.isRerendering = false;\n-                            currentState.pendingRerender = false;\n                             committed = true;\n \n                             const postCommit: Array<Effect.Effect<void, unknown, R>> = [\n@@ -874,10 +887,6 @@\n                               ),\n                               Trace.emit(\"keyedList.item.rerender\", () => ({ key })),\n                             ];\n-                            if (needsAnotherRender) {\n-                              postCommit.push(scheduleItemRerender());\n-                            }\n-\n                             if (outcome.kind === \"replaced\") {\n                               postCommit.push(\n                                 Effect.sync(() => {\n@@ -934,8 +943,6 @@\n                                 Scope.close(stagingScope, Exit.asVoid(exit)),\n                               ]),\n                             );\n-                            currentState.isRerendering = false;\n-                            currentState.pendingRerender = false;\n                             const reportedCause = Exit.isFailure(cleanupExit)\n                               ? Cause.combine(exit.cause, cleanupExit.cause)\n                               : exit.cause;\n@@ -951,16 +958,23 @@\n                           committed ? Effect.failCause(cause) : handleUpdateCause(cause),\n                         ),\n                         Effect.ensuring(\n-                          Effect.sync(() => {\n+                          Effect.suspend(() => {\n                             if (currentState.rerenderFiber === rerenderFiber)\n                               currentState.rerenderFiber = null;\n+                            currentState.isRerendering = false;\n+                            return resumeItemRerender(currentState);\n                           }),\n                         ),\n                       );\n                     }),\n                   ),\n-                  itemRenderContext(currentState.scope),\n-                  context,\n+                  {\n+                    ...itemRenderContext(currentState.scope),\n+                    // Compose once: list services win, while Scope and operation\n+                    // annotations remain with the owner and triggering worker.\n+                    services: Context.merge(forkContext, rowServices),\n+                  },\n+                  null,\n                 ),\n               );\n             });\n@@ -975,7 +989,7 @@\n               currentIndex: i,\n               isRerendering: false,\n               rerenderFiber: null,\n-              pendingRerender: false,\n+              pendingRerenderContext: null,\n               subscriptions: new Map(),\n               scope: itemScope,\n               scheduleRerender: scheduleItemRerender,\n@@ -1218,6 +1232,8 @@\n             }\n \n             for (const { key } of removedItems) {\n+              const state = itemStates.get(key);\n+              if (state !== undefined) state.pendingRerenderContext = null;\n               itemStates.delete(key);\n             }\n             keyOrder.length = 0;\n@@ -1346,8 +1362,10 @@\n         Effect.suspend(() => {\n           isUpdating = false;\n           if (pendingUpdate && !isUnmounted) {\n+            const nextContext = pendingUpdateContext;\n             pendingUpdate = false;\n-            updateList();\n+            pendingUpdateContext = null;\n+            updateList(nextContext);\n             return Effect.void;\n           }\n           if (isUnmounted || pendingRerenderKeys.size === 0) return Effect.void;\n@@ -1357,10 +1375,7 @@\n               if (isUpdating || isUnmounted) break;\n               pendingRerenderKeys.delete(key);\n               const state = itemStates.get(key);\n-              if (state !== undefined && state.pendingRerender && !state.isRerendering) {\n-                state.pendingRerender = false;\n-                yield* state.scheduleRerender();\n-              }\n+              if (state !== undefined) yield* resumeItemRerender(state);\n             }\n           });\n         }),\n@@ -1370,7 +1385,7 @@\n     const forkRuntime =\n       forkContext === null\n         ? updateContext\n-        : { ...updateContext, services: Context.merge(updateContext.services, forkContext) };\n+        : { ...updateContext, services: Context.merge(forkContext, rowServices) };\n \n     // Structural reconcile passes (create / replace / append / reorder / remove)\n     // are a single synchronous compute+DOM unit. Run the forked update fiber under\n@@ -1379,15 +1394,7 @@\n     // pure main-thread idle \u2014 once op-count crosses MaxOpsBeforeYield. Granular\n     // per-item re-renders fork separately (scheduleItemRerender) and keep cooperative\n     // scheduling, so interactive single-row updates are unaffected.\n-    const annotatedUpdate =\n-      forkContext === null\n-        ? updateEffect\n-        : Effect.provideService(\n-            updateEffect,\n-            References.CurrentLogAnnotations,\n-            Context.get(forkContext, References.CurrentLogAnnotations),\n-          );\n-    deps.runForkInRenderContext(annotatedUpdate, forkRuntime, context, {\n+    deps.runForkInRenderContext(updateEffect, forkRuntime, forkContext === null ? context : null, {\n       preventSchedulerYield: true,\n     });\n   }\n@@ -1408,6 +1415,8 @@\n     node: anchor,\n     cleanup: Effect.gen(function* () {\n       isUnmounted = true;\n+      pendingUpdate = false;\n+      pendingUpdateContext = null;\n \n       const mountedStates = currentStatesInDomOrder();\n       detachContiguousItemRange(mountedStates);\n@@ -1416,6 +1425,7 @@\n         Scope.close(updateScope, Exit.void),\n       ];\n       for (const state of mountedStates) {\n+        state.pendingRerenderContext = null;\n         for (const [, unsubscribe] of state.subscriptions) {\n           cleanups.push(unsubscribe);\n         }\n",
+  "processOwner": "Herdr wM:p3 (task-owned finite commands; no service launched)",
+  "redEvidence": {
+    "initial": "4 failures / 5 passes before granular queue fix",
+    "strengthenedPropertyService": "1 failure / 14 passes in intermediate G",
+    "logs": [
+      {
+        "path": "/tmp/opencode/trygg-granular-red.log",
+        "sha256": "756d38fa29216c55cc4b9f145109d7d44df1ad1fa1e7fbaf3edfc22c374360b2"
+      },
+      {
+        "path": "/tmp/opencode/trygg-granular-property-service-red.log",
+        "sha256": "886999b9863efa0aeb975c0f80740e8d2ae003bf3e7797a3aa075e71acc602b6"
+      }
+    ]
+  }
+}

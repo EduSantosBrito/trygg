@@ -1,0 +1,29 @@
+--- b/packages/core/src/primitives/render-intrinsic.ts
++++ c/packages/core/src/primitives/render-intrinsic.ts
+@@ -198,9 +198,14 @@
+         );
+         cleanups.push(unsubscribe);
+       } else if (isEffectProp(value)) {
+-        const resolved = preparedValues?.has(key) ? preparedValues.get(key) : yield* value;
+-        propertyValues ??= new Map();
+-        propertyValues.set(key, resolved);
++        let resolved: unknown;
++        if (preparedValues?.has(key)) {
++          resolved = preparedValues.get(key);
++        } else {
++          resolved = yield* value;
++          propertyValues ??= new Map(preparedValues);
++          propertyValues.set(key, resolved);
++        }
+         if (Signal.isSignal(resolved)) {
+           // peek (not get): binding owns its subscription below; do not subscribe
+           // the enclosing component's render phase to this resolved signal.
+@@ -236,7 +241,7 @@
+       }
+     }
+ 
+-    return { cleanups, propertyValues };
++    return { cleanups, propertyValues: propertyValues ?? preparedValues };
+   }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? cleanupAll(cleanups) : Effect.void)));
+ });
+ 

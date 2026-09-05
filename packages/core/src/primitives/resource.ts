@@ -20,13 +20,12 @@ import {
   Clock,
   Data,
   Deferred,
+  Duration,
   Effect,
   Exit,
-  Fiber,
-  Hash,
   Layer,
   Option,
-  pipe,
+  Predicate,
   Ref,
   Schema,
   Scope,
@@ -36,12 +35,13 @@ import * as Context from "effect/Context";
 import * as Signal from "./signal.js";
 import { Element, type Element as ElementType } from "./element.js";
 import { isEffectComponent, type Component } from "./component.js";
+import { cleanupAll, reportUnhandledRenderExit } from "./render-cleanup.js";
 import * as ReactiveMatcher from "./reactive-matcher.js";
 import * as Trace from "../trace/index.js";
 import {
   unsafeEntrySignal,
   unsafeAsParams,
-  unsafeAsError,
+  unsafeAsUnrecoverableCause,
   unsafeCallNoArgs,
   unsafeNarrowContext,
   unsafeAsOverload,
@@ -303,7 +303,7 @@ export type ReactiveParams<P extends object> = { readonly [K in keyof P]: Signal
  *     const c = yield* ApiClient
  *     return yield* c.users.getUser({ path: params })
  *   }),
- *   { key: (params) => Resource.hash("users.getUser", params) }
+ *   { key: ({ id }) => Resource.hash("users.getUser", id) }
  * )
  * ```
  *
@@ -346,28 +346,119 @@ export function make<P extends object, A, E, R>(
 // Resource.hash - Deterministic cache key generation
 // =============================================================================
 
+const canonicalFrame = (tag: string, payload: string): string =>
+  `${tag}${payload.length}:${payload}`;
+
+interface ObjectIdentityRegistry {
+  readonly ids: WeakMap<object, bigint>;
+  nextId: bigint;
+}
+
+const objectIdentityRegistryKey = Symbol.for("trygg/Resource/objectIdentity/v3");
+// oxlint-disable-next-line effect/no-type-casting -- This versioned Symbol.for slot is private framework state, and globalThis cannot express symbol-key augmentation directly.
+const objectIdentityRegistryGlobal = globalThis as typeof globalThis & {
+  [objectIdentityRegistryKey]: ObjectIdentityRegistry | undefined;
+};
+const objectIdentityRegistry = (objectIdentityRegistryGlobal[objectIdentityRegistryKey] ??= {
+  ids: new WeakMap<object, bigint>(),
+  nextId: 0n,
+});
+
+const objectIdentityId = (value: object): bigint => {
+  const existing = objectIdentityRegistry.ids.get(value);
+  if (existing !== undefined) return existing;
+  const id = objectIdentityRegistry.nextId;
+  objectIdentityRegistry.nextId += 1n;
+  objectIdentityRegistry.ids.set(value, id);
+  return id;
+};
+
 /**
- * Generate a deterministic cache key from a prefix and params object.
- *
- * Uses Effect's structural hashing (Hash.structure) for deterministic,
- * collision-resistant keys. Works with flat objects containing primitive values.
+ * Reports a non-global Symbol passed to {@link hash}.
  *
  * @remarks
- * Use this when a resource key depends on parameter values.
+ * Local and well-known Symbols have no deterministic, weakly-held identity.
+ * Use `Symbol.for`, a primitive value, or an opaque reference instead.
  *
  * @example
- * ```tsx
- * Resource.hash("users.getUser", { id: "123" })
- * // => "users.getUser:1234567"
+ * ```ts
+ * Resource.hash("users.byRole", Symbol.for("admin"))
  * ```
  *
  * @category Async State
  * @public
  * @since 1.0.0
  */
-export const hash = (prefix: string, params: object): string => {
-  const h = pipe(Hash.string(prefix), Hash.combine(Hash.structure(params)));
-  return `${prefix}:${h}`;
+export class ResourceHashLocalSymbolError extends Schema.TaggedError<ResourceHashLocalSymbolError>()(
+  "ResourceHashLocalSymbolError",
+  {
+    message: Schema.String,
+  },
+) {}
+
+const encodeHashPart = (value: unknown): string => {
+  if (value === null) return "n";
+
+  switch (typeof value) {
+    case "undefined":
+      return "u";
+    case "boolean":
+      return value ? "b1" : "b0";
+    case "string":
+      return canonicalFrame("s", value);
+    case "number":
+      if (Number.isNaN(value)) return "dNaN";
+      if (value === Number.POSITIVE_INFINITY) return "dInfinity";
+      if (value === Number.NEGATIVE_INFINITY) return "d-Infinity";
+      if (Object.is(value, -0)) return "d-0";
+      return canonicalFrame("d", String(value));
+    case "bigint":
+      return canonicalFrame("i", String(value));
+    case "symbol": {
+      const globalKey = Symbol.keyFor(value);
+      if (globalKey === undefined) {
+        // oxlint-disable-next-line effect/no-raw-throw -- Resource.hash is a synchronous JavaScript identity boundary and rejects unsupported Symbols synchronously.
+        throw new ResourceHashLocalSymbolError({
+          message: "Resource.hash only accepts Symbols created by Symbol.for",
+        });
+      }
+      return canonicalFrame("yg", globalKey);
+    }
+    case "function":
+      return canonicalFrame("f", String(objectIdentityId(value)));
+    case "object":
+      return canonicalFrame("o", String(objectIdentityId(value)));
+  }
+  return "u";
+};
+
+/**
+ * Generate a stable cache key from a prefix and positional identity parts.
+ *
+ * @remarks
+ * Primitive parts and `Symbol.for` values have deterministic structural identity.
+ * Objects and functions are opaque process-local references: hashing never reads
+ * their keys, properties, prototypes, or contents. Duplicate module copies share
+ * one versioned weak identity authority for HMR safety. Pass immutable primitive
+ * parts when independently-created values must share identity. Non-global Symbols
+ * are rejected with {@link ResourceHashLocalSymbolError}.
+ *
+ * @example
+ * ```tsx
+ * Resource.hash("users.getUser", "123")
+ * // => "trygg-resource:v3:..."
+ * ```
+ *
+ * @category Async State
+ * @public
+ * @since 1.0.0
+ */
+export const hash = (prefix: string, ...parts: ReadonlyArray<unknown>): string => {
+  let encoded = canonicalFrame("p", prefix);
+  for (const part of parts) {
+    encoded += canonicalFrame("v", encodeHashPart(part));
+  }
+  return `trygg-resource:v3:${encoded}`;
 };
 
 // =============================================================================
@@ -379,20 +470,105 @@ export const hash = (prefix: string, params: object): string => {
  * @internal
  */
 interface RegistryEntry {
+  readonly key: string;
   readonly state: Signal.Signal<ResourceState<unknown, unknown>>;
-  readonly inFlight: Ref.Ref<Option.Option<Deferred.Deferred<void, never>>>;
-  readonly currentFiber: Ref.Ref<Option.Option<Fiber.Fiber<void, never>>>;
-  readonly timestamp: Ref.Ref<number>;
-  readonly scope: Scope.Scope;
+  readonly inFlight: Ref.Ref<Option.Option<InFlight>>;
+  readonly scope: Scope.Closeable;
 }
 
-class ResourceFactoryParamsRequiredError extends Schema.TaggedErrorClass<ResourceFactoryParamsRequiredError>()(
+interface EntryLifetime {
+  readonly leases: ReadonlySet<object>;
+  readonly retired: boolean;
+  readonly closeStarted: boolean;
+}
+
+interface InFlight {
+  readonly deferred: Deferred.Deferred<void, never>;
+  readonly key: string;
+}
+
+interface RegistryRecord {
+  readonly entry: RegistryEntry;
+  readonly expiresAt: number;
+}
+
+interface PendingAdmission {
+  readonly deferred: Deferred.Deferred<Option.Option<RegistryEntry>>;
+}
+
+interface RegistryState {
+  readonly cache: Map<string, RegistryRecord>;
+  readonly entries: Map<RegistryEntry, EntryLifetime>;
+  readonly pending: Map<string, PendingAdmission>;
+  nextExpiration: number;
+}
+
+/**
+ * Framework-owned terminal reporter for Resource fetch workers.
+ *
+ * @remarks
+ * The fetch owner invokes this with the complete terminal Exit for defects,
+ * interruption, and mixed Causes. Causes containing only typed failures become
+ * Resource Failure state and are not reported.
+ *
+ * @internal
+ */
+export type ResourceFetchExitReporter = (exit: Exit.Exit<unknown, unknown>) => void;
+
+declare global {
+  var __tryggResourceCurrentFetchExitReporter:
+    | Context.Reference<ResourceFetchExitReporter>
+    | undefined;
+}
+
+/**
+ * Terminal reporter inherited by owned Resource fetch workers.
+ *
+ * @remarks
+ * The reference is shared across duplicate module copies so HMR does not split
+ * the owner policy. Tests and renderer integrations can replace it to observe
+ * the exact terminal Exit.
+ *
+ * @internal
+ */
+export const CurrentResourceFetchExitReporter: Context.Reference<ResourceFetchExitReporter> =
+  (globalThis.__tryggResourceCurrentFetchExitReporter ??=
+    Context.Reference<ResourceFetchExitReporter>("trygg/Resource/CurrentFetchExitReporter", {
+      defaultValue: () => reportUnhandledRenderExit,
+    }));
+
+class ResourceFactoryParamsRequiredError extends Schema.TaggedError<ResourceFactoryParamsRequiredError>()(
   "ResourceFactoryParamsRequiredError",
   {},
 ) {}
 
-const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
-  value === null || value === undefined ? Option.none() : Option.some(value);
+/**
+ * Reports that a Resource registry has no free or safely evictable slot.
+ *
+ * @remarks
+ * Capacity counts admitted entries, retired entries that still have leases,
+ * in-flight fetches, entries being closed, and reserved candidates. Admission
+ * fails immediately instead of waiting for an existing consumer to release.
+ *
+ * @example
+ * ```ts
+ * const recovered = Resource.fetch(users).pipe(
+ *   Effect.catchTag("ResourceRegistrySaturatedError", () => Effect.succeed(null)),
+ * )
+ * ```
+ *
+ * @category Async State
+ * @public
+ * @since 1.0.0
+ */
+export class ResourceRegistrySaturatedError extends Schema.TaggedError<ResourceRegistrySaturatedError>()(
+  "ResourceRegistrySaturatedError",
+  {
+    capacity: Schema.Int,
+    key: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
 /**
  * ResourceRegistry service for caching and deduplication.
@@ -417,7 +593,12 @@ const fromNullable = <A>(value: A | null | undefined): Option.Option<A> =>
 export interface ResourceRegistry {
   readonly _tag: "ResourceRegistry";
   readonly get: (key: string) => Effect.Effect<Option.Option<RegistryEntry>>;
-  readonly getOrCreate: (key: string) => Effect.Effect<RegistryEntry, Signal.SignalScopeError>;
+  readonly getOrCreate: (
+    key: string,
+  ) => Effect.Effect<RegistryEntry, ResourceRegistrySaturatedError>;
+  readonly acquire: (key: string, entry: RegistryEntry, lease: object) => Effect.Effect<boolean>;
+  readonly release: (entry: RegistryEntry, lease: object) => Effect.Effect<void>;
+  readonly retire: (key: string, entry: RegistryEntry) => Effect.Effect<void>;
   readonly delete: (key: string) => Effect.Effect<void>;
 }
 
@@ -443,155 +624,705 @@ export class ResourceRegistryTag extends Context.Service<
   {
     readonly _tag: "ResourceRegistry";
     readonly get: (key: string) => Effect.Effect<Option.Option<RegistryEntry>>;
-    readonly getOrCreate: (key: string) => Effect.Effect<RegistryEntry, Signal.SignalScopeError>;
+    readonly getOrCreate: (
+      key: string,
+    ) => Effect.Effect<RegistryEntry, ResourceRegistrySaturatedError>;
+    readonly acquire: (key: string, entry: RegistryEntry, lease: object) => Effect.Effect<boolean>;
+    readonly release: (entry: RegistryEntry, lease: object) => Effect.Effect<void>;
+    readonly retire: (key: string, entry: RegistryEntry) => Effect.Effect<void>;
     readonly delete: (key: string) => Effect.Effect<void>;
   }
 >()("trygg/ResourceRegistryTag") {}
 
 /**
- * Create a ResourceRegistry layer with an in-memory cache.
+ * Capacity and idle-expiration policy for an in-memory Resource registry.
  *
  * @remarks
- * This is the default registry implementation used by app and test code.
+ * `capacity` bounds the registry with least-recently-used eviction. `timeToLive`
+ * is an idle timeout refreshed by registry access; expired entries are removed
+ * lazily on later access. Capacity includes reserved, admitted, in-flight,
+ * closing, and retired-but-leased entries. When no slot is free or safely
+ * evictable, admission fails with {@link ResourceRegistrySaturatedError} instead
+ * of waiting.
  *
  * @example
  * ```ts
- * const program = Resource.fetch(users).pipe(Effect.provide(Resource.ResourceRegistryLive))
+ * const options: Resource.ResourceRegistryOptions = {
+ *   capacity: 128,
+ *   timeToLive: "10 minutes",
+ * }
  * ```
  *
  * @category Async State
  * @public
  * @since 1.0.0
  */
-export const ResourceRegistryLive: Layer.Layer<ResourceRegistryTag, Signal.SignalScopeError> =
-  Layer.effect(
-    ResourceRegistryTag,
+export interface ResourceRegistryOptions {
+  /** Maximum total live, reserved, retired, and closing entries. */
+  readonly capacity: number;
+  /** Idle time after the last registry access before an entry expires. */
+  readonly timeToLive: Duration.Input;
+}
+
+/**
+ * Reports an invalid explicit Resource registry policy.
+ *
+ * @remarks
+ * `Resource.ResourceRegistry.layer` exposes this error in the returned Layer when capacity
+ * is not a positive safe integer or the idle TTL is invalid or negative.
+ *
+ * @example
+ * ```ts
+ * const layer: Layer.Layer<
+ *   Resource.ResourceRegistryTag,
+ *   Resource.ResourceRegistryOptionsError
+ * > = Resource.ResourceRegistry.layer({ capacity: 0, timeToLive: "1 minute" })
+ * ```
+ *
+ * @category Async State
+ * @public
+ * @since 1.0.0
+ */
+export class ResourceRegistryOptionsError extends Schema.TaggedError<ResourceRegistryOptionsError>()(
+  "ResourceRegistryOptionsError",
+  {
+    message: Schema.String,
+  },
+) {}
+
+const expiresAt = (now: number, timeToLiveMillis: number): number =>
+  timeToLiveMillis === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : now + timeToLiveMillis;
+
+const storeCacheEntry = (state: RegistryState, key: string, record: RegistryRecord): void => {
+  state.cache.set(key, record);
+  // A conservative lower bound remains safe across renewal, deletion, and clock
+  // rollback. Recompute the exact minimum only when that bound is reached.
+  state.nextExpiration = Math.min(state.nextExpiration, record.expiresAt);
+};
+
+const retireEntryInState = (
+  state: RegistryState,
+  entry: RegistryEntry,
+  force: boolean,
+): boolean => {
+  const lifetime = state.entries.get(entry);
+  if (lifetime === undefined || lifetime.closeStarted) return false;
+
+  const closeStarted = force || lifetime.leases.size === 0;
+  state.entries.set(entry, { ...lifetime, retired: true, closeStarted });
+  return closeStarted;
+};
+
+const pruneExpired = (state: RegistryState, now: number): ReadonlyArray<RegistryEntry> => {
+  if (now < state.nextExpiration) return [];
+  const closing: Array<RegistryEntry> = [];
+  state.nextExpiration = Number.POSITIVE_INFINITY;
+  for (const [key, record] of state.cache) {
+    if (record.expiresAt <= now) {
+      state.cache.delete(key);
+      if (retireEntryInState(state, record.entry, false)) closing.push(record.entry);
+    } else {
+      state.nextExpiration = Math.min(state.nextExpiration, record.expiresAt);
+    }
+  }
+  return closing;
+};
+
+type AdmissionDecision = Data.TaggedEnum<{
+  readonly Closed: {};
+  readonly Existing: { readonly entry: RegistryEntry };
+  readonly Join: { readonly pending: PendingAdmission };
+  readonly Reserve: { readonly pending: PendingAdmission };
+  readonly Cleanup: { readonly entries: ReadonlyArray<RegistryEntry> };
+  readonly Saturated: {};
+}>;
+
+const AdmissionDecision = Data.taggedEnum<AdmissionDecision>();
+
+const makeRegistryService = (
+  capacity: number,
+  timeToLiveMillis: number,
+): Effect.Effect<ResourceRegistry, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    // This state never escapes the registry and is accessed only in synchronous
+    // Ref callbacks. Mutating its Maps there preserves atomic decisions without
+    // copying every cached entry on a hit. Cleanup and user effects run afterward.
+    const state = yield* Ref.make<RegistryState>({
+      cache: new Map(),
+      entries: new Map(),
+      pending: new Map(),
+      nextExpiration: Number.POSITIVE_INFINITY,
+    });
+    const registryScope = yield* Effect.scope;
+
+    yield* Effect.addFinalizer(() =>
+      Ref.modify(state, (current) => {
+        const pending = Array.from(current.pending.values());
+        current.cache.clear();
+        current.entries.clear();
+        current.pending.clear();
+        current.nextExpiration = Number.POSITIVE_INFINITY;
+        return [pending, current];
+      }).pipe(
+        Effect.flatMap((pending) =>
+          Effect.forEach(
+            pending,
+            (admission) => Deferred.succeed(admission.deferred, Option.none()),
+            {
+              discard: true,
+            },
+          ),
+        ),
+      ),
+    );
+
+    const closeEntries = (entries: ReadonlyArray<RegistryEntry>): Effect.Effect<void> =>
+      cleanupAll(
+        entries.map((entry) =>
+          Scope.close(entry.scope, Exit.void).pipe(
+            // A failed finalizer still consumes the scope. Release its capacity
+            // while preserving the Cause and continuing the remaining releases.
+            Effect.ensuring(
+              Ref.update(state, (current) => {
+                if (!current.entries.has(entry)) return current;
+                current.entries.delete(entry);
+                return current;
+              }),
+            ),
+          ),
+        ),
+      );
+
+    const lookup = (
+      key: string,
+      now: number,
+    ): Effect.Effect<{
+      readonly entry: Option.Option<RegistryEntry>;
+      readonly closing: ReadonlyArray<RegistryEntry>;
+    }> =>
+      Ref.modify(state, (current) => {
+        if (Predicate.isTagged(registryScope.state, "Closed")) {
+          return [{ entry: Option.none(), closing: [] }, current];
+        }
+        const closing = pruneExpired(current, now);
+        const record = current.cache.get(key);
+        if (record === undefined) {
+          return [{ entry: Option.none(), closing }, current];
+        }
+
+        current.cache.delete(key);
+        storeCacheEntry(current, key, {
+          entry: record.entry,
+          expiresAt: expiresAt(now, timeToLiveMillis),
+        });
+        return [{ entry: Option.some(record.entry), closing }, current];
+      });
+
+    const get: ResourceRegistry["get"] = Effect.fn("ResourceRegistry.get")(function* (key: string) {
+      if (Predicate.isTagged(registryScope.state, "Closed")) return Option.none();
+      const now = yield* Clock.currentTimeMillis;
+      return yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const result = yield* lookup(key, now);
+          yield* closeEntries(result.closing);
+          return Predicate.isTagged(registryScope.state, "Closed") ? Option.none() : result.entry;
+        }),
+      );
+    });
+
+    const makeEntry = (key: string): Effect.Effect<RegistryEntry> =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const scope = yield* Scope.fork(registryScope);
+          if (Predicate.isTagged(scope.state, "Closed")) return yield* Effect.interrupt;
+          const candidate = Effect.gen(function* () {
+            const entryState = yield* Signal.makeInScope<ResourceState<unknown, unknown>>(
+              Pending(),
+              scope,
+            );
+            const inFlight = yield* Ref.make<Option.Option<InFlight>>(Option.none());
+            return { key, state: entryState, inFlight, scope } satisfies RegistryEntry;
+          });
+          const exit = yield* restore(candidate).pipe(Effect.exit);
+          if (Exit.isSuccess(exit)) return exit.value;
+
+          return yield* Effect.failCause(exit.cause).pipe(
+            Effect.ensuring(Scope.close(scope, exit)),
+          );
+        }),
+      );
+
+    const cancelPending = (key: string, pending: PendingAdmission): Effect.Effect<void> =>
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const removed = yield* Ref.modify(state, (current): readonly [boolean, RegistryState] => {
+            if (current.pending.get(key) !== pending) return [false, current];
+            current.pending.delete(key);
+            return [true, current];
+          });
+          if (removed) yield* Deferred.succeed(pending.deferred, Option.none());
+        }),
+      );
+
+    const decideAdmission = (
+      key: string,
+      now: number,
+      candidate: PendingAdmission,
+    ): Effect.Effect<AdmissionDecision> =>
+      Ref.modify(state, (current): readonly [AdmissionDecision, RegistryState] => {
+        if (Predicate.isTagged(registryScope.state, "Closed")) {
+          return [AdmissionDecision.Closed(), current];
+        }
+        const expired = pruneExpired(current, now);
+        if (expired.length > 0) {
+          return [AdmissionDecision.Cleanup({ entries: expired }), current];
+        }
+
+        const existing = current.cache.get(key);
+        if (existing !== undefined) {
+          current.cache.delete(key);
+          storeCacheEntry(current, key, {
+            entry: existing.entry,
+            expiresAt: expiresAt(now, timeToLiveMillis),
+          });
+          return [AdmissionDecision.Existing({ entry: existing.entry }), current];
+        }
+
+        const pending = current.pending.get(key);
+        if (pending !== undefined) return [AdmissionDecision.Join({ pending }), current];
+
+        if (current.entries.size + current.pending.size < capacity) {
+          current.pending.set(key, candidate);
+          return [AdmissionDecision.Reserve({ pending: candidate }), current];
+        }
+
+        for (const [oldestKey, oldest] of current.cache) {
+          const lifetime = current.entries.get(oldest.entry);
+          if (
+            lifetime === undefined ||
+            lifetime.retired ||
+            lifetime.closeStarted ||
+            lifetime.leases.size > 0
+          ) {
+            continue;
+          }
+
+          current.cache.delete(oldestKey);
+          current.entries.set(oldest.entry, {
+            ...lifetime,
+            retired: true,
+            closeStarted: true,
+          });
+          return [AdmissionDecision.Cleanup({ entries: [oldest.entry] }), current];
+        }
+
+        return [AdmissionDecision.Saturated(), current];
+      });
+
+    type RestoreInterruptibility = <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>;
+
+    const createReserved: (
+      key: string,
+      pending: PendingAdmission,
+      restore: RestoreInterruptibility,
+    ) => Effect.Effect<Option.Option<RegistryEntry>> = Effect.fn("ResourceRegistry.createReserved")(
+      function* (key: string, pending: PendingAdmission, restore: RestoreInterruptibility) {
+        const candidateExit = yield* restore(makeEntry(key)).pipe(Effect.exit);
+        if (Exit.isFailure(candidateExit)) {
+          yield* cancelPending(key, pending);
+          return yield* Effect.failCause(candidateExit.cause);
+        }
+        const candidate = candidateExit.value;
+
+        const clockExit = yield* restore(Clock.currentTimeMillis).pipe(Effect.exit);
+        if (Exit.isFailure(clockExit)) {
+          return yield* Effect.failCause(clockExit.cause).pipe(
+            Effect.ensuring(
+              cleanupAll([Scope.close(candidate.scope, clockExit), cancelPending(key, pending)]),
+            ),
+          );
+        }
+
+        const committed = yield* Ref.modify(state, (current): readonly [boolean, RegistryState] => {
+          if (Predicate.isTagged(registryScope.state, "Closed")) return [false, current];
+          if (current.pending.get(key) !== pending) return [false, current];
+
+          current.pending.delete(key);
+          current.entries.set(candidate, {
+            leases: new Set<object>(),
+            retired: false,
+            closeStarted: false,
+          });
+          storeCacheEntry(current, key, {
+            entry: candidate,
+            expiresAt: expiresAt(clockExit.value, timeToLiveMillis),
+          });
+          return [true, current];
+        });
+
+        if (!committed) {
+          yield* Scope.close(candidate.scope, Exit.void);
+          return Option.none();
+        }
+
+        yield* Deferred.succeed(pending.deferred, Option.some(candidate));
+        yield* Trace.emit("resource.registry.create_entry", () => ({ key }));
+        return Option.some(candidate);
+      },
+    );
+
+    const getOrCreate: ResourceRegistry["getOrCreate"] = Effect.fn("ResourceRegistry.getOrCreate")(
+      function* (key: string) {
+        while (true) {
+          if (Predicate.isTagged(registryScope.state, "Closed")) return yield* Effect.interrupt;
+          const now = yield* Clock.currentTimeMillis;
+          const candidate: PendingAdmission = {
+            deferred: yield* Deferred.make<Option.Option<RegistryEntry>>(),
+          };
+          const entry = yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const decision = yield* decideAdmission(key, now, candidate);
+
+              switch (decision._tag) {
+                case "Closed":
+                  return yield* Effect.interrupt;
+                case "Existing":
+                  yield* Trace.emit("resource.registry.get_existing", () => ({ key }));
+                  return Option.some(decision.entry);
+                case "Join":
+                  return yield* restore(Deferred.await(decision.pending.deferred));
+                case "Reserve":
+                  return yield* createReserved(key, decision.pending, restore);
+                case "Cleanup":
+                  yield* closeEntries(decision.entries);
+                  return Option.none();
+                case "Saturated":
+                  return yield* new ResourceRegistrySaturatedError({
+                    capacity,
+                    key,
+                    message: `Resource registry capacity ${capacity} has no free or safely evictable slot`,
+                  });
+              }
+            }),
+          );
+          if (Predicate.isTagged(registryScope.state, "Closed")) return yield* Effect.interrupt;
+          if (Option.isSome(entry)) return entry.value;
+        }
+      },
+    );
+
+    const acquire: ResourceRegistry["acquire"] = (key, entry, lease) =>
+      Ref.modify(state, (current): readonly [boolean, RegistryState] => {
+        if (Predicate.isTagged(registryScope.state, "Closed")) return [false, current];
+        const record = current.cache.get(key);
+        const lifetime = current.entries.get(entry);
+        if (
+          record?.entry !== entry ||
+          lifetime === undefined ||
+          lifetime.retired ||
+          lifetime.closeStarted
+        ) {
+          return [false, current];
+        }
+
+        const leases = new Set(lifetime.leases);
+        leases.add(lease);
+        current.entries.set(entry, { ...lifetime, leases });
+        return [true, current];
+      });
+
+    const release: ResourceRegistry["release"] = Effect.fn("ResourceRegistry.release")(function* (
+      entry: RegistryEntry,
+      lease: object,
+    ) {
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const closing = yield* Ref.modify(
+            state,
+            (current): readonly [ReadonlyArray<RegistryEntry>, RegistryState] => {
+              const lifetime = current.entries.get(entry);
+              if (lifetime === undefined || !lifetime.leases.has(lease)) return [[], current];
+
+              const leases = new Set(lifetime.leases);
+              leases.delete(lease);
+              const closeStarted = lifetime.retired && leases.size === 0 && !lifetime.closeStarted;
+              current.entries.set(entry, {
+                ...lifetime,
+                leases,
+                closeStarted: lifetime.closeStarted || closeStarted,
+              });
+              return [closeStarted ? [entry] : [], current];
+            },
+          );
+          yield* closeEntries(closing);
+        }),
+      );
+    });
+
+    const retireEntry: ResourceRegistry["retire"] = Effect.fn("ResourceRegistry.retire")(function* (
+      key: string,
+      entry: RegistryEntry,
+    ) {
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const closing = yield* Ref.modify(
+            state,
+            (current): readonly [ReadonlyArray<RegistryEntry>, RegistryState] => {
+              if (current.cache.get(key)?.entry === entry) current.cache.delete(key);
+              return [retireEntryInState(current, entry, false) ? [entry] : [], current];
+            },
+          );
+          yield* closeEntries(closing);
+        }),
+      );
+    });
+
+    const deleteEntry: ResourceRegistry["delete"] = Effect.fn("ResourceRegistry.delete")(function* (
+      key: string,
+    ) {
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const closing = yield* Ref.modify(
+            state,
+            (current): readonly [ReadonlyArray<RegistryEntry>, RegistryState] => {
+              current.cache.delete(key);
+              const closing: Array<RegistryEntry> = [];
+              for (const entry of current.entries.keys()) {
+                if (entry.key === key && retireEntryInState(current, entry, true)) {
+                  closing.push(entry);
+                }
+              }
+              return [closing, current];
+            },
+          );
+          yield* closeEntries(closing);
+        }),
+      );
+    });
+
+    return {
+      _tag: resourceRegistryServiceTag,
+      get,
+      getOrCreate,
+      acquire,
+      release,
+      retire: retireEntry,
+      delete: deleteEntry,
+    };
+  }).pipe(Effect.annotateLogs({ service: "ResourceRegistry" }));
+
+const makeRegistryLayer = (
+  capacity: number,
+  timeToLiveMillis: number,
+): Layer.Layer<ResourceRegistryTag> =>
+  Layer.effect(ResourceRegistryTag, makeRegistryService(capacity, timeToLiveMillis));
+
+/**
+ * Construct an in-memory Resource registry Layer.
+ *
+ * @remarks
+ * The resulting Layer validates its policy during acquisition. It retains entries
+ * by least-recently-used order and expires them after the configured idle TTL.
+ * Capacity eviction closes the least-recently-used unleased entry before allocating
+ * its replacement. If no slot is free or safely evictable, admission fails
+ * immediately.
+ *
+ * @example
+ * ```ts
+ * const registry = Resource.ResourceRegistry.layer({
+ *   capacity: 128,
+ *   timeToLive: "10 minutes",
+ * })
+ *
+ * const program = Resource.fetch(users).pipe(Effect.provide(registry))
+ * ```
+ *
+ * @param options - Maximum entry count and idle expiration duration.
+ * @returns A Resource registry Layer whose error channel reports invalid policy.
+ * @category Async State
+ * @public
+ * @since 1.0.0
+ */
+function resourceRegistryLayer(): Layer.Layer<ResourceRegistryTag>;
+function resourceRegistryLayer(
+  options: ResourceRegistryOptions,
+): Layer.Layer<ResourceRegistryTag, ResourceRegistryOptionsError>;
+function resourceRegistryLayer(
+  options?: ResourceRegistryOptions,
+): Layer.Layer<ResourceRegistryTag, ResourceRegistryOptionsError> {
+  if (options === undefined) {
+    return makeRegistryLayer(256, Duration.toMillis("30 minutes"));
+  }
+
+  return Layer.unwrap(
     Effect.gen(function* () {
-      const cache = yield* SynchronizedRef.make(new Map<string, RegistryEntry>());
-      const registryScope = yield* Effect.scope;
+      if (!Number.isSafeInteger(options.capacity) || options.capacity <= 0) {
+        return yield* new ResourceRegistryOptionsError({
+          message: "Resource registry capacity must be a positive safe integer",
+        });
+      }
 
-      const get = (key: string): Effect.Effect<Option.Option<RegistryEntry>> =>
-        SynchronizedRef.get(cache).pipe(Effect.map((map) => fromNullable(map.get(key))));
+      const duration = Duration.fromInput(options.timeToLive);
+      if (Option.isNone(duration)) {
+        return yield* new ResourceRegistryOptionsError({
+          message: "Resource registry timeToLive must be a valid Duration input",
+        });
+      }
+      const timeToLiveMillis = Duration.toMillis(duration.value);
+      if (Number.isNaN(timeToLiveMillis) || timeToLiveMillis < 0) {
+        return yield* new ResourceRegistryOptionsError({
+          message: "Resource registry timeToLive must not be negative",
+        });
+      }
 
-      const getOrCreate = (key: string): Effect.Effect<RegistryEntry, Signal.SignalScopeError> =>
-        SynchronizedRef.modifyEffect(cache, (map) =>
-          Effect.gen(function* () {
-            const existing = map.get(key);
-            if (existing !== undefined) {
-              yield* Trace.emit("resource.registry.get_existing", () => ({
-                key,
-              }));
-              const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [existing, map];
-              return result;
-            }
-
-            yield* Trace.emit("resource.registry.create_entry", () => ({
-              key,
-            }));
-
-            // Create new entry
-            const state = yield* Signal.make<ResourceState<unknown, unknown>>(Pending());
-            const inFlight = yield* Ref.make<Option.Option<Deferred.Deferred<void, never>>>(
-              Option.none(),
-            );
-            const currentFiber = yield* Ref.make<Option.Option<Fiber.Fiber<void, never>>>(
-              Option.none(),
-            );
-            const timestamp = yield* Ref.make(0);
-            const scope = yield* Scope.fork(registryScope);
-
-            const entry: RegistryEntry = { state, inFlight, currentFiber, timestamp, scope };
-            const newMap = new Map(map);
-            newMap.set(key, entry);
-
-            const result: readonly [RegistryEntry, Map<string, RegistryEntry>] = [entry, newMap];
-            return result;
-          }),
-        );
-
-      const deleteEntry = (key: string): Effect.Effect<void> =>
-        SynchronizedRef.modifyEffect(cache, (map) =>
-          Effect.gen(function* () {
-            const newMap = new Map(map);
-            const entry = newMap.get(key);
-            newMap.delete(key);
-
-            if (entry !== undefined) {
-              yield* Scope.close(entry.scope, Exit.void);
-            }
-
-            const result: readonly [void, Map<string, RegistryEntry>] = [undefined, newMap];
-            return result;
-          }),
-        );
-
-      return {
-        _tag: resourceRegistryServiceTag,
-        get,
-        getOrCreate,
-        delete: deleteEntry,
-      };
-    }).pipe(Effect.annotateLogs({ service: "ResourceRegistry" })),
+      return makeRegistryLayer(options.capacity, timeToLiveMillis);
+    }),
   );
+}
+
+/**
+ * In-memory Resource registry adapter.
+ *
+ * @remarks
+ * `layer()` uses the default policy of 256 live slots and a lazy 30-minute idle
+ * TTL. Pass an explicit policy to validate custom capacity and expiration at
+ * Layer acquisition.
+ *
+ * @example
+ * ```ts
+ * const program = Resource.fetch(users).pipe(
+ *   Effect.provide(Resource.ResourceRegistry.layer()),
+ * )
+ * ```
+ *
+ * @category Async State
+ * @public
+ * @since 1.0.0
+ */
+export const ResourceRegistry = { layer: resourceRegistryLayer };
 
 // =============================================================================
 // Internal helpers
 // =============================================================================
 
 /**
- * Execute a fetch for a resource and update state.
- * Captures context from R and provides it to the daemon-forked fiber.
- * Returns the fiber reference for cancellation support.
+ * Atomic ownership decision for one shared fetch.
  * @internal
  */
-const fetchInternal: <A, E, R>(
+type FetchMode = "pending" | "invalidate" | "refresh";
+
+type FlightClaim = Data.TaggedEnum<{
+  readonly Start: { readonly flight: InFlight };
+  readonly Join: { readonly flight: InFlight };
+  readonly Unavailable: {};
+}>;
+
+const FlightClaim = Data.taggedEnum<FlightClaim>();
+
+const currentResourceConsumerScope: Effect.Effect<Scope.Scope, Signal.SignalScopeError> =
+  Effect.gen(function* () {
+    const renderScope = yield* Signal.CurrentRenderScope;
+    if (renderScope !== null) return renderScope;
+
+    const componentScope = yield* Signal.CurrentComponentScope;
+    if (componentScope !== null) return componentScope;
+
+    const scope = Context.getOption(yield* Effect.context<never>(), Scope.Scope);
+    if (Option.isSome(scope)) return scope.value;
+
+    return yield* new Signal.SignalScopeError({
+      operation: "make",
+      message:
+        "Resource.fetch requires an owner scope. Fetch inside Component.gen or an explicitly scoped Effect.",
+    });
+  });
+
+interface RegistryLease {
+  readonly entry: RegistryEntry;
+  readonly release: Effect.Effect<void>;
+}
+
+const getOrCreateLeasedEntryInScope = (
+  registry: ResourceRegistry,
+  key: string,
+  scope: Scope.Scope,
+): Effect.Effect<RegistryLease, ResourceRegistrySaturatedError> => {
+  const acquire = Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      while (true) {
+        const entry = yield* restore(registry.getOrCreate(key));
+        const lease = {};
+        if (!(yield* registry.acquire(key, entry, lease))) continue;
+
+        return {
+          entry,
+          release: registry.release(entry, lease),
+        } satisfies RegistryLease;
+      }
+    }),
+  );
+
+  return Effect.acquireRelease(acquire, ({ release }) => release, {
+    interruptible: true,
+  }).pipe(Scope.provide(scope));
+};
+
+const completeFlight: (
+  entry: RegistryEntry,
+  flight: InFlight,
+  exit: Exit.Exit<void, never>,
+) => Effect.Effect<void> = Effect.fn("Resource.completeFlight")(function* (
+  entry: RegistryEntry,
+  flight: InFlight,
+  exit: Exit.Exit<void, never>,
+) {
+  yield* Ref.modify(entry.inFlight, (current): readonly [void, Option.Option<InFlight>] => [
+    undefined,
+    Option.isSome(current) && current.value === flight ? Option.none() : current,
+  ]);
+  yield* Deferred.done(flight.deferred, exit);
+  yield* Trace.emit("resource.fetch.complete", () => ({ key: flight.key }));
+});
+
+const runFetch: <A, E, R>(
   resource: Resource<A, E, R>,
   entry: RegistryEntry,
   ctx: Context.Context<R>,
-  startImmediately?: boolean,
-) => Effect.Effect<Fiber.Fiber<void, never>> = Effect.fn("Resource.fetchInternal")(function* <
-  A,
-  E,
-  R,
->(
+  mode: FetchMode,
+) => Effect.Effect<void> = Effect.fn("Resource.runFetch")(function* <A, E, R>(
   resource: Resource<A, E, R>,
   entry: RegistryEntry,
   ctx: Context.Context<R>,
-  startImmediately: boolean = false,
+  mode: FetchMode,
 ) {
   const state = unsafeEntrySignal<A, E>(entry.state);
+
+  if (mode === "pending") {
+    const current = yield* Signal.peek(state);
+    if (!ResourceState.$is("Pending")(current)) return;
+  } else if (mode === "refresh") {
+    yield* Signal.set(state, Pending<A, E>());
+  } else {
+    const current = yield* Signal.peek(state);
+    if (ResourceState.$is("Success")(current)) {
+      yield* Signal.set(state, Success<A, E>(current.value, true));
+    }
+  }
 
   yield* Trace.emit("resource.fetch.start", () => ({
     key: resource.key,
   }));
 
-  // Create deferred for dedupe coordination
-  const deferred = yield* Deferred.make<void, never>();
-  yield* Ref.set(entry.inFlight, Option.some(deferred));
-
-  const fiber: Fiber.Fiber<void, never> = yield* Trace.emit("resource.fetch.fork_running", () => ({
+  return yield* Trace.emit("resource.fetch.fork_running", () => ({
     key: resource.key,
   })).pipe(
     Effect.flatMap(() => Effect.provide(resource.fetch, ctx)),
     Effect.tap((value) =>
       Trace.emit("resource.fetch.success", () => ({
         key: resource.key,
-        value_type: typeof value,
-        is_array: Array.isArray(value),
-        length: Array.isArray(value) ? value.length : undefined,
-      })),
-    ),
-    Effect.tapCause((cause) =>
-      Trace.emit("resource.fetch.error", () => ({
-        key: resource.key,
-        error: Cause.squash(cause),
-        error_message: Cause.pretty(cause),
-      })),
-    ),
-    Effect.tapDefect((defect) =>
-      Trace.emit("resource.fetch.defect", () => ({
-        key: resource.key,
-        defect: String(defect),
+        value_type: Trace.valueType(value),
       })),
     ),
     Effect.matchCauseEffect({
@@ -603,48 +1334,124 @@ const fetchInternal: <A, E, R>(
           yield* Signal.set(state, Success<A, E>(value, false));
         }),
       onFailure: (cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Trace.emit("resource.fetch.interrupted", () => ({
-              key: resource.key,
-            }))
-          : Effect.gen(function* () {
-              const error = Cause.squash(cause);
-              yield* Trace.emit("resource.fetch.set_failure", () => ({
-                key: resource.key,
-                error,
-                error_message: Cause.pretty(cause),
-              }));
-              const prev = yield* Signal.get(state);
-              const staleValue = ResourceState.$is("Success")(prev)
-                ? Option.some(prev.value)
-                : Option.none();
-              yield* Signal.set(state, Failure<A, E>(unsafeAsError<E>(error), staleValue));
-            }),
-    }),
-    Effect.catchCause((cause) =>
-      Trace.emit("resource.fetch.unhandled", () => ({
-        key: resource.key,
-        error: Cause.squash(cause),
-        error_message: Cause.pretty(cause),
-      })),
-    ),
-    Effect.ensuring(
-      Effect.gen(function* () {
-        yield* Trace.emit("resource.fetch.complete", () => ({
-          key: resource.key,
-        }));
-        const now = yield* Clock.currentTimeMillis;
-        yield* Deferred.succeed(deferred, undefined);
-        yield* Ref.set(entry.inFlight, Option.none());
-        yield* Ref.set(entry.currentFiber, Option.none());
-        yield* Ref.set(entry.timestamp, now);
-      }),
-    ),
-    Effect.forkIn(entry.scope, { startImmediately }),
-  );
+        Effect.gen(function* () {
+          const firstReason = cause.reasons[0];
+          const typedFailureOnly =
+            firstReason !== undefined && cause.reasons.every(Cause.isFailReason);
 
-  yield* Ref.set(entry.currentFiber, Option.some(fiber));
-  return fiber;
+          if (typedFailureOnly && Cause.isFailReason(firstReason)) {
+            // ResourceState has one error slot; for an all-Fail Cause, preserve Cause order.
+            const error = firstReason.error;
+            yield* Trace.emit("resource.fetch.set_failure", () => ({
+              key: resource.key,
+              error_type: Trace.valueType(error),
+            }));
+            const previous = yield* Signal.peek(state);
+            const staleValue = ResourceState.$is("Success")(previous)
+              ? Option.some(previous.value)
+              : Option.none();
+            yield* Signal.set(state, Failure<A, E>(error, staleValue));
+            return;
+          }
+
+          if (Cause.hasInterruptsOnly(cause)) {
+            yield* Trace.emit("resource.fetch.interrupted", () => ({
+              key: resource.key,
+            }));
+          } else {
+            yield* Trace.emit("resource.fetch.unhandled", () => ({
+              key: resource.key,
+              error_type: Trace.causeValueType(cause),
+            }));
+          }
+
+          return yield* Effect.failCause(unsafeAsUnrecoverableCause(cause));
+        }),
+    }),
+  );
+});
+
+/**
+ * Atomically join an existing flight or install and fork exactly one owner.
+ * @internal
+ */
+const claimFlight: <A, E, R>(
+  resource: Resource<A, E, R>,
+  entry: RegistryEntry,
+  registry: ResourceRegistry,
+  ctx: Context.Context<R>,
+  mode: FetchMode,
+  startBeforeReturn?: boolean,
+) => Effect.Effect<FlightClaim> = Effect.fn("Resource.claimFlight")(function* <A, E, R>(
+  resource: Resource<A, E, R>,
+  entry: RegistryEntry,
+  registry: ResourceRegistry,
+  ctx: Context.Context<R>,
+  mode: FetchMode,
+  startBeforeReturn: boolean = false,
+) {
+  const reportFetchExit = yield* CurrentResourceFetchExitReporter;
+  return yield* Effect.uninterruptible(
+    Effect.gen(function* () {
+      const flightLease = {};
+      if (!(yield* registry.acquire(resource.key, entry, flightLease))) {
+        return FlightClaim.Unavailable();
+      }
+
+      const candidate: InFlight = {
+        deferred: yield* Deferred.make<void, never>(),
+        key: resource.key,
+      };
+      const claim = yield* Ref.modify(
+        entry.inFlight,
+        (current): readonly [FlightClaim, Option.Option<InFlight>] =>
+          Option.isSome(current)
+            ? [FlightClaim.Join({ flight: current.value }), current]
+            : [FlightClaim.Start({ flight: candidate }), Option.some(candidate)],
+      );
+
+      if (FlightClaim.$is("Join")(claim)) {
+        yield* registry.release(entry, flightLease);
+        return claim;
+      }
+      if (FlightClaim.$is("Unavailable")(claim)) {
+        yield* registry.release(entry, flightLease);
+        return claim;
+      }
+
+      yield* Trace.emit("resource.fetch.starting", () => ({
+        key: resource.key,
+      }));
+      const worker = yield* runFetch(resource, entry, ctx, mode).pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            if (Exit.isFailure(exit)) {
+              yield* registry.retire(resource.key, entry);
+            }
+            // Fatal identities are no longer admissible before a waiter can retry.
+            yield* completeFlight(entry, claim.flight, exit);
+          }),
+        ),
+        Effect.ensuring(registry.release(entry, flightLease)),
+        // Attach before user fetch code can reenter clear/shutdown. Immediate
+        // fork execution in rc.112 runs before the Scope finalizer is installed.
+        Effect.forkIn(entry.scope, {
+          uninterruptible: false,
+        }),
+      );
+      yield* Effect.withFiber((caller) =>
+        Effect.sync(() => {
+          worker.addObserver((exit) => {
+            if (Exit.isFailure(exit)) reportFetchExit(exit);
+          });
+          // Reactive fetch starts before installing parameter listeners. Flush
+          // the parent's launch queue only after ownership and observation exist.
+          if (startBeforeReturn) caller.currentDispatcher.flush();
+        }),
+      );
+      return claim;
+    }),
+  );
 });
 
 // =============================================================================
@@ -657,11 +1464,16 @@ const fetchInternal: <A, E, R>(
  * Two modes:
  * 1. Static: Pass a resource directly. Returns cached or fetches new.
  * 2. Reactive: Pass a factory + reactive params. Re-fetches when Signal params change.
- *    Previous in-flight fetches are cancelled on param change.
+ *    The output stops following the previous key while its shared fetch continues.
  *
  * @remarks
  * Static fetches reuse cached entries by key. Reactive fetches keep the output
- * signal stable while switching the backing cache entry as params change.
+ * signal stable while switching the backing cache entry as params change. Static
+ * consumers lease an entry to their render, component, or Effect Scope; reactive
+ * machinery leases only the entry followed by its current daemon. Fatal flights
+ * report once and retire their cache identity so a later fetch starts fresh. A
+ * full registry fails immediately with {@link ResourceRegistrySaturatedError}.
+ * Reactive key changes publish that error as `Failure` state.
  *
  * @example
  * ```tsx
@@ -685,15 +1497,15 @@ export const fetch: {
     resource: Resource<A, E, R>,
   ): Effect.Effect<
     Signal.Signal<ResourceState<A, E>>,
-    Signal.SignalScopeError,
+    Signal.SignalScopeError | ResourceRegistrySaturatedError,
     ResourceRegistryTag | R
   >;
   <P extends object, A, E, R>(
     factory: (params: P) => Resource<A, E, R>,
     params: ReactiveParams<P>,
   ): Effect.Effect<
-    Signal.Signal<ResourceState<A, E>>,
-    Signal.SignalScopeError,
+    Signal.Signal<ResourceState<A, E | ResourceRegistrySaturatedError>>,
+    Signal.SignalScopeError | ResourceRegistrySaturatedError,
     ResourceRegistryTag | R | Scope.Scope
   >;
 } = unsafeAsOverload(
@@ -721,7 +1533,7 @@ const fetchStatic = <A, E, R>(
   resource: Resource<A, E, R>,
 ): Effect.Effect<
   Signal.Signal<ResourceState<A, E>>,
-  Signal.SignalScopeError,
+  Signal.SignalScopeError | ResourceRegistrySaturatedError,
   ResourceRegistryTag | R
 > =>
   Effect.gen(function* () {
@@ -731,59 +1543,59 @@ const fetchStatic = <A, E, R>(
 
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
-    const entry = yield* registry.getOrCreate(resource.key);
-    const state = unsafeEntrySignal<A, E>(entry.state);
+    const consumerScope = yield* currentResourceConsumerScope;
+    while (true) {
+      const leased = yield* getOrCreateLeasedEntryInScope(registry, resource.key, consumerScope);
+      const state = unsafeEntrySignal<A, E>(leased.entry.state);
 
-    const currentInFlight = yield* Ref.get(entry.inFlight);
+      // Check if we have cached data.
+      // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
+      // If we tracked this read, the component would re-render when state changes,
+      // causing keyed-list teardown/remount race that blanks rendered items.
+      const currentState = yield* Signal.peek(state);
+      if (!ResourceState.$is("Pending")(currentState)) {
+        yield* Trace.emit("resource.fetch.cached", () => ({
+          key: resource.key,
+          state: currentState._tag,
+        }));
+        return state;
+      }
 
-    // Dedupe: if fetch in progress, wait for it
-    if (Option.isSome(currentInFlight)) {
-      yield* Trace.emit("resource.fetch.dedupe_wait", () => ({
-        key: resource.key,
-      }));
-      yield* Deferred.await(currentInFlight.value);
+      const claim = yield* claimFlight(resource, leased.entry, registry, ctx, "pending");
+      if (FlightClaim.$is("Unavailable")(claim)) {
+        yield* leased.release;
+        continue;
+      }
+      if (FlightClaim.$is("Join")(claim)) {
+        yield* Trace.emit("resource.fetch.dedupe_wait", () => ({
+          key: resource.key,
+        }));
+        yield* Deferred.await(claim.flight.deferred);
+      }
+
       return state;
     }
-
-    // Check if we have cached data.
-    // CRITICAL: Read untracked to prevent component re-render on Pending→Success.
-    // If we tracked this read, the component would re-render when state changes,
-    // causing keyed-list teardown/remount race that blanks rendered items.
-    const currentState = yield* Signal.peek(state);
-    if (!ResourceState.$is("Pending")(currentState)) {
-      yield* Trace.emit("resource.fetch.cached", () => ({
-        key: resource.key,
-        state: currentState._tag,
-      }));
-      return state;
-    }
-
-    yield* Trace.emit("resource.fetch.starting", () => ({
-      key: resource.key,
-    }));
-
-    // Start fetch with captured context
-    yield* fetchInternal(resource, entry, ctx);
-
-    return state;
   }).pipe(Effect.withSpan("Resource.fetch", { attributes: { key: resource.key } }));
 
 /**
  * Reactive fetch implementation.
- * Subscribes to Signal params and re-fetches on change, cancelling in-flight fetches.
+ * Subscribes to Signal params and follows the cache entry for each current key.
  * @internal
  */
 const fetchReactive = <P extends object, A, E, R>(
   factory: (params: P) => Resource<A, E, R>,
   reactiveParams: ReactiveParams<P>,
 ): Effect.Effect<
-  Signal.Signal<ResourceState<A, E>>,
-  Signal.SignalScopeError,
+  Signal.Signal<ResourceState<A, E | ResourceRegistrySaturatedError>>,
+  Signal.SignalScopeError | ResourceRegistrySaturatedError,
   ResourceRegistryTag | R | Scope.Scope
 > =>
   Effect.gen(function* () {
     const ctx = yield* Effect.context<ResourceRegistryTag | R>();
-    const scope = yield* Effect.scope;
+    const registry = yield* ResourceRegistryTag;
+    const ambientScope = yield* Effect.scope;
+    const renderScope = yield* Signal.CurrentRenderScope;
+    const scope = renderScope ?? ambientScope;
 
     // Unwrap current values from reactive params without registering component
     // dependencies — reactivity is handled by explicit subscriptions below.
@@ -812,12 +1624,12 @@ const fetchReactive = <P extends object, A, E, R>(
     const initialResource = factory(initialParams);
 
     // Create the output signal that will be updated on param changes
-    const outputState = yield* Signal.make<ResourceState<A, E>>(Pending());
-
-    // Track current in-flight fiber for cancellation (SynchronizedRef for atomic updates)
-    const activeFiber = yield* SynchronizedRef.make<Option.Option<Fiber.Fiber<void, never>>>(
-      Option.none(),
+    const outputState = yield* Signal.make<ResourceState<A, E | ResourceRegistrySaturatedError>>(
+      Pending(),
     );
+
+    // Each daemon has an independent Scope so a key switch atomically releases its lease.
+    const activeDaemon = yield* SynchronizedRef.make<Option.Option<Scope.Closeable>>(Option.none());
 
     // Track current resource key for change detection
     const activeKey = yield* Ref.make(initialResource.key);
@@ -825,114 +1637,183 @@ const fetchReactive = <P extends object, A, E, R>(
     // Helper: cancel previous daemon, fork new fetch, sync result to output.
     // The daemon stays alive after the initial fetch, mirroring entry.state → outputState
     // so that invalidate/refresh changes propagate to the component.
-    // Uses SynchronizedRef.updateEffect to atomically interrupt+fork+store, preventing
+    // Uses SynchronizedRef.modifyEffect to atomically close+fork+store, preventing
     // race conditions where concurrent doFetch calls could leak daemons.
-    const doFetch: (resource: Resource<A, E, R>) => Effect.Effect<void, Signal.SignalScopeError> =
-      Effect.fn("Resource.fetch.reactive.doFetch")(function* (resource: Resource<A, E, R>) {
-        yield* Ref.set(activeKey, resource.key);
-        yield* Signal.set(outputState, Pending<A, E>());
+    const doFetch: (
+      resource: Resource<A, E, R>,
+    ) => Effect.Effect<void, ResourceRegistrySaturatedError> = Effect.fn(
+      "Resource.fetch.reactive.doFetch",
+    )(function* (resource: Resource<A, E, R>) {
+      yield* Ref.set(activeKey, resource.key);
+      yield* Signal.set(outputState, Pending<A, E | ResourceRegistrySaturatedError>());
 
-        const setOutputIfActive: (next: ResourceState<A, E>) => Effect.Effect<void> = Effect.fn(
-          "Resource.fetch.reactive.setOutputIfActive",
-        )(function* (next: ResourceState<A, E>) {
-          const currentKey = yield* Ref.get(activeKey);
-          if (currentKey === resource.key) {
-            yield* Signal.set(outputState, next);
-          }
-        });
+      const setOutputIfActive: (
+        next: ResourceState<A, E | ResourceRegistrySaturatedError>,
+      ) => Effect.Effect<void> = Effect.fn("Resource.fetch.reactive.setOutputIfActive")(function* (
+        next: ResourceState<A, E | ResourceRegistrySaturatedError>,
+      ) {
+        const currentKey = yield* Ref.get(activeKey);
+        if (currentKey === resource.key) {
+          yield* Signal.set(outputState, next);
+        }
+      });
 
-        // Atomically: interrupt previous daemon → fork new daemon → store reference
-        yield* SynchronizedRef.updateEffect(activeFiber, (prevFiber) =>
+      const installed = yield* SynchronizedRef.modifyEffect(activeDaemon, (previousScope) =>
+        Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            // Cancel previous doFetch daemon before forking new one
-            if (Option.isSome(prevFiber)) {
-              yield* Fiber.interrupt(prevFiber.value);
+            if (Option.isSome(previousScope)) {
+              yield* Scope.close(previousScope.value, Exit.void);
             }
 
-            // Fork the fetch work as a daemon
-            const daemon = yield* Effect.gen(function* () {
-              const registry = yield* ResourceRegistryTag;
-              const entry = yield* registry.getOrCreate(resource.key);
-              const entryState = unsafeEntrySignal<A, E>(entry.state);
+            const daemonScope = yield* Scope.fork(scope);
+            const selectionExit = yield* restore(
+              Effect.gen(function* () {
+                while (true) {
+                  const leased = yield* getOrCreateLeasedEntryInScope(
+                    registry,
+                    resource.key,
+                    daemonScope,
+                  );
+                  const entryState = unsafeEntrySignal<A, E>(leased.entry.state);
+                  const cached = yield* Signal.peek(entryState);
+                  if (!ResourceState.$is("Pending")(cached)) {
+                    return {
+                      entryState,
+                      cached,
+                      flight: Option.none<InFlight>(),
+                    };
+                  }
 
-              // Check if already cached
-              const cached = yield* Signal.peek(entryState);
-              if (!ResourceState.$is("Pending")(cached)) {
-                yield* setOutputIfActive(cached);
-              } else {
-                // Dedupe: if fetch already in-flight for this key, wait for it
-                const currentInFlight = yield* Ref.get(entry.inFlight);
-                if (Option.isSome(currentInFlight)) {
-                  yield* Deferred.await(currentInFlight.value);
-                } else {
-                  // Start fetch and wait for completion
-                  const fiber = yield* fetchInternal(
+                  const claim = yield* claimFlight(
                     resource,
-                    entry,
+                    leased.entry,
+                    registry,
                     unsafeNarrowContext<R, ResourceRegistryTag | R>(ctx),
+                    "pending",
                     true,
                   );
-                  yield* Fiber.join(fiber);
+                  if (FlightClaim.$is("Unavailable")(claim)) {
+                    yield* leased.release;
+                    continue;
+                  }
+
+                  return {
+                    entryState,
+                    cached,
+                    flight: Option.some(claim.flight),
+                  };
                 }
+              }),
+            ).pipe(Effect.exit);
+            if (Exit.isFailure(selectionExit)) {
+              yield* Scope.close(daemonScope, selectionExit);
+              const result: readonly [
+                Exit.Exit<unknown, ResourceRegistrySaturatedError>,
+                Option.Option<Scope.Closeable>,
+              ] = [selectionExit, Option.none()];
+              return result;
+            }
+            const selection = selectionExit.value;
+
+            yield* Effect.gen(function* () {
+              if (Option.isNone(selection.flight)) {
+                yield* setOutputIfActive(selection.cached);
+              } else {
+                const settlement = yield* Effect.exit(
+                  Deferred.await(selection.flight.value.deferred),
+                );
+                if (Exit.isFailure(settlement)) return;
+
                 // Sync resolved state to output
-                const finalState = yield* Signal.peek(entryState);
+                const finalState = yield* Signal.peek(selection.entryState);
                 yield* setOutputIfActive(finalState);
               }
 
               // Subscribe to entry state so invalidate/refresh propagates to outputState.
               // The daemon stays alive until interrupted by the next doFetch call.
-              const unsubscribe = yield* Signal.subscribe(entryState, () =>
-                Signal.peek(entryState).pipe(Effect.flatMap((s) => setOutputIfActive(s))),
+              return yield* Effect.acquireUseRelease(
+                Signal.subscribe(selection.entryState, () =>
+                  Signal.peek(selection.entryState).pipe(
+                    Effect.flatMap((next) => setOutputIfActive(next)),
+                  ),
+                ),
+                () => Effect.never,
+                (unsubscribe) => unsubscribe,
               );
-              return yield* Effect.never.pipe(Effect.ensuring(unsubscribe));
             }).pipe(
               Effect.provide(ctx),
-              Effect.catchCause((cause) =>
+              Effect.tapCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.void
                   : Trace.emit("resource.fetch.unhandled", () => ({
                       key: resource.key,
-                      error: Cause.squash(cause),
-                      error_message: Cause.pretty(cause),
+                      error_type: Trace.causeValueType(cause),
                     })),
               ),
-              Effect.forkIn(scope, { startImmediately: true }),
+              Effect.forkIn(daemonScope, { uninterruptible: false }),
+            );
+            // Publish cached state before returning, with subscription work
+            // already owned if its callbacks reenter render shutdown.
+            yield* Effect.withFiber((caller) =>
+              Effect.sync(() => caller.currentDispatcher.flush()),
             );
 
-            return Option.some(daemon);
+            const result: readonly [
+              Exit.Exit<unknown, ResourceRegistrySaturatedError>,
+              Option.Option<Scope.Closeable>,
+            ] = [Exit.void, Option.some(daemonScope)];
+            return result;
           }),
-        );
-      });
+        ),
+      );
+      if (Exit.isFailure(installed)) return yield* Effect.failCause(installed.cause);
+    });
 
     // Initial fetch
     yield* doFetch(initialResource).pipe(Effect.provide(ctx));
 
     // If there are reactive signals, subscribe to changes
     if (signalFields.length > 0) {
-      const onParamChange: Effect.Effect<void, Signal.SignalScopeError> = Effect.gen(function* () {
+      const onParamChange: Effect.Effect<void> = Effect.gen(function* () {
         const newParams = yield* unwrapParams;
         const newResource = factory(newParams);
         const currentKey = yield* Ref.get(activeKey);
 
         // Only re-fetch if key actually changed
         if (newResource.key !== currentKey) {
-          yield* doFetch(newResource).pipe(Effect.provide(ctx));
+          const previous = yield* Signal.peek(outputState);
+          const staleValue = ResourceState.$is("Success")(previous)
+            ? Option.some(previous.value)
+            : ResourceState.$is("Failure")(previous)
+              ? previous.staleValue
+              : Option.none();
+          yield* doFetch(newResource).pipe(
+            Effect.provide(ctx),
+            Effect.catchTag("ResourceRegistrySaturatedError", (error) =>
+              Signal.set(
+                outputState,
+                Failure<A, E | ResourceRegistrySaturatedError>(error, staleValue),
+              ),
+            ),
+          );
         }
       });
 
       for (const signal of signalFields) {
-        const unsub = yield* Signal.subscribe(signal, () => onParamChange);
-        yield* Scope.addFinalizer(scope, unsub);
+        yield* Effect.acquireRelease(
+          Signal.subscribe(signal, () => onParamChange),
+          (unsubscribe) => unsubscribe,
+        ).pipe(Scope.provide(scope), Effect.asVoid);
       }
     }
 
-    // Cleanup: interrupt active fiber on scope close
+    // Cleanup: closing the active daemon Scope interrupts work and releases its lease.
     yield* Scope.addFinalizer(
       scope,
       Effect.gen(function* () {
-        const fiber = yield* SynchronizedRef.get(activeFiber);
-        if (Option.isSome(fiber)) {
-          yield* Fiber.interrupt(fiber.value);
+        const daemonScope = yield* SynchronizedRef.get(activeDaemon);
+        if (Option.isSome(daemonScope)) {
+          yield* Scope.close(daemonScope.value, Exit.void);
         }
       }),
     );
@@ -1293,22 +2174,7 @@ export const invalidate = <A, E, R>(
     if (Option.isNone(maybeEntry)) return; // Nothing to invalidate
 
     const entry = maybeEntry.value;
-    const state = unsafeEntrySignal<A, E>(entry.state);
-    const currentInFlight = yield* Ref.get(entry.inFlight);
-
-    // Dedupe: if already fetching, no-op
-    if (Option.isSome(currentInFlight)) {
-      return; // Fetch in progress, will get fresh data
-    }
-
-    // Mark current success as stale
-    const currentState = yield* Signal.get(state);
-    if (ResourceState.$is("Success")(currentState)) {
-      yield* Signal.set(state, Success<A, E>(currentState.value, true));
-    }
-
-    // Trigger background refetch
-    yield* fetchInternal(resource, entry, ctx);
+    yield* claimFlight(resource, entry, registry, ctx, "invalidate");
   }).pipe(Effect.withSpan("Resource.invalidate", { attributes: { key: resource.key } }));
 
 /**
@@ -1318,7 +2184,8 @@ export const invalidate = <A, E, R>(
  * Dedupes: waits for in-progress fetch if any.
  *
  * @remarks
- * Use this when a hard reload is better than showing stale data.
+ * Use this when a hard reload is better than showing stale data. Creating a
+ * previously unseen key can fail with {@link ResourceRegistrySaturatedError}.
  *
  * @example
  * ```tsx
@@ -1333,26 +2200,19 @@ export const invalidate = <A, E, R>(
  */
 export const refresh = <A, E, R>(
   resource: Resource<A, E, R>,
-): Effect.Effect<void, Signal.SignalScopeError, ResourceRegistryTag | R> =>
+): Effect.Effect<void, ResourceRegistrySaturatedError, ResourceRegistryTag | R> =>
   Effect.gen(function* () {
     const ctx = yield* Effect.context<R>();
     const registry = yield* ResourceRegistryTag;
-    const entry = yield* registry.getOrCreate(resource.key);
-    const state = unsafeEntrySignal<A, E>(entry.state);
-
-    const currentInFlight = yield* Ref.get(entry.inFlight);
-
-    // Dedupe: if already fetching, wait for it
-    if (Option.isSome(currentInFlight)) {
-      yield* Deferred.await(currentInFlight.value);
+    while (true) {
+      const entry = yield* registry.getOrCreate(resource.key);
+      const claim = yield* claimFlight(resource, entry, registry, ctx, "refresh");
+      if (FlightClaim.$is("Unavailable")(claim)) continue;
+      if (FlightClaim.$is("Join")(claim)) {
+        yield* Deferred.await(claim.flight.deferred);
+      }
       return;
     }
-
-    // Go to Pending (unlike invalidate which keeps stale)
-    yield* Signal.set(state, Pending<A, E>());
-
-    // Trigger fetch
-    yield* fetchInternal(resource, entry, ctx);
   }).pipe(Effect.withSpan("Resource.refresh", { attributes: { key: resource.key } }));
 
 /**
@@ -1361,7 +2221,9 @@ export const refresh = <A, E, R>(
  * Use this to force a fresh fetch on the next `Resource.fetch` call.
  *
  * @remarks
- * Clearing removes the cached entry entirely instead of marking it stale.
+ * Clearing removes every live generation for the key instead of marking one stale.
+ * Unlike policy eviction, explicit clear also force-closes TTL-retired generations
+ * while old consumers still retain their Signals.
  *
  * @example
  * ```ts

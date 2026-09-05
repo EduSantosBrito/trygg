@@ -61,12 +61,24 @@ export type {
   ComponentInput,
   ExtractRouteParams,
   RouteParamsFor,
+  RouteParamsInputFor,
+  RouteQueryFor,
+  RouteQueryInput,
+  RouteQueryInputFor,
   TypeSafeLinkProps,
   RouteMap,
+  RouteInputMap,
+  RouteQueryMap,
+  RouteQueryInputMap,
   RoutePath,
 } from "./types.js";
 
-export { buildPathWithParams, InvalidRouteComponent, NavigationError } from "./types.js";
+export {
+  buildPathWithParams,
+  InvalidRouteComponent,
+  NavigationError,
+  RouteParamsPatternMismatch,
+} from "./types.js";
 
 // Router service
 export {
@@ -94,14 +106,8 @@ export { Outlet } from "./outlet.js";
 export type { OutletProps } from "./outlet.js";
 
 // Outlet Services (exposed for testing)
-export {
-  OutletRenderer,
-  BoundaryResolver,
-  AsyncLoader,
-  AsyncLoadState,
-} from "./outlet-services.js";
+export { BoundaryResolver, AsyncLoader, AsyncLoadState } from "./outlet-services.js";
 export type {
-  OutletRendererShape,
   BoundaryResolverShape,
   AsyncLoaderShape,
   AsyncLoadState as AsyncLoadStateType,
@@ -111,11 +117,10 @@ export type {
 export { Link } from "./link.js";
 export type { LinkProps, PrefetchStrategy } from "./link.js";
 
-// Matching (RouteMatcher is now a Context.Tag)
+// Matching
 export {
   RouteMatcher,
   resolveRoutes,
-  createMatcher,
   collectRouteMiddleware,
   runRouteMiddleware,
   resolveErrorBoundary,
@@ -127,7 +132,7 @@ export {
   decodeRouteParams,
   decodeRouteQuery,
 } from "./matching.js";
-export type { ResolvedRoute, RouteMatch, RouteMatcherShape, SyncMatcher } from "./matching.js";
+export type { ResolvedRoute, RouteMatch, RouteMatcherShape } from "./matching.js";
 
 // Route Path Pattern
 export {
@@ -139,6 +144,7 @@ export {
   interpolateCompiledRoutePathPattern,
   getPathParamOption,
   InvalidRoutePathPattern,
+  InvalidRoutePathEncoding,
   MissingRoutePathParam,
   UnusedRoutePathParam,
   InvalidRoutePathParamValue,
@@ -156,10 +162,9 @@ export type {
 // Navigation Core
 export {
   NavigationCore,
+  NavigationAdapter,
   NavigationCoreError,
   NavigationCoreConfigInput,
-  makeNavigationCore,
-  makeInMemoryNavigationAdapter,
   navigationTarget,
   resolveNavigationTarget,
   sameQuery,
@@ -167,7 +172,6 @@ export {
 export type {
   NavigationSnapshot,
   NavigationTarget,
-  NavigationAdapter,
   NavigationCoreShape,
 } from "./navigation-core.js";
 
@@ -175,7 +179,6 @@ export type {
 export {
   NavigationOutletCoordination,
   NavigationOutletCoordinationConfigInput,
-  makeNavigationOutletCoordination,
 } from "./navigation-outlet-coordination.js";
 export type {
   NavigationPrefetchState,
@@ -188,11 +191,10 @@ export {
   RouteActivation,
   RouteActivationBoundary,
   RouteActivationError,
+  DuplicateRouteActivationId,
   LazyRouteLoadError,
   BoundaryResolutionError,
   RouteActivationBoundaryConfigInput,
-  makeRouteActivation,
-  makeRouteActivationBoundary,
 } from "./route-activation.js";
 export type {
   RouteActivationRequest,
@@ -206,9 +208,7 @@ export type {
 
 // Route Builder
 export {
-  make as routeMake,
-  index as routeIndex,
-  provide as routeProvide,
+  Route,
   isRouteBuilder,
   routeRedirect,
   routeForbidden,
@@ -227,7 +227,7 @@ export type {
 } from "./route.js";
 
 // Routes Collection
-export { make as routesMake, CurrentRoutesManifest } from "./routes.js";
+export { Routes, CurrentRoutesManifest } from "./routes.js";
 export type { RoutesCollection, RoutesManifest } from "./routes.js";
 
 // Render Strategy
@@ -246,68 +246,3 @@ export { parsePath, buildPath } from "./utils.js";
 
 // Utility functions
 export { cx, type ClassValue, type ClassInput } from "../primitives/cx.js";
-
-// =============================================================================
-// Namespace Objects (for import { Route, Routes } from "trygg/router")
-// =============================================================================
-
-import { make as _routeMake, index as _routeIndex, provide as _routeProvide } from "./route.js";
-import { routeRedirect as _redirect, routeForbidden as _forbidden } from "./route.js";
-import { make as _routesMake } from "./routes.js";
-import { currentRoute as _currentRoute } from "./service.js";
-
-/**
- * Route namespace - provides `Route.make(path)`, `Route.index(component)`,
- * `Route.provide(strategy)`, `Route.current`, `Route.redirect(path)`, and
- * `Route.forbidden`.
- *
- * @remarks
- * Use `Route` for the fluent route-definition API. The namespace groups the
- * builder entrypoints and middleware escape hatches under the import users see
- * most often in application code.
- *
- * @example
- * ```tsx
- * import { Route, RenderStrategy } from "trygg/router"
- *
- * Route.make("/users/:id")
- *   .component(UserProfile)
- *   .pipe(Route.provide(RenderStrategy.Eager))
- * ```
- *
- * @category Routing
- * @public
- * @since 1.0.0
- */
-export const Route = {
-  make: _routeMake,
-  index: _routeIndex,
-  provide: _routeProvide,
-  current: _currentRoute,
-  redirect: _redirect,
-  forbidden: _forbidden,
-};
-
-/**
- * Routes namespace - provides `Routes.make()` for route collection.
- *
- * @remarks
- * Use `Routes` to build the root manifest consumed by `Outlet`. The namespace
- * keeps the collection builder distinct from individual `Route` definitions.
- *
- * @example
- * ```tsx
- * import { Routes } from "trygg/router"
- *
- * export const routes = Routes.make()
- *   .add(Route.make("/").component(HomePage))
- *   .add(Route.make("/users").component(UsersList))
- * ```
- *
- * @category Routing
- * @public
- * @since 1.0.0
- */
-export const Routes = {
-  make: _routesMake,
-};
